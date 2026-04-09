@@ -1,0 +1,85 @@
+{
+  "name": "wat321",
+  "displayName": "WAT321 Willy's AI Tools",
+  "description": "Real-time Claude & Codex status bar widgets: session usage, weekly limits, and more",
+  "version": "1.0.3",
+  "publisher": "WillyDrucker",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WillyDrucker/WAT321"
+  },
+  "keywords": [
+    "claude",
+    "codex",
+    "anthropic",
+    "openai",
+    "usage",
+    "limits",
+    "tokens",
+    "context window",
+    "status bar",
+    "AI"
+  ],
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [],
+    "configuration": {
+      "title": "WAT321",
+      "properties": {
+        "wat321.enableClaude": {
+          "type": "boolean",
+          "default": true,
+          "order": 1,
+          "markdownDescription": "Enable Claude usage and session token widgets. *Requires window reload to take effect.*"
+        },
+        "wat321.enableCodex": {
+          "type": "boolean",
+          "default": false,
+          "order": 2,
+          "markdownDescription": "Enable Codex usage and session token widgets. *Requires window reload to take effect.*"
+        },
+        "wat321.displayMode": {
+          "type": "string",
+          "default": "Full",
+          "enum": [
+            "Full",
+            "Compact",
+            "Minimal"
+          ],
+          "enumDescriptions": [
+            "Full progress bars (10 blocks) with all details",
+            "Compact progress bars (5 blocks) with shortened token display",
+            "Minimal text-only view with no progress bars"
+          ],
+          "order": 3,
+          "markdownDescription": "Status bar display density. Changes apply immediately."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
+    "lint": "eslint src/",
+    "build": "npm run clean && npm run lint && tsc",
+    "watch": "tsc -w",
+    "package": "npm run build && npx vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.1",
+    "@typescript-eslint/parser": "^8.58.1",
+    "eslint": "^10.2.0",
+    "typescript": "^5.7.0"
+  }
+}
