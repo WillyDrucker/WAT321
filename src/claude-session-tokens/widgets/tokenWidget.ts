@@ -46,17 +46,10 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
           this.item.text = `🗜️ Claude ${formatTokens(session.contextUsed)} / ${formatTokens(ceilingTokens)} ${formatPct(pctOfCeiling)}`;
         }
 
-        if (pctOfCeiling >= 100) {
-          this.item.color = new vscode.ThemeColor(
-            "statusBarItem.errorForeground"
-          );
-        } else if (pctOfCeiling >= 85) {
-          this.item.color = new vscode.ThemeColor(
-            "statusBarItem.warningForeground"
-          );
-        } else {
-          this.item.color = undefined;
-        }
+        this.item.color =
+          pctOfCeiling >= 90
+            ? new vscode.ThemeColor("statusBarItem.warningForeground")
+            : undefined;
 
         this.item.tooltip = this.buildTooltip(session);
         this.item.show();

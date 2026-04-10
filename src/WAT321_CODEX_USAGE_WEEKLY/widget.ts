@@ -52,7 +52,10 @@ export class CodexUsageWeeklyWidget implements StatusBarWidget {
           this.item.text = `Codex weekly ${makeBar(usedPct)} ${remainingPct}%`;
         }
         this.item.tooltip = buildTooltip(state.data);
-        this.item.color = undefined;
+        this.item.color =
+          remainingPct <= 10
+            ? new vscode.ThemeColor("statusBarItem.warningForeground")
+            : undefined;
         this.item.show();
         break;
       }

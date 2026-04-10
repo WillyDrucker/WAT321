@@ -42,17 +42,10 @@ export class CodexSessionTokensWidget implements vscode.Disposable {
           this.item.text = `🗜️ Codex ${formatTokens(session.contextUsed)} / ${formatTokens(session.contextWindowSize)} ${formatPct(usedPct)}`;
         }
 
-        if (usedPct >= 100) {
-          this.item.color = new vscode.ThemeColor(
-            "statusBarItem.errorForeground"
-          );
-        } else if (usedPct >= 85) {
-          this.item.color = new vscode.ThemeColor(
-            "statusBarItem.warningForeground"
-          );
-        } else {
-          this.item.color = undefined;
-        }
+        this.item.color =
+          usedPct >= 90
+            ? new vscode.ThemeColor("statusBarItem.warningForeground")
+            : undefined;
 
         this.item.tooltip = this.buildTooltip(session);
         this.item.show();
