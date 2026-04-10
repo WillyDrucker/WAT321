@@ -1,42 +1,51 @@
 import * as vscode from "vscode";
-import { UsageService } from "./usageService";
-import { SessionWidget } from "./widgets/sessionWidget";
-import { WeeklyWidget } from "./widgets/weeklyWidget";
-import type { StatusBarWidget } from "./types";
 
-const COMMAND_ID = "wat321.refresh";
+import { activateClaudeUsage5hTool } from "./WAT321_CLAUDE_USAGE_5H/tool";
+import { activateClaudeUsageWeeklyTool } from "./WAT321_CLAUDE_USAGE_WEEKLY/tool";
+import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 
-let service: UsageService;
-let widgets: StatusBarWidget[];
+import { activateCodexUsage5hTool } from "./WAT321_CODEX_USAGE_5H/tool";
+import { activateCodexUsageWeeklyTool } from "./WAT321_CODEX_USAGE_WEEKLY/tool";
+import { CodexUsageSharedService } from "./shared/codex-usage/service";
+
+import { SessionTokenService } from "./claude-session-tokens/sessionService";
+import { activateTokenWidget } from "./claude-session-tokens/widgets/tokenWidget";
+
+let claudeService: ClaudeUsageSharedService;
+let codexService: CodexUsageSharedService;
+let tokenService: SessionTokenService;
 
 export function activate(context: vscode.ExtensionContext) {
-  service = new UsageService();
+  const workspacePath =
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
 
-  const session = new SessionWidget(COMMAND_ID);
-  const weekly = new WeeklyWidget(COMMAND_ID);
-  widgets = [session, weekly];
+  // --- Claude usage (one shared poller, two widgets) ---
+  claudeService = new ClaudeUsageSharedService();
+  activateClaudeUsage5hTool(context, claudeService);
+  activateClaudeUsageWeeklyTool(context, claudeService);
 
-  // Wire widgets to service state
-  const listener = (state: Parameters<typeof session.update>[0]) => {
-    for (const w of widgets) w.update(state);
-  };
-  service.subscribe(listener);
+  // --- Codex usage (one shared poller, two widgets) ---
+  codexService = new CodexUsageSharedService();
+  activateCodexUsage5hTool(context, codexService, "wat321.codexRefresh");
+  activateCodexUsageWeeklyTool(context, codexService, "wat321.codexRefresh");
 
-  // Manual refresh command
-  const cmd = vscode.commands.registerCommand(COMMAND_ID, () =>
-    service.forceRefresh()
-  );
+  // --- Claude session tokens ---
+  tokenService = new SessionTokenService(workspacePath);
+  activateTokenWidget(context, tokenService);
 
   context.subscriptions.push(
-    { dispose: () => service.dispose() },
-    session,
-    weekly,
-    cmd
+    { dispose: () => claudeService.dispose() },
+    { dispose: () => codexService.dispose() },
+    { dispose: () => tokenService.dispose() }
   );
 
-  service.start();
+  claudeService.start();
+  codexService.start();
+  tokenService.start();
 }
 
 export function deactivate() {
-  service?.dispose();
+  claudeService?.dispose();
+  codexService?.dispose();
+  tokenService?.dispose();
 }

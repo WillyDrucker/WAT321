@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
-import type { UsageResponse } from "../types";
+import type { UsageResponse } from "./types";
 import {
   formatSessionReset,
   formatWeeklyReset,
   getMaxLabel,
-} from "../formatters";
+} from "./formatters";
 
 export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
   const sPct = usage.five_hour?.utilization ?? 0;
@@ -28,19 +28,19 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
   md.appendMarkdown(`
 <div style="min-width:280px;">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-<strong style="font-size:12px;">Plan usage limits</strong>
+<strong style="font-size:12px;">Claude usage limits</strong>
 <span style="font-size:11px;opacity:0.7;">${planLabel}</span>
 </div>
 
 <div style="margin-bottom:4px;">
 <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-<strong style="font-size:11px;">Current session</strong>
+<strong style="font-size:11px;">Current session (5hr)</strong>
 <span style="font-size:11px;">${sPct}% used</span>
 </div>
 <div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
 <div style="width:${Math.min(sPct, 100)}%;height:100%;border-radius:4px;background:${sBarColor};"></div>
 </div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">Resets in ${sReset}</div>
+<div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ Resets in ${sReset}</div>
 </div>
 
 <hr style="border:none;border-top:1px solid rgba(255,255,255,0.12);margin:8px 0;">
@@ -53,10 +53,10 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
 <div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
 <div style="width:${Math.min(wPct, 100)}%;height:100%;border-radius:4px;background:${wBarColor};"></div>
 </div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">Resets ${wReset}</div>
+<div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ Resets ${wReset}</div>
 </div>
 
-<div style="font-size:9px;opacity:0.4;margin-top:8px;">Click to refresh · Updated ${new Date().toLocaleTimeString()}</div>
+<div style="font-size:9px;opacity:0.4;margin-top:8px;">Updated ${new Date().toLocaleTimeString()}</div>
 </div>
 `);
   return md;

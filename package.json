@@ -4,6 +4,10 @@
   "description": "Real-time Claude & Codex status bar widgets: session usage, weekly limits, and more",
   "version": "1.0.0",
   "publisher": "WillyDrucker",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WillyDrucker/WAT321"
+  },
   "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.85.0"
@@ -12,12 +16,7 @@
   "activationEvents": ["onStartupFinished"],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [
-      {
-        "command": "wat321.refresh",
-        "title": "WAT321: Refresh Usage"
-      }
-    ]
+    "commands": []
   },
   "scripts": {
     "build": "tsc",

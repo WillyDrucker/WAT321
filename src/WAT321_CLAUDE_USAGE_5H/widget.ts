@@ -1,22 +1,22 @@
 import * as vscode from "vscode";
-import type { ServiceState, StatusBarWidget } from "../types";
-import { makeBar } from "../formatters";
-import { buildTooltip } from "./tooltipBuilder";
+import { makeBar } from "../shared/claude-usage/formatters";
+import { buildTooltip } from "../shared/claude-usage/tooltipBuilder";
+import type {
+  ServiceState,
+  StatusBarWidget,
+} from "../shared/claude-usage/types";
 
-export class SessionWidget implements StatusBarWidget {
+export class ClaudeUsage5hWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
 
-  constructor(commandId: string) {
+  constructor() {
     this.item = vscode.window.createStatusBarItem(
       "wat321.session",
       vscode.StatusBarAlignment.Right,
       1001
     );
-    this.item.name = "WAT321: Session";
-    this.item.command = commandId;
-
-    // Initial loading state
-    this.item.text = "Current session $(loading~spin)";
+    this.item.name = "WAT321: Claude Usage (5h)";
+    this.item.text = "Claude (5hr) $(loading~spin)";
     this.item.color = undefined;
     this.item.show();
   }
@@ -24,7 +24,7 @@ export class SessionWidget implements StatusBarWidget {
   update(state: ServiceState): void {
     switch (state.status) {
       case "loading":
-        this.item.text = "Current session $(loading~spin)";
+        this.item.text = "Claude (5hr) $(loading~spin)";
         this.item.tooltip = "Fetching usage data...";
         this.item.color = undefined;
         this.item.show();
@@ -47,16 +47,25 @@ export class SessionWidget implements StatusBarWidget {
         this.item.show();
         break;
 
-      case "rate-limited":
-        this.item.text = "$(warning) WAT321 - Offline";
-        this.item.tooltip = "API rate limited. Click or wait to retry.";
+      case "rate-limited": {
+        this.item.text = "$(warning) Claude Usage - Disconnected";
+        const elapsed = Date.now() - state.rateLimitedAt;
+        const remaining = Math.max(
+          0,
+          Math.ceil((state.retryAfterMs - elapsed) / 60_000)
+        );
+        this.item.tooltip =
+          remaining > 0
+            ? `Sleeping ${remaining} minute${remaining !== 1 ? "s" : ""}...`
+            : "Reconnecting...";
         this.item.color = undefined;
         this.item.show();
         break;
+      }
 
       case "offline":
-        this.item.text = "$(cloud-offline) WAT321: offline";
-        this.item.tooltip = "Network unavailable. Click to retry.";
+        this.item.text = "$(cloud-offline) Claude Usage - Offline";
+        this.item.tooltip = "Network unavailable.";
         this.item.color = undefined;
         this.item.show();
         break;
@@ -70,7 +79,7 @@ export class SessionWidget implements StatusBarWidget {
 
       case "ok": {
         const pct = state.data.five_hour?.utilization ?? 0;
-        this.item.text = `Current session ${makeBar(pct)} ${pct}%`;
+        this.item.text = `Claude (5hr) ${makeBar(pct)} ${pct}%`;
         this.item.tooltip = buildTooltip(state.data);
         this.item.color = undefined;
         this.item.show();
