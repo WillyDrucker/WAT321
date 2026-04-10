@@ -17,5 +17,7 @@ VS Code extension providing real-time AI usage status bar widgets (Claude + Code
 ## Conventions
 - AIDOCS/ and WDDOCS/ are gitignored — not in repo
 - Branch naming: `WAT321_vX.X.X`
+- **Branch = version = changelog.** Branch `WAT321_v1.0.1` means `package.json` version is `1.0.1` and `CHANGELOG.md` has a `[1.0.1]` entry. These must always be in sync.
 - Status bar item names: `WAT321: <Tool Name>`
 - Debug via F5 → Extension Development Host
+- Use `/wat321-publish` for the full release flow

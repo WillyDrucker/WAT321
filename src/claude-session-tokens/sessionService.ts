@@ -12,9 +12,10 @@ import { join, basename } from "path";
 import type { SessionEntry, WidgetState } from "./types";
 
 const POLL_INTERVAL = 5_000;
+const SESSION_SCAN_INTERVAL = 30_000; // re-scan sessions dir every 30s, not every poll
 const DEFAULT_AUTOCOMPACT_PCT = 85;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
-const TAIL_BYTES = 65_536; // read last 64KB of transcript — enough for ~100 lines
+const TAIL_BYTES = 65_536;
 const EXTENDED_MODELS = ["claude-opus-4-6", "claude-sonnet-4-6"];
 
 type Listener = (state: WidgetState) => void;
@@ -26,6 +27,8 @@ export class SessionTokenService {
   private disposed = false;
   private workspacePath: string;
   private lastFileSize = 0;
+  private cachedSession: SessionEntry | null = null;
+  private lastSessionScan = 0;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath.replace(/\\/g, "/");
@@ -46,7 +49,9 @@ export class SessionTokenService {
   }
 
   forceRefresh(): void {
-    this.lastFileSize = 0; // force re-parse
+    this.lastFileSize = 0;
+    this.lastSessionScan = 0; // force session re-scan
+    this.cachedSession = null;
     this.poll();
   }
 
@@ -71,8 +76,13 @@ export class SessionTokenService {
     const home = homedir();
     const sessionsDir = join(home, ".claude", "sessions");
 
-    // Find active session for this workspace
-    const activeSession = this.findActiveSession(sessionsDir);
+    // Re-scan sessions directory periodically, use cache between scans
+    const now = Date.now();
+    if (now - this.lastSessionScan >= SESSION_SCAN_INTERVAL || !this.cachedSession) {
+      this.cachedSession = this.findActiveSession(sessionsDir);
+      this.lastSessionScan = now;
+    }
+    const activeSession = this.cachedSession;
     if (!activeSession) {
       this.setState({ status: "no-session" });
       return;
@@ -276,7 +286,12 @@ export class SessionTokenService {
       p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
     const wsNorm = normalize(this.workspacePath);
 
+    // Collect matching sessions, then pick the one whose transcript was
+    // modified most recently. This handles /resume correctly — a resumed
+    // session has an older startedAt but a newer transcript mtime.
+    const home = homedir();
     let best: SessionEntry | null = null;
+    let bestMtime = 0;
 
     for (const file of files) {
       try {
@@ -286,12 +301,29 @@ export class SessionTokenService {
         const entryCwd = normalize(entry.cwd);
         const match =
           wsNorm === ""
-            ? true // no workspace — accept any session
+            ? true
             : entryCwd === wsNorm || wsNorm.startsWith(entryCwd + "/");
-        if (match) {
-          if (!best || entry.startedAt > best.startedAt) {
-            best = entry;
-          }
+        if (!match) continue;
+
+        // Check transcript mtime to detect the actually-active session
+        const projectKey = this.getProjectKey(entry.cwd);
+        const transcriptPath = join(
+          home,
+          ".claude",
+          "projects",
+          projectKey,
+          `${entry.sessionId}.jsonl`
+        );
+        let mtime = entry.startedAt; // fallback if transcript doesn't exist yet
+        try {
+          mtime = statSync(transcriptPath).mtimeMs;
+        } catch {
+          // use startedAt as fallback
+        }
+
+        if (!best || mtime > bestMtime) {
+          best = entry;
+          bestMtime = mtime;
         }
       } catch {
         continue;

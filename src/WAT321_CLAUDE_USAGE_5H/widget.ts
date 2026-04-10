@@ -48,7 +48,7 @@ export class ClaudeUsage5hWidget implements StatusBarWidget {
         break;
 
       case "rate-limited": {
-        this.item.text = "$(warning) Claude Usage - Disconnected";
+        this.item.text = "$(warning) Claude Usage - Offline";
         const elapsed = Date.now() - state.rateLimitedAt;
         const remaining = Math.max(
           0,
@@ -71,10 +71,7 @@ export class ClaudeUsage5hWidget implements StatusBarWidget {
         break;
 
       case "error":
-        this.item.text = "$(warning) WAT321: error";
-        this.item.tooltip = state.message;
-        this.item.color = undefined;
-        this.item.show();
+        this.item.hide();
         break;
 
       case "ok": {

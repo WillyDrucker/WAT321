@@ -32,11 +32,7 @@ export class CodexUsage5hWidget implements StatusBarWidget {
         break;
 
       case "no-auth":
-        this.item.text = "$(key) WAT321: Codex no auth";
-        this.item.tooltip =
-          "No Codex access token found. Log in with: codex --login chatgpt";
-        this.item.color = undefined;
-        this.item.show();
+        this.item.hide();
         break;
 
       case "token-expired":
@@ -49,7 +45,7 @@ export class CodexUsage5hWidget implements StatusBarWidget {
         break;
 
       case "rate-limited": {
-        this.item.text = "$(warning) WAT321 Codex - Offline";
+        this.item.text = "$(warning) Codex Usage - Offline";
         const elapsed = Date.now() - state.rateLimitedAt;
         const remaining = Math.max(
           0,
@@ -72,10 +68,7 @@ export class CodexUsage5hWidget implements StatusBarWidget {
         break;
 
       case "error":
-        this.item.text = "$(warning) WAT321: Codex error";
-        this.item.tooltip = state.message;
-        this.item.color = undefined;
-        this.item.show();
+        this.item.hide();
         break;
 
       case "ok": {

@@ -39,7 +39,7 @@ export class TokenWidget implements StatusBarWidget {
             ? Math.round((session.contextUsed / ceilingTokens) * 100)
             : 0;
 
-        this.item.text = `🗜️ ${session.label} ${formatTokens(session.contextUsed)} / ${formatTokens(ceilingTokens)} ${formatPct(pctOfCeiling)}`;
+        this.item.text = `🗜️ Claude ${formatTokens(session.contextUsed)} / ${formatTokens(ceilingTokens)} ${formatPct(pctOfCeiling)}`;
 
         if (pctOfCeiling >= 100) {
           this.item.color = new vscode.ThemeColor(
@@ -83,14 +83,14 @@ export class TokenWidget implements StatusBarWidget {
     const md = new vscode.MarkdownString();
     md.isTrusted = true;
     md.supportHtml = false;
-    md.appendMarkdown(`**Session token context**  \n`);
+    md.appendMarkdown(`**Claude session token context**  \n`);
     if (title) {
       md.appendMarkdown(`"${title}"  \n`);
     }
     md.appendMarkdown(
       `📁 ${session.label} ${formatTokens(session.contextUsed)} / ${formatTokens(ceilingTokens)}\n\n`
     );
-    md.appendMarkdown(`${bar} ${formatPct(pctOfCeiling)}\n\n`);
+    md.appendMarkdown(`${bar} ${formatPct(pctOfCeiling)} used\n\n`);
     md.appendMarkdown(
       `🗜️ Auto-compact at ${formatTokens(ceilingTokens)} · ${formatPct(pctRemaining)} remaining`
     );

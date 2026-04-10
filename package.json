@@ -1,13 +1,25 @@
 {
   "name": "wat321",
-  "displayName": "WAT321 — Will's AI Tools",
+  "displayName": "WAT321 — Willy's AI Tools 3-2-1",
   "description": "Real-time Claude & Codex status bar widgets: session usage, weekly limits, and more",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
     "url": "https://github.com/WillyDrucker/WAT321"
   },
+  "keywords": [
+    "claude",
+    "codex",
+    "anthropic",
+    "openai",
+    "usage",
+    "limits",
+    "tokens",
+    "context window",
+    "status bar",
+    "AI"
+  ],
   "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.85.0"
