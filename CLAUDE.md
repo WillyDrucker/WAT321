@@ -1,5 +1,10 @@
 # WAT321 — Claude Code Project Instructions
 
+## Read Order
+1. This file (rules and conventions)
+2. `AIDOCS/WD_WAT321_MEMORY_EXTENDED.md` (architecture, references, constraints)
+3. `WDDOCS/WAT321_FRAMEWORK/WAT321_FRAMEWORK_README.md` (framework details)
+
 ## Project
 VS Code extension providing real-time AI usage status bar widgets (Claude + Codex).
 
@@ -12,7 +17,11 @@ VS Code extension providing real-time AI usage status bar widgets (Claude + Code
 ## Architecture
 - Each tool gets its own folder under `src/`
 - Shared services in `src/shared/` — one polling path per API provider
-- Codex tools are scaffolded but not activated yet
+- All six tools active: Claude (5hr, weekly, session tokens) + Codex (5 hour, weekly, session tokens)
+- Settings gate: `wat321.enableClaude` (default true), `wat321.enableCodex` (default false). Gate prevents services from starting when disabled.
+- Claude tools visible by default, Codex tools hidden by default
+- All widgets are display-only — no click-to-refresh commands
+- Session token tooltips use `isTrusted: false` for security
 
 ## Conventions
 - AIDOCS/ and WDDOCS/ are gitignored — not in repo

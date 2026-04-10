@@ -10,13 +10,13 @@ Real-time AI usage widgets for your VS Code status bar.
 
 ![Default install](images/screenshots/CLAUDE_DEFAULT_INSTALL.png)
 
-WAT321 ships with **six status bar widgets** for Claude and Codex — Claude tools are visible by default, Codex tools are installed but hidden. Turn them on in two clicks.
+WAT321 ships with **six status bar widgets** for Claude and Codex. Claude tools are enabled by default. Codex tools are included but disabled — enable them in Settings and reload.
 
 ---
 
 ## What's Included
 
-### Claude Usage (5h + Weekly)
+### Claude Usage (5hr + Weekly)
 
 Live progress bars showing your 5-hour session utilization and weekly limits. Simple hover for information breakdown.
 
@@ -52,17 +52,19 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 ## Enabling Codex Widgets
 
-All six tools install together, but only Claude widgets are visible by default. To turn on Codex:
+All six tools install together, but Codex is **disabled by default**. To enable:
 
-1. Click the **status bar overflow button** (the `>>` icon at the bottom-right of VS Code)
+1. Open **Settings** (`Ctrl+,` / `Cmd+,`) and search for **"wat321"**
+2. Check **Enable Codex**
+3. Reload the window (`Ctrl+Shift+P` / `Cmd+Shift+P` → **"Reload Window"**)
+
+![WAT321 Settings](images/screenshots/CODEX_WAT321_SETTINGS.png)
+
+Once enabled, you can toggle individual Codex widgets on or off using the **status bar overflow button** (`>>` at the bottom-right):
 
 ![Status bar button](images/screenshots/STATUS_BAR_BUTTON.png)
 
-2. Check the **WAT321: Codex** items you want to see
-
 ![Status bar toggle menu](images/screenshots/STATUS_BAR_TOGGLE_MENU.png)
-
-That's it. Your selections persist across sessions.
 
 ---
 
@@ -90,10 +92,10 @@ That's it. Your selections persist across sessions.
 
 Install from a `.vsix` file:
 1. Download `wat321-x.x.x.vsix`
-2. Open VS Code, press `Ctrl+Shift+P`, type **Extensions: Install from VSIX**
+2. Open VS Code, press `Ctrl+Shift+P` / `Cmd+Shift+P`, type **Extensions: Install from VSIX**
 3. Select the file and reload
 
-Widgets appear in the status bar automatically. Toggle visibility by right-clicking the status bar.
+Widgets appear in the status bar automatically. Toggle individual widget visibility by right-clicking the status bar (Codex widgets must be enabled in Settings first).
 
 ## Supported Plans
 
@@ -112,6 +114,10 @@ API-only Anthropic accounts without CLI OAuth credentials will see the Claude wi
 Both Claude and Codex usage APIs have rate limits. WAT321 polls conservatively to stay well within safe thresholds. However, **repeatedly reinstalling, reloading, or enabling/disabling the extension in quick succession can trigger a rate-limit lockout** of approximately 15 minutes.
 
 If a lockout occurs, the status bar will show "Offline" and the tooltip will display a countdown timer. The extension will automatically reconnect when the lockout expires — no action needed.
+
+## Issues & Feedback
+
+Found a bug or have a feature request? [Open an issue on GitHub](https://github.com/WillyDrucker/WAT321/issues).
 
 ## License
 

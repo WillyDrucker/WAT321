@@ -1,26 +1,19 @@
-import {
-  readFileSync,
-  readdirSync,
-  existsSync,
-  statSync,
-  openSync,
-  readSync,
-  closeSync,
-} from "fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { homedir } from "os";
 import { join, basename } from "path";
 import type { SessionEntry, WidgetState } from "./types";
+import { readTail, readHead } from "../shared/fs/fileReaders";
+import { normalizePath, getProjectKey } from "../shared/fs/pathUtils";
 
 const POLL_INTERVAL = 5_000;
-const SESSION_SCAN_INTERVAL = 30_000; // re-scan sessions dir every 30s, not every poll
+const SESSION_SCAN_INTERVAL = 30_000;
 const DEFAULT_AUTOCOMPACT_PCT = 85;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
-const TAIL_BYTES = 65_536;
 const EXTENDED_MODELS = ["claude-opus-4-6", "claude-sonnet-4-6"];
 
 type Listener = (state: WidgetState) => void;
 
-export class SessionTokenService {
+export class ClaudeSessionTokenService {
   private state: WidgetState = { status: "no-session" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -89,7 +82,7 @@ export class SessionTokenService {
     }
 
     // Find the transcript JSONL for this session
-    const projectKey = this.getProjectKey(activeSession.cwd);
+    const projectKey = getProjectKey(activeSession.cwd);
     const transcriptPath = join(
       home,
       ".claude",
@@ -112,7 +105,7 @@ export class SessionTokenService {
     }
 
     // Read tail of transcript for usage, head for session title
-    const tail = this.readTail(transcriptPath);
+    const tail = readTail(transcriptPath);
     if (!tail) {
       this.setState({ status: "waiting" });
       return;
@@ -151,22 +144,6 @@ export class SessionTokenService {
         autoCompactPct,
       },
     });
-  }
-
-  /** Read the last ~64KB of a file — enough for recent usage without loading the whole transcript */
-  private readTail(path: string): string | null {
-    try {
-      const size = statSync(path).size;
-      if (size <= TAIL_BYTES) return readFileSync(path, "utf8");
-
-      const fd = openSync(path, "r");
-      const buf = Buffer.alloc(TAIL_BYTES);
-      readSync(fd, buf, 0, TAIL_BYTES, size - TAIL_BYTES);
-      closeSync(fd);
-      return buf.toString("utf8");
-    } catch {
-      return null;
-    }
   }
 
   /** Walk backwards to find the most recent assistant message with usage */
@@ -222,21 +199,8 @@ export class SessionTokenService {
 
   /** Extract the first user message text as session title — reads only the first 8KB */
   private parseFirstUserMessage(path: string): string {
-    let head: string;
-    try {
-      const size = statSync(path).size;
-      if (size <= 8192) {
-        head = readFileSync(path, "utf8");
-      } else {
-        const fd = openSync(path, "r");
-        const buf = Buffer.alloc(8192);
-        readSync(fd, buf, 0, 8192, 0);
-        closeSync(fd);
-        head = buf.toString("utf8");
-      }
-    } catch {
-      return "";
-    }
+    const head = readHead(path);
+    if (!head) return "";
 
     const lines = head.trimEnd().split("\n");
 
@@ -282,9 +246,7 @@ export class SessionTokenService {
       return null;
     }
 
-    const normalize = (p: string) =>
-      p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-    const wsNorm = normalize(this.workspacePath);
+    const wsNorm = normalizePath(this.workspacePath);
 
     // Collect matching sessions, then pick the one whose transcript was
     // modified most recently. This handles /resume correctly — a resumed
@@ -298,7 +260,7 @@ export class SessionTokenService {
         const entry: SessionEntry = JSON.parse(
           readFileSync(join(sessionsDir, file), "utf8")
         );
-        const entryCwd = normalize(entry.cwd);
+        const entryCwd = normalizePath(entry.cwd);
         const match =
           wsNorm === ""
             ? true
@@ -306,7 +268,7 @@ export class SessionTokenService {
         if (!match) continue;
 
         // Check transcript mtime to detect the actually-active session
-        const projectKey = this.getProjectKey(entry.cwd);
+        const projectKey = getProjectKey(entry.cwd);
         const transcriptPath = join(
           home,
           ".claude",
@@ -331,18 +293,6 @@ export class SessionTokenService {
     }
 
     return best;
-  }
-
-  /**
-   * Convert a cwd to the project key used by Claude Code for transcript paths.
-   * e.g. "c:\Dev\WAT321" → "c--Dev-WAT321"
-   */
-  private getProjectKey(cwd: string): string {
-    return cwd
-      .replace(/\\/g, "/")
-      .replace(/^\//, "")
-      .replace(/\//g, "-")
-      .replace(/:/g, "-");
   }
 
   private readAutoCompactPct(home: string): number {

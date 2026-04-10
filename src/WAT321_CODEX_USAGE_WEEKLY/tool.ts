@@ -5,10 +5,9 @@ import { CodexUsageWeeklyWidget } from "./widget";
 
 export function activateCodexUsageWeeklyTool(
   context: vscode.ExtensionContext,
-  service: CodexUsageSharedService,
-  commandId: string
+  service: CodexUsageSharedService
 ): void {
-  const widget = new CodexUsageWeeklyWidget(commandId);
+  const widget = new CodexUsageWeeklyWidget();
   const listener = (state: ServiceState) => widget.update(state);
   service.subscribe(listener);
 

@@ -15,10 +15,11 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     : "unknown";
   const planLabel = formatPlanLabel(usage.plan_type);
 
+  // Color based on remaining — low remaining = red/yellow
   const sBarColor =
-    sPct >= 80 ? "#ef4444" : sPct >= 50 ? "#f59e0b" : "#3b82f6";
+    sRemaining <= 20 ? "#ef4444" : sRemaining <= 50 ? "#f59e0b" : "#22c55e";
   const wBarColor =
-    wPct >= 80 ? "#ef4444" : wPct >= 50 ? "#f59e0b" : "#3b82f6";
+    wRemaining <= 20 ? "#ef4444" : wRemaining <= 50 ? "#f59e0b" : "#22c55e";
 
   let creditsLine = "";
   if (usage.credits?.has_credits || usage.credits?.unlimited) {
@@ -44,7 +45,7 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
 <span style="font-size:11px;">${sRemaining}% remaining</span>
 </div>
 <div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
-<div style="width:${Math.min(sPct, 100)}%;height:100%;border-radius:4px;background:${sBarColor};"></div>
+<div style="width:${Math.min(sRemaining, 100)}%;height:100%;border-radius:4px;background:${sBarColor};"></div>
 </div>
 <div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ Resets ${sReset}</div>
 </div>
@@ -57,7 +58,7 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
 <span style="font-size:11px;">${wRemaining}% remaining</span>
 </div>
 <div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
-<div style="width:${Math.min(wPct, 100)}%;height:100%;border-radius:4px;background:${wBarColor};"></div>
+<div style="width:${Math.min(wRemaining, 100)}%;height:100%;border-radius:4px;background:${wBarColor};"></div>
 </div>
 <div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ Resets ${wReset}</div>
 </div>

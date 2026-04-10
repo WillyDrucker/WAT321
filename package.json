@@ -28,11 +28,28 @@
   "activationEvents": ["onStartupFinished"],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": []
+    "commands": [],
+    "configuration": {
+      "title": "WAT321",
+      "properties": {
+        "wat321.enableClaude": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Enable Claude usage and session token widgets. *Requires window reload to take effect.*"
+        },
+        "wat321.enableCodex": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable Codex usage and session token widgets. *Requires window reload to take effect.*"
+        }
+      }
+    }
   },
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w"
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc",
+    "watch": "tsc -w",
+    "package": "npm run build && npx vsce package"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",

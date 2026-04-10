@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
 import type { WidgetState, ResolvedSession, StatusBarWidget } from "../types";
 import { formatTokens, formatPct, makeBar } from "../formatters";
-import { SessionTokenService } from "../sessionService";
+import { ClaudeSessionTokenService } from "../sessionService";
 
-export class TokenWidget implements StatusBarWidget {
+export class ClaudeSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
 
   constructor() {
@@ -81,7 +81,7 @@ export class TokenWidget implements StatusBarWidget {
     const bar = makeBar(pctOfCeiling);
 
     const md = new vscode.MarkdownString();
-    md.isTrusted = true;
+    md.isTrusted = false;
     md.supportHtml = false;
     md.appendMarkdown(`**Claude session token context**  \n`);
     if (title) {
@@ -102,11 +102,11 @@ export class TokenWidget implements StatusBarWidget {
   }
 }
 
-export function activateTokenWidget(
+export function activateClaudeTokenWidget(
   context: vscode.ExtensionContext,
-  service: SessionTokenService
+  service: ClaudeSessionTokenService
 ): void {
-  const widget = new TokenWidget();
+  const widget = new ClaudeSessionTokensWidget();
   const listener = (state: WidgetState) => widget.update(state);
   service.subscribe(listener);
 

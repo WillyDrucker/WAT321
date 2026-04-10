@@ -1,20 +1,12 @@
-import {
-  readFileSync,
-  readdirSync,
-  existsSync,
-  statSync,
-  openSync,
-  readSync,
-  closeSync,
-} from "fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { homedir } from "os";
 import { join, basename } from "path";
 import type { CodexSessionIndex, CodexTokenWidgetState } from "./types";
+import { readTail, readHead } from "../shared/fs/fileReaders";
+import { normalizePath } from "../shared/fs/pathUtils";
 
 const POLL_INTERVAL = 5_000;
 const SESSION_SCAN_INTERVAL = 30_000;
-const TAIL_BYTES = 65_536;
-const HEAD_BYTES = 8_192;
 
 type Listener = (state: CodexTokenWidgetState) => void;
 
@@ -104,7 +96,7 @@ export class CodexSessionTokenService {
     }
 
     // Read tail for latest token_count + context window
-    const tail = this.readTail(this.cachedRolloutPath);
+    const tail = readTail(this.cachedRolloutPath);
     if (!tail) {
       this.setState({ status: "waiting" });
       return;
@@ -119,7 +111,7 @@ export class CodexSessionTokenService {
     // Get session title — prefer session_index, fall back to first user message
     let sessionTitle = this.getSessionTitle(codexDir, this.cachedRolloutPath);
     if (!sessionTitle) {
-      const head = this.readHead(this.cachedRolloutPath);
+      const head = readHead(this.cachedRolloutPath);
       if (head) {
         sessionTitle = this.parseFirstUserMessage(head);
       }
@@ -142,15 +134,17 @@ export class CodexSessionTokenService {
   }
 
   /**
-   * Find the most recent rollout JSONL by walking the date-based directory
-   * structure: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+   * Find the most recent rollout JSONL whose session_meta.cwd matches
+   * the current workspace. Walks ~/.codex/sessions/YYYY/MM/DD/ in
+   * reverse date order and checks cwd from the first line of each file.
    */
   private findLatestRollout(codexDir: string): string | null {
     const sessionsDir = join(codexDir, "sessions");
     if (!existsSync(sessionsDir)) return null;
 
+    const wsNorm = normalizePath(this.workspacePath);
+
     try {
-      // Walk year/month/day dirs in reverse to find most recent
       const years = readdirSync(sessionsDir).sort().reverse();
       for (const year of years) {
         const yearDir = join(sessionsDir, year);
@@ -171,8 +165,15 @@ export class CodexSessionTokenService {
               .sort()
               .reverse();
 
-            if (files.length > 0) {
-              return join(dayDir, files[0]);
+            for (const file of files) {
+              const fullPath = join(dayDir, file);
+              const cwd = this.parseCwd(fullPath);
+              if (!cwd) continue;
+              const cwdNorm = normalizePath(cwd);
+              // Match workspace or accept any if no workspace open
+              if (wsNorm === "" || cwdNorm === wsNorm || wsNorm.startsWith(cwdNorm + "/")) {
+                return fullPath;
+              }
             }
           }
         }
@@ -226,7 +227,7 @@ export class CodexSessionTokenService {
 
   /** Read cwd from session_meta (first line of rollout) */
   private parseCwd(rolloutPath: string): string | null {
-    const head = this.readHead(rolloutPath);
+    const head = readHead(rolloutPath);
     if (!head) return null;
 
     const firstLine = head.split("\n")[0];
@@ -282,36 +283,6 @@ export class CodexSessionTokenService {
       };
     }
     return null;
-  }
-
-  private readTail(path: string): string | null {
-    try {
-      const size = statSync(path).size;
-      if (size <= TAIL_BYTES) return readFileSync(path, "utf8");
-
-      const fd = openSync(path, "r");
-      const buf = Buffer.alloc(TAIL_BYTES);
-      readSync(fd, buf, 0, TAIL_BYTES, size - TAIL_BYTES);
-      closeSync(fd);
-      return buf.toString("utf8");
-    } catch {
-      return null;
-    }
-  }
-
-  private readHead(path: string): string | null {
-    try {
-      const size = statSync(path).size;
-      if (size <= HEAD_BYTES) return readFileSync(path, "utf8");
-
-      const fd = openSync(path, "r");
-      const buf = Buffer.alloc(HEAD_BYTES);
-      readSync(fd, buf, 0, HEAD_BYTES, 0);
-      closeSync(fd);
-      return buf.toString("utf8");
-    } catch {
-      return null;
-    }
   }
 
   /** Extract first user message text from the head of the rollout */

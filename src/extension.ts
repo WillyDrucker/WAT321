@@ -1,57 +1,64 @@
 import * as vscode from "vscode";
 
-import { activateClaudeUsage5hTool } from "./WAT321_CLAUDE_USAGE_5H/tool";
+import { activateClaudeUsage5hrTool } from "./WAT321_CLAUDE_USAGE_5H/tool";
 import { activateClaudeUsageWeeklyTool } from "./WAT321_CLAUDE_USAGE_WEEKLY/tool";
 import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 
-import { activateCodexUsage5hTool } from "./WAT321_CODEX_USAGE_5H/tool";
+import { activateCodexUsage5hrTool } from "./WAT321_CODEX_USAGE_5H/tool";
 import { activateCodexUsageWeeklyTool } from "./WAT321_CODEX_USAGE_WEEKLY/tool";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
 
-import { SessionTokenService } from "./claude-session-tokens/sessionService";
-import { activateTokenWidget } from "./claude-session-tokens/widgets/tokenWidget";
+import { ClaudeSessionTokenService } from "./claude-session-tokens/sessionService";
+import { activateClaudeTokenWidget } from "./claude-session-tokens/widgets/tokenWidget";
 
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { activateCodexTokenWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 
-let claudeService: ClaudeUsageSharedService;
-let codexService: CodexUsageSharedService;
-let claudeTokenService: SessionTokenService;
-let codexTokenService: CodexSessionTokenService;
+let claudeService: ClaudeUsageSharedService | null = null;
+let codexService: CodexUsageSharedService | null = null;
+let claudeTokenService: ClaudeSessionTokenService | null = null;
+let codexTokenService: CodexSessionTokenService | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
   const workspacePath =
     vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+  const config = vscode.workspace.getConfiguration("wat321");
 
-  // --- Claude usage (one shared poller, two widgets) ---
-  claudeService = new ClaudeUsageSharedService();
-  activateClaudeUsage5hTool(context, claudeService);
-  activateClaudeUsageWeeklyTool(context, claudeService);
+  // --- Claude tools (default: enabled) ---
+  if (config.get<boolean>("enableClaude", true)) {
+    claudeService = new ClaudeUsageSharedService();
+    activateClaudeUsage5hrTool(context, claudeService);
+    activateClaudeUsageWeeklyTool(context, claudeService);
 
-  // --- Codex usage (one shared poller, two widgets) ---
-  codexService = new CodexUsageSharedService();
-  activateCodexUsage5hTool(context, codexService, "wat321.codexRefresh");
-  activateCodexUsageWeeklyTool(context, codexService, "wat321.codexRefresh");
+    claudeTokenService = new ClaudeSessionTokenService(workspacePath);
+    activateClaudeTokenWidget(context, claudeTokenService);
 
-  // --- Claude session tokens ---
-  claudeTokenService = new SessionTokenService(workspacePath);
-  activateTokenWidget(context, claudeTokenService);
+    context.subscriptions.push(
+      { dispose: () => claudeService?.dispose() },
+      { dispose: () => claudeTokenService?.dispose() }
+    );
 
-  // --- Codex session tokens ---
-  codexTokenService = new CodexSessionTokenService(workspacePath);
-  activateCodexTokenWidget(context, codexTokenService);
+    claudeService.start();
+    claudeTokenService.start();
+  }
 
-  context.subscriptions.push(
-    { dispose: () => claudeService.dispose() },
-    { dispose: () => codexService.dispose() },
-    { dispose: () => claudeTokenService.dispose() },
-    { dispose: () => codexTokenService.dispose() }
-  );
+  // --- Codex tools (default: disabled) ---
+  if (config.get<boolean>("enableCodex", false)) {
+    codexService = new CodexUsageSharedService();
+    activateCodexUsage5hrTool(context, codexService);
+    activateCodexUsageWeeklyTool(context, codexService);
 
-  claudeService.start();
-  codexService.start();
-  claudeTokenService.start();
-  codexTokenService.start();
+    codexTokenService = new CodexSessionTokenService(workspacePath);
+    activateCodexTokenWidget(context, codexTokenService);
+
+    context.subscriptions.push(
+      { dispose: () => codexService?.dispose() },
+      { dispose: () => codexTokenService?.dispose() }
+    );
+
+    codexService.start();
+    codexTokenService.start();
+  }
 }
 
 export function deactivate() {

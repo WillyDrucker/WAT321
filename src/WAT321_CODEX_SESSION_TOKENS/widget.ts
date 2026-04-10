@@ -1,34 +1,7 @@
 import * as vscode from "vscode";
 import type { CodexTokenWidgetState, CodexResolvedSession } from "./types";
 import { CodexSessionTokenService } from "./service";
-
-const BAR_WIDTH = 10;
-const FILLED = "\uD83D\uDFE6"; // 🟦 — same blue as Claude for consistency
-const EMPTY = "\u2B1B"; // ⬛
-
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) {
-    const m = tokens / 1_000_000;
-    return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
-  }
-  if (tokens >= 1_000) {
-    const k = Math.round(tokens / 1_000);
-    return `${k}k`;
-  }
-  return `${tokens}`;
-}
-
-function formatPct(pct: number): string {
-  return `${Math.round(pct)}%`;
-}
-
-/** Blue bar showing used capacity (fills left to right) */
-function makeBar(usedPct: number): string {
-  const clamped = Math.max(0, Math.min(100, usedPct));
-  const filled = Math.round((clamped / 100) * BAR_WIDTH);
-  const empty = BAR_WIDTH - filled;
-  return FILLED.repeat(filled) + EMPTY.repeat(empty);
-}
+import { formatTokens, formatPct, makeTokenBar } from "../shared/fs/tokenFormatters";
 
 export class CodexSessionTokensWidget implements vscode.Disposable {
   private item: vscode.StatusBarItem;
@@ -88,7 +61,7 @@ export class CodexSessionTokensWidget implements vscode.Disposable {
       (session.contextUsed / session.contextWindowSize) * 100
     );
     const remainingPct = Math.max(0, 100 - usedPct);
-    const bar = makeBar(usedPct);
+    const bar = makeTokenBar(usedPct);
 
     const maxTitleLen = 38;
     const title = session.sessionTitle
@@ -98,7 +71,7 @@ export class CodexSessionTokensWidget implements vscode.Disposable {
       : "";
 
     const md = new vscode.MarkdownString();
-    md.isTrusted = true;
+    md.isTrusted = false;
     md.supportHtml = false;
     md.appendMarkdown(`**Codex session token context**  \n`);
     if (title) {

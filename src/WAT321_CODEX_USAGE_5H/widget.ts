@@ -6,17 +6,16 @@ import type {
   StatusBarWidget,
 } from "../shared/codex-usage/types";
 
-export class CodexUsage5hWidget implements StatusBarWidget {
+export class CodexUsage5hrWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
 
-  constructor(commandId: string) {
+  constructor() {
     this.item = vscode.window.createStatusBarItem(
       "wat321.codexSession",
       vscode.StatusBarAlignment.Right,
       999
     );
-    this.item.name = "WAT321: Codex Usage (5h)";
-    this.item.command = commandId;
+    this.item.name = "WAT321: Codex Usage (5 hour)";
     this.item.text = "Codex (5 hour) $(loading~spin)";
     this.item.color = undefined;
     this.item.show();
