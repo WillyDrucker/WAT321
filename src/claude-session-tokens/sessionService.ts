@@ -43,9 +43,13 @@ export class ClaudeSessionTokenService {
 
   forceRefresh(): void {
     this.lastFileSize = 0;
-    this.lastSessionScan = 0; // force session re-scan
+    this.lastSessionScan = 0;
     this.cachedSession = null;
     this.poll();
+  }
+
+  rebroadcast(): void {
+    for (const fn of this.listeners) fn(this.state);
   }
 
   dispose(): void {
@@ -197,7 +201,7 @@ export class ClaudeSessionTokenService {
     return null;
   }
 
-  /** Extract the first user message text as session title — reads only the first 8KB */
+  /** Extract the first user message text as session title - reads only the first 8KB */
   private parseFirstUserMessage(path: string): string {
     const head = readHead(path);
     if (!head) return "";
@@ -249,7 +253,7 @@ export class ClaudeSessionTokenService {
     const wsNorm = normalizePath(this.workspacePath);
 
     // Collect matching sessions, then pick the one whose transcript was
-    // modified most recently. This handles /resume correctly — a resumed
+    // modified most recently. This handles /resume correctly - a resumed
     // session has an older startedAt but a newer transcript mtime.
     const home = homedir();
     let best: SessionEntry | null = null;

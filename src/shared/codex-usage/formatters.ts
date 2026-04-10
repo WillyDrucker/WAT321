@@ -1,16 +1,15 @@
 const FILLED = "\uD83D\uDFE9";
 const EMPTY = "\u2B1B";
-const BAR_WIDTH = 10;
 
 export function getRemainingPct(usedPct: number): number {
   const clamped = Math.max(0, Math.min(100, usedPct));
   return Math.max(0, 100 - clamped);
 }
 
-export function makeBar(usedPct: number): string {
+export function makeBar(usedPct: number, width: number = 10): string {
   const remaining = getRemainingPct(usedPct);
-  const filled = Math.round((remaining / 100) * BAR_WIDTH);
-  const empty = BAR_WIDTH - filled;
+  const filled = Math.round((remaining / 100) * width);
+  const empty = width - filled;
   return FILLED.repeat(filled) + EMPTY.repeat(empty);
 }
 

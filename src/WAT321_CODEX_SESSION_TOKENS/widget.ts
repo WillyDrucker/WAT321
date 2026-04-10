@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import type { CodexTokenWidgetState, CodexResolvedSession } from "./types";
 import { CodexSessionTokenService } from "./service";
-import { formatTokens, formatPct, makeTokenBar } from "../shared/fs/tokenFormatters";
+import { formatTokens, formatPct, makeTokenBar } from "../shared/ui/tokenFormatters";
+import { getDisplayMode } from "../shared/displayMode";
 
 export class CodexSessionTokensWidget implements vscode.Disposable {
   private item: vscode.StatusBarItem;
@@ -13,18 +14,17 @@ export class CodexSessionTokensWidget implements vscode.Disposable {
       996
     );
     this.item.name = "WAT321: Codex Session Tokens";
-    this.item.hide();
+    this.item.text = "🗜️ Codex -";
+    this.item.tooltip = "No active Codex session";
+    this.item.show();
   }
 
   update(state: CodexTokenWidgetState): void {
     switch (state.status) {
       case "no-session":
-        this.item.hide();
-        break;
-
       case "waiting":
-        this.item.text = "$(loading~spin) Codex tokens";
-        this.item.tooltip = "Waiting for Codex session data...";
+        this.item.text = "🗜️ Codex -";
+        this.item.tooltip = "No active Codex session";
         this.item.color = undefined;
         this.item.show();
         break;
@@ -35,7 +35,14 @@ export class CodexSessionTokensWidget implements vscode.Disposable {
           (session.contextUsed / session.contextWindowSize) * 100
         );
 
-        this.item.text = `🗜️ Codex ${formatTokens(session.contextUsed)} / ${formatTokens(session.contextWindowSize)} ${formatPct(usedPct)}`;
+        const mode = getDisplayMode();
+        if (mode === "minimal") {
+          this.item.text = `🗜️ Codex ${formatTokens(session.contextUsed)} ${formatPct(usedPct)}`;
+        } else if (mode === "compact") {
+          this.item.text = `🗜️ Codex ${formatTokens(session.contextUsed)} ${makeTokenBar(usedPct, 5)} ${formatPct(usedPct)}`;
+        } else {
+          this.item.text = `🗜️ Codex ${formatTokens(session.contextUsed)} / ${formatTokens(session.contextWindowSize)} ${formatPct(usedPct)}`;
+        }
 
         if (usedPct >= 100) {
           this.item.color = new vscode.ThemeColor(

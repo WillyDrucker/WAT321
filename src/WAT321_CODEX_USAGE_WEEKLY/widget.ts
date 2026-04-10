@@ -5,6 +5,7 @@ import type {
   ServiceState,
   StatusBarWidget,
 } from "../shared/codex-usage/types";
+import { getDisplayMode } from "../shared/displayMode";
 
 export class CodexUsageWeeklyWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -42,7 +43,14 @@ export class CodexUsageWeeklyWidget implements StatusBarWidget {
         const usedPct =
           state.data.rate_limit?.secondary_window?.used_percent ?? 0;
         const remainingPct = getRemainingPct(usedPct);
-        this.item.text = `Codex weekly ${makeBar(usedPct)} ${remainingPct}%`;
+        const mode = getDisplayMode();
+        if (mode === "minimal") {
+          this.item.text = `Codex weekly: ${remainingPct}%`;
+        } else if (mode === "compact") {
+          this.item.text = `Codex weekly ${makeBar(usedPct, 5)} ${remainingPct}%`;
+        } else {
+          this.item.text = `Codex weekly ${makeBar(usedPct)} ${remainingPct}%`;
+        }
         this.item.tooltip = buildTooltip(state.data);
         this.item.color = undefined;
         this.item.show();

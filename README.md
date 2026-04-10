@@ -1,28 +1,28 @@
-# WAT321 — Willy's AI Tools 3-2-1
+# WAT321 - Willy's AI Tools
 
-*Tired of the anxiety from manually refreshing Claude's usage limits? Now you can live in anxiety in real-time!*
+### *Do you get anxiety manually refreshing AI usage limits?*
+
+<img src="images/screenshots/AI_USAGE_LIMITS.png" width="37.5%">
+
+## Now you can live in fear in real-time!
 
 ![Hero](images/screenshots/HERO_SHOT.png)
 
 Real-time AI usage widgets for your VS Code status bar.
 
-### What you get out of the box
-
-![Default install](images/screenshots/CLAUDE_DEFAULT_INSTALL.png)
-
-WAT321 ships with **six status bar widgets** for Claude and Codex. Claude tools are enabled by default. Codex tools are included but disabled — enable them in Settings and reload.
+WAT321 ships with **six status bar widgets** for Claude and Codex. Claude tools are enabled by default. Codex tools are included but disabled - enable them in Settings.
 
 ---
 
 ## What's Included
 
-### Claude Usage (5hr + Weekly)
+### Claude Usage
 
 Live progress bars showing your 5-hour session utilization and weekly limits. Simple hover for information breakdown.
 
-![Claude usage bars](images/screenshots/CLAUDE_USAGE.png)
+<img src="images/screenshots/CLAUDE_USAGE_TOOLTIP_HOVER.png" width="284">
 
-![Claude usage tooltip](images/screenshots/CLAUDE_USAGE_TOOLTIP_HOVER.png)
+![Claude usage bars](images/screenshots/CLAUDE_USAGE.png)
 
 ### Claude Session Tokens
 
@@ -30,15 +30,13 @@ Tracks your active Claude Code session's context window usage against the auto-c
 
 ![Claude session tokens](images/screenshots/CLAUDE_SESSION_TOKENS.png)
 
-![Claude session tokens tooltip](images/screenshots/CLAUDE_SESSION_TOKENS_TOOLTIP_HOVER.png)
+### Codex Usage
 
-### Codex Usage (5 hour + Weekly)
+Same concept, **green** bars for Codex. Shows **remaining** capacity - the bars deplete as you use more.
 
-Same concept, green bars for Codex. Shows remaining capacity — the bars deplete as you use more.
+<img src="images/screenshots/CODEX_USAGE_TOOLTIP_HOVER.png" width="311">
 
 ![Codex usage bars](images/screenshots/CODEX_USAGE.png)
-
-![Codex usage tooltip](images/screenshots/CODEX_USAGE_TOOLTIP_HOVER.png)
 
 ### Codex Session Tokens
 
@@ -46,7 +44,14 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 ![Codex session tokens](images/screenshots/CODEX_SESSION_TOKENS.png)
 
-![Codex session tokens tooltip](images/screenshots/CODEX_SESSION_TOKENS_TOOLTIP_HOVER.png)
+---
+
+## Installation
+
+1. Open VS Code
+2. Go to Extensions (`Ctrl+Shift+X` / `Cmd+Shift+X`)
+3. Search **"WAT321"**
+4. Click **Install**
 
 ---
 
@@ -54,13 +59,13 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 All six tools install together, but Codex is **disabled by default**. To enable:
 
-1. Open **Settings** (`Ctrl+,` / `Cmd+,`) and search for **"wat321"**
+1. **File > Preferences > Settings** (`Ctrl+,` / `Cmd+,`) and search for **"wat321"**
 2. Check **Enable Codex**
-3. Reload the window (`Ctrl+Shift+P` / `Cmd+Shift+P` → **"Reload Window"**)
+3. Reload the window - `Ctrl+Shift+P` / `Cmd+Shift+P` then **Developer: Reload Window**
 
 ![WAT321 Settings](images/screenshots/CODEX_WAT321_SETTINGS.png)
 
-Once enabled, you can toggle individual Codex widgets on or off using the **status bar overflow button** (`>>` at the bottom-right):
+Once enabled, you can toggle individual Codex widgets on or off using the **status bar overflow button** (`>>` at the bottom-left):
 
 ![Status bar button](images/screenshots/STATUS_BAR_BUTTON.png)
 
@@ -71,13 +76,13 @@ Once enabled, you can toggle individual Codex widgets on or off using the **stat
 ## How It Works
 
 - **Claude Usage** and **Codex Usage** poll their respective APIs on a safe interval (~2 minutes) with built-in rate-limit protection
-- **Session Tokens** (both providers) read local transcript files — no API calls, no network access
-- All data sources are **read-only** — WAT321 never modifies any user files or credentials
+- **Session Tokens** (both providers) read local transcript files - no API calls, no network access
+- All data sources are **read-only** - WAT321 never modifies Claude, Codex, or user config files. The only files written are cooldown timestamps under `~/.wat321/` for rate-limit protection
 - One shared API polling path per provider prevents duplicate calls even with multiple widgets active
 
 ## What It Doesn't Do
 
-- WAT321 does not store, transmit, or modify your credentials
+- WAT321 does not store, transmit, or modify your credentials. It only writes cooldown timestamps to `~/.wat321/`
 - WAT321 does not make API calls on your behalf (beyond reading usage stats)
 - WAT321 does not interfere with Claude Code, Codex CLI, or any other extension
 
@@ -88,23 +93,14 @@ Once enabled, you can toggle individual Codex widgets on or off using the **stat
 - Codex widgets need Codex CLI credentials (`~/.codex/auth.json`)
 - Session token widgets need an active session in the respective CLI tool
 
-## Installation
-
-Install from a `.vsix` file:
-1. Download `wat321-x.x.x.vsix`
-2. Open VS Code, press `Ctrl+Shift+P` / `Cmd+Shift+P`, type **Extensions: Install from VSIX**
-3. Select the file and reload
-
-Widgets appear in the status bar automatically. Toggle individual widget visibility by right-clicking the status bar (Codex widgets must be enabled in Settings first).
-
 ## Supported Plans
 
 | Provider | Plan | Status |
 |----------|------|--------|
-| Claude | Max (5x / 10x / 20x) | Supported — plan tier detected automatically |
-| Claude | Pro | Supported — usage data works, plan label not shown |
-| Claude | Free | Supported — usage data works, plan label not shown |
-| Claude | Team / Enterprise | Unknown — untested with the usage API |
+| Claude | Max (5x / 10x / 20x) | Supported - plan tier detected automatically |
+| Claude | Pro | Supported - usage data works, plan label not shown |
+| Claude | Free | Supported - usage data works, plan label not shown |
+| Claude | Team / Enterprise | Unknown - untested with the usage API |
 | Codex | Plus / Pro / Team | Supported |
 
 API-only Anthropic accounts without CLI OAuth credentials will see the Claude widgets hidden, which is expected.
@@ -113,7 +109,7 @@ API-only Anthropic accounts without CLI OAuth credentials will see the Claude wi
 
 Both Claude and Codex usage APIs have rate limits. WAT321 polls conservatively to stay well within safe thresholds. However, **repeatedly reinstalling, reloading, or enabling/disabling the extension in quick succession can trigger a rate-limit lockout** of approximately 15 minutes.
 
-If a lockout occurs, the status bar will show "Offline" and the tooltip will display a countdown timer. The extension will automatically reconnect when the lockout expires — no action needed.
+If a lockout occurs, the status bar will show "Offline" and the tooltip will display a countdown timer. The extension will automatically reconnect when the lockout expires - no action needed.
 
 ## Issues & Feedback
 

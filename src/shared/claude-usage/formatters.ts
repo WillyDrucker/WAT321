@@ -1,11 +1,10 @@
 const FILLED = "\uD83D\uDFE6";
 const EMPTY = "\u2B1B";
-const BAR_WIDTH = 10;
 
-export function makeBar(pct: number): string {
+export function makeBar(pct: number, width: number = 10): string {
   const clamped = Math.max(0, Math.min(100, pct));
-  const filled = Math.round((clamped / 100) * BAR_WIDTH);
-  const empty = BAR_WIDTH - filled;
+  const filled = Math.round((clamped / 100) * width);
+  const empty = width - filled;
   return FILLED.repeat(filled) + EMPTY.repeat(empty);
 }
 

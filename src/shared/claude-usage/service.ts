@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import https from "https";
 import { homedir } from "os";
 import { join } from "path";
@@ -10,13 +10,36 @@ const COOLDOWN_MS = 61_000;
 const REQUEST_TIMEOUT = 10_000;
 const AUTH_ERROR_CODES = new Set([401, 403]);
 
+// Persist last fetch time across reloads to prevent rate-limit on rapid restarts
+const STAMP_DIR = join(homedir(), ".wat321");
+const CLAUDE_STAMP_FILE = join(STAMP_DIR, "claude-usage-last-fetch");
+
+function readStamp(): number {
+  try {
+    const val = parseInt(readFileSync(CLAUDE_STAMP_FILE, "utf8"), 10) || 0;
+    // Ignore future timestamps (clock skew or corruption)
+    return val > Date.now() ? 0 : val;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStamp(time: number): void {
+  try {
+    if (!existsSync(STAMP_DIR)) mkdirSync(STAMP_DIR, { recursive: true });
+    writeFileSync(CLAUDE_STAMP_FILE, String(time));
+  } catch {
+    // best-effort
+  }
+}
+
 type Listener = (state: ServiceState) => void;
 
 export class ClaudeUsageSharedService {
   private state: ServiceState = { status: "loading" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
-  private lastFetchTime = 0;
+  private lastFetchTime = readStamp();
   private inFlight = false;
   private abortController: AbortController | null = null;
   private consecutiveRateLimits = 0;
@@ -24,12 +47,14 @@ export class ClaudeUsageSharedService {
   private disposed = false;
 
   start(): void {
-    // Delay first fetch by 5s to avoid hammering API on rapid reloads
+    // Delay first fetch - use remaining cooldown or 5s minimum
+    const elapsed = Date.now() - this.lastFetchTime;
+    const remaining = Math.max(5_000, COOLDOWN_MS - elapsed);
     setTimeout(() => {
       if (this.disposed) return;
       this.refresh();
       this.timer = setInterval(() => this.refresh(), POLL_INTERVAL);
-    }, 5_000);
+    }, remaining);
   }
 
   subscribe(listener: Listener): void {
@@ -43,6 +68,11 @@ export class ClaudeUsageSharedService {
 
   async forceRefresh(): Promise<void> {
     await this.refresh();
+  }
+
+  /** Re-emit current state to all listeners without making API calls */
+  rebroadcast(): void {
+    for (const listener of this.listeners) listener(this.state);
   }
 
   dispose(): void {
@@ -120,6 +150,7 @@ export class ClaudeUsageSharedService {
       this.handleFetchError(error);
     } finally {
       this.lastFetchTime = Date.now();
+      writeStamp(this.lastFetchTime);
       this.inFlight = false;
     }
   }

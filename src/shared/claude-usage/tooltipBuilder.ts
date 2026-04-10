@@ -1,10 +1,12 @@
 import * as vscode from "vscode";
 import type { UsageResponse } from "./types";
 import {
+  makeBar,
   formatSessionReset,
   formatWeeklyReset,
   getMaxLabel,
 } from "./formatters";
+import { getDisplayMode } from "../displayMode";
 
 export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
   const sPct = usage.five_hour?.utilization ?? 0;
@@ -16,6 +18,22 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
     ? formatWeeklyReset(usage.seven_day.resets_at)
     : "unknown";
   const planLabel = getMaxLabel(usage.extra_usage);
+  const mode = getDisplayMode();
+
+  if (mode === "minimal") {
+    const md = new vscode.MarkdownString();
+    md.isTrusted = false;
+    md.supportHtml = false;
+    md.appendMarkdown(`**Claude usage limits** ${planLabel}\n\n`);
+    md.appendMarkdown(`**Current session (5hr)** ${sPct}% used  \n`);
+    md.appendMarkdown(`${makeBar(sPct)}  \n`);
+    md.appendMarkdown(`⧗ Resets in ${sReset}\n\n`);
+    md.appendMarkdown(`**Weekly limits** ${wPct}% used  \n`);
+    md.appendMarkdown(`${makeBar(wPct)}  \n`);
+    md.appendMarkdown(`⧗ Resets ${wReset}\n\n`);
+    md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
+    return md;
+  }
 
   const sBarColor =
     sPct >= 80 ? "#ef4444" : sPct >= 50 ? "#f59e0b" : "#3b82f6";

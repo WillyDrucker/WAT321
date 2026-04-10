@@ -5,6 +5,7 @@ import type {
   ServiceState,
   StatusBarWidget,
 } from "../shared/claude-usage/types";
+import { getDisplayMode } from "../shared/displayMode";
 
 export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -40,7 +41,14 @@ export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
 
       case "ok": {
         const pct = state.data.seven_day?.utilization ?? 0;
-        this.item.text = `Claude weekly ${makeBar(pct)} ${pct}%`;
+        const mode = getDisplayMode();
+        if (mode === "minimal") {
+          this.item.text = `Claude weekly: ${pct}%`;
+        } else if (mode === "compact") {
+          this.item.text = `Claude weekly ${makeBar(pct, 5)} ${pct}%`;
+        } else {
+          this.item.text = `Claude weekly ${makeBar(pct)} ${pct}%`;
+        }
         this.item.tooltip = buildTooltip(state.data);
         this.item.color = undefined;
         this.item.show();

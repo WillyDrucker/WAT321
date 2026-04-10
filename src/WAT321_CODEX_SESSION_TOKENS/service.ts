@@ -45,6 +45,10 @@ export class CodexSessionTokenService {
     this.poll();
   }
 
+  rebroadcast(): void {
+    for (const fn of this.listeners) fn(this.state);
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.timer) {
@@ -108,7 +112,7 @@ export class CodexSessionTokenService {
       return;
     }
 
-    // Get session title — prefer session_index, fall back to first user message
+    // Get session title - prefer session_index, fall back to first user message
     let sessionTitle = this.getSessionTitle(codexDir, this.cachedRolloutPath);
     if (!sessionTitle) {
       const head = readHead(this.cachedRolloutPath);

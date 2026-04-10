@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { CodexUsageResponse } from "./types";
-import { formatPlanLabel, formatWindowReset, getRemainingPct } from "./formatters";
+import { makeBar, formatPlanLabel, formatWindowReset, getRemainingPct } from "./formatters";
+import { getDisplayMode } from "../displayMode";
 
 export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   const sPct = usage.rate_limit?.primary_window?.used_percent ?? 0;
@@ -14,20 +15,41 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     ? formatWindowReset(usage.rate_limit.secondary_window.reset_at)
     : "unknown";
   const planLabel = formatPlanLabel(usage.plan_type);
+  const mode = getDisplayMode();
 
-  // Color based on remaining — low remaining = red/yellow
+  let creditsText = "";
+  if (usage.credits?.has_credits || usage.credits?.unlimited) {
+    const balance = usage.credits.unlimited
+      ? "Unlimited"
+      : `$${usage.credits.balance ?? "0"}`;
+    creditsText = `Credits: ${balance}`;
+  }
+
+  if (mode === "minimal") {
+    const md = new vscode.MarkdownString();
+    md.isTrusted = false;
+    md.supportHtml = false;
+    md.appendMarkdown(`**Codex usage limits** ${planLabel}\n\n`);
+    md.appendMarkdown(`**5 hour usage limit** ${sRemaining}% remaining  \n`);
+    md.appendMarkdown(`${makeBar(sPct)}  \n`);
+    md.appendMarkdown(`⧗ Resets ${sReset}\n\n`);
+    md.appendMarkdown(`**Weekly usage limit** ${wRemaining}% remaining  \n`);
+    md.appendMarkdown(`${makeBar(wPct)}  \n`);
+    md.appendMarkdown(`⧗ Resets ${wReset}\n\n`);
+    if (creditsText) md.appendMarkdown(`${creditsText}\n\n`);
+    md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
+    return md;
+  }
+
+  // Color based on remaining - low remaining = red/yellow
   const sBarColor =
     sRemaining <= 20 ? "#ef4444" : sRemaining <= 50 ? "#f59e0b" : "#22c55e";
   const wBarColor =
     wRemaining <= 20 ? "#ef4444" : wRemaining <= 50 ? "#f59e0b" : "#22c55e";
 
-  let creditsLine = "";
-  if (usage.credits?.has_credits || usage.credits?.unlimited) {
-    const balance = usage.credits.unlimited
-      ? "Unlimited"
-      : `$${usage.credits.balance ?? "0"}`;
-    creditsLine = `<div style="font-size:10px;opacity:0.6;margin-top:6px;">Credits: ${balance}</div>`;
-  }
+  const creditsLine = creditsText
+    ? `<div style="font-size:10px;opacity:0.6;margin-top:6px;">${creditsText}</div>`
+    : "";
 
   const md = new vscode.MarkdownString();
   md.isTrusted = true;

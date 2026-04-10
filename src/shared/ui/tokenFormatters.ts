@@ -21,9 +21,9 @@ export function formatPct(pct: number): string {
 }
 
 /** Blue/black block bar for token context display */
-export function makeTokenBar(pct: number): string {
+export function makeTokenBar(pct: number, width: number = BAR_WIDTH): string {
   const clamped = Math.max(0, Math.min(100, pct));
-  const filled = Math.round((clamped / 100) * BAR_WIDTH);
-  const empty = BAR_WIDTH - filled;
+  const filled = Math.round((clamped / 100) * width);
+  const empty = width - filled;
   return FILLED.repeat(filled) + EMPTY.repeat(empty);
 }

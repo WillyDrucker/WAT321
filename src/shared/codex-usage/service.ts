@@ -1,12 +1,12 @@
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import https from "https";
 import { homedir } from "os";
 import { join } from "path";
 import type { CodexUsageResponse, ServiceState } from "./types";
 
-const POLL_INTERVAL = 122_000; // conservative shared cadence for Codex usage polling
-const BACKOFF_INTERVAL = 901_000; // fallback when 429 gives us no retry metadata
-const COOLDOWN_MS = 61_000; // minimum gap between any usage checks, including manual
+const POLL_INTERVAL = 122_000;
+const BACKOFF_INTERVAL = 901_000;
+const COOLDOWN_MS = 61_000;
 const REQUEST_TIMEOUT = 10_000;
 const AUTH_ERROR_CODES = new Set([401, 403]);
 
@@ -15,6 +15,28 @@ interface CodexAuth {
     access_token?: string;
     account_id?: string;
   };
+}
+
+// Persist last fetch time across reloads to prevent rate-limit on rapid restarts
+const STAMP_DIR = join(homedir(), ".wat321");
+const CODEX_STAMP_FILE = join(STAMP_DIR, "codex-usage-last-fetch");
+
+function readStamp(): number {
+  try {
+    const val = parseInt(readFileSync(CODEX_STAMP_FILE, "utf8"), 10) || 0;
+    return val > Date.now() ? 0 : val;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStamp(time: number): void {
+  try {
+    if (!existsSync(STAMP_DIR)) mkdirSync(STAMP_DIR, { recursive: true });
+    writeFileSync(CODEX_STAMP_FILE, String(time));
+  } catch {
+    // best-effort
+  }
 }
 
 type Listener = (state: ServiceState) => void;
@@ -33,7 +55,7 @@ export class CodexUsageSharedService {
   private state: ServiceState = { status: "loading" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
-  private lastFetchTime = 0;
+  private lastFetchTime = readStamp();
   private inFlight = false;
   private abortController: AbortController | null = null;
   private consecutiveRateLimits = 0;
@@ -41,12 +63,14 @@ export class CodexUsageSharedService {
   private disposed = false;
 
   start(): void {
-    // Delay first fetch by 5s to avoid hammering API on rapid reloads
+    // Delay first fetch - use remaining cooldown or 5s minimum
+    const elapsed = Date.now() - this.lastFetchTime;
+    const remaining = Math.max(5_000, COOLDOWN_MS - elapsed);
     setTimeout(() => {
       if (this.disposed) return;
       this.refresh();
       this.timer = setInterval(() => this.refresh(), POLL_INTERVAL);
-    }, 5_000);
+    }, remaining);
   }
 
   subscribe(listener: Listener): void {
@@ -60,6 +84,10 @@ export class CodexUsageSharedService {
 
   async forceRefresh(): Promise<void> {
     await this.refresh();
+  }
+
+  rebroadcast(): void {
+    for (const listener of this.listeners) listener(this.state);
   }
 
   dispose(): void {
@@ -138,6 +166,7 @@ export class CodexUsageSharedService {
       this.handleFetchError(error);
     } finally {
       this.lastFetchTime = Date.now();
+      writeStamp(this.lastFetchTime);
       this.inFlight = false;
     }
   }

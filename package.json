@@ -1,6 +1,6 @@
 {
   "name": "wat321",
-  "displayName": "WAT321 — Willy's AI Tools 3-2-1",
+  "displayName": "WAT321 Willy's AI Tools",
   "description": "Real-time Claude & Codex status bar widgets: session usage, weekly limits, and more",
   "version": "1.0.2",
   "publisher": "WillyDrucker",
@@ -35,12 +35,26 @@
         "wat321.enableClaude": {
           "type": "boolean",
           "default": true,
+          "order": 1,
           "markdownDescription": "Enable Claude usage and session token widgets. *Requires window reload to take effect.*"
         },
         "wat321.enableCodex": {
           "type": "boolean",
           "default": false,
+          "order": 2,
           "markdownDescription": "Enable Codex usage and session token widgets. *Requires window reload to take effect.*"
+        },
+        "wat321.displayMode": {
+          "type": "string",
+          "default": "Full",
+          "enum": ["Full", "Compact", "Minimal"],
+          "enumDescriptions": [
+            "Full progress bars (10 blocks) with all details",
+            "Compact progress bars (5 blocks) with shortened token display",
+            "Minimal text-only view with no progress bars"
+          ],
+          "order": 3,
+          "markdownDescription": "Status bar display density. Changes apply immediately."
         }
       }
     }

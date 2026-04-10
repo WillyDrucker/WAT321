@@ -59,6 +59,18 @@ export function activate(context: vscode.ExtensionContext) {
     codexService.start();
     codexTokenService.start();
   }
+
+  // --- Re-render all widgets immediately when displayMode changes ---
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("wat321.displayMode")) {
+        claudeService?.rebroadcast();
+        codexService?.rebroadcast();
+        claudeTokenService?.rebroadcast();
+        codexTokenService?.rebroadcast();
+      }
+    })
+  );
 }
 
 export function deactivate() {
