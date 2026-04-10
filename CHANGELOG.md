@@ -1,9 +1,33 @@
 # Changelog
 
-All notable changes to WAT321 — Will's AI Tools will be documented in this file.
+All notable changes to WAT321 — Willy's AI Tools 3-2-1 will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.1] - 2026-04-10
+
+### Added
+- **Codex Session Tokens** — context window usage monitor for Codex CLI sessions, reads local rollout transcripts
+- README.md with screenshots, marketplace listing content, and supported plans table
+- New extension logo
+
+### Changed
+- Status bar labels differentiated: "Claude (5hr)" / "Claude weekly" / "Codex (5 hour)" / "Codex weekly"
+- Claude tooltip title changed to "Claude usage limits" with "(5hr)" on session label
+- Codex tooltip: "5 hour usage limit" / "Weekly usage limit", percentages show "remaining", reset times use absolute dates
+- Codex usage bars fill left-to-right (green=remaining depletes from right), percentage counts down
+- Session token tooltips: "Claude session token context" / "Codex session token context", bars show "used"
+- Error states hide widgets silently instead of showing persistent error messages
+- Codex no-auth hides widgets silently (Claude no-auth still shows login hint)
+- Rate-limited state shows "Offline" with countdown in tooltip
+- 5-second startup delay on API services to prevent hammering on rapid reloads
+- Session scanner uses transcript mtime (not startedAt) to handle /resume correctly
+- Session directory scan cached at 30-second intervals
+
+### Fixed
+- Codex session ID extraction from rollout filenames (was off by one segment)
+- Removed all screenshot mock data and debug logging from production code
 
 ## [1.0.0] - 2026-04-09
 

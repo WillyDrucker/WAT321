@@ -6,7 +6,7 @@ import type {
   StatusBarWidget,
 } from "../shared/claude-usage/types";
 
-export class ClaudeUsage5hWidget implements StatusBarWidget {
+export class ClaudeUsage5hrWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
 
   constructor() {
@@ -15,7 +15,7 @@ export class ClaudeUsage5hWidget implements StatusBarWidget {
       vscode.StatusBarAlignment.Right,
       1001
     );
-    this.item.name = "WAT321: Claude Usage (5h)";
+    this.item.name = "WAT321: Claude Usage (5hr)";
     this.item.text = "Claude (5hr) $(loading~spin)";
     this.item.color = undefined;
     this.item.show();
@@ -48,7 +48,7 @@ export class ClaudeUsage5hWidget implements StatusBarWidget {
         break;
 
       case "rate-limited": {
-        this.item.text = "$(warning) Claude Usage - Disconnected";
+        this.item.text = "$(warning) Claude Usage - Offline";
         const elapsed = Date.now() - state.rateLimitedAt;
         const remaining = Math.max(
           0,
@@ -71,10 +71,7 @@ export class ClaudeUsage5hWidget implements StatusBarWidget {
         break;
 
       case "error":
-        this.item.text = "$(warning) WAT321: error";
-        this.item.tooltip = state.message;
-        this.item.color = undefined;
-        this.item.show();
+        this.item.hide();
         break;
 
       case "ok": {

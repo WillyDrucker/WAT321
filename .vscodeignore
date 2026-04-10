@@ -3,3 +3,10 @@ src/**
 tsconfig.json
 images/icon.svg
 *.vsix
+AIDOCS/**
+WDDOCS/**
+CLAUDE.md
+.vscode/**
+.github/**
+.gitignore
+package-lock.json

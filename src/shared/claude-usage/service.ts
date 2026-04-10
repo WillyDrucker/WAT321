@@ -24,8 +24,12 @@ export class ClaudeUsageSharedService {
   private disposed = false;
 
   start(): void {
-    this.refresh();
-    this.timer = setInterval(() => this.refresh(), POLL_INTERVAL);
+    // Delay first fetch by 5s to avoid hammering API on rapid reloads
+    setTimeout(() => {
+      if (this.disposed) return;
+      this.refresh();
+      this.timer = setInterval(() => this.refresh(), POLL_INTERVAL);
+    }, 5_000);
   }
 
   subscribe(listener: Listener): void {
