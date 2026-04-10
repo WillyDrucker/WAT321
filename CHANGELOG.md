@@ -5,6 +5,25 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-04-10
+
+### Added
+- Display mode setting: Full, Compact, Minimal (changes apply instantly)
+- Rate-limit cooldown stamps persist across reloads (`~/.wat321/`)
+- GitHub issue templates for bug reports and feature requests
+
+### Changed
+- Settings gate controls tool activation (Enable Claude / Enable Codex)
+- Smart startup delay respects remaining cooldown from previous session
+- Compact mode shows 5-block bars, minimal mode is text-only with bars in tooltips
+- Shared utilities reorganized (`shared/ui/`, `shared/fs/`, `shared/displayMode.ts`)
+- README redesigned with marketplace install instructions
+
+### Fixed
+- Codex tooltip bar width now matches "remaining" text
+- Future timestamp guard on cooldown stamp reads
+- Session token widgets register in status bar menu when no session active
+
 ## [1.0.1] - 2026-04-10
 
 ### Added
