@@ -115,7 +115,7 @@ export class CodexSessionTokenService {
     // Get session title - prefer session_index, fall back to first user message
     let sessionTitle = this.getSessionTitle(codexDir, this.cachedRolloutPath);
     if (!sessionTitle) {
-      const head = readHead(this.cachedRolloutPath);
+      const head = readHead(this.cachedRolloutPath, 32_768);
       if (head) {
         sessionTitle = this.parseFirstUserMessage(head);
       }
@@ -231,7 +231,8 @@ export class CodexSessionTokenService {
 
   /** Read cwd from session_meta (first line of rollout) */
   private parseCwd(rolloutPath: string): string | null {
-    const head = readHead(rolloutPath);
+    // Codex session_meta includes full system prompt and can exceed 16KB
+    const head = readHead(rolloutPath, 32_768);
     if (!head) return null;
 
     const firstLine = head.split("\n")[0];
