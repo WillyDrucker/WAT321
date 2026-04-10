@@ -1,22 +1,22 @@
 import * as vscode from "vscode";
-import type { ServiceState, StatusBarWidget } from "../types";
-import { makeBar } from "../formatters";
-import { buildTooltip } from "./tooltipBuilder";
+import { makeBar } from "../shared/claude-usage/formatters";
+import { buildTooltip } from "../shared/claude-usage/tooltipBuilder";
+import type {
+  ServiceState,
+  StatusBarWidget,
+} from "../shared/claude-usage/types";
 
-export class WeeklyWidget implements StatusBarWidget {
+export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
 
-  constructor(commandId: string) {
+  constructor() {
     this.item = vscode.window.createStatusBarItem(
       "wat321.weekly",
       vscode.StatusBarAlignment.Right,
       1000
     );
-    this.item.name = "WAT321: Weekly";
-    this.item.command = commandId;
-
-    // Initial loading state
-    this.item.text = "Weekly limits $(loading~spin)";
+    this.item.name = "WAT321: Claude Usage (Weekly)";
+    this.item.text = "Claude weekly $(loading~spin)";
     this.item.color = undefined;
     this.item.show();
   }
@@ -24,13 +24,12 @@ export class WeeklyWidget implements StatusBarWidget {
   update(state: ServiceState): void {
     switch (state.status) {
       case "loading":
-        this.item.text = "Weekly limits $(loading~spin)";
+        this.item.text = "Claude weekly $(loading~spin)";
         this.item.tooltip = "Fetching usage data...";
         this.item.color = undefined;
         this.item.show();
         break;
 
-      // Session widget handles all non-ok states; weekly hides
       case "no-auth":
       case "token-expired":
       case "rate-limited":
@@ -41,7 +40,7 @@ export class WeeklyWidget implements StatusBarWidget {
 
       case "ok": {
         const pct = state.data.seven_day?.utilization ?? 0;
-        this.item.text = `Weekly limits ${makeBar(pct)} ${pct}%`;
+        this.item.text = `Claude weekly ${makeBar(pct)} ${pct}%`;
         this.item.tooltip = buildTooltip(state.data);
         this.item.color = undefined;
         this.item.show();

@@ -1,5 +1,5 @@
-const FILLED = "\uD83D\uDFE6"; // 🟦
-const EMPTY = "\u2B1B"; // ⬛
+const FILLED = "\uD83D\uDFE6";
+const EMPTY = "\u2B1B";
 const BAR_WIDTH = 10;
 
 export function makeBar(pct: number): string {

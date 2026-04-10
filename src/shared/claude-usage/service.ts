@@ -1,18 +1,18 @@
 import { readFileSync } from "fs";
+import https from "https";
 import { homedir } from "os";
 import { join } from "path";
-import https from "https";
-import type { UsageResponse, ServiceState } from "./types";
+import type { ServiceState, UsageResponse } from "./types";
 
-const POLL_INTERVAL = 122_000; // ~2 min
-const BACKOFF_INTERVAL = 901_000; // ~15 min
-const COOLDOWN_MS = 61_000; // min gap between API calls
-const REQUEST_TIMEOUT = 10_000; // 10s fetch timeout
+const POLL_INTERVAL = 122_000;
+const BACKOFF_INTERVAL = 901_000;
+const COOLDOWN_MS = 61_000;
+const REQUEST_TIMEOUT = 10_000;
 const AUTH_ERROR_CODES = new Set([401, 403]);
 
 type Listener = (state: ServiceState) => void;
 
-export class UsageService {
+export class ClaudeUsageSharedService {
   private state: ServiceState = { status: "loading" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -20,6 +20,7 @@ export class UsageService {
   private inFlight = false;
   private abortController: AbortController | null = null;
   private consecutiveRateLimits = 0;
+  private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
 
   start(): void {
@@ -36,9 +37,8 @@ export class UsageService {
     this.listeners.delete(listener);
   }
 
-  /** Manual refresh (e.g. from command click) */
   async forceRefresh(): Promise<void> {
-    await this.refresh(true);
+    await this.refresh();
   }
 
   dispose(): void {
@@ -47,14 +47,15 @@ export class UsageService {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.stopCountdownTicker();
     this.abortController?.abort();
     this.listeners.clear();
   }
 
-  private setState(s: ServiceState): void {
+  private setState(state: ServiceState): void {
     if (this.disposed) return;
-    this.state = s;
-    for (const fn of this.listeners) fn(s);
+    this.state = state;
+    for (const listener of this.listeners) listener(state);
   }
 
   private setPollInterval(ms: number): void {
@@ -62,11 +63,29 @@ export class UsageService {
     this.timer = setInterval(() => this.refresh(), ms);
   }
 
-  private async refresh(force = false): Promise<void> {
+  private startCountdownTicker(): void {
+    this.stopCountdownTicker();
+    this.countdownTimer = setInterval(() => {
+      if (this.state.status === "rate-limited") {
+        for (const listener of this.listeners) listener(this.state);
+      } else {
+        this.stopCountdownTicker();
+      }
+    }, 60_000);
+  }
+
+  private stopCountdownTicker(): void {
+    if (this.countdownTimer) {
+      clearInterval(this.countdownTimer);
+      this.countdownTimer = null;
+    }
+  }
+
+  private async refresh(): Promise<void> {
     if (this.disposed) return;
 
     const now = Date.now();
-    if (!force && now - this.lastFetchTime < COOLDOWN_MS) return;
+    if (now - this.lastFetchTime < COOLDOWN_MS) return;
     if (this.inFlight) return;
 
     const token = this.getAccessToken();
@@ -93,17 +112,17 @@ export class UsageService {
         this.setPollInterval(POLL_INTERVAL);
       }
       this.consecutiveRateLimits = 0;
-    } catch (err: unknown) {
-      this.handleFetchError(err);
+    } catch (error: unknown) {
+      this.handleFetchError(error);
     } finally {
       this.lastFetchTime = Date.now();
       this.inFlight = false;
     }
   }
 
-  private handleFetchError(err: unknown): void {
-    const msg = err instanceof Error ? err.message : String(err);
-    const statusMatch = msg.match(/^HTTP (\d+):/);
+  private handleFetchError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    const statusMatch = message.match(/^HTTP (\d+):/);
     const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : null;
 
     if (statusCode === 429) {
@@ -114,7 +133,9 @@ export class UsageService {
       this.setState({
         status: "rate-limited",
         retryAfterMs: BACKOFF_INTERVAL,
+        rateLimitedAt: Date.now(),
       });
+      this.startCountdownTicker();
       return;
     }
 
@@ -126,33 +147,33 @@ export class UsageService {
       return;
     }
 
-    // Network errors (offline, DNS, timeout)
     if (
-      msg.includes("ENOTFOUND") ||
-      msg.includes("ETIMEDOUT") ||
-      msg.includes("EAI_AGAIN") ||
-      msg.includes("Request timed out") ||
-      msg.includes("ECONNREFUSED")
+      message.includes("ENOTFOUND") ||
+      message.includes("ETIMEDOUT") ||
+      message.includes("EAI_AGAIN") ||
+      message.includes("Request timed out") ||
+      message.includes("ECONNREFUSED")
     ) {
-      this.setState({ status: "offline", message: msg });
+      this.setState({ status: "offline", message });
       return;
     }
 
-    this.setState({ status: "error", message: msg });
+    this.setState({ status: "error", message });
   }
 
   private validateResponse(data: unknown): data is UsageResponse {
     if (data === null || typeof data !== "object") return false;
     const obj = data as Record<string, unknown>;
-    // five_hour and seven_day can be null or an object with utilization + resets_at
+
     for (const key of ["five_hour", "seven_day"]) {
-      const val = obj[key];
-      if (val === null || val === undefined) continue;
-      if (typeof val !== "object") return false;
-      const bucket = val as Record<string, unknown>;
+      const value = obj[key];
+      if (value === null || value === undefined) continue;
+      if (typeof value !== "object") return false;
+      const bucket = value as Record<string, unknown>;
       if (typeof bucket.utilization !== "number") return false;
       if (typeof bucket.resets_at !== "string") return false;
     }
+
     return true;
   }
 
@@ -172,7 +193,7 @@ export class UsageService {
       const { signal } = this.abortController;
 
       const timeout = setTimeout(() => {
-        req.destroy();
+        request.destroy();
         reject(new Error("Request timed out"));
       }, REQUEST_TIMEOUT);
 
@@ -181,13 +202,14 @@ export class UsageService {
         reject(new Error("Aborted"));
         return;
       }
+
       signal.addEventListener("abort", () => {
         clearTimeout(timeout);
-        req.destroy();
+        request.destroy();
         reject(new Error("Aborted"));
       });
 
-      const req = https.request(
+      const request = https.request(
         "https://api.anthropic.com/api/oauth/usage",
         {
           method: "GET",
@@ -196,28 +218,29 @@ export class UsageService {
             "anthropic-beta": "oauth-2025-04-20",
           },
         },
-        (res) => {
+        (response) => {
           let data = "";
-          res.on("data", (chunk: string) => (data += chunk));
-          res.on("end", () => {
+          response.on("data", (chunk: string) => (data += chunk));
+          response.on("end", () => {
             clearTimeout(timeout);
-            if (res.statusCode === 200) {
+            if (response.statusCode === 200) {
               try {
                 resolve(JSON.parse(data));
               } catch {
                 reject(new Error("Invalid JSON in API response"));
               }
             } else {
-              reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+              reject(new Error(`HTTP ${response.statusCode}: ${data}`));
             }
           });
         }
       );
-      req.on("error", (err) => {
+
+      request.on("error", (error) => {
         clearTimeout(timeout);
-        reject(err);
+        reject(error);
       });
-      req.end();
+      request.end();
     });
   }
 }
