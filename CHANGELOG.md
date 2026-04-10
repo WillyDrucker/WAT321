@@ -5,6 +5,14 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-04-10
+
+### Changed
+- Warning color threshold standardized at 90% across all six widgets
+
+### Fixed
+- Codex session tokens not detecting active sessions (readHead buffer too small for large session_meta)
+
 ## [1.0.3] - 2026-04-10
 
 ### Added

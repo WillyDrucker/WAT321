@@ -85,7 +85,10 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
           this.item.text = `Claude (5hr) ${makeBar(pct)} ${pct}%`;
         }
         this.item.tooltip = buildTooltip(state.data);
-        this.item.color = undefined;
+        this.item.color =
+          pct >= 90
+            ? new vscode.ThemeColor("statusBarItem.warningForeground")
+            : undefined;
         this.item.show();
         break;
       }
