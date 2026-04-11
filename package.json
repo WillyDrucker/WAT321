@@ -32,7 +32,12 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [],
+    "commands": [
+      {
+        "command": "wat321.clearAllSettings",
+        "title": "WAT321: Clear All Settings"
+      }
+    ],
     "configuration": {
       "title": "WAT321",
       "properties": {

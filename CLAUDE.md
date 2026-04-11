@@ -8,14 +8,25 @@
 ## Project
 VS Code extension providing real-time AI usage status bar widgets (Claude + Codex).
 
+## Product Principles
+- **Read-only** - never modify user files. Only writes are disposable stamps in `~/.wat321/`
+- **No data collection** - no telemetry, no tracking, no analytics. All data stays local
+- **Never affect usage limits** - usage widgets hit a read-only stats endpoint. Session tokens read local files only
+- **Always visible** - never hide a widget on error. Show a friendly status so the user knows what's happening
+- **Never imply action** - no login prompts, no CLI commands, no "click here to fix". All errors are passive and self-healing
+- **Auto-reconnect** - every error state recovers automatically. The user never needs to do anything
+- **Last known good** - on transient failures, keep showing cached data. Only surface errors after repeated failures
+- **Zero bloat** - all stored files (stamps, flags) are tiny, disposable, and removable via the clear command
+- **Fail silently on first attempt** - absorb the first transient error, surface it only if it persists
+
 ## Key Rules
-- **No user file modifications** - never write to ~/.claude/, ~/.codex/, or any user config. Only writes `~/.wat321/` (cooldown timestamps).
-- **API rate limiting** - keep polling >=122s, cooldown >=61s. Never bypass cooldown.
-- **No bundler** - tsc only, no external runtime deps.
-- **CHANGELOG.md must be updated before any version bump.** Use `/wat321-publish` skill.
-- **Commit messages are descriptive, not versioned.** Only changelog and version bump commits mention the version.
-- **No em dashes** - use hyphens throughout.
-- **Error messages are passive** - no login prompts, no CLI commands, no user action required.
+- **No user file modifications** - never write to ~/.claude/, ~/.codex/, or any user config
+- **API rate limiting** - keep polling >=122s, cooldown >=61s. Never bypass cooldown
+- **No bundler** - tsc only, no external runtime deps
+- **CHANGELOG.md must be updated before any version bump.** Use `/wat321-publish` skill
+- **Commit messages are descriptive, not versioned.** Only changelog and version bump commits mention the version
+- **No em dashes** - use hyphens throughout
+- **Error messages are passive** - friendly, short, no jargon
 
 ## Architecture
 - Each tool gets its own folder under `src/`
@@ -23,7 +34,8 @@ VS Code extension providing real-time AI usage status bar widgets (Claude + Code
 - All six tools active: Claude (5hr, weekly, session tokens) + Codex (5 hour, weekly, session tokens)
 - Settings gate: `wat321.enableClaude` (default true), `wat321.enableCodex` (default false)
 - Display modes: Full / Compact / Minimal (instant switching via rebroadcast)
-- All widgets are display-only - no click commands
+- Dynamic enable/disable - no window reload needed
+- All widgets are display-only - no click commands (except clear settings)
 - Session token tooltips use `isTrusted: false` for security
 - Build pipeline: clean -> lint -> tsc
 
