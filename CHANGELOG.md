@@ -5,6 +5,34 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-04-11
+
+### Added
+- Clear All Settings command (`WAT321: Clear All Settings`) - resets all settings and removes stored data
+- State deduplication on session token services - widgets only update when visible values actually change
+- Bounded staleness (60s) - cached session data preserved during transient failures, degrades to placeholder after timeout
+- Path-aware file cache - handles session switches without showing stale data from previous session
+- Cached hot-path values - session title, autoCompactPct, and Codex cwd read once per session instead of every poll
+- Product principles documented in CLAUDE.md
+- Side effect safety audit documented in framework README
+- Shared regulation model documented in framework README
+
+### Changed
+- Folder `claude-session-tokens/` standardized to `WAT321_CLAUDE_SESSION_TOKENS/` (all six tool folders now match)
+- `sessionService.ts` renamed to `service.ts`, `widgets/tokenWidget.ts` flattened to `widget.ts`
+- Widget disposal fixed for dynamic enable/disable - provider group now owns all widgets, no ghost items on re-enable
+- Tool activation functions return disposables instead of pushing to context subscriptions
+- Session token services absorb mid-write parse failures silently when cached data exists
+- Usage services dedupe no-auth state to prevent redundant rebroadcasts
+- Clear settings confirmation changed from "Reload the window" to "All defaults restored"
+- Session resolution description corrected to transcript mtime-based (not startedAt)
+- README clarifies WAT321 will not affect usage limits
+
+### Fixed
+- Session token widget blip on every prompt (mid-write streaming caused blank flicker)
+- Usage widget going offline on alt-tab or idle (first transient error now silently absorbed)
+- File-size cache not resetting on session switch (could show stale data from different file with same size)
+
 ## [1.0.5] - 2026-04-10
 
 ### Added
