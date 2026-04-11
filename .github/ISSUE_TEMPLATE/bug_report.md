@@ -20,7 +20,7 @@ What should have happened instead.
 - OS: (Windows / macOS / Linux)
 - VS Code version: 
 - WAT321 version: 
-- Which widget: (Claude Usage / Codex Usage / Session Tokens / All)
+- Which widget: (Claude Usage / Claude Session Tokens / Codex Usage / Codex Session Tokens / All)
 
 **Screenshots**
 If applicable, add screenshots.
