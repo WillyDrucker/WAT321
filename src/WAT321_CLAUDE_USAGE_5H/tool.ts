@@ -4,14 +4,11 @@ import type { ServiceState } from "../shared/claude-usage/types";
 import { ClaudeUsage5hrWidget } from "./widget";
 
 export function activateClaudeUsage5hrTool(
-  context: vscode.ExtensionContext,
   service: ClaudeUsageSharedService
-): void {
+): vscode.Disposable[] {
   const widget = new ClaudeUsage5hrWidget();
   const listener = (state: ServiceState) => widget.update(state);
   service.subscribe(listener);
 
-  context.subscriptions.push(widget, {
-    dispose: () => service.unsubscribe(listener),
-  });
+  return [widget, { dispose: () => service.unsubscribe(listener) }];
 }
