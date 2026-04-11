@@ -13,6 +13,7 @@ export interface UsageResponse {
 
 export type ServiceState =
   | { status: "loading" }
+  | { status: "not-connected" }
   | { status: "no-auth" }
   | { status: "token-expired"; message: string }
   | { status: "rate-limited"; retryAfterMs: number; rateLimitedAt: number }

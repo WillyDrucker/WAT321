@@ -1,3 +1,5 @@
+import * as vscode from "vscode";
+
 export interface CodexUsageResponse {
   plan_type: string;
   rate_limit: {
@@ -42,6 +44,7 @@ export interface AdditionalRateLimit {
 
 export type ServiceState =
   | { status: "loading" }
+  | { status: "not-connected" }
   | { status: "no-auth" }
   | { status: "token-expired"; message: string }
   | { status: "rate-limited"; retryAfterMs: number; rateLimitedAt: number }
@@ -49,7 +52,6 @@ export type ServiceState =
   | { status: "error"; message: string }
   | { status: "ok"; data: CodexUsageResponse; fetchedAt: number };
 
-export interface StatusBarWidget {
+export interface StatusBarWidget extends vscode.Disposable {
   update(state: ServiceState): void;
-  dispose(): void;
 }

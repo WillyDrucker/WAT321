@@ -6,6 +6,7 @@ import type {
   StatusBarWidget,
 } from "../shared/claude-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
+import { getWidgetPriority } from "../shared/priority";
 
 export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -14,7 +15,7 @@ export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.weekly",
       vscode.StatusBarAlignment.Right,
-      1000
+      getWidgetPriority(1)
     );
     this.item.name = "WAT321: Claude Usage (Weekly)";
     this.item.text = "Claude weekly $(loading~spin)";
@@ -31,6 +32,7 @@ export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
         this.item.show();
         break;
 
+      case "not-connected":
       case "no-auth":
       case "token-expired":
       case "rate-limited":
