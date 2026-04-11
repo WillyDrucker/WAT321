@@ -7,6 +7,7 @@ import { normalizePath } from "../shared/fs/pathUtils";
 
 const POLL_INTERVAL = 5_000;
 const SESSION_SCAN_INTERVAL = 30_000;
+const STALE_TIMEOUT = 60_000;
 
 type Listener = (state: CodexTokenWidgetState) => void;
 
@@ -16,9 +17,23 @@ export class CodexSessionTokenService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private workspacePath: string;
+
+  // File cache - keyed by path
+  private lastFilePath = "";
   private lastFileSize = 0;
+
+  // Rollout cache
   private cachedRolloutPath: string | null = null;
   private lastRolloutScan = 0;
+
+  // Value caches to reduce sync I/O
+  private cachedSessionTitle: string | null = null;
+  private cachedSessionTitleId = "";
+  private cachedCwd: string | null = null;
+  private cachedCwdPath = "";
+
+  // Last known good tracking
+  private lastOkTime = 0;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath.replace(/\\/g, "/");
@@ -54,12 +69,42 @@ export class CodexSessionTokenService {
   private setState(s: CodexTokenWidgetState): void {
     if (this.disposed) return;
     this.state = s;
+    if (s.status === "ok") this.lastOkTime = Date.now();
     for (const fn of this.listeners) fn(s);
+  }
+
+  /** Only emit if visible values actually changed */
+  private setOkState(
+    sessionId: string,
+    label: string,
+    sessionTitle: string,
+    contextUsed: number,
+    contextWindowSize: number
+  ): void {
+    if (this.state.status === "ok") {
+      const prev = this.state.session;
+      if (
+        prev.sessionId === sessionId &&
+        prev.label === label &&
+        prev.sessionTitle === sessionTitle &&
+        prev.contextUsed === contextUsed &&
+        prev.contextWindowSize === contextWindowSize
+      ) {
+        this.lastOkTime = Date.now();
+        return;
+      }
+    }
+    this.setState({
+      status: "ok",
+      session: { sessionId, label, sessionTitle, contextUsed, contextWindowSize },
+    });
   }
 
   private poll(): void {
     if (this.disposed) return;
 
+    const hasGoodData = this.state.status === "ok";
+    const now = Date.now();
     const home = homedir();
     const codexDir = join(home, ".codex");
 
@@ -69,65 +114,79 @@ export class CodexSessionTokenService {
     }
 
     // Find the most recent rollout file (re-scan periodically)
-    const now = Date.now();
     if (
       now - this.lastRolloutScan >= SESSION_SCAN_INTERVAL ||
       !this.cachedRolloutPath
     ) {
-      this.cachedRolloutPath = this.findLatestRollout(codexDir);
+      const found = this.findLatestRollout(codexDir);
+      if (found) this.cachedRolloutPath = found;
       this.lastRolloutScan = now;
     }
 
     if (!this.cachedRolloutPath || !existsSync(this.cachedRolloutPath)) {
+      if (hasGoodData && now - this.lastOkTime < STALE_TIMEOUT) return;
       this.setState({ status: "no-session" });
       return;
+    }
+
+    // Reset file cache if rollout path changed (session switch)
+    if (this.cachedRolloutPath !== this.lastFilePath) {
+      this.lastFileSize = 0;
+      this.lastFilePath = this.cachedRolloutPath;
+      this.cachedSessionTitle = null;
+      this.cachedCwd = null;
     }
 
     // Skip re-parse if file hasn't changed
     try {
       const size = statSync(this.cachedRolloutPath).size;
-      if (size === this.lastFileSize && this.state.status === "ok") return;
+      if (size === this.lastFileSize && hasGoodData) return;
       this.lastFileSize = size;
     } catch {
       return;
     }
 
     // Read tail for latest token_count + context window
+    // If read or parse fails during mid-write, keep showing last good data
     const tail = readTail(this.cachedRolloutPath);
     if (!tail) {
-      this.setState({ status: "waiting" });
+      if (!hasGoodData) this.setState({ status: "waiting" });
       return;
     }
 
     const usage = this.parseLastTokenCount(tail);
     if (!usage) {
-      this.setState({ status: "waiting" });
+      if (!hasGoodData) this.setState({ status: "waiting" });
       return;
     }
 
-    // Get session title - prefer session_index, fall back to first user message
-    let sessionTitle = this.getSessionTitle(codexDir, this.cachedRolloutPath);
-    if (!sessionTitle) {
-      const head = readHead(this.cachedRolloutPath, 32_768);
-      if (head) {
-        sessionTitle = this.parseFirstUserMessage(head);
+    // Cache session title by session ID
+    const sessionId = this.extractSessionId(this.cachedRolloutPath);
+    if (this.cachedSessionTitle === null || this.cachedSessionTitleId !== sessionId) {
+      let title = this.getSessionTitle(codexDir, sessionId);
+      if (!title) {
+        const head = readHead(this.cachedRolloutPath, 32_768);
+        if (head) title = this.parseFirstUserMessage(head);
       }
+      this.cachedSessionTitle = title;
+      this.cachedSessionTitleId = sessionId;
     }
 
-    // Get cwd from session_meta (head of file)
-    const cwd = this.parseCwd(this.cachedRolloutPath);
-    const label = cwd ? basename(cwd) : "Codex";
+    // Cache cwd by rollout path
+    if (this.cachedCwd === null || this.cachedCwdPath !== this.cachedRolloutPath) {
+      this.cachedCwd = this.parseCwd(this.cachedRolloutPath);
+      this.cachedCwdPath = this.cachedRolloutPath;
+    }
 
-    this.setState({
-      status: "ok",
-      session: {
-        sessionId: this.extractSessionId(this.cachedRolloutPath),
-        label,
-        sessionTitle,
-        contextUsed: usage.inputTokens,
-        contextWindowSize: usage.contextWindowSize,
-      },
-    });
+    const label = this.cachedCwd ? basename(this.cachedCwd) : "Codex";
+
+    this.setOkState(
+      sessionId,
+      label,
+      this.cachedSessionTitle,
+      usage.inputTokens,
+      usage.contextWindowSize,
+    );
   }
 
   /**
@@ -184,8 +243,6 @@ export class CodexSessionTokenService {
   /** Extract session ID from rollout filename */
   private extractSessionId(rolloutPath: string): string {
     const filename = basename(rolloutPath, ".jsonl");
-    // Format: rollout-2026-04-09T21-34-18-019d7506-9373-7213-a5f7-43a4854f5948
-    // The session ID starts after the 6th dash (rollout-YYYY-MM-DDTHH-MM-SS-)
     const parts = filename.split("-");
     if (parts.length > 6) {
       return parts.slice(6).join("-");
@@ -194,8 +251,7 @@ export class CodexSessionTokenService {
   }
 
   /** Get session title from session_index.jsonl by matching session ID */
-  private getSessionTitle(codexDir: string, rolloutPath: string): string {
-    const sessionId = this.extractSessionId(rolloutPath);
+  private getSessionTitle(codexDir: string, sessionId: string): string {
     const indexPath = join(codexDir, "session_index.jsonl");
 
     if (!existsSync(indexPath)) return "";
@@ -224,7 +280,6 @@ export class CodexSessionTokenService {
 
   /** Read cwd from session_meta (first line of rollout) */
   private parseCwd(rolloutPath: string): string | null {
-    // Codex session_meta includes full system prompt and can exceed 16KB
     const head = readHead(rolloutPath, 32_768);
     if (!head) return null;
 
@@ -271,7 +326,7 @@ export class CodexSessionTokenService {
       const contextWindow =
         typeof info.model_context_window === "number"
           ? info.model_context_window
-          : 258_400; // default for gpt-5.4
+          : 258_400;
 
       if (!lastUsage || typeof lastUsage.input_tokens !== "number") continue;
 
@@ -301,7 +356,6 @@ export class CodexSessionTokenService {
       const payload = entry.payload as Record<string, unknown> | undefined;
       if (!payload) continue;
 
-      // Codex uses type=event_msg with payload.type=user_message
       if (payload.type === "user_message") {
         const msg = payload.message;
         if (typeof msg === "string") return msg.trim();
