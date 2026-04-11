@@ -38,13 +38,6 @@ export class CodexSessionTokenService {
     this.listeners.delete(listener);
   }
 
-  forceRefresh(): void {
-    this.lastFileSize = 0;
-    this.lastRolloutScan = 0;
-    this.cachedRolloutPath = null;
-    this.poll();
-  }
-
   rebroadcast(): void {
     for (const fn of this.listeners) fn(this.state);
   }

@@ -41,13 +41,6 @@ export class ClaudeSessionTokenService {
     this.listeners.delete(listener);
   }
 
-  forceRefresh(): void {
-    this.lastFileSize = 0;
-    this.lastSessionScan = 0;
-    this.cachedSession = null;
-    this.poll();
-  }
-
   rebroadcast(): void {
     for (const fn of this.listeners) fn(this.state);
   }

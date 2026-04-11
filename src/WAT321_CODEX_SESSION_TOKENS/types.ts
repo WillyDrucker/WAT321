@@ -18,3 +18,8 @@ export type CodexTokenWidgetState =
   | { status: "no-session" }
   | { status: "waiting" }
   | { status: "ok"; session: CodexResolvedSession };
+
+export interface StatusBarWidget {
+  update(state: CodexTokenWidgetState): void;
+  dispose(): void;
+}
