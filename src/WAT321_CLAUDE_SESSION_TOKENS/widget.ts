@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
-import type { WidgetState, ResolvedSession, StatusBarWidget } from "../types";
-import { formatTokens, formatPct, makeTokenBar } from "../../shared/ui/tokenFormatters";
-import { ClaudeSessionTokenService } from "../sessionService";
-import { getDisplayMode } from "../../shared/displayMode";
-import { getWidgetPriority } from "../../shared/priority";
+import type { WidgetState, ResolvedSession, StatusBarWidget } from "./types";
+import { formatTokens, formatPct, makeTokenBar } from "../shared/ui/tokenFormatters";
+import { ClaudeSessionTokenService } from "./service";
+import { getDisplayMode } from "../shared/displayMode";
+import { getWidgetPriority } from "../shared/priority";
 
 export class ClaudeSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -69,7 +69,6 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
         : 0;
     const pctRemaining = Math.max(0, 100 - pctOfCeiling);
 
-    // Truncate to roughly match the "Auto-compact at 700k · 75% remaining" line width
     const maxTitleLen = 38;
     const title = session.sessionTitle
       ? session.sessionTitle.length > maxTitleLen
@@ -102,14 +101,11 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
 }
 
 export function activateClaudeTokenWidget(
-  context: vscode.ExtensionContext,
   service: ClaudeSessionTokenService
-): void {
+): vscode.Disposable[] {
   const widget = new ClaudeSessionTokensWidget();
   const listener = (state: WidgetState) => widget.update(state);
   service.subscribe(listener);
 
-  context.subscriptions.push(widget, {
-    dispose: () => service.unsubscribe(listener),
-  });
+  return [widget, { dispose: () => service.unsubscribe(listener) }];
 }
