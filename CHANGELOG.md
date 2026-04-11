@@ -5,6 +5,33 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-04-10
+
+### Added
+- Dynamic enable/disable - toggling Claude or Codex settings takes effect immediately, no window reload needed
+- Auth directory detection - widgets show "Not Connected" when CLI hasn't been used yet, activate automatically when it is
+- First-run welcome notification with option to enable Codex from the toast
+- Configurable status bar priority base (`wat321.statusBarPriority`) to resolve conflicts with other extensions
+- ECONNRESET handling as network offline state
+
+### Changed
+- Error state on usage widgets now shows "Offline" instead of hiding the widget
+- Codex no-auth state now shows "Waiting" instead of hiding
+- Token-expired messages no longer reference CLI re-login
+- Session token percentages clamped to 100% maximum
+- Display mode descriptions clarified for session token widget differences
+- Updated extension logo
+
+### Fixed
+- Missing countdown ticker cleanup on successful fetch in Claude usage service
+- Redundant regex fallback in Codex error handler (dead code removed)
+- Division-by-zero guard on Codex session token widget
+- Em dash in GitHub feature request template
+- Stale label references across framework documentation
+
+### Removed
+- Unused forceRefresh() from all four services (dead code since click commands were removed)
+
 ## [1.0.4] - 2026-04-10
 
 ### Changed
