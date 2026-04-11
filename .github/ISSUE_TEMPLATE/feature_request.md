@@ -12,4 +12,4 @@ A clear description of the feature or improvement.
 How would this help your workflow?
 
 **Any ideas on how it should work?**
-Optional — sketches, mockups, or rough descriptions are welcome.
+Optional - sketches, mockups, or rough descriptions are welcome.

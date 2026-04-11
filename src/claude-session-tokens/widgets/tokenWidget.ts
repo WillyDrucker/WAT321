@@ -3,6 +3,7 @@ import type { WidgetState, ResolvedSession, StatusBarWidget } from "../types";
 import { formatTokens, formatPct, makeTokenBar } from "../../shared/ui/tokenFormatters";
 import { ClaudeSessionTokenService } from "../sessionService";
 import { getDisplayMode } from "../../shared/displayMode";
+import { getWidgetPriority } from "../../shared/priority";
 
 export class ClaudeSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -11,7 +12,7 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.sessionTokens",
       vscode.StatusBarAlignment.Right,
-      997
+      getWidgetPriority(4)
     );
     this.item.name = "WAT321: Claude Session Tokens";
     this.item.text = "🗜️ Claude -";
@@ -36,7 +37,7 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
         );
         const pctOfCeiling =
           ceilingTokens > 0
-            ? Math.round((session.contextUsed / ceilingTokens) * 100)
+            ? Math.min(100, Math.round((session.contextUsed / ceilingTokens) * 100))
             : 0;
 
         const mode = getDisplayMode();
@@ -64,7 +65,7 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
     );
     const pctOfCeiling =
       ceilingTokens > 0
-        ? Math.round((session.contextUsed / ceilingTokens) * 100)
+        ? Math.min(100, Math.round((session.contextUsed / ceilingTokens) * 100))
         : 0;
     const pctRemaining = Math.max(0, 100 - pctOfCeiling);
 

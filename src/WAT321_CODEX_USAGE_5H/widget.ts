@@ -6,6 +6,7 @@ import type {
   StatusBarWidget,
 } from "../shared/codex-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
+import { getWidgetPriority } from "../shared/priority";
 
 export class CodexUsage5hrWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -14,7 +15,7 @@ export class CodexUsage5hrWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.codexSession",
       vscode.StatusBarAlignment.Right,
-      999
+      getWidgetPriority(2)
     );
     this.item.name = "WAT321: Codex Usage (5 hour)";
     this.item.text = "Codex (5 hour) $(loading~spin)";
@@ -31,8 +32,20 @@ export class CodexUsage5hrWidget implements StatusBarWidget {
         this.item.show();
         break;
 
+      case "not-connected":
+        this.item.text = "$(info) Codex - Not Connected";
+        this.item.tooltip =
+          "Codex tools will activate automatically when Codex CLI is used.";
+        this.item.color = undefined;
+        this.item.show();
+        break;
+
       case "no-auth":
-        this.item.hide();
+        this.item.text = "$(key) Codex - Waiting";
+        this.item.tooltip =
+          "Waiting for Codex credentials. Will connect automatically when available.";
+        this.item.color = undefined;
+        this.item.show();
         break;
 
       case "token-expired":
@@ -67,7 +80,10 @@ export class CodexUsage5hrWidget implements StatusBarWidget {
         break;
 
       case "error":
-        this.item.hide();
+        this.item.text = "$(cloud-offline) Codex - Offline";
+        this.item.tooltip = "Codex usage temporarily unavailable. Will retry automatically.";
+        this.item.color = undefined;
+        this.item.show();
         break;
 
       case "ok": {

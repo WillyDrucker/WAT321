@@ -6,6 +6,7 @@ import type {
   StatusBarWidget,
 } from "../shared/claude-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
+import { getWidgetPriority } from "../shared/priority";
 
 export class ClaudeUsage5hrWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -14,7 +15,7 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.session",
       vscode.StatusBarAlignment.Right,
-      1001
+      getWidgetPriority(0)
     );
     this.item.name = "WAT321: Claude Usage (5hr)";
     this.item.text = "Claude (5hr) $(loading~spin)";
@@ -27,6 +28,14 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
       case "loading":
         this.item.text = "Claude (5hr) $(loading~spin)";
         this.item.tooltip = "Fetching Claude usage data...";
+        this.item.color = undefined;
+        this.item.show();
+        break;
+
+      case "not-connected":
+        this.item.text = "$(info) Claude - Not Connected";
+        this.item.tooltip =
+          "Claude tools will activate automatically when Claude Code is used in this workspace.";
         this.item.color = undefined;
         this.item.show();
         break;
@@ -71,7 +80,10 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
         break;
 
       case "error":
-        this.item.hide();
+        this.item.text = "$(cloud-offline) Claude - Offline";
+        this.item.tooltip = "Claude usage temporarily unavailable. Will retry automatically.";
+        this.item.color = undefined;
+        this.item.show();
         break;
 
       case "ok": {

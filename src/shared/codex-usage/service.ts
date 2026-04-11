@@ -8,7 +8,9 @@ const POLL_INTERVAL = 122_000;
 const BACKOFF_INTERVAL = 901_000;
 const COOLDOWN_MS = 61_000;
 const REQUEST_TIMEOUT = 10_000;
+const DISCOVERY_INTERVAL = 60_000;
 const AUTH_ERROR_CODES = new Set([401, 403]);
+const AUTH_DIR = join(homedir(), ".codex");
 
 interface CodexAuth {
   tokens?: {
@@ -61,8 +63,19 @@ export class CodexUsageSharedService {
   private consecutiveRateLimits = 0;
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
+  private discoveryTimer: ReturnType<typeof setInterval> | null = null;
 
   start(): void {
+    if (!existsSync(AUTH_DIR)) {
+      this.setState({ status: "not-connected" });
+      this.startDiscovery();
+      return;
+    }
+    this.startPolling();
+  }
+
+  private startPolling(): void {
+    this.stopDiscovery();
     // Delay first fetch - use remaining cooldown or 5s minimum
     const elapsed = Date.now() - this.lastFetchTime;
     const remaining = Math.max(5_000, COOLDOWN_MS - elapsed);
@@ -73,6 +86,24 @@ export class CodexUsageSharedService {
     }, remaining);
   }
 
+  /** Check every 60s if auth directory appears */
+  private startDiscovery(): void {
+    this.discoveryTimer = setInterval(() => {
+      if (this.disposed) { this.stopDiscovery(); return; }
+      if (existsSync(AUTH_DIR)) {
+        this.setState({ status: "loading" });
+        this.startPolling();
+      }
+    }, DISCOVERY_INTERVAL);
+  }
+
+  private stopDiscovery(): void {
+    if (this.discoveryTimer) {
+      clearInterval(this.discoveryTimer);
+      this.discoveryTimer = null;
+    }
+  }
+
   subscribe(listener: Listener): void {
     this.listeners.add(listener);
     listener(this.state);
@@ -80,10 +111,6 @@ export class CodexUsageSharedService {
 
   unsubscribe(listener: Listener): void {
     this.listeners.delete(listener);
-  }
-
-  async forceRefresh(): Promise<void> {
-    await this.refresh();
   }
 
   rebroadcast(): void {
@@ -96,6 +123,7 @@ export class CodexUsageSharedService {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.stopDiscovery();
     this.stopCountdownTicker();
     this.abortController?.abort();
     this.listeners.clear();
@@ -174,11 +202,7 @@ export class CodexUsageSharedService {
   private handleFetchError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     const statusCode =
-      error instanceof HttpError
-        ? error.statusCode
-        : (message.match(/^HTTP (\d+):/)?.[1]
-            ? parseInt(message.match(/^HTTP (\d+):/)![1], 10)
-            : null);
+      error instanceof HttpError ? error.statusCode : null;
 
     if (statusCode === 429) {
       this.consecutiveRateLimits++;
@@ -201,7 +225,7 @@ export class CodexUsageSharedService {
     if (statusCode && AUTH_ERROR_CODES.has(statusCode)) {
       this.setState({
         status: "token-expired",
-        message: `Authentication failed (${statusCode}). Re-login with Codex CLI.`,
+        message: `Authentication failed (${statusCode})`,
       });
       return;
     }
@@ -210,6 +234,7 @@ export class CodexUsageSharedService {
       message.includes("ENOTFOUND") ||
       message.includes("ETIMEDOUT") ||
       message.includes("EAI_AGAIN") ||
+      message.includes("ECONNRESET") ||
       message.includes("Request timed out") ||
       message.includes("ECONNREFUSED")
     ) {

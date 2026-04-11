@@ -51,8 +51,8 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 WAT321 supports three display densities. Search **"wat321"** in **Settings** to change.
 
 - **Full** - 10-block progress bars with all details (default)
-- **Compact** - 5-block progress bars with shortened display
-- **Minimal** - text-only, progress bars move to tooltips on hover
+- **Compact** - 5-block progress bars, session tokens show text only
+- **Minimal** - text-only, usage bars move to tooltips on hover
 
 <img src="images/screenshots/DISPLAY_MODE_SETTINGS.png" width="300">
 
@@ -80,8 +80,7 @@ WAT321 supports three display densities. Search **"wat321"** in **Settings** to 
 All six tools install together, but Codex is **disabled by default**. To enable:
 
 1. **File > Preferences > Settings** (`Ctrl+,` / `Cmd+,`) and search for **"wat321"**
-2. Check **Enable Codex**
-3. Reload the window - `Ctrl+Shift+P` / `Cmd+Shift+P` then **Developer: Reload Window**
+2. Check **Enable Codex** - widgets appear immediately, no reload needed
 
 <img src="images/screenshots/CODEX_WAT321_SETTINGS.png" width="350">
 
@@ -97,8 +96,10 @@ Once enabled, you can toggle individual Codex widgets on or off using the **stat
 
 - **Claude Usage** and **Codex Usage** poll their respective APIs on a safe interval (~2 minutes) with built-in rate-limit protection
 - **Session Tokens** (both providers) read local transcript files - no API calls, no network access
-- All data sources are **read-only** - WAT321 never modifies Claude, Codex, or user config files. The only files written are cooldown timestamps under `~/.wat321/` for rate-limit protection
+- All data sources are **read-only** - WAT321 never modifies Claude, Codex, or user config files. The only files written are internal timestamps under `~/.wat321/`
 - One shared API polling path per provider prevents duplicate calls even with multiple widgets active
+- Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
+- If Claude or Codex CLI hasn't been used yet, widgets show "Not Connected" and activate automatically when you start using the CLI
 
 ## What It Doesn't Do
 
@@ -127,7 +128,7 @@ API-only Anthropic accounts without CLI OAuth credentials will see the Claude wi
 
 ## Rate Limits
 
-Both Claude and Codex usage APIs have rate limits. WAT321 polls conservatively to stay well within safe thresholds. However, **repeatedly reinstalling, reloading, or enabling/disabling the extension in quick succession can trigger a temporary rate-limit lockout**.
+Both Claude and Codex usage APIs have rate limits. WAT321 polls conservatively to stay well within safe thresholds. However, **repeatedly reinstalling or reloading the extension in quick succession can trigger a temporary rate-limit lockout**.
 
 If a lockout occurs, the status bar will show "Offline" and the tooltip will display a countdown timer. The extension will automatically reconnect when the lockout expires - no action needed.
 

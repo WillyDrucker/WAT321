@@ -1,17 +1,18 @@
 import * as vscode from "vscode";
-import type { CodexTokenWidgetState, CodexResolvedSession } from "./types";
+import type { CodexTokenWidgetState, CodexResolvedSession, StatusBarWidget } from "./types";
 import { CodexSessionTokenService } from "./service";
 import { formatTokens, formatPct, makeTokenBar } from "../shared/ui/tokenFormatters";
 import { getDisplayMode } from "../shared/displayMode";
+import { getWidgetPriority } from "../shared/priority";
 
-export class CodexSessionTokensWidget implements vscode.Disposable {
+export class CodexSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
 
   constructor() {
     this.item = vscode.window.createStatusBarItem(
       "wat321.codexSessionTokens",
       vscode.StatusBarAlignment.Right,
-      996
+      getWidgetPriority(5)
     );
     this.item.name = "WAT321: Codex Session Tokens";
     this.item.text = "🗜️ Codex -";
@@ -31,9 +32,9 @@ export class CodexSessionTokensWidget implements vscode.Disposable {
 
       case "ok": {
         const { session } = state;
-        const usedPct = Math.round(
-          (session.contextUsed / session.contextWindowSize) * 100
-        );
+        const usedPct = session.contextWindowSize > 0
+          ? Math.min(100, Math.round((session.contextUsed / session.contextWindowSize) * 100))
+          : 0;
 
         const mode = getDisplayMode();
         if (mode === "minimal" || mode === "compact") {
@@ -55,9 +56,9 @@ export class CodexSessionTokensWidget implements vscode.Disposable {
   }
 
   private buildTooltip(session: CodexResolvedSession): vscode.MarkdownString {
-    const usedPct = Math.round(
-      (session.contextUsed / session.contextWindowSize) * 100
-    );
+    const usedPct = session.contextWindowSize > 0
+      ? Math.min(100, Math.round((session.contextUsed / session.contextWindowSize) * 100))
+      : 0;
     const remainingPct = Math.max(0, 100 - usedPct);
     const bar = makeTokenBar(usedPct);
 

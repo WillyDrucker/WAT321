@@ -6,6 +6,7 @@ import type {
   StatusBarWidget,
 } from "../shared/codex-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
+import { getWidgetPriority } from "../shared/priority";
 
 export class CodexUsageWeeklyWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -14,7 +15,7 @@ export class CodexUsageWeeklyWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.codexWeekly",
       vscode.StatusBarAlignment.Right,
-      998
+      getWidgetPriority(3)
     );
     this.item.name = "WAT321: Codex Usage (Weekly)";
     this.item.text = "Codex weekly $(loading~spin)";
@@ -31,6 +32,7 @@ export class CodexUsageWeeklyWidget implements StatusBarWidget {
         this.item.show();
         break;
 
+      case "not-connected":
       case "no-auth":
       case "token-expired":
       case "rate-limited":
