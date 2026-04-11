@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321 Willy's AI Tools",
   "description": "Real-time Claude & Codex status bar widgets: session usage, weekly limits, and more",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
