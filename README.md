@@ -103,8 +103,8 @@ Once enabled, you can toggle individual Codex widgets on or off using the **stat
 
 ## What It Doesn't Do
 
+- **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage.
 - WAT321 does not store, transmit, or modify your credentials. It only writes cooldown timestamps to `~/.wat321/`
-- WAT321 does not make API calls on your behalf (beyond reading usage stats)
 - WAT321 does not interfere with Claude Code, Codex CLI, or any other extension
 
 ## Requirements

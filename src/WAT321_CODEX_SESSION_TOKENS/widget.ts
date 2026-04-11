@@ -92,14 +92,11 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 }
 
 export function activateCodexTokenWidget(
-  context: vscode.ExtensionContext,
   service: CodexSessionTokenService
-): void {
+): vscode.Disposable[] {
   const widget = new CodexSessionTokensWidget();
   const listener = (state: CodexTokenWidgetState) => widget.update(state);
   service.subscribe(listener);
 
-  context.subscriptions.push(widget, {
-    dispose: () => service.unsubscribe(listener),
-  });
+  return [widget, { dispose: () => service.unsubscribe(listener) }];
 }

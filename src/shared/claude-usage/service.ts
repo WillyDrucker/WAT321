@@ -45,6 +45,7 @@ export class ClaudeUsageSharedService {
   private inFlight = false;
   private abortController: AbortController | null = null;
   private consecutiveRateLimits = 0;
+  private consecutiveErrors = 0;
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private discoveryTimer: ReturnType<typeof setInterval> | null = null;
@@ -152,7 +153,7 @@ export class ClaudeUsageSharedService {
 
     const token = this.getAccessToken();
     if (!token) {
-      this.setState({ status: "no-auth" });
+      if (this.state.status !== "no-auth") this.setState({ status: "no-auth" });
       return;
     }
 
@@ -175,6 +176,7 @@ export class ClaudeUsageSharedService {
         this.setPollInterval(POLL_INTERVAL);
       }
       this.consecutiveRateLimits = 0;
+      this.consecutiveErrors = 0;
     } catch (error: unknown) {
       this.handleFetchError(error);
     } finally {
@@ -189,8 +191,10 @@ export class ClaudeUsageSharedService {
     const statusMatch = message.match(/^HTTP (\d+):/);
     const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : null;
 
+    // Rate limits always surface immediately
     if (statusCode === 429) {
       this.consecutiveRateLimits++;
+      this.consecutiveErrors = 0;
       if (this.consecutiveRateLimits === 1) {
         this.setPollInterval(BACKOFF_INTERVAL);
       }
@@ -202,6 +206,12 @@ export class ClaudeUsageSharedService {
       this.startCountdownTicker();
       return;
     }
+
+    // Track consecutive non-429 errors. If we have good data and this is
+    // the first failure (transient after alt-tab, idle, etc.), silently
+    // keep showing cached data and retry on the next poll cycle.
+    this.consecutiveErrors++;
+    if (this.state.status === "ok" && this.consecutiveErrors < 2) return;
 
     if (statusCode && AUTH_ERROR_CODES.has(statusCode)) {
       this.setState({

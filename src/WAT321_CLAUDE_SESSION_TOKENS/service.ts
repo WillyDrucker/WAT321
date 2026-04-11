@@ -7,6 +7,7 @@ import { normalizePath, getProjectKey } from "../shared/fs/pathUtils";
 
 const POLL_INTERVAL = 5_000;
 const SESSION_SCAN_INTERVAL = 30_000;
+const STALE_TIMEOUT = 60_000;
 const DEFAULT_AUTOCOMPACT_PCT = 85;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const EXTENDED_MODELS = ["claude-opus-4-6", "claude-sonnet-4-6"];
@@ -19,9 +20,23 @@ export class ClaudeSessionTokenService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private workspacePath: string;
+
+  // File cache - keyed by path
+  private lastFilePath = "";
   private lastFileSize = 0;
+
+  // Session cache
   private cachedSession: SessionEntry | null = null;
   private lastSessionScan = 0;
+
+  // Value caches to reduce sync I/O
+  private cachedSessionTitle: string | null = null;
+  private cachedSessionTitlePath = "";
+  private cachedAutoCompactPct: number | null = null;
+  private cachedAutoCompactTime = 0;
+
+  // Last known good tracking
+  private lastOkTime = 0;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath.replace(/\\/g, "/");
@@ -57,23 +72,59 @@ export class ClaudeSessionTokenService {
   private setState(s: WidgetState): void {
     if (this.disposed) return;
     this.state = s;
+    if (s.status === "ok") this.lastOkTime = Date.now();
     for (const fn of this.listeners) fn(s);
+  }
+
+  /** Only emit if visible values actually changed */
+  private setOkState(
+    sessionId: string,
+    label: string,
+    sessionTitle: string,
+    contextUsed: number,
+    contextWindowSize: number,
+    autoCompactPct: number
+  ): void {
+    if (this.state.status === "ok") {
+      const prev = this.state.session;
+      if (
+        prev.sessionId === sessionId &&
+        prev.label === label &&
+        prev.sessionTitle === sessionTitle &&
+        prev.contextUsed === contextUsed &&
+        prev.contextWindowSize === contextWindowSize &&
+        prev.autoCompactPct === autoCompactPct
+      ) {
+        // Values identical - update timestamp but skip rebroadcast
+        this.lastOkTime = Date.now();
+        return;
+      }
+    }
+    this.setState({
+      status: "ok",
+      session: { sessionId, label, sessionTitle, contextUsed, contextWindowSize, autoCompactPct },
+    });
   }
 
   private poll(): void {
     if (this.disposed) return;
 
+    const hasGoodData = this.state.status === "ok";
     const home = homedir();
     const sessionsDir = join(home, ".claude", "sessions");
 
     // Re-scan sessions directory periodically, use cache between scans
     const now = Date.now();
     if (now - this.lastSessionScan >= SESSION_SCAN_INTERVAL || !this.cachedSession) {
-      this.cachedSession = this.findActiveSession(sessionsDir);
+      const found = this.findActiveSession(sessionsDir);
+      // Keep cached session if scan fails mid-write
+      if (found) this.cachedSession = found;
       this.lastSessionScan = now;
     }
     const activeSession = this.cachedSession;
     if (!activeSession) {
+      // Bounded staleness: keep cached data for up to 60s, then degrade
+      if (hasGoodData && now - this.lastOkTime < STALE_TIMEOUT) return;
       this.setState({ status: "no-session" });
       return;
     }
@@ -88,41 +139,59 @@ export class ClaudeSessionTokenService {
       `${activeSession.sessionId}.jsonl`
     );
     if (!existsSync(transcriptPath)) {
+      if (hasGoodData && now - this.lastOkTime < STALE_TIMEOUT) return;
       this.setState({ status: "waiting" });
       return;
+    }
+
+    // Reset file cache if transcript path changed (session switch)
+    if (transcriptPath !== this.lastFilePath) {
+      this.lastFileSize = 0;
+      this.lastFilePath = transcriptPath;
+      this.cachedSessionTitle = null;
     }
 
     // Skip re-parse if file hasn't changed
     try {
       const size = statSync(transcriptPath).size;
-      if (size === this.lastFileSize && this.state.status === "ok") return;
+      if (size === this.lastFileSize && hasGoodData) return;
       this.lastFileSize = size;
     } catch {
       return;
     }
 
-    // Read tail of transcript for usage, head for session title
+    // Read tail of transcript for usage
+    // If read or parse fails during mid-write, keep showing last good data
     const tail = readTail(transcriptPath);
     if (!tail) {
-      this.setState({ status: "waiting" });
+      if (!hasGoodData) this.setState({ status: "waiting" });
       return;
     }
 
     const usage = this.parseLastUsage(tail);
     if (!usage) {
-      this.setState({ status: "waiting" });
+      if (!hasGoodData) this.setState({ status: "waiting" });
       return;
     }
 
-    const sessionTitle = this.parseFirstUserMessage(transcriptPath);
-    const autoCompactPct = this.readAutoCompactPct(home);
+    // Cache session title - only read head once per transcript path
+    if (this.cachedSessionTitle === null || this.cachedSessionTitlePath !== transcriptPath) {
+      this.cachedSessionTitle = this.parseFirstUserMessage(transcriptPath);
+      this.cachedSessionTitlePath = transcriptPath;
+    }
+
+    // Cache autoCompactPct - reread every 30s
+    if (this.cachedAutoCompactPct === null || now - this.cachedAutoCompactTime >= SESSION_SCAN_INTERVAL) {
+      this.cachedAutoCompactPct = this.readAutoCompactPct(home);
+      this.cachedAutoCompactTime = now;
+    }
+
     const contextWindowSize = EXTENDED_MODELS.some((m) =>
       usage.modelId.includes(m)
     )
       ? 1_000_000
       : DEFAULT_CONTEXT_WINDOW;
 
-    // Context = input_tokens + cache_creation + cache_read
     const contextUsed =
       usage.inputTokens +
       usage.cacheCreationTokens +
@@ -130,17 +199,14 @@ export class ClaudeSessionTokenService {
 
     const label = basename(activeSession.cwd);
 
-    this.setState({
-      status: "ok",
-      session: {
-        sessionId: activeSession.sessionId,
-        label,
-        sessionTitle,
-        contextUsed,
-        contextWindowSize,
-        autoCompactPct,
-      },
-    });
+    this.setOkState(
+      activeSession.sessionId,
+      label,
+      this.cachedSessionTitle,
+      contextUsed,
+      contextWindowSize,
+      this.cachedAutoCompactPct,
+    );
   }
 
   /** Walk backwards to find the most recent assistant message with usage */

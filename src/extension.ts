@@ -8,67 +8,64 @@ import { activateCodexUsage5hrTool } from "./WAT321_CODEX_USAGE_5H/tool";
 import { activateCodexUsageWeeklyTool } from "./WAT321_CODEX_USAGE_WEEKLY/tool";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
 
-import { ClaudeSessionTokenService } from "./claude-session-tokens/sessionService";
-import { activateClaudeTokenWidget } from "./claude-session-tokens/widgets/tokenWidget";
+import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
+import { activateClaudeTokenWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
 
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { activateCodexTokenWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 
 import { showWelcomeOnce } from "./shared/welcome";
+import { registerClearSettingsCommand } from "./shared/clearSettings";
 
 interface ProviderGroup {
   disposables: vscode.Disposable[];
-  usageService?: { dispose(): void; rebroadcast(): void };
-  tokenService?: { dispose(): void; rebroadcast(): void };
+  usageService: { dispose(): void; rebroadcast(): void };
+  tokenService: { dispose(): void; rebroadcast(): void };
 }
 
 let claudeGroup: ProviderGroup | null = null;
 let codexGroup: ProviderGroup | null = null;
 
-function activateClaude(context: vscode.ExtensionContext): ProviderGroup {
+function activateClaude(): ProviderGroup {
   const workspacePath =
     vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-  const disposables: vscode.Disposable[] = [];
 
   const usageService = new ClaudeUsageSharedService();
-  activateClaudeUsage5hrTool(context, usageService);
-  activateClaudeUsageWeeklyTool(context, usageService);
-
   const tokenService = new ClaudeSessionTokenService(workspacePath);
-  activateClaudeTokenWidget(context, tokenService);
+
+  const disposables: vscode.Disposable[] = [
+    ...activateClaudeUsage5hrTool(usageService),
+    ...activateClaudeUsageWeeklyTool(usageService),
+    ...activateClaudeTokenWidget(tokenService),
+    { dispose: () => usageService.dispose() },
+    { dispose: () => tokenService.dispose() },
+  ];
 
   usageService.start();
   tokenService.start();
-
-  disposables.push(
-    { dispose: () => usageService.dispose() },
-    { dispose: () => tokenService.dispose() }
-  );
 
   return { disposables, usageService, tokenService };
 }
 
-function activateCodex(context: vscode.ExtensionContext): ProviderGroup {
+function activateCodex(): ProviderGroup {
   const workspacePath =
     vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-  const disposables: vscode.Disposable[] = [];
 
-  const usageService = new CodexUsageSharedService();
-  activateCodexUsage5hrTool(context, usageService);
-  activateCodexUsageWeeklyTool(context, usageService);
-
+  const codexService = new CodexUsageSharedService();
   const tokenService = new CodexSessionTokenService(workspacePath);
-  activateCodexTokenWidget(context, tokenService);
 
-  usageService.start();
+  const disposables: vscode.Disposable[] = [
+    ...activateCodexUsage5hrTool(codexService),
+    ...activateCodexUsageWeeklyTool(codexService),
+    ...activateCodexTokenWidget(tokenService),
+    { dispose: () => codexService.dispose() },
+    { dispose: () => tokenService.dispose() },
+  ];
+
+  codexService.start();
   tokenService.start();
 
-  disposables.push(
-    { dispose: () => usageService.dispose() },
-    { dispose: () => tokenService.dispose() }
-  );
-
-  return { disposables, usageService, tokenService };
+  return { disposables, usageService: codexService, tokenService };
 }
 
 function deactivateGroup(group: ProviderGroup | null): null {
@@ -82,10 +79,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // --- Initial activation based on current settings ---
   if (config.get<boolean>("enableClaude", true)) {
-    claudeGroup = activateClaude(context);
+    claudeGroup = activateClaude();
   }
   if (config.get<boolean>("enableCodex", false)) {
-    codexGroup = activateCodex(context);
+    codexGroup = activateCodex();
   }
 
   // --- Dynamic enable/disable on settings change ---
@@ -96,7 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
           .getConfiguration("wat321")
           .get<boolean>("enableClaude", true);
         if (enabled && !claudeGroup) {
-          claudeGroup = activateClaude(context);
+          claudeGroup = activateClaude();
         } else if (!enabled && claudeGroup) {
           claudeGroup = deactivateGroup(claudeGroup);
         }
@@ -107,7 +104,7 @@ export function activate(context: vscode.ExtensionContext) {
           .getConfiguration("wat321")
           .get<boolean>("enableCodex", false);
         if (enabled && !codexGroup) {
-          codexGroup = activateCodex(context);
+          codexGroup = activateCodex();
         } else if (!enabled && codexGroup) {
           codexGroup = deactivateGroup(codexGroup);
         }
@@ -115,16 +112,19 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Re-render all widgets immediately when displayMode changes
       if (e.affectsConfiguration("wat321.displayMode")) {
-        claudeGroup?.usageService?.rebroadcast();
-        codexGroup?.usageService?.rebroadcast();
-        claudeGroup?.tokenService?.rebroadcast();
-        codexGroup?.tokenService?.rebroadcast();
+        claudeGroup?.usageService.rebroadcast();
+        codexGroup?.usageService.rebroadcast();
+        claudeGroup?.tokenService.rebroadcast();
+        codexGroup?.tokenService.rebroadcast();
       }
     })
   );
 
   // --- First-run welcome notification ---
   showWelcomeOnce();
+
+  // --- Command palette ---
+  registerClearSettingsCommand(context);
 }
 
 export function deactivate() {
