@@ -11,7 +11,8 @@ export interface CodexResolvedSession {
   label: string; // folder name from cwd
   sessionTitle: string; // thread_name or first user message
   contextUsed: number; // last_token_usage.input_tokens
-  contextWindowSize: number; // model_context_window
+  contextWindowSize: number; // effective model context window from token_count
+  autoCompactTokens: number; // actual Codex auto-compact ceiling for display
 }
 
 export type CodexTokenWidgetState =
