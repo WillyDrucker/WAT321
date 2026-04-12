@@ -5,6 +5,32 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-04-12
+
+### Added
+- Cross-instance shared cache and claim-based coordination (one API call per 122s cycle across all VS Code windows)
+- Auto display mode (new default) - resolves to Compact when both providers active, Full when only one
+- Exponential discovery backoff - 60s to 15 min when CLI is not installed
+- New Predator handshake logo showing Claude vs Codex friendly competition
+
+### Changed
+- Both providers enabled by default (`wat321.enableCodex` default: false -> true)
+- Widgets hide entirely when provider CLI is not installed (no more "Not Connected" text)
+- Startup adopts cached state instantly from other instances - no loading flash on new windows
+- HTTPS requests now use `agent: false` for fresh connections, avoiding stale keep-alive sockets after idle
+- Error absorption bumped from 2 to 3 consecutive failures before showing offline
+- Startup delay now includes 0-5s random jitter to stagger simultaneous instance startups
+- Extension `displayName` changed to `"WAT321"` only (was `"WAT321 Willy's AI Tools"`, got truncated in UI)
+
+### Fixed
+- Idle-offline bug from stale keep-alive socket reuse after 5+ minute idle
+- Cross-instance cooldown - multiple VS Code windows no longer collide on the API
+- No-auth state dedupe - no longer emits on every poll when credentials are missing
+
+### Removed
+- First-run welcome notification (no longer needed with auto-detection and default-enabled providers)
+- `src/shared/welcome.ts` deleted
+
 ## [1.0.7] - 2026-04-11
 
 ### Added
