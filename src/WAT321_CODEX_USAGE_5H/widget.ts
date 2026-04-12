@@ -33,11 +33,8 @@ export class CodexUsage5hrWidget implements StatusBarWidget {
         break;
 
       case "not-connected":
-        this.item.text = "$(info) Codex - Not Connected";
-        this.item.tooltip =
-          "Codex tools will activate automatically when Codex CLI is used.";
-        this.item.color = undefined;
-        this.item.show();
+        // Codex CLI is not installed - hide widget entirely
+        this.item.hide();
         break;
 
       case "no-auth":

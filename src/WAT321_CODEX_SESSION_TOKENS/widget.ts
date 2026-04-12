@@ -22,6 +22,11 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 
   update(state: CodexTokenWidgetState): void {
     switch (state.status) {
+      case "not-installed":
+        // Codex CLI is not installed - hide widget entirely
+        this.item.hide();
+        break;
+
       case "no-session":
       case "waiting":
         this.item.text = "🗜️ Codex -";

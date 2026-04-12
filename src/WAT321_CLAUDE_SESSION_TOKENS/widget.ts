@@ -22,6 +22,11 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
 
   update(state: WidgetState): void {
     switch (state.status) {
+      case "not-installed":
+        // Claude CLI is not installed - hide widget entirely
+        this.item.hide();
+        break;
+
       case "no-session":
       case "waiting":
         this.item.text = "🗜️ Claude -";
