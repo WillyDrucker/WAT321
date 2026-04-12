@@ -20,7 +20,7 @@ export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
     this.item.name = "WAT321: Claude Usage (Weekly)";
     this.item.text = "Claude weekly $(loading~spin)";
     this.item.color = undefined;
-    this.item.show();
+    // First state delivered by subscribe() decides visibility.
   }
 
   update(state: ServiceState): void {

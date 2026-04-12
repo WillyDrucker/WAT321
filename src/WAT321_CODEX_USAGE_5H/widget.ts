@@ -20,7 +20,7 @@ export class CodexUsage5hrWidget implements StatusBarWidget {
     this.item.name = "WAT321: Codex Usage (5 hour)";
     this.item.text = "Codex (5 hour) $(loading~spin)";
     this.item.color = undefined;
-    this.item.show();
+    // First state delivered by subscribe() decides visibility.
   }
 
   update(state: ServiceState): void {
