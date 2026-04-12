@@ -15,6 +15,7 @@ export interface CodexResolvedSession {
 }
 
 export type CodexTokenWidgetState =
+  | { status: "not-installed" } // ~/.codex/ does not exist - hide widget
   | { status: "no-session" }
   | { status: "waiting" }
   | { status: "ok"; session: CodexResolvedSession };

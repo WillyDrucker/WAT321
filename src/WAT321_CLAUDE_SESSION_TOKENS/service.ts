@@ -115,7 +115,16 @@ export class ClaudeSessionTokenService {
 
     const hasGoodData = this.state.status === "ok";
     const home = homedir();
-    const sessionsDir = join(home, ".claude", "sessions");
+    const claudeDir = join(home, ".claude");
+    const sessionsDir = join(claudeDir, "sessions");
+
+    // Hide entirely if Claude is not installed at all
+    if (!existsSync(claudeDir)) {
+      if (this.state.status !== "not-installed") {
+        this.setState({ status: "not-installed" });
+      }
+      return;
+    }
 
     // Re-scan sessions directory periodically, use cache between scans
     const now = Date.now();

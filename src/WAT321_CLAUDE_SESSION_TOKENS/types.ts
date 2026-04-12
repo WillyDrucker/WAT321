@@ -18,6 +18,7 @@ export interface ResolvedSession {
 }
 
 export type WidgetState =
+  | { status: "not-installed" } // ~/.claude/ does not exist - hide widget
   | { status: "no-session" }
   | { status: "waiting" } // session exists but no usage data yet
   | { status: "ok"; session: ResolvedSession };

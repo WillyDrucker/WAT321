@@ -108,8 +108,11 @@ export class CodexSessionTokenService {
     const home = homedir();
     const codexDir = join(home, ".codex");
 
+    // Hide entirely if Codex is not installed at all
     if (!existsSync(codexDir)) {
-      this.setState({ status: "no-session" });
+      if (this.state.status !== "not-installed") {
+        this.setState({ status: "not-installed" });
+      }
       return;
     }
 

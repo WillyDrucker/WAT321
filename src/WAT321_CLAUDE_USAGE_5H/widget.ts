@@ -33,11 +33,8 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
         break;
 
       case "not-connected":
-        this.item.text = "$(info) Claude - Not Connected";
-        this.item.tooltip =
-          "Claude tools will activate automatically when Claude Code is used in this workspace.";
-        this.item.color = undefined;
-        this.item.show();
+        // Claude CLI is not installed - hide widget entirely
+        this.item.hide();
         break;
 
       case "no-auth":
