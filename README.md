@@ -10,7 +10,7 @@
 
 Real-time AI usage widgets for your VS Code status bar.
 
-WAT321 ships with **six status bar widgets** for Claude and Codex. Both providers are enabled by default. Widgets for a provider are automatically hidden if its CLI (`~/.claude/` or `~/.codex/`) is not installed, so there is nothing to configure for a Claude-only or Codex-only setup.
+WAT321 ships with **six status bar widgets** - three for Claude, three for Codex - all enabled out of the box. WAT321 only shows widgets for the providers you actually use, so a Claude-only or Codex-only setup just works with nothing to configure. If you add the other provider later, its widgets show up automatically.
 
 ---
 
@@ -48,7 +48,7 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 ## Display Modes
 
-WAT321 supports four display densities. Search **"wat321"** in **Settings** to change.
+WAT321 supports four display densities. Search **"wat321"** in **Settings** and pick the one that fits how crowded you like your status bar.
 
 - **Auto** (default) - automatically picks Full when only one provider is active, Compact when both are active
 - **Full** - 10-block progress bars with all details
@@ -78,7 +78,7 @@ WAT321 supports four display densities. Search **"wat321"** in **Settings** to c
 
 ## Provider Toggles
 
-Both Claude and Codex widgets are enabled by default. Widgets are automatically hidden if the corresponding CLI is not installed, so you never see "Not Connected" placeholders. If you want to explicitly turn one provider off:
+Both Claude and Codex widgets are enabled by default. If a provider CLI is not installed, its widgets stay hidden automatically, so you never end up with "Not Connected" clutter. If you want to turn one provider off yourself:
 
 1. **File > Preferences > Settings** (`Ctrl+,` / `Cmd+,`) and search for **"wat321"**
 2. Uncheck **Enable Claude** or **Enable Codex** - widgets disappear immediately, no reload needed
@@ -100,7 +100,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - **Claude Usage** and **Codex Usage** poll their respective APIs on a safe interval (~2 minutes) with built-in rate-limit protection
 - **Session Tokens** (both providers) read local transcript files - no API calls, no network access
 - All data sources are **read-only** - WAT321 never modifies Claude, Codex, or user config files
-- **Hidden when you're not signed in** - if you don't have a Claude or Codex account set up in VS Code, those widgets stay out of the way. They appear automatically as soon as you sign in, no reload or restart needed
+- **Hidden when a provider isn't set up yet** - if Claude or Codex isn't installed on your machine, those widgets stay out of the way. They appear automatically as soon as the provider is ready, no reload or restart needed
 - Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
 
 ## What It Doesn't Do
@@ -140,7 +140,7 @@ If a lockout occurs, the status bar will show "Offline" and the tooltip will dis
 
 ## Reset WAT321
 
-To start fresh, open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Clear All Settings**, or check the **Reset WAT321** checkbox at the bottom of the WAT321 settings page. This resets all settings to defaults and clears stored data. WAT321 picks right back up on the next refresh, no restart needed.
+Need a clean slate? Open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Clear All Settings**, or check the **Reset WAT321** box at the bottom of the WAT321 settings page. That restores WAT321 to its defaults, clears its saved local data, and lets everything rebuild automatically on the next refresh. No restart needed.
 
 ## Issues & Feedback
 
