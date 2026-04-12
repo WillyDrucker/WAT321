@@ -40,6 +40,7 @@ VS Code extension providing real-time AI usage status bar widgets (Claude + Code
 - Build pipeline: clean -> lint -> tsc
 
 ## Conventions
+- `package.json` `displayName` is `"WAT321"` only - never add "Willy's AI Tools" or any suffix (gets truncated in VS Code UI)
 - AIDOCS/ and WDDOCS/ are gitignored - not in repo
 - Branch naming: `WAT321_vX.X.X`
 - **Branch = version = changelog** - always in sync
