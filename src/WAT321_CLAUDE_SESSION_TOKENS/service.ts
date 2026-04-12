@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { homedir } from "os";
 import { join, basename } from "path";
+import * as vscode from "vscode";
 import type { SessionEntry, WidgetState } from "./types";
 import { readTail, readHead } from "../shared/fs/fileReaders";
 import { normalizePath, getProjectKey } from "../shared/fs/pathUtils";
@@ -57,6 +58,9 @@ export class ClaudeSessionTokenService {
   }
 
   rebroadcast(): void {
+    // Invalidate cached values so next poll picks up setting changes
+    this.cachedAutoCompactPct = null;
+    this.lastFileSize = 0;
     for (const fn of this.listeners) fn(this.state);
   }
 
@@ -359,6 +363,13 @@ export class ClaudeSessionTokenService {
   }
 
   private readAutoCompactPct(home: string): number {
+    // Check WAT321 setting first
+    const watOverride = vscode.workspace
+      .getConfiguration("wat321")
+      .get<number>("autoCompactThreshold", 0);
+    if (watOverride >= 1 && watOverride <= 100) return watOverride;
+
+    // Fall back to Claude's own setting
     try {
       const settingsPath = join(home, ".claude", "settings.json");
       const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
