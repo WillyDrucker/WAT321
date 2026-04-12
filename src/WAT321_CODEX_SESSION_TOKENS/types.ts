@@ -1,3 +1,5 @@
+import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/types";
+
 /** Entry from ~/.codex/session_index.jsonl */
 export interface CodexSessionIndex {
   id: string;
@@ -21,7 +23,5 @@ export type CodexTokenWidgetState =
   | { status: "waiting" }
   | { status: "ok"; session: CodexResolvedSession };
 
-export interface StatusBarWidget {
-  update(state: CodexTokenWidgetState): void;
-  dispose(): void;
-}
+/** Codex session token widget contract. */
+export type StatusBarWidget = GenericStatusBarWidget<CodexTokenWidgetState>;

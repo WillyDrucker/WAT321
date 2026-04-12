@@ -6,7 +6,7 @@ import { readTail, readHead } from "../shared/fs/fileReaders";
 import { normalizePath, getProjectKey } from "../shared/fs/pathUtils";
 
 const POLL_INTERVAL = 5_000;
-const SESSION_SCAN_INTERVAL = 30_000;
+const SESSION_SCAN_INTERVAL = 51_000;
 const STALE_TIMEOUT = 60_000;
 const DEFAULT_AUTOCOMPACT_PCT = 85;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
