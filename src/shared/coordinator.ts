@@ -1,11 +1,13 @@
 import {
   readFileSync,
   writeFileSync,
+  writeSync,
   openSync,
   closeSync,
   existsSync,
   mkdirSync,
   rmSync,
+  statSync,
 } from "fs";
 import { dirname } from "path";
 
@@ -108,6 +110,18 @@ export class Coordinator<TState> {
    * Try to atomically claim the refresh slot.
    * Returns true if we own the claim, false if another instance holds it.
    * Stale claims (> claimTtlMs old) are forcibly reclaimed.
+   *
+   * Corrupt claim files (zero-byte, partial write, unparseable JSON) are
+   * treated as stale if their filesystem mtime is older than claimTtlMs.
+   * The main remaining source of a corrupt claim is a crash between
+   * openSync("wx") and writeSync(fd, payload) which would leave a
+   * zero-byte file on disk. Without the mtime fallback, that case would
+   * deadlock every instance forever because JSON.parse would throw
+   * before the TTL check could run.
+   *
+   * Note: claim writes go through the owned file descriptor (writeSync)
+   * rather than reopening the path (writeFileSync), so the truncate
+   * window that writeFileSync(path) would create does not exist here.
    */
   tryClaim(): boolean {
     try {
@@ -117,12 +131,15 @@ export class Coordinator<TState> {
       return false;
     }
 
-    // Fast path: atomic create, fails if file exists
+    // Fast path: atomic create, fails if file exists. Write through the
+    // owned fd instead of reopening the path, otherwise writeFileSync(path)
+    // would truncate the file and recreate the truncate-window race the
+    // mtime fallback below exists to recover from.
     try {
       const fd = openSync(this.claimPath, "wx");
       try {
         const payload = JSON.stringify({ acquiredAt: Date.now() });
-        writeFileSync(this.claimPath, payload);
+        writeSync(fd, payload);
       } finally {
         closeSync(fd);
       }
@@ -131,41 +148,64 @@ export class Coordinator<TState> {
       // File exists, check if stale
     }
 
+    // Parseable claim with a stale acquiredAt timestamp.
     try {
       const json = readFileSync(this.claimPath, "utf8");
       const claim = JSON.parse(json);
       const acquiredAt =
         typeof claim?.acquiredAt === "number" ? claim.acquiredAt : 0;
       if (Date.now() - acquiredAt > this.claimTtlMs) {
-        // Stale claim from a crashed instance - delete and retry atomic create.
-        // Two instances can both observe the same stale claim, but only one
-        // will win the subsequent openSync("wx") race.
-        try {
-          rmSync(this.claimPath, { force: true });
-        } catch {
-          return false;
-        }
-        try {
-          const fd = openSync(this.claimPath, "wx");
-          try {
-            writeFileSync(
-              this.claimPath,
-              JSON.stringify({ acquiredAt: Date.now() })
-            );
-          } finally {
-            closeSync(fd);
-          }
-          return true;
-        } catch {
-          // Another instance won the reclaim race
-          return false;
-        }
+        return this.reclaimStaleClaim();
+      }
+      // Parseable, recent - another instance owns it, wait.
+      return false;
+    } catch {
+      // Unparseable claim. Fall through to the mtime-based check below.
+    }
+
+    // Corrupt / zero-byte / partial-write claim. Use filesystem mtime as
+    // the age signal since we cannot trust the contents. If mtime is
+    // recent, another instance is probably mid-write - respect it. If
+    // mtime is older than the TTL, treat as a crash leftover and reclaim.
+    try {
+      const mtime = statSync(this.claimPath).mtimeMs;
+      if (Date.now() - mtime > this.claimTtlMs) {
+        return this.reclaimStaleClaim();
       }
     } catch {
-      // If we cannot read the claim file at all, assume someone holds it
+      // Cannot even stat the file - assume someone holds it.
     }
 
     return false;
+  }
+
+  /**
+   * Delete the current claim file and atomically recreate it. Used for
+   * both legitimate stale claims and corrupt-file recovery. Two instances
+   * can both enter this path concurrently, but the atomic openSync("wx")
+   * inside arbitrates - only one returns true, the other sees EEXIST and
+   * returns false cleanly.
+   */
+  private reclaimStaleClaim(): boolean {
+    try {
+      rmSync(this.claimPath, { force: true });
+    } catch {
+      return false;
+    }
+    try {
+      const fd = openSync(this.claimPath, "wx");
+      try {
+        // Write through the owned fd, not by reopening the path, so we
+        // do not create a truncate window another instance could observe.
+        writeSync(fd, JSON.stringify({ acquiredAt: Date.now() }));
+      } finally {
+        closeSync(fd);
+      }
+      return true;
+    } catch {
+      // Another instance won the reclaim race
+      return false;
+    }
   }
 
   /** Release our claim on the refresh slot. Best-effort. */
