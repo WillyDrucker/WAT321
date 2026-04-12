@@ -1,9 +1,16 @@
 import * as vscode from "vscode";
-import type { CodexTokenWidgetState, CodexResolvedSession, StatusBarWidget } from "./types";
+import type {
+  CodexResolvedSession,
+  CodexTokenWidgetState,
+  StatusBarWidget,
+} from "./types";
 import { CodexSessionTokenService } from "./service";
-import { formatTokens, formatPct, makeTokenBar } from "../shared/ui/tokenFormatters";
+import { formatPct, formatTokens, makeTokenBar } from "../shared/ui/tokenFormatters";
 import { getDisplayMode } from "../shared/displayMode";
 import { getWidgetPriority } from "../shared/priority";
+
+const CLAMP = "\u{1F5DC}\u{FE0F}";
+const FOLDER = "\u{1F4C1}";
 
 export class CodexSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -15,7 +22,7 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
       getWidgetPriority(5)
     );
     this.item.name = "WAT321: Codex Session Tokens";
-    this.item.text = "🗜️ Codex -";
+    this.item.text = `${CLAMP} Codex -`;
     this.item.tooltip = "No active Codex session";
     // First state delivered by subscribe() decides visibility.
   }
@@ -29,7 +36,7 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 
       case "no-session":
       case "waiting":
-        this.item.text = "🗜️ Codex -";
+        this.item.text = `${CLAMP} Codex -`;
         this.item.tooltip = "No active Codex session";
         this.item.color = undefined;
         this.item.show();
@@ -37,15 +44,17 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 
       case "ok": {
         const { session } = state;
-        const usedPct = session.contextWindowSize > 0
-          ? Math.min(100, Math.round((session.contextUsed / session.contextWindowSize) * 100))
+        const usedPct = session.autoCompactTokens > 0
+          ? Math.min(100, Math.round((session.contextUsed / session.autoCompactTokens) * 100))
           : 0;
 
         const mode = getDisplayMode();
         if (mode === "minimal" || mode === "compact") {
-          this.item.text = `🗜️ Codex ${formatTokens(session.contextUsed)} ${formatPct(usedPct)}`;
+          this.item.text = `${CLAMP} Codex ${formatTokens(session.contextUsed)} ${formatPct(usedPct)}`;
         } else {
-          this.item.text = `🗜️ Codex ${formatTokens(session.contextUsed)} / ${formatTokens(session.contextWindowSize)} ${formatPct(usedPct)}`;
+          this.item.text =
+            `${CLAMP} Codex ${formatTokens(session.contextUsed)} / ` +
+            `${formatTokens(session.autoCompactTokens)} ${formatPct(usedPct)}`;
         }
 
         this.item.color =
@@ -61,8 +70,8 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
   }
 
   private buildTooltip(session: CodexResolvedSession): vscode.MarkdownString {
-    const usedPct = session.contextWindowSize > 0
-      ? Math.min(100, Math.round((session.contextUsed / session.contextWindowSize) * 100))
+    const usedPct = session.autoCompactTokens > 0
+      ? Math.min(100, Math.round((session.contextUsed / session.autoCompactTokens) * 100))
       : 0;
     const remainingPct = Math.max(0, 100 - usedPct);
     const bar = makeTokenBar(usedPct);
@@ -77,16 +86,18 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
     const md = new vscode.MarkdownString();
     md.isTrusted = false;
     md.supportHtml = false;
-    md.appendMarkdown(`**Codex session token context**  \n`);
+    md.appendMarkdown("**Codex session token context**  \n");
     if (title) {
       md.appendMarkdown(`"${title}"  \n`);
     }
     md.appendMarkdown(
-      `📁 ${session.label} ${formatTokens(session.contextUsed)} / ${formatTokens(session.contextWindowSize)}\n\n`
+      `${FOLDER} ${session.label} ${formatTokens(session.contextUsed)} / ` +
+      `${formatTokens(session.autoCompactTokens)}\n\n`
     );
     md.appendMarkdown(`${bar} ${formatPct(usedPct)} used\n\n`);
     md.appendMarkdown(
-      `🗜️ Auto-compact at ${formatTokens(session.contextWindowSize)} · ${formatPct(remainingPct)} remaining`
+      `${CLAMP} Auto-compact at ${formatTokens(session.autoCompactTokens)} ` +
+      `- ${formatPct(remainingPct)} remaining`
     );
     return md;
   }

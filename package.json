@@ -2,11 +2,15 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
     "url": "https://github.com/WillyDrucker/WAT321"
+  },
+  "homepage": "https://github.com/WillyDrucker/WAT321",
+  "bugs": {
+    "url": "https://github.com/WillyDrucker/WAT321/issues"
   },
   "keywords": [
     "claude",
@@ -95,7 +99,7 @@
             "type": "boolean",
             "default": false,
             "order": 99,
-            "markdownDescription": "**Reset WAT321** - Check this box to clear all WAT321 settings and stored data. This resets all options to defaults and removes the shared usage caches and claim files under `~/.wat321/`. The caches are recreated automatically on the next poll. A confirmation dialog will appear before any changes are made."
+            "markdownDescription": "**Reset WAT321** - Restore WAT321 to its default state and clear its saved local data. This resets all WAT321 settings and clears anything WAT321 has stored locally, so everything rebuilds cleanly on the next refresh. A confirmation dialog appears before anything is changed."
           }
         }
       }

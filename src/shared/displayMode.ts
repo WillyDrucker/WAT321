@@ -5,8 +5,15 @@ export type RawDisplayMode = DisplayMode | "auto";
 
 /**
  * Shared provider activity state. Updated by extension.ts as providers
- * come online or go offline. Read by getEffectiveDisplayMode() to resolve
- * the "Auto" setting into a concrete display mode.
+ * come online or go offline. Read by getDisplayMode() to resolve the
+ * "Auto" setting into a concrete display mode.
+ *
+ * A provider is considered "active" when its CLI is present and it is
+ * enabled in settings - including transient states like loading, no-auth,
+ * offline, or error. The only state that counts as inactive is
+ * "not-connected" (CLI directory missing). This is intentional: Auto mode
+ * keys off provider presence, not successful authentication, so the
+ * layout does not shift every time a transient error clears.
  */
 export const providerState = {
   claudeActive: false,

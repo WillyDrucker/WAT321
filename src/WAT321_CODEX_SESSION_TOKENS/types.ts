@@ -1,3 +1,5 @@
+import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/types";
+
 /** Entry from ~/.codex/session_index.jsonl */
 export interface CodexSessionIndex {
   id: string;
@@ -11,7 +13,8 @@ export interface CodexResolvedSession {
   label: string; // folder name from cwd
   sessionTitle: string; // thread_name or first user message
   contextUsed: number; // last_token_usage.input_tokens
-  contextWindowSize: number; // model_context_window
+  contextWindowSize: number; // effective model context window from token_count
+  autoCompactTokens: number; // actual Codex auto-compact ceiling for display
 }
 
 export type CodexTokenWidgetState =
@@ -20,7 +23,5 @@ export type CodexTokenWidgetState =
   | { status: "waiting" }
   | { status: "ok"; session: CodexResolvedSession };
 
-export interface StatusBarWidget {
-  update(state: CodexTokenWidgetState): void;
-  dispose(): void;
-}
+/** Codex session token widget contract. */
+export type StatusBarWidget = GenericStatusBarWidget<CodexTokenWidgetState>;

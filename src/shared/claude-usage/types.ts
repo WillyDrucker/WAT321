@@ -1,4 +1,7 @@
-import * as vscode from "vscode";
+import type {
+  ServiceState as GenericServiceState,
+  StatusBarWidget as GenericStatusBarWidget,
+} from "../types";
 
 export interface UsageResponse {
   five_hour: { utilization: number; resets_at: string } | null;
@@ -11,16 +14,8 @@ export interface UsageResponse {
   } | null;
 }
 
-export type ServiceState =
-  | { status: "loading" }
-  | { status: "not-connected" }
-  | { status: "no-auth" }
-  | { status: "token-expired"; message: string }
-  | { status: "rate-limited"; retryAfterMs: number; rateLimitedAt: number }
-  | { status: "offline"; message: string }
-  | { status: "error"; message: string }
-  | { status: "ok"; data: UsageResponse; fetchedAt: number };
+/** Claude-specialized service state: ok payload is a Claude UsageResponse. */
+export type ServiceState = GenericServiceState<UsageResponse>;
 
-export interface StatusBarWidget extends vscode.Disposable {
-  update(state: ServiceState): void;
-}
+/** Claude-specialized status bar widget contract. */
+export type StatusBarWidget = GenericStatusBarWidget<ServiceState>;

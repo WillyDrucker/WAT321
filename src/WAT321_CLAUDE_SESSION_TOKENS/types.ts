@@ -1,3 +1,5 @@
+import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/types";
+
 /** Active session entry from ~/.claude/sessions/<pid>.json */
 export interface SessionEntry {
   pid: number;
@@ -23,7 +25,5 @@ export type WidgetState =
   | { status: "waiting" } // session exists but no usage data yet
   | { status: "ok"; session: ResolvedSession };
 
-export interface StatusBarWidget {
-  update(state: WidgetState): void;
-  dispose(): void;
-}
+/** Claude session token widget contract. */
+export type StatusBarWidget = GenericStatusBarWidget<WidgetState>;

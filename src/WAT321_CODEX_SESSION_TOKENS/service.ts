@@ -6,8 +6,10 @@ import { readTail, readHead } from "../shared/fs/fileReaders";
 import { normalizePath } from "../shared/fs/pathUtils";
 
 const POLL_INTERVAL = 5_000;
-const SESSION_SCAN_INTERVAL = 30_000;
+const SESSION_SCAN_INTERVAL = 51_000;
 const STALE_TIMEOUT = 60_000;
+const DEFAULT_CODEX_EFFECTIVE_CONTEXT_PCT = 95;
+const DEFAULT_CODEX_AUTO_COMPACT_PCT = 90;
 
 type Listener = (state: CodexTokenWidgetState) => void;
 
@@ -35,6 +37,10 @@ export class CodexSessionTokenService {
   private cachedSessionTitleId = "";
   private cachedCwd: string | null = null;
   private cachedCwdPath = "";
+  private cachedModelSlug: string | null = null;
+  private cachedModelPath = "";
+  private cachedAutoCompactTokens: number | null = null;
+  private cachedAutoCompactModel = "";
 
   // Last known good tracking
   private lastOkTime = 0;
@@ -83,7 +89,8 @@ export class CodexSessionTokenService {
     label: string,
     sessionTitle: string,
     contextUsed: number,
-    contextWindowSize: number
+    contextWindowSize: number,
+    autoCompactTokens: number
   ): void {
     if (this.state.status === "ok") {
       const prev = this.state.session;
@@ -92,7 +99,8 @@ export class CodexSessionTokenService {
         prev.label === label &&
         prev.sessionTitle === sessionTitle &&
         prev.contextUsed === contextUsed &&
-        prev.contextWindowSize === contextWindowSize
+        prev.contextWindowSize === contextWindowSize &&
+        prev.autoCompactTokens === autoCompactTokens
       ) {
         this.lastOkTime = Date.now();
         return;
@@ -100,7 +108,14 @@ export class CodexSessionTokenService {
     }
     this.setState({
       status: "ok",
-      session: { sessionId, label, sessionTitle, contextUsed, contextWindowSize },
+      session: {
+        sessionId,
+        label,
+        sessionTitle,
+        contextUsed,
+        contextWindowSize,
+        autoCompactTokens,
+      },
     });
   }
 
@@ -142,6 +157,8 @@ export class CodexSessionTokenService {
       this.lastFilePath = this.cachedRolloutPath;
       this.cachedSessionTitle = null;
       this.cachedCwd = null;
+      this.cachedModelSlug = null;
+      this.cachedAutoCompactTokens = null;
     }
 
     // Skip re-parse if file hasn't changed
@@ -185,6 +202,22 @@ export class CodexSessionTokenService {
       this.cachedCwdPath = this.cachedRolloutPath;
     }
 
+    if (this.cachedModelSlug === null || this.cachedModelPath !== this.cachedRolloutPath) {
+      this.cachedModelSlug = this.parseModelSlug(this.cachedRolloutPath);
+      this.cachedModelPath = this.cachedRolloutPath;
+    }
+
+    if (
+      this.cachedAutoCompactTokens === null ||
+      this.cachedAutoCompactModel !== this.cachedModelSlug
+    ) {
+      this.cachedAutoCompactTokens = this.resolveAutoCompactTokens(
+        usage.contextWindowSize,
+        this.cachedModelSlug
+      );
+      this.cachedAutoCompactModel = this.cachedModelSlug ?? "";
+    }
+
     const label = this.cachedCwd ? basename(this.cachedCwd) : "Codex";
 
     this.setOkState(
@@ -193,6 +226,7 @@ export class CodexSessionTokenService {
       this.cachedSessionTitle,
       usage.inputTokens,
       usage.contextWindowSize,
+      this.cachedAutoCompactTokens,
     );
   }
 
@@ -302,6 +336,94 @@ export class CodexSessionTokenService {
       // ignore
     }
     return null;
+  }
+
+  /** Extract active model slug from the rollout transcript header */
+  private parseModelSlug(rolloutPath: string): string | null {
+    const head = readHead(rolloutPath, 65_536);
+    if (!head) return null;
+
+    const lines = head.split("\n");
+    for (let i = 0; i < lines.length && i < 80; i++) {
+      const line = lines[i];
+      if (!line) continue;
+
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type === "turn_context" && typeof entry.payload?.model === "string") {
+          return entry.payload.model;
+        }
+        if (entry.type === "session_meta" && typeof entry.payload?.model === "string") {
+          return entry.payload.model;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resolve Codex's actual auto-compact ceiling. Upstream core derives this
+   * from model metadata as 90% of the model context window, not 100% of the
+   * effective window reported in token_count events.
+   */
+  private resolveAutoCompactTokens(
+    reportedContextWindow: number,
+    modelSlug: string | null
+  ): number {
+    const fallback = Math.max(
+      1,
+      Math.min(
+        reportedContextWindow,
+        Math.floor(
+          reportedContextWindow *
+            (DEFAULT_CODEX_AUTO_COMPACT_PCT / DEFAULT_CODEX_EFFECTIVE_CONTEXT_PCT)
+        )
+      )
+    );
+
+    if (!modelSlug) return fallback;
+
+    const modelsCachePath = join(homedir(), ".codex", "models_cache.json");
+    if (!existsSync(modelsCachePath)) return fallback;
+
+    try {
+      const raw = readFileSync(modelsCachePath, "utf8");
+      const parsed = JSON.parse(raw) as {
+        models?: Array<{
+          slug?: string;
+          context_window?: number;
+          auto_compact_token_limit?: number;
+        }>;
+      };
+
+      const model = parsed.models?.find((entry) => entry.slug === modelSlug);
+      if (!model) return fallback;
+
+      const contextWindow =
+        typeof model.context_window === "number" && model.context_window > 0
+          ? model.context_window
+          : null;
+      const configuredLimit =
+        typeof model.auto_compact_token_limit === "number" &&
+        model.auto_compact_token_limit > 0
+          ? model.auto_compact_token_limit
+          : null;
+
+      if (contextWindow !== null) {
+        const defaultLimit = Math.floor(
+          contextWindow * (DEFAULT_CODEX_AUTO_COMPACT_PCT / 100)
+        );
+        return configuredLimit === null
+          ? defaultLimit
+          : Math.min(configuredLimit, defaultLimit);
+      }
+
+      return configuredLimit ?? fallback;
+    } catch {
+      return fallback;
+    }
   }
 
   /** Parse the last token_count event from tail content */
