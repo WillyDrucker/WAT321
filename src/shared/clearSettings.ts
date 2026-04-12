@@ -28,7 +28,11 @@ async function performClear(): Promise<void> {
   await config.update("statusBarPriority", undefined, vscode.ConfigurationTarget.Global);
   await config.update("clearAllData", false, vscode.ConfigurationTarget.Global);
 
-  // Remove ~/.wat321/ folder
+  // Remove the entire ~/.wat321/ folder. This catches the active shared
+  // caches and claim files, plus any deprecated artifacts from earlier
+  // versions (e.g. claude-usage-last-fetch, codex-usage-last-fetch,
+  // welcome-shown) that upgraded installs may still be carrying. One
+  // recursive remove covers everything WAT321 has ever written.
   try {
     if (existsSync(STAMP_DIR)) {
       rmSync(STAMP_DIR, { recursive: true, force: true });
