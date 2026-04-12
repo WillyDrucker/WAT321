@@ -147,10 +147,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       // Re-render all widgets immediately when display settings change
-      if (
-        e.affectsConfiguration("wat321.displayMode") ||
-        e.affectsConfiguration("wat321.autoCompactThreshold")
-      ) {
+      if (e.affectsConfiguration("wat321.displayMode")) {
         rebroadcastAll();
       }
     })

@@ -9,6 +9,10 @@ const POLL_INTERVAL = 122_000;
 const BACKOFF_INTERVAL = 901_000;
 const COOLDOWN_MS = 61_000;
 const CACHE_FRESHNESS_MS = 115_000; // slightly less than poll interval
+// Auth/error states recover faster once the user fixes them, so we share
+// them with a much shorter window. Long-lived success states stay cached
+// for the full interval to avoid duplicate API calls across windows.
+const ERROR_CACHE_FRESHNESS_MS = 30_000;
 const CLAIM_TTL_MS = 30_000;
 const REQUEST_TIMEOUT = 10_000;
 const AUTH_ERROR_CODES = new Set([401, 403]);
@@ -39,6 +43,27 @@ function isCacheableState(state: ServiceState): boolean {
   );
 }
 
+/**
+ * Per-state freshness window. `ok` and `rate-limited` are slow-changing so
+ * we keep them for the full interval. Auth/offline/error states might clear
+ * the moment the user fixes credentials or the network blip ends, so other
+ * instances should recheck them sooner.
+ */
+function stateFreshnessFor(state: ServiceState): number {
+  switch (state.status) {
+    case "ok":
+    case "rate-limited":
+      return CACHE_FRESHNESS_MS;
+    case "no-auth":
+    case "token-expired":
+    case "offline":
+    case "error":
+      return ERROR_CACHE_FRESHNESS_MS;
+    default:
+      return CACHE_FRESHNESS_MS;
+  }
+}
+
 /** Compare two states for deep equality on the fields that matter. */
 function statesEqual(a: ServiceState, b: ServiceState): boolean {
   if (a.status !== b.status) return false;
@@ -52,7 +77,12 @@ function statesEqual(a: ServiceState, b: ServiceState): boolean {
 }
 
 export class ClaudeUsageSharedService {
-  private state: ServiceState = { status: "loading" };
+  // Initial state reflects auth-dir presence so the first subscriber sees
+  // the correct state synchronously. Widgets that hide on "not-connected"
+  // never flash their loading text on startup.
+  private state: ServiceState = existsSync(AUTH_DIR)
+    ? { status: "loading" }
+    : { status: "not-connected" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
   private inFlight = false;
@@ -67,7 +97,9 @@ export class ClaudeUsageSharedService {
     CACHE_FILE,
     CLAIM_FILE,
     CACHE_FRESHNESS_MS,
-    CLAIM_TTL_MS
+    CLAIM_TTL_MS,
+    undefined,
+    stateFreshnessFor
   );
 
   start(): void {
@@ -201,7 +233,11 @@ export class ClaudeUsageSharedService {
     if (cache && this.coordinator.isFresh(cache)) {
       this.setState(cache.state);
       if (cache.state.status === "ok") this.consecutiveErrors = 0;
-      if (cache.state.status === "rate-limited") this.startCountdownTicker();
+      if (cache.state.status === "rate-limited") {
+        this.startCountdownTicker();
+      } else {
+        this.stopCountdownTicker();
+      }
       return;
     }
 

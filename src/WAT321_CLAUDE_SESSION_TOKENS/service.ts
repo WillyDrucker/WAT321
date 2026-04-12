@@ -1,7 +1,6 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { homedir } from "os";
 import { join, basename } from "path";
-import * as vscode from "vscode";
 import type { SessionEntry, WidgetState } from "./types";
 import { readTail, readHead } from "../shared/fs/fileReaders";
 import { normalizePath, getProjectKey } from "../shared/fs/pathUtils";
@@ -16,7 +15,12 @@ const EXTENDED_MODELS = ["claude-opus-4-6", "claude-sonnet-4-6"];
 type Listener = (state: WidgetState) => void;
 
 export class ClaudeSessionTokenService {
-  private state: WidgetState = { status: "no-session" };
+  // Initial state reflects Claude CLI presence so the first subscriber
+  // sees the correct state and the widget stays hidden on startup when
+  // the CLI is not installed (no flash of "Claude -").
+  private state: WidgetState = existsSync(join(homedir(), ".claude"))
+    ? { status: "no-session" }
+    : { status: "not-installed" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -372,13 +376,10 @@ export class ClaudeSessionTokenService {
   }
 
   private readAutoCompactPct(home: string): number {
-    // Check WAT321 setting first
-    const watOverride = vscode.workspace
-      .getConfiguration("wat321")
-      .get<number>("autoCompactThreshold", 0);
-    if (watOverride >= 1 && watOverride <= 100) return watOverride;
-
-    // Fall back to Claude's own setting
+    // Read CLAUDE_AUTOCOMPACT_PCT_OVERRIDE from Claude's own settings.
+    // WAT321 does not provide an override setting for this value anymore -
+    // the source of truth is Claude's settings file so the display matches
+    // the CLI's actual auto-compact behavior.
     try {
       const settingsPath = join(home, ".claude", "settings.json");
       const settings = JSON.parse(readFileSync(settingsPath, "utf8"));

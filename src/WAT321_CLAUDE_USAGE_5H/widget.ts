@@ -20,7 +20,8 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
     this.item.name = "WAT321: Claude Usage (5hr)";
     this.item.text = "Claude (5hr) $(loading~spin)";
     this.item.color = undefined;
-    this.item.show();
+    // Do not call show() here. The first state emitted by subscribe()
+    // decides whether to show (loading/ok) or stay hidden (not-connected).
   }
 
   update(state: ServiceState): void {

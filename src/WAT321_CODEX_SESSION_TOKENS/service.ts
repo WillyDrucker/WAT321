@@ -12,7 +12,11 @@ const STALE_TIMEOUT = 60_000;
 type Listener = (state: CodexTokenWidgetState) => void;
 
 export class CodexSessionTokenService {
-  private state: CodexTokenWidgetState = { status: "no-session" };
+  // Initial state reflects Codex CLI presence so widgets stay hidden on
+  // startup when the CLI is not installed (no startup flash).
+  private state: CodexTokenWidgetState = existsSync(join(homedir(), ".codex"))
+    ? { status: "no-session" }
+    : { status: "not-installed" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;

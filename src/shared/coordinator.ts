@@ -32,7 +32,14 @@ export class Coordinator<TState> {
     private readonly claimPath: string,
     private readonly freshnessMs: number,
     private readonly claimTtlMs: number,
-    private readonly readThrottleMs: number = 15_000
+    private readonly readThrottleMs: number = 15_000,
+    /**
+     * Optional resolver that returns a per-state freshness window in ms.
+     * Falls back to the default freshnessMs when not provided or when it
+     * returns a non-positive value. Used to keep long freshness for `ok`
+     * states and shorter freshness for auth/error states.
+     */
+    private readonly stateFreshnessMs?: (state: TState) => number
   ) {}
 
   /** Read cache with in-memory throttle to limit disk reads per instance. */
@@ -69,10 +76,18 @@ export class Coordinator<TState> {
     return this.readCache();
   }
 
-  /** Is this cache entry considered fresh (within freshness window)? */
-  isFresh(cache: { timestamp: number } | null): boolean {
+  /**
+   * Is this cache entry considered fresh? Uses the per-state resolver if
+   * provided (so e.g. error states can age out faster than `ok`).
+   */
+  isFresh(cache: { timestamp: number; state: TState } | null): boolean {
     if (!cache) return false;
-    return Date.now() - cache.timestamp < this.freshnessMs;
+    let window = this.freshnessMs;
+    if (this.stateFreshnessMs) {
+      const resolved = this.stateFreshnessMs(cache.state);
+      if (resolved > 0) window = resolved;
+    }
+    return Date.now() - cache.timestamp < window;
   }
 
   /** Write the latest state to the cache file. Best-effort. */
@@ -122,12 +137,29 @@ export class Coordinator<TState> {
       const acquiredAt =
         typeof claim?.acquiredAt === "number" ? claim.acquiredAt : 0;
       if (Date.now() - acquiredAt > this.claimTtlMs) {
-        // Stale claim from a crashed instance - overwrite it
-        writeFileSync(
-          this.claimPath,
-          JSON.stringify({ acquiredAt: Date.now() })
-        );
-        return true;
+        // Stale claim from a crashed instance - delete and retry atomic create.
+        // Two instances can both observe the same stale claim, but only one
+        // will win the subsequent openSync("wx") race.
+        try {
+          rmSync(this.claimPath, { force: true });
+        } catch {
+          return false;
+        }
+        try {
+          const fd = openSync(this.claimPath, "wx");
+          try {
+            writeFileSync(
+              this.claimPath,
+              JSON.stringify({ acquiredAt: Date.now() })
+            );
+          } finally {
+            closeSync(fd);
+          }
+          return true;
+        } catch {
+          // Another instance won the reclaim race
+          return false;
+        }
       }
     } catch {
       // If we cannot read the claim file at all, assume someone holds it

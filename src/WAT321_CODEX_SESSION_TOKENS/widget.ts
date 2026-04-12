@@ -17,7 +17,7 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
     this.item.name = "WAT321: Codex Session Tokens";
     this.item.text = "🗜️ Codex -";
     this.item.tooltip = "No active Codex session";
-    this.item.show();
+    // First state delivered by subscribe() decides visibility.
   }
 
   update(state: CodexTokenWidgetState): void {

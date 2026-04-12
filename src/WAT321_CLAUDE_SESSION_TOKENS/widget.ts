@@ -17,7 +17,7 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
     this.item.name = "WAT321: Claude Session Tokens";
     this.item.text = "🗜️ Claude -";
     this.item.tooltip = "No active Claude session";
-    this.item.show();
+    // First state delivered by subscribe() decides visibility.
   }
 
   update(state: WidgetState): void {
