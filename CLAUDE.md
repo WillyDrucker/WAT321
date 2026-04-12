@@ -9,14 +9,14 @@
 VS Code extension providing real-time AI usage status bar widgets (Claude + Codex).
 
 ## Product Principles
-- **Read-only** - never modify user files. Only writes are disposable stamps in `~/.wat321/`
+- **Read-only** - never modify user files. Only writes are disposable caches, claims, and stamps in `~/.wat321/`
 - **No data collection** - no telemetry, no tracking, no analytics. All data stays local
 - **Never affect usage limits** - usage widgets hit a read-only stats endpoint. Session tokens read local files only
-- **Always visible** - never hide a widget on error. Show a friendly status so the user knows what's happening
+- **Visible when relevant, hidden when not** - show a friendly status on error, but fully hide widgets for a provider whose CLI is not installed. No "Not Connected" placeholders for missing CLIs
 - **Never imply action** - no login prompts, no CLI commands, no "click here to fix". All errors are passive and self-healing
 - **Auto-reconnect** - every error state recovers automatically. The user never needs to do anything
 - **Last known good** - on transient failures, keep showing cached data. Only surface errors after repeated failures
-- **Zero bloat** - all stored files (stamps, flags) are tiny, disposable, and removable via the clear command
+- **Zero bloat** - all stored files under `~/.wat321/` (shared usage caches, atomic claim files) are tiny, disposable, and removable via the clear command. They are recreated automatically on the next poll
 - **Fail silently on first attempt** - absorb the first transient error, surface it only if it persists
 
 ## Key Rules
@@ -32,11 +32,15 @@ VS Code extension providing real-time AI usage status bar widgets (Claude + Code
 - Each tool gets its own folder under `src/`
 - Shared services in `src/shared/` - one polling path per API provider
 - All six tools active: Claude (5hr, weekly, session tokens) + Codex (5 hour, weekly, session tokens)
-- Settings gate: `wat321.enableClaude` (default true), `wat321.enableCodex` (default false)
-- Display modes: Full / Compact / Minimal (instant switching via rebroadcast)
+- Settings gate: `wat321.enableClaude` (default true), `wat321.enableCodex` (default true)
+- Widgets are fully hidden when the corresponding CLI (`~/.claude/` or `~/.codex/`) is not installed. Exponential discovery backoff (60s -> 5 min -> 15 min) detects later installs
+- Display modes: Auto / Full / Compact / Minimal (instant switching via rebroadcast). Auto picks Full when one provider is active, Compact when both are active
+- Cross-instance coordination via `src/shared/coordinator.ts`: shared JSON cache + atomic claim file per provider under `~/.wat321/`. Only one window fetches per poll cycle; others adopt the cached state
+- Per-state cache freshness: long window for `ok`/`rate-limited`, short window for auth/error states so recovery propagates quickly across windows
 - Dynamic enable/disable - no window reload needed
 - All widgets are display-only - no click commands (except clear settings)
 - Session token tooltips use `isTrusted: false` for security
+- Widget constructors do NOT call `item.show()` - the first state delivered via `subscribe()` decides visibility, so missing-CLI widgets never flash on startup
 - Build pipeline: clean -> lint -> tsc
 
 ## Conventions

@@ -10,7 +10,7 @@
 
 Real-time AI usage widgets for your VS Code status bar.
 
-WAT321 ships with **six status bar widgets** for Claude and Codex. Claude tools are enabled by default. Codex tools are included but disabled - enable them in Settings.
+WAT321 ships with **six status bar widgets** for Claude and Codex. Both providers are enabled by default. Widgets for a provider are automatically hidden if its CLI (`~/.claude/` or `~/.codex/`) is not installed, so there is nothing to configure for a Claude-only or Codex-only setup.
 
 ---
 
@@ -48,9 +48,10 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 ## Display Modes
 
-WAT321 supports three display densities. Search **"wat321"** in **Settings** to change.
+WAT321 supports four display densities. Search **"wat321"** in **Settings** to change.
 
-- **Full** - 10-block progress bars with all details (default)
+- **Auto** (default) - automatically picks Full when only one provider is active, Compact when both are active
+- **Full** - 10-block progress bars with all details
 - **Compact** - 5-block progress bars, session tokens show text only
 - **Minimal** - text-only, usage bars move to tooltips on hover
 
@@ -75,12 +76,12 @@ WAT321 supports three display densities. Search **"wat321"** in **Settings** to 
 
 ---
 
-## Enabling Codex Widgets
+## Provider Toggles
 
-All six tools install together, but Codex is **disabled by default**. To enable:
+Both Claude and Codex widgets are enabled by default. Widgets are automatically hidden if the corresponding CLI is not installed, so you never see "Not Connected" placeholders. If you want to explicitly turn one provider off:
 
 1. **File > Preferences > Settings** (`Ctrl+,` / `Cmd+,`) and search for **"wat321"**
-2. Check **Enable Codex** - widgets appear immediately, no reload needed
+2. Uncheck **Enable Claude** or **Enable Codex** - widgets disappear immediately, no reload needed
 
 <img src="images/screenshots/CODEX_WAT321_SETTINGS.png" width="350">
 
@@ -98,15 +99,14 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 
 - **Claude Usage** and **Codex Usage** poll their respective APIs on a safe interval (~2 minutes) with built-in rate-limit protection
 - **Session Tokens** (both providers) read local transcript files - no API calls, no network access
-- All data sources are **read-only** - WAT321 never modifies Claude, Codex, or user config files. The only files written are internal timestamps under `~/.wat321/`
-- One shared API polling path per provider prevents duplicate calls even with multiple widgets active
+- All data sources are **read-only** - WAT321 never modifies Claude, Codex, or user config files
+- **Hidden when you're not signed in** - if you don't have a Claude or Codex account set up in VS Code, those widgets stay out of the way. They appear automatically as soon as you sign in, no reload or restart needed
 - Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
-- If Claude or Codex CLI hasn't been used yet, widgets show "Not Connected" and activate automatically when you start using the CLI
 
 ## What It Doesn't Do
 
 - **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage.
-- WAT321 does not store, transmit, or modify your credentials. It only writes cooldown timestamps to `~/.wat321/`
+- WAT321 does not store, transmit, or modify your credentials. Anything it saves locally is disposable and can be cleared at any time from the settings page
 - WAT321 does not interfere with Claude Code, Codex CLI, or any other extension
 
 ## Requirements
@@ -126,7 +126,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 | Claude | Team / Enterprise | Unknown - untested with the usage API |
 | Codex | Plus / Pro / Team | Supported |
 
-API-only Anthropic accounts without CLI OAuth credentials will see Claude widgets showing "Not Connected", which is expected. They will activate automatically if CLI credentials are set up later.
+API-only Anthropic accounts without CLI OAuth credentials will see Claude widgets stay hidden until CLI credentials are set up.
 
 ## Rate Limits
 
@@ -136,12 +136,11 @@ If a lockout occurs, the status bar will show "Offline" and the tooltip will dis
 
 ## Additional Settings
 
-- **Auto-Compact Threshold** - Override the percentage ceiling shown in the Claude session token widget. Set to 0 (default) to use Claude's own setting, or enter a value like 85 for 85%.
-- **Status Bar Priority** - Adjust widget ordering if they overlap with other extensions.
+- **Status Bar Priority** - Adjust widget ordering if they overlap with other extensions (requires window reload).
 
 ## Reset WAT321
 
-To start fresh, open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Clear All Settings**, or check the **Reset WAT321** checkbox at the bottom of the WAT321 settings page. This resets all settings to defaults and removes stored data.
+To start fresh, open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Clear All Settings**, or check the **Reset WAT321** checkbox at the bottom of the WAT321 settings page. This resets all settings to defaults and clears stored data. WAT321 picks right back up on the next refresh, no restart needed.
 
 ## Issues & Feedback
 
