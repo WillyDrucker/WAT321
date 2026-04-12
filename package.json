@@ -1,7 +1,7 @@
 {
   "name": "wat321",
   "displayName": "WAT321",
-  "description": "Real-time Claude & Codex status bar widgets: session usage, weekly limits, and more",
+  "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
   "version": "1.0.9",
   "publisher": "WillyDrucker",
   "repository": {
@@ -47,15 +47,7 @@
             "type": "boolean",
             "default": true,
             "order": 1,
-            "markdownDescription": "Enable Claude usage and session token widgets. Changes apply immediately."
-          },
-          "wat321.autoCompactThreshold": {
-            "type": "number",
-            "default": 0,
-            "minimum": 0,
-            "maximum": 100,
-            "order": 2,
-            "markdownDescription": "**Display-only override** for the auto-compact ceiling shown in the Claude session token widget. This does NOT modify Claude Code's actual auto-compact behavior - it only changes what percentage WAT321 uses as the ceiling on its bar.\n\n- `0` (default) = read from your Claude settings\n- `10`-`100` = custom display threshold as a percentage (e.g. `85` = 85%)\n\nTo change Claude's real auto-compact behavior, edit `~/.claude/settings.json` directly."
+            "markdownDescription": "Enable Claude usage and session token widgets. Widgets are hidden automatically if Claude CLI is not installed. Changes apply immediately."
           }
         }
       },
@@ -103,7 +95,7 @@
             "type": "boolean",
             "default": false,
             "order": 99,
-            "markdownDescription": "**Reset WAT321** - Check this box to clear all WAT321 settings and stored data. This will reset all options to defaults and remove cooldown timestamps and welcome flags from `~/.wat321/`. A confirmation dialog will appear before any changes are made."
+            "markdownDescription": "**Reset WAT321** - Check this box to clear all WAT321 settings and stored data. This resets all options to defaults and removes the shared usage caches and claim files under `~/.wat321/`. The caches are recreated automatically on the next poll. A confirmation dialog will appear before any changes are made."
           }
         }
       }

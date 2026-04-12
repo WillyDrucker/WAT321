@@ -26,7 +26,6 @@ async function performClear(): Promise<void> {
   await config.update("enableCodex", undefined, vscode.ConfigurationTarget.Global);
   await config.update("displayMode", undefined, vscode.ConfigurationTarget.Global);
   await config.update("statusBarPriority", undefined, vscode.ConfigurationTarget.Global);
-  await config.update("autoCompactThreshold", undefined, vscode.ConfigurationTarget.Global);
   await config.update("clearAllData", false, vscode.ConfigurationTarget.Global);
 
   // Remove ~/.wat321/ folder
