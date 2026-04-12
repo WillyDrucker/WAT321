@@ -9,6 +9,9 @@ const POLL_INTERVAL = 122_000;
 const BACKOFF_INTERVAL = 901_000;
 const COOLDOWN_MS = 61_000;
 const CACHE_FRESHNESS_MS = 115_000;
+// Auth/error states recover faster once the user fixes them, so we share
+// them with a much shorter window.
+const ERROR_CACHE_FRESHNESS_MS = 30_000;
 const CLAIM_TTL_MS = 30_000;
 const REQUEST_TIMEOUT = 10_000;
 const AUTH_ERROR_CODES = new Set([401, 403]);
@@ -56,6 +59,25 @@ function isCacheableState(state: ServiceState): boolean {
   );
 }
 
+/**
+ * Per-state freshness. Long window for slow-changing success/rate-limit
+ * states, short window for states the user might fix immediately.
+ */
+function stateFreshnessFor(state: ServiceState): number {
+  switch (state.status) {
+    case "ok":
+    case "rate-limited":
+      return CACHE_FRESHNESS_MS;
+    case "no-auth":
+    case "token-expired":
+    case "offline":
+    case "error":
+      return ERROR_CACHE_FRESHNESS_MS;
+    default:
+      return CACHE_FRESHNESS_MS;
+  }
+}
+
 /** Compare two states for deep equality on the fields that matter. */
 function statesEqual(a: ServiceState, b: ServiceState): boolean {
   if (a.status !== b.status) return false;
@@ -69,7 +91,11 @@ function statesEqual(a: ServiceState, b: ServiceState): boolean {
 }
 
 export class CodexUsageSharedService {
-  private state: ServiceState = { status: "loading" };
+  // Initial state reflects auth-dir presence so first subscribers see the
+  // right state synchronously (no startup flash for missing CLI).
+  private state: ServiceState = existsSync(AUTH_DIR)
+    ? { status: "loading" }
+    : { status: "not-connected" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
   private inFlight = false;
@@ -84,7 +110,9 @@ export class CodexUsageSharedService {
     CACHE_FILE,
     CLAIM_FILE,
     CACHE_FRESHNESS_MS,
-    CLAIM_TTL_MS
+    CLAIM_TTL_MS,
+    undefined,
+    stateFreshnessFor
   );
 
   start(): void {
@@ -216,7 +244,11 @@ export class CodexUsageSharedService {
     if (cache && this.coordinator.isFresh(cache)) {
       this.setState(cache.state);
       if (cache.state.status === "ok") this.consecutiveErrors = 0;
-      if (cache.state.status === "rate-limited") this.startCountdownTicker();
+      if (cache.state.status === "rate-limited") {
+        this.startCountdownTicker();
+      } else {
+        this.stopCountdownTicker();
+      }
       return;
     }
 
