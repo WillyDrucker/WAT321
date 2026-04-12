@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321 Willy's AI Tools",
   "description": "Real-time Claude & Codex status bar widgets: session usage, weekly limits, and more",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -74,6 +74,20 @@
           "default": 1001,
           "order": 4,
           "markdownDescription": "Base priority for WAT321 status bar items. Higher values appear further left. Adjust if widgets overlap with other extensions. *Requires window reload.*"
+        },
+        "wat321.autoCompactThreshold": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 100,
+          "order": 5,
+          "markdownDescription": "Override the auto-compact ceiling percentage shown in the Claude session token widget. Set to `0` to read from Claude's own settings (default). Values `1`-`100` set a custom display threshold (e.g. `85` = 85%)."
+        },
+        "wat321.clearAllData": {
+          "type": "boolean",
+          "default": false,
+          "order": 99,
+          "markdownDescription": "**Reset WAT321** - Check this box to clear all WAT321 settings and stored data. This will reset all options above to defaults and remove cooldown timestamps and welcome flags from `~/.wat321/`. A confirmation dialog will appear before any changes are made."
         }
       }
     }

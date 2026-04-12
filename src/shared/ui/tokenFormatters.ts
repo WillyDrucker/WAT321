@@ -1,4 +1,4 @@
-const FILLED = "\uD83D\uDFE6"; // Blue square
+const FILLED = "\uD83D\uDFE8"; // Yellow square
 const EMPTY = "\u2B1B"; // Black square
 const BAR_WIDTH = 10;
 
@@ -20,7 +20,7 @@ export function formatPct(pct: number): string {
   return `${Math.round(pct)}%`;
 }
 
-/** Blue/black block bar for token context display */
+/** Yellow/black block bar for session token context display */
 export function makeTokenBar(pct: number, width: number = BAR_WIDTH): string {
   const clamped = Math.max(0, Math.min(100, pct));
   const filled = Math.round((clamped / 100) * width);

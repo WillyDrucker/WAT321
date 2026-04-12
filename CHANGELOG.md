@@ -5,6 +5,21 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-04-11
+
+### Added
+- Auto-compact threshold setting (`wat321.autoCompactThreshold`) - override the session token ceiling display (0 = auto, 1-100 = custom percentage)
+- Reset WAT321 checkbox in settings page with confirmation dialog
+- Additional Settings and Reset WAT321 sections in README
+- Customize Visible Widgets section in README
+
+### Changed
+- Session token progress bars changed from blue to yellow for visual distinction from usage widgets
+- Startup offline fix - first transient API error absorbed during loading state, prevents false "Offline" flash
+- README updated with Not Connected wording for API-only accounts
+- Clear settings now also resets autoCompactThreshold
+- Rebroadcast invalidates cached autoCompactPct so threshold changes apply immediately
+
 ## [1.0.6] - 2026-04-11
 
 ### Added

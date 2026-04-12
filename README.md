@@ -84,7 +84,9 @@ All six tools install together, but Codex is **disabled by default**. To enable:
 
 <img src="images/screenshots/CODEX_WAT321_SETTINGS.png" width="350">
 
-Once enabled, you can toggle individual Codex widgets on or off using the **status bar overflow button** (`>>` at the bottom-left):
+## Customize Visible Widgets
+
+You can show or hide individual widgets by right-clicking the status bar or using the overflow menu (`>>`):
 
 ![Status bar button](images/screenshots/STATUS_BAR_BUTTON.png)
 
@@ -124,13 +126,22 @@ Once enabled, you can toggle individual Codex widgets on or off using the **stat
 | Claude | Team / Enterprise | Unknown - untested with the usage API |
 | Codex | Plus / Pro / Team | Supported |
 
-API-only Anthropic accounts without CLI OAuth credentials will see the Claude widgets hidden, which is expected.
+API-only Anthropic accounts without CLI OAuth credentials will see Claude widgets showing "Not Connected", which is expected. They will activate automatically if CLI credentials are set up later.
 
 ## Rate Limits
 
 Both Claude and Codex usage APIs have rate limits. WAT321 polls conservatively to stay well within safe thresholds. However, **repeatedly reinstalling or reloading the extension in quick succession can trigger a temporary rate-limit lockout**.
 
 If a lockout occurs, the status bar will show "Offline" and the tooltip will display a countdown timer. The extension will automatically reconnect when the lockout expires - no action needed.
+
+## Additional Settings
+
+- **Auto-Compact Threshold** - Override the percentage ceiling shown in the Claude session token widget. Set to 0 (default) to use Claude's own setting, or enter a value like 85 for 85%.
+- **Status Bar Priority** - Adjust widget ordering if they overlap with other extensions.
+
+## Reset WAT321
+
+To start fresh, open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Clear All Settings**, or check the **Reset WAT321** checkbox at the bottom of the WAT321 settings page. This resets all settings to defaults and removes stored data.
 
 ## Issues & Feedback
 

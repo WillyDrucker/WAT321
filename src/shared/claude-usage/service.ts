@@ -207,11 +207,13 @@ export class ClaudeUsageSharedService {
       return;
     }
 
-    // Track consecutive non-429 errors. If we have good data and this is
-    // the first failure (transient after alt-tab, idle, etc.), silently
-    // keep showing cached data and retry on the next poll cycle.
+    // Absorb first transient error silently. On startup (loading state),
+    // this prevents flashing "Offline" before the network is ready.
+    // When we have good data, this preserves cached values on transient failures.
     this.consecutiveErrors++;
-    if (this.state.status === "ok" && this.consecutiveErrors < 2) return;
+    if (this.consecutiveErrors < 2) {
+      if (this.state.status === "ok" || this.state.status === "loading") return;
+    }
 
     if (statusCode && AUTH_ERROR_CODES.has(statusCode)) {
       this.setState({
