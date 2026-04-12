@@ -1,4 +1,7 @@
-import * as vscode from "vscode";
+import type {
+  ServiceState as GenericServiceState,
+  StatusBarWidget as GenericStatusBarWidget,
+} from "../types";
 
 export interface CodexUsageResponse {
   plan_type: string;
@@ -42,16 +45,8 @@ export interface AdditionalRateLimit {
   } | null;
 }
 
-export type ServiceState =
-  | { status: "loading" }
-  | { status: "not-connected" }
-  | { status: "no-auth" }
-  | { status: "token-expired"; message: string }
-  | { status: "rate-limited"; retryAfterMs: number; rateLimitedAt: number }
-  | { status: "offline"; message: string }
-  | { status: "error"; message: string }
-  | { status: "ok"; data: CodexUsageResponse; fetchedAt: number };
+/** Codex-specialized service state: ok payload is a CodexUsageResponse. */
+export type ServiceState = GenericServiceState<CodexUsageResponse>;
 
-export interface StatusBarWidget extends vscode.Disposable {
-  update(state: ServiceState): void;
-}
+/** Codex-specialized status bar widget contract. */
+export type StatusBarWidget = GenericStatusBarWidget<ServiceState>;
