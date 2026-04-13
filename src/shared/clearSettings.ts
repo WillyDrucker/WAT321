@@ -1,17 +1,31 @@
-import * as vscode from "vscode";
 import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ClaudeForceAutoCompactService } from "../WAT321_CLAUDE_FORCE_AUTOCOMPACT/service";
+import * as vscode from "vscode";
 import {
   clearArmBackupRing,
   readInstallSnapshotBytes,
   writeInstallSnapshotBytes,
-} from "../WAT321_CLAUDE_FORCE_AUTOCOMPACT/backups";
-import type { HealResult } from "../WAT321_CLAUDE_FORCE_AUTOCOMPACT/heal";
-import { clearConsent } from "./consent";
+} from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/backups";
+import type { HealResult } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/heal";
+import { ExperimentalAutoCompactService } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/service";
 
 const STAMP_DIR = join(homedir(), ".wat321");
+
+/** Every status bar item id we create via `window.createStatusBarItem`.
+ * VS Code (1.63+) stores per-item user-hidden state in `settings.json`
+ * under `workbench.statusBarItem.<id>.visible`. Reset WAT321 clears
+ * those keys so a user who hid a widget via right-click then later
+ * hit Reset gets every widget restored, not just the `wat321.*`
+ * settings. Keep this list in sync with the widget constructors. */
+const STATUS_BAR_ITEM_IDS = [
+  "wat321.session",
+  "wat321.weekly",
+  "wat321.sessionTokens",
+  "wat321.codexSession",
+  "wat321.codexWeekly",
+  "wat321.codexSessionTokens",
+] as const;
 
 /** Update a single wat321.* setting at every applicable configuration
  * scope. Necessary because `config.get()` returns the merged effective
@@ -33,6 +47,18 @@ async function updateSettingAllScopes(
   value: unknown
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
+  await updateConfigKeyAllScopes(config, key, value);
+}
+
+/** Same three-scope update pattern as `updateSettingAllScopes`, but
+ * takes an already-resolved `WorkspaceConfiguration` so callers can
+ * target non-`wat321.*` namespaces (e.g. `workbench.statusBarItem.*`
+ * for the Reset-restores-hidden-widgets behavior). */
+async function updateConfigKeyAllScopes(
+  config: vscode.WorkspaceConfiguration,
+  key: string,
+  value: unknown
+): Promise<void> {
   const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
   const targets: vscode.ConfigurationTarget[] = [
     vscode.ConfigurationTarget.Global,
@@ -54,7 +80,23 @@ async function updateSettingAllScopes(
   );
 }
 
-async function performClear(context: vscode.ExtensionContext): Promise<void> {
+/** Reset the per-item status-bar visibility for every WAT321 widget.
+ * VS Code stores user right-click "Hide" decisions in `settings.json`
+ * as `workbench.statusBarItem.<id>.visible = false`. Clearing these
+ * to `undefined` restores VS Code's default (visible) so a user who
+ * reset WAT321 after hiding a widget gets it back. Scoped narrowly
+ * to our six known widget ids - we never touch any other workbench
+ * namespace. */
+async function resetStatusBarItemVisibility(): Promise<void> {
+  const config = vscode.workspace.getConfiguration("workbench");
+  await Promise.all(
+    STATUS_BAR_ITEM_IDS.map((id) =>
+      updateConfigKeyAllScopes(config, `statusBarItem.${id}.visible`, undefined)
+    )
+  );
+}
+
+async function performClear(): Promise<void> {
   const confirm = await vscode.window.showWarningMessage(
     "This will reset all WAT321 settings to defaults and clear stored data. If any WAT321 tool appears unresponsive, this will reset every tool back to a known-good state. Continue?",
     "Clear Everything",
@@ -71,16 +113,17 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
   }
 
   // CRITICAL: before wiping ~/.wat321/, make absolutely sure
-  // ~/.claude/settings.json is not stuck at the Claude Force Auto-Compact
-  // armed value "1". healStuckOverride inspects settings.json directly
-  // (NOT via the sentinel) so it works even if the sentinel is missing,
-  // corrupt, or self-referential. It restores to the sentinel's original
-  // value if trustworthy, or to "85" (Claude's default auto-compact
-  // threshold) as a hardcoded failsafe. This is the reset-as-failsafe
-  // guarantee: Reset WAT321 must ALWAYS unstick the user.
+  // ~/.claude/settings.json is not stuck at the experimental
+  // Force Claude Auto-Compact armed value "1". healStuckOverride
+  // inspects settings.json directly (NOT via the sentinel) so it
+  // works even if the sentinel is missing, corrupt, or self-
+  // referential. It restores to the sentinel's original value if
+  // trustworthy, or to "85" (Claude's default auto-compact
+  // threshold) as a hardcoded failsafe. This is the reset-as-
+  // failsafe guarantee: Reset WAT321 must ALWAYS unstick the user.
   let healResult: HealResult = "not-stuck";
   try {
-    healResult = ClaudeForceAutoCompactService.healStuckOverride();
+    healResult = ExperimentalAutoCompactService.healStuckOverride();
   } catch {
     healResult = "io-error";
   }
@@ -107,15 +150,14 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
   await Promise.all([
     updateSettingAllScopes("enableClaude", undefined),
     updateSettingAllScopes("enableCodex", undefined),
-    updateSettingAllScopes("enableClaudeForceAutoCompact", undefined),
+    updateSettingAllScopes("experimental.forceClaudeAutoCompact", undefined),
     updateSettingAllScopes("displayMode", undefined),
     updateSettingAllScopes("statusBarPriority", undefined),
     updateSettingAllScopes("clearAllData", false),
+    // Restore any WAT321 status bar items the user hid via right-click.
+    // Narrowly scoped to our six known widget ids - see STATUS_BAR_ITEM_IDS.
+    resetStatusBarItemVisibility(),
   ]);
-
-  // Clear persisted consent records so re-enabling an interactive tool
-  // re-prompts the user. Symmetric with the settings reset.
-  await clearConsent(context, "claudeForceAutoCompact");
 
   // Clear the arm backup ring explicitly (best-effort) before the
   // recursive wipe. Ring entries are historical user values; a reset
@@ -162,7 +204,7 @@ export function registerClearSettingsCommand(
 ): void {
   // Command palette entry
   context.subscriptions.push(
-    vscode.commands.registerCommand("wat321.clearAllSettings", () => performClear(context))
+    vscode.commands.registerCommand("wat321.clearAllSettings", () => performClear())
   );
 
   // Settings page checkbox trigger
@@ -172,7 +214,7 @@ export function registerClearSettingsCommand(
         const checked = vscode.workspace
           .getConfiguration("wat321")
           .get<boolean>("clearAllData", false);
-        if (checked) performClear(context);
+        if (checked) performClear();
       }
     })
   );
