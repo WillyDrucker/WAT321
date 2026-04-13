@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+- **Reset WAT321 now shows a proper center-screen confirmation dialog** instead of a bottom-right toast that was easy to miss. Checking the Reset box in WAT321 settings (or running `WAT321: Reset All Settings` from the command palette) pops a modal asking you to confirm before anything is touched. The old non-modal toast could auto-dismiss before you saw it, especially if you were looking at the settings page when you clicked the checkbox
 
 ### Removed
 
