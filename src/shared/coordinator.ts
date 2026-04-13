@@ -1,15 +1,6 @@
-import {
-  readFileSync,
-  writeFileSync,
-  writeSync,
-  openSync,
-  closeSync,
-  existsSync,
-  mkdirSync,
-  rmSync,
-  statSync,
-} from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname } from "path";
+import { releaseClaim, tryAcquireClaim } from "./claimFile";
 
 /**
  * Cross-instance coordinator for shared API state.
@@ -20,10 +11,10 @@ import { dirname } from "path";
  * shared state.
  *
  * Design:
- * - Cache file stores { timestamp, state } as JSON
- * - Claim file is created atomically with O_EXCL; only one instance wins
- * - Stale claims (> CLAIM_TTL_MS) can be overwritten by any instance
- * - Per-instance read throttle prevents excessive disk reads
+ *   - Cache file stores `{ timestamp, state }` as JSON
+ *   - Claim file is managed by `./claimFile.ts` via atomic O_EXCL create
+ *   - Stale claims (> `claimTtlMs`) can be overwritten by any instance
+ *   - Per-instance read throttle prevents excessive disk reads
  */
 export class Coordinator<TState> {
   private cachedRead: { timestamp: number; state: TState } | null = null;
@@ -37,9 +28,9 @@ export class Coordinator<TState> {
     private readonly readThrottleMs: number = 15_000,
     /**
      * Optional resolver that returns a per-state freshness window in ms.
-     * Falls back to the default freshnessMs when not provided or when it
-     * returns a non-positive value. Used to keep long freshness for `ok`
-     * states and shorter freshness for auth/error states.
+     * Falls back to `freshnessMs` when not provided or when it returns
+     * a non-positive value. Used to keep long freshness for `ok` states
+     * and shorter freshness for auth/error states.
      */
     private readonly stateFreshnessMs?: (state: TState) => number
   ) {}
@@ -47,7 +38,10 @@ export class Coordinator<TState> {
   /** Read cache with in-memory throttle to limit disk reads per instance. */
   readCache(): { timestamp: number; state: TState } | null {
     const now = Date.now();
-    if (now - this.lastReadAt < this.readThrottleMs && this.cachedRead !== null) {
+    if (
+      now - this.lastReadAt < this.readThrottleMs &&
+      this.cachedRead !== null
+    ) {
       return this.cachedRead;
     }
     this.lastReadAt = now;
@@ -62,7 +56,7 @@ export class Coordinator<TState> {
       ) {
         return null;
       }
-      // Guard against future timestamps (clock skew)
+      // Guard against future timestamps (clock skew).
       if (parsed.timestamp > now) return null;
       this.cachedRead = parsed;
       return parsed;
@@ -79,8 +73,8 @@ export class Coordinator<TState> {
   }
 
   /**
-   * Is this cache entry considered fresh? Uses the per-state resolver if
-   * provided (so e.g. error states can age out faster than `ok`).
+   * Is this cache entry considered fresh? Uses the per-state resolver
+   * if provided, so e.g. error states age out faster than `ok`.
    */
   isFresh(cache: { timestamp: number; state: TState } | null): boolean {
     if (!cache) return false;
@@ -99,121 +93,21 @@ export class Coordinator<TState> {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const payload = JSON.stringify({ timestamp: Date.now(), state });
       writeFileSync(this.cachePath, payload);
-      // Invalidate our own throttled read so the next call returns fresh data
+      // Invalidate our own throttled read so the next call returns
+      // fresh data.
       this.lastReadAt = 0;
     } catch {
       // best-effort
     }
   }
 
-  /**
-   * Try to atomically claim the refresh slot.
-   * Returns true if we own the claim, false if another instance holds it.
-   * Stale claims (> claimTtlMs old) are forcibly reclaimed.
-   *
-   * Corrupt claim files (zero-byte, partial write, unparseable JSON) are
-   * treated as stale if their filesystem mtime is older than claimTtlMs.
-   * The main remaining source of a corrupt claim is a crash between
-   * openSync("wx") and writeSync(fd, payload) which would leave a
-   * zero-byte file on disk. Without the mtime fallback, that case would
-   * deadlock every instance forever because JSON.parse would throw
-   * before the TTL check could run.
-   *
-   * Note: claim writes go through the owned file descriptor (writeSync)
-   * rather than reopening the path (writeFileSync), so the truncate
-   * window that writeFileSync(path) would create does not exist here.
-   */
+  /** Try to atomically claim the refresh slot. See `./claimFile.ts`. */
   tryClaim(): boolean {
-    try {
-      const dir = dirname(this.claimPath);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    } catch {
-      return false;
-    }
-
-    // Fast path: atomic create, fails if file exists. Write through the
-    // owned fd instead of reopening the path, otherwise writeFileSync(path)
-    // would truncate the file and recreate the truncate-window race the
-    // mtime fallback below exists to recover from.
-    try {
-      const fd = openSync(this.claimPath, "wx");
-      try {
-        const payload = JSON.stringify({ acquiredAt: Date.now() });
-        writeSync(fd, payload);
-      } finally {
-        closeSync(fd);
-      }
-      return true;
-    } catch {
-      // File exists, check if stale
-    }
-
-    // Parseable claim with a stale acquiredAt timestamp.
-    try {
-      const json = readFileSync(this.claimPath, "utf8");
-      const claim = JSON.parse(json);
-      const acquiredAt =
-        typeof claim?.acquiredAt === "number" ? claim.acquiredAt : 0;
-      if (Date.now() - acquiredAt > this.claimTtlMs) {
-        return this.reclaimStaleClaim();
-      }
-      // Parseable, recent - another instance owns it, wait.
-      return false;
-    } catch {
-      // Unparseable claim. Fall through to the mtime-based check below.
-    }
-
-    // Corrupt / zero-byte / partial-write claim. Use filesystem mtime as
-    // the age signal since we cannot trust the contents. If mtime is
-    // recent, another instance is probably mid-write - respect it. If
-    // mtime is older than the TTL, treat as a crash leftover and reclaim.
-    try {
-      const mtime = statSync(this.claimPath).mtimeMs;
-      if (Date.now() - mtime > this.claimTtlMs) {
-        return this.reclaimStaleClaim();
-      }
-    } catch {
-      // Cannot even stat the file - assume someone holds it.
-    }
-
-    return false;
-  }
-
-  /**
-   * Delete the current claim file and atomically recreate it. Used for
-   * both legitimate stale claims and corrupt-file recovery. Two instances
-   * can both enter this path concurrently, but the atomic openSync("wx")
-   * inside arbitrates - only one returns true, the other sees EEXIST and
-   * returns false cleanly.
-   */
-  private reclaimStaleClaim(): boolean {
-    try {
-      rmSync(this.claimPath, { force: true });
-    } catch {
-      return false;
-    }
-    try {
-      const fd = openSync(this.claimPath, "wx");
-      try {
-        // Write through the owned fd, not by reopening the path, so we
-        // do not create a truncate window another instance could observe.
-        writeSync(fd, JSON.stringify({ acquiredAt: Date.now() }));
-      } finally {
-        closeSync(fd);
-      }
-      return true;
-    } catch {
-      // Another instance won the reclaim race
-      return false;
-    }
+    return tryAcquireClaim(this.claimPath, this.claimTtlMs);
   }
 
   /** Release our claim on the refresh slot. Best-effort. */
   releaseClaim(): void {
-    try {
-      rmSync(this.claimPath, { force: true });
-    } catch {
-      // best-effort
-    }
+    releaseClaim(this.claimPath);
   }
 }
