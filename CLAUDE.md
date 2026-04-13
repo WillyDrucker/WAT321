@@ -41,6 +41,6 @@ WAT321 has two distinct tool categories with different trust contracts:
 - AIDOCS/ and WDDOCS/ are gitignored - not in repo
 - Branch naming: `WAT321_vX.X.X`
 - **Branch = version = changelog** - always in sync
-- Status bar labels for 5-hour windows: compact and minimal views show `Claude (5h)` and `Codex (5h)`; full view shows `Claude (5hr)` and `Codex (5 hour)`. Tooltip reset lines use the shared formatters in `src/shared/ui/resetFormatters.ts` (5hr: "Resets 1:30AM (3hr 30min)", weekly: "Resets in Thu (4d 1hr)")
 - Debug via F5 - Extension Development Host
 - Use `/wat321-publish` for the full release flow
+- Naming conventions, status bar label specs, tooltip formatters, and file-layout reference live in `AIDOCS/WD_WAT321_MEMORY_EXTENDED.md` - do not re-duplicate here
