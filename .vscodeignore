@@ -5,6 +5,7 @@ images/icon.svg
 *.vsix
 AIDOCS/**
 WDDOCS/**
+ARCHIVE/**
 CLAUDE.md
 .vscode/**
 .github/**

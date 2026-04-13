@@ -5,15 +5,28 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.14] - unreleased
+## [1.0.14] - 2026-04-13
 
 ### Added
+- **Click the usage widget to resume polling when it looks stuck.** If a Claude or Codex usage widget lands in its 15-minute "Offline" state because WAT321 fell back to a conservative guess after a 429, the widget is now clickable. Clicking it resumes polling at the normal cadence right away, and the next three rate-limit responses are absorbed silently so a single transient 429 does not snap it straight back to sleep. The click-to-wake affordance only appears on the fallback wait - if the server told us to wait a specific amount of time via a Retry-After header, the widget stays hover-only. We never override a delay the server explicitly asked for
+- **Claude Force Auto-Compact now waits for Claude to finish its turn before it lets you arm it.** If Claude is mid-response or still running a tool call when you click the button, the widget stays grayed with a tooltip explaining what is going on. It lights back up the instant Claude finishes. This prevents the next compact from firing on a queued prompt or a tool-result callback instead of the prompt you actually meant to trigger it with
 
 ### Changed
+- **Usage widgets now honor the server's rate-limit wait time instead of always falling back to a flat 15 minutes.** When the Anthropic or ChatGPT usage endpoint returns a 429 with a Retry-After header, WAT321 now reads that header and waits exactly that long. If there is no header we still fall back to our own 15-minute guess, but you can now click the widget to resume polling early if you think the server is ready again
+- **Claude Force Auto-Compact now gives you 30 seconds instead of 10 to actually send a prompt after arming.** The old 10-second auto-disarm was too aggressive for anyone who clicks arm and then reads their prompt before sending. 30 seconds also makes the timeout the unified safety net for every "nothing happened" scenario - you armed by mistake, you walked away, Claude was mid-tool-call when you armed, and so on - so one failsafe catches everything
+- **Claude Force Auto-Compact arm confirm dialog is shorter and clearer.** The old dialog padded the message with threshold hints and multi-session warnings that duplicated what the grayed `unavailable` state was already telling you. Rewritten into a single sentence that names the target session and confirms what your next prompt will do
+- **Reset WAT321 now works even when you have no workspace folder open.** The old reset path tried to update settings at the Workspace and WorkspaceFolder scopes regardless and threw two guaranteed errors in the common no-workspace case. The six `wat321.*` keys also reset in parallel now instead of sequentially
+- **Codebase reorganized into focused shared helpers**, no behavior change. The four usage widgets now share one generic activator and one shared non-OK state renderer, the Force Auto-Compact tool's timing and threshold values all live in one centralized `constants.ts`, and a handful of single-caller helpers were inlined into their callers. Per-tool framework documentation was removed entirely because every doc had drifted into a worse copy of the code; the source tree is now authoritative
 
 ### Fixed
+- **Claude Force Auto-Compact no longer double-reports the loop warning** if the post-disarm watcher sees more than one stray compact in the same 30-second window. The first stray still triggers the "close and reopen your Claude terminal" toast; subsequent ones in the same window are silent
+- **Claude Force Auto-Compact internal sentinel-ownership tracking is now consistent.** The passive availability resolver used to hardcode "this sentinel is not ours" in every snap check, which was harmless because the resolver never ran during armed state anyway, but would have silently misreported the moment a future caller invoked it outside that guarded path. The tracker now takes a getter so the answer is always live
+- **Claude Force Auto-Compact idle poll no longer re-reads `~/.claude/settings.json` on every tick.** The passive resolver now caches the parsed settings file against its mtime, so idle sessions pay only a stat call until the file actually changes
 
 ### Removed
+- Dead `loadingTooltip` option on the shared usage non-OK renderer (was declared and passed from both 5h widgets but the loading branch hardcoded its own string)
+- Unused `adopted-restored` variant on the Force Auto-Compact `DisarmReason` type (zero emitters, zero consumers)
+- Unused `getCooldownRemainingMs()` and `hasCooldownLoopDetected()` on the Force Auto-Compact service plus their backing watcher methods (the passive resolver stopped consulting cooldown state when the context-fraction gate replaced the time-based cooldown-as-arm-gate path)
 
 ## [1.0.13] - 2026-04-13
 
