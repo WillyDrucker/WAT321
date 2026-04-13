@@ -5,15 +5,27 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.13] - unreleased
-
-### Added
+## [1.0.13] - 2026-04-13
 
 ### Changed
+- **Claude Force Auto-Compact now grays itself out when arming would not help.** The button used to always look ready and then refuse at click-time with an error toast. Now it reads your live Claude context and, if you are below 20% of the session's auto-compact ceiling, the button passively grays out with a tooltip explaining that there is not enough context to produce a useful summary yet. As soon as your context grows past the threshold, it wakes back up on its own. No clicks, no toasts, no guesswork
+- **The grayed state also covers every other reason arming is unsafe**: a suspected compact loop, an unreadable settings file, a stuck override left behind by a crash, a missing Claude settings file, or another VS Code window already driving a compact. Each reason has its own tooltip that tells you what is going on and, where WAT321 can fix itself, the grayed button is clickable to trigger the repair directly
+- **Click-to-repair** - if the grayed reason is something WAT321 can heal on its own (stuck override, transient read error), the button becomes clickable while grayed and runs the repair path in place. You no longer need to open the command palette and Reset WAT321 to recover from a stuck state
+- **Auto-repair runs quietly in the background** when WAT321 notices its own override got stuck at the armed value, limited to once every five minutes so a genuine loop cannot spin the heal path
+- **First-use consent notification is shorter and clearer.** The old version opened with the tool name twice (VS Code renders the first sentence as the header) and padded the body with separator lines. Rewritten into a single flowing paragraph that leads with what the tool does and ends with the grant question
+- **Error messages along the arm path dropped the jargon.** Every refusal message now reads like a sentence a human would say, does not reference internal file paths, and does not tell you to "write a message first" (which contradicted the morning-resume workflow the tool is designed for)
+- **Settings page wording polished throughout.** Each tool's enable description now reads in full sentences matching the feature names ("Enable Claude Usage and Claude Session Token widgets...", "Enable Claude Force Auto-Compact widget..."), the Reset WAT321 description reads "If any WAT321 tool appears unresponsive, this will reset every tool back to a known-good state", and the command palette entry reads `WAT321: Enable Claude Force Auto-Compact tool` so the disabled default state reads as a next-step action
+- **Force Auto-Compact poll cadence is now dynamic.** The service polls every two seconds while armed or watching for a stray compact, and every fifteen seconds the rest of the time. The Claude session token widget piggybacks its own reads into the availability check, so the grayed state still reacts within about five seconds even during the idle cadence. Net effect: the widget feels instant when it matters and is effectively free when it doesn't
 
 ### Fixed
+- **The `"1"` poison value can no longer end up in any backup file.** Every backup tier (install snapshot, arm backup ring) refuses to write the armed value, so a crash mid-arm cannot leave a backup that, when restored, would re-arm the tool
+- **Reset WAT321 now preserves the original Claude install snapshot across its wipe.** Before, resetting would clear the one file that knew what your original auto-compact setting was, leaving recovery reliant on the hardcoded Claude default. The snapshot is now read, held in memory during the `~/.wat321/` wipe, and rewritten afterward so the canonical baseline survives reset
+- **An unreadable Claude settings file now pauses arming instead of triggering a bad write.** The reader distinguishes "file missing", "file unreadable", and "file OK but key absent" as separate outcomes, and the arm path refuses to proceed on any read error. Stale sentinels are never cleaned up on a read error either
+- **Post-disarm stray compacts caused by cached CLI env vars are now detected and surfaced.** If a second compact fires inside a thirty-second window after WAT321 successfully disarms, the tool assumes the CLI is still holding a cached copy of the old override value and notifies you via a loop-detected event. The watcher runs as a diagnostic, not an arm gate, so it does not block legitimate use
 
 ### Removed
+- Time-based recency gates (`recent-native-compact` and `post-disarm-cooldown`). Both edge cases fold into the single context-fraction gate because post-compact context is always well below the 20% threshold anyway
+- `formatArmErrorMessage` helper and several other stale symbols left over from earlier review rounds
 
 ## [1.0.12] - 2026-04-13
 
