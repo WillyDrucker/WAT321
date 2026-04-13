@@ -1,7 +1,10 @@
 import * as vscode from "vscode";
 import { formatPct, formatTokens } from "../shared/ui/tokenFormatters";
-import { USEFUL_CONTEXT_FRACTION } from "./preflightGate";
+import { USEFUL_CONTEXT_FRACTION } from "./constants";
 import type { UnavailableReason } from "./types";
+
+const FOLDER = "\u{1F4C1}"; // U+1F4C1 FILE FOLDER
+const CLAMP = "\u{1F5DC}\u{FE0F}"; // U+1F5DC CLAMP + VS16
 
 /**
  * MarkdownString builders for each Claude Force Auto-Compact widget
@@ -25,14 +28,9 @@ export function truncateTitle(raw: string): string {
   return raw.length > MAX_TITLE_LEN ? `${raw.slice(0, MAX_TITLE_LEN)}...` : raw;
 }
 
-/** Tooltip for the idle "ready" state. Shows the current session
- * title and the context usage line when a live Claude session is
- * available, otherwise tells the user to open Claude Code first.
- * The activation-threshold breakdown only appears in the
- * `below-useful-threshold` unavailable tooltip - this tooltip is
- * for the ready state specifically, where the button is already
- * clickable and the user does not need a "why can't I click?"
- * explanation. */
+/** Tooltip for the idle "ready" state. Shows session title and
+ * context usage when a live Claude session exists, otherwise
+ * tells the user to open Claude Code first. */
 export function buildReadyTooltip(
   live: LiveSessionTooltipInput | null
 ): vscode.MarkdownString {
@@ -49,7 +47,7 @@ export function buildReadyTooltip(
     );
     const pct = ceiling > 0 ? Math.round((live.contextUsed / ceiling) * 100) : 0;
     md.appendMarkdown(
-      `📁 ${live.label} ${formatTokens(live.contextUsed)} / ${formatTokens(ceiling)} (${formatPct(pct)})\n\n`
+      `${FOLDER} ${live.label} ${formatTokens(live.contextUsed)} / ${formatTokens(ceiling)} (${formatPct(pct)})\n\n`
     );
     md.appendMarkdown("Click to trigger Claude's **auto-compact** on your next prompt.  \n");
     md.appendMarkdown(
@@ -127,21 +125,27 @@ export function buildUnavailableTooltip(
           `Your context is at **${formatTokens(context.contextUsed)} / ${formatTokens(context.ceiling)}** (${formatPct(currentPct)}).  \n\n`
         );
         md.appendMarkdown(
-          `This button activates at **${formatTokens(activationTokens)}** (${activationPct}% of ceiling) so you do not compact a nearly-empty session. Claude will auto-compact on its own at **${formatTokens(context.ceiling)}** (100%).  \n\n`
+          `This button activates at **${formatTokens(activationTokens)}** (${activationPct}% of ceiling) so you do not compact a nearly-empty session.  \n\n`
         );
         md.appendMarkdown(
-          "Keep working - the button lights up on its own when there is enough context to compact meaningfully."
+          `${CLAMP} Claude will auto-compact on its own at **${formatTokens(context.ceiling)}** (100%).`
         );
       } else {
         md.appendMarkdown(
-          "Not enough context in this session to compact yet.  \n\n"
-        );
-        md.appendMarkdown(
-          "Keep working - the button lights up on its own once your session has meaningful context."
+          "Not enough context in this session to compact yet."
         );
       }
       break;
     }
+
+    case "claude-busy":
+      md.appendMarkdown(
+        "Claude is currently working on a prompt or tool call.  \n\n"
+      );
+      md.appendMarkdown(
+        "The button will light up on its own as soon as Claude is idle. Arming mid-turn could compact on a queued prompt instead of the one you intend."
+      );
+      break;
 
     case "loop-suspected":
       md.appendMarkdown(

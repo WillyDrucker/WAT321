@@ -4,6 +4,7 @@ import {
 } from "../shared/claudeSettings";
 import { ARMED_OVERRIDE_VALUE } from "./backups";
 import { scanForCompactMarker } from "./compactDetector";
+import { POST_DISARM_COOLDOWN_MS } from "./constants";
 import { healStuckOverride } from "./heal";
 
 /**
@@ -22,7 +23,7 @@ import { healStuckOverride } from "./heal";
  * widget can tell the user to restart their Claude terminal.
  *
  * The watcher owns its own state and listener set. The service
- * calls `start`, `poll`, `stop`, and `remainingMs` without reaching
+ * calls `start`, `poll`, `stop`, and `isActive` without reaching
  * into any fields.
  */
 
@@ -32,12 +33,6 @@ export type CooldownEvent =
   | { kind: "cleared" };
 
 export type CooldownListener = (event: CooldownEvent) => void;
-
-/** How long to keep watching after a successful compact-detected
- * disarm. Long enough to see a second compact fire on the next
- * Claude turn, short enough that we are not holding the fast poll
- * cadence open indefinitely. */
-export const POST_DISARM_COOLDOWN_MS = 30_000;
 
 export class PostDisarmWatcher {
   private until = 0;
@@ -49,23 +44,6 @@ export class PostDisarmWatcher {
   /** True if the watcher is currently inside its cooldown window. */
   isActive(): boolean {
     return this.until > 0;
-  }
-
-  /** Milliseconds remaining in the current cooldown window, or 0
-   * if no cooldown is active. The passive availability resolver
-   * uses this as the single source of truth for the cooldown red
-   * condition. */
-  remainingMs(): number {
-    if (this.until === 0) return 0;
-    const remaining = this.until - Date.now();
-    return remaining > 0 ? remaining : 0;
-  }
-
-  /** True if the watcher has observed a stray compact marker since
-   * the current cooldown window started. Cleared when the cooldown
-   * ends or on a fresh `start()`. */
-  hasLoopDetected(): boolean {
-    return this.loopDetected;
   }
 
   subscribe(listener: CooldownListener): void {
@@ -118,6 +96,7 @@ export class PostDisarmWatcher {
       const outcome = scanForCompactMarker(path, this.scanOffset, size);
       this.scanOffset = outcome.nextOffset;
       if (outcome.found) {
+        const firstDetection = !this.loopDetected;
         this.loopDetected = true;
         // Cheap check before writing: if the settings are already
         // healthy, skip the re-heal write entirely. Avoids writing
@@ -127,7 +106,14 @@ export class PostDisarmWatcher {
         if (read.kind === "present" && read.value === ARMED_OVERRIDE_VALUE) {
           healStuckOverride();
         }
-        this.emit({ kind: "loop-detected" });
+        // Emit the loop-detected event at most once per cooldown
+        // window. Subsequent strays within the same window still
+        // trigger the defensive heal write above, but do not stack
+        // user-facing warning toasts. The flag resets on the next
+        // `start()` so a fresh arm cycle gets its own notification.
+        if (firstDetection) {
+          this.emit({ kind: "loop-detected" });
+        }
       }
     } catch {
       // best-effort; transcript may have been rotated

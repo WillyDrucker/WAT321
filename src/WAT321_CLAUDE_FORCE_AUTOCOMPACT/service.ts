@@ -1,4 +1,11 @@
-import { existsSync, statSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   readAutoCompactOverride,
   SETTINGS_PATH,
@@ -9,6 +16,12 @@ import {
   maybeCaptureInstallSnapshot,
   rotateArmBackup,
 } from "./backups";
+import {
+  ACTIVE_POLL_INTERVAL_MS,
+  IDLE_POLL_INTERVAL_MS,
+  RESTORED_DISPLAY_MS,
+  TIMEOUT_MS,
+} from "./constants";
 import { scanForCompactMarker } from "./compactDetector";
 import {
   healStuckOverride,
@@ -30,12 +43,39 @@ import {
   SENTINEL_PATH,
   writeSentinel,
 } from "./sentinel";
-import { isTargetSessionStillLive } from "./sessionLiveness";
 import type {
   ClaudeForceAutoCompactSentinel,
   ClaudeForceAutoCompactState,
+  DisarmReason,
   UnavailableReason,
 } from "./types";
+
+/** Scan `~/.claude/sessions/*.json` for a live entry whose `sessionId`
+ * matches the targeted session. Returns `true` if found. Errs on the
+ * side of "still live" if the sessions directory itself cannot be
+ * read, so a transient filesystem hiccup does not cause a spurious
+ * disarm. Inlined from the former `sessionLiveness.ts` - there is
+ * exactly one caller (pollArmed below) and the helper is small. */
+function isTargetSessionStillLive(targetSessionId: string): boolean {
+  const sessionsDir = join(homedir(), ".claude", "sessions");
+  if (!existsSync(sessionsDir)) return false;
+
+  try {
+    const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
+    for (const file of files) {
+      try {
+        const raw = readFileSync(join(sessionsDir, file), "utf8");
+        const entry = JSON.parse(raw) as { sessionId?: string };
+        if (entry.sessionId === targetSessionId) return true;
+      } catch {
+        // skip malformed entries
+      }
+    }
+  } catch {
+    return true;
+  }
+  return false;
+}
 
 /**
  * Claude Force Auto-Compact service. Owns the state machine
@@ -57,35 +97,7 @@ import type {
  * armed-state rolling scan, and the poll scheduler.
  */
 
-/** Fast poll interval for active states (armed, cooldown watcher).
- * Must be short so we catch the compact marker within the 10 s
- * timeout window and react to stray compacts promptly. */
-const ACTIVE_POLL_INTERVAL_MS = 2_000;
-/** Slow poll interval for idle states (ready, unavailable). The
- * widget also gets effective ~5 s refresh rate for free via the
- * session token service piggyback (widget calls
- * `snapCheckAvailability` on every Claude token update). This
- * slower interval is the background safety net for cases where
- * the session token service is not running. */
-const IDLE_POLL_INTERVAL_MS = 15_000;
-/** Armed-state failsafe. One Claude turn fires compact within
- * seconds - if the marker never appears within this window,
- * something is wrong and we restore to keep the user out of a
- * compact loop. 10 s is 5 full active-poll cycles of headroom. */
-const TIMEOUT_MS = 10_000;
-const RESTORED_DISPLAY_MS = 3_000;
-
 type Listener = (state: ClaudeForceAutoCompactState) => void;
-
-/** Why an armed session was disarmed. Surfaced to the widget so
- * the user sees a notification explaining an unexpected restore. */
-export type DisarmReason =
-  | "user-cancel"
-  | "compact-detected"
-  | "timeout"
-  | "session-ended"
-  | "session-switched"
-  | "adopted-restored";
 
 export type ArmResult =
   | { ok: true }
@@ -99,16 +111,33 @@ export class ClaudeForceAutoCompactService {
   private state: ClaudeForceAutoCompactState = { status: "not-installed" };
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Handle for the 3-second `restored -> ready` flash transition.
+   * Tracked so `dispose()` can cancel it and we don't hold a
+   * closure over `this` for 3 seconds on rapid dispose/restart. */
+  private flashTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   /** Rolling offset into the watched transcript for compact-marker
    * scanning during the armed state. Reset to `baselineSize` on
    * entry to armed, advanced on each poll. */
   private armedScanOffset = 0;
-  /** Read by the widget after it sees an armed -> restored
-   * transition. */
-  lastDisarmReason: DisarmReason | null = null;
+  /** Set on disarm, drained by the widget via `consumeLastDisarmReason`
+   * after it sees an armed -> restored transition. Private so callers
+   * cannot mutate it directly - the consume contract guarantees a
+   * second read returns null. */
+  private lastDisarmReason: DisarmReason | null = null;
 
-  private passive = new PassiveAvailabilityTracker();
+  /** Drain the last disarm reason. Returns the reason once and clears
+   * it so a subsequent read returns null. The widget calls this on
+   * every armed -> restored transition to surface the right toast. */
+  consumeLastDisarmReason(): DisarmReason | null {
+    const reason = this.lastDisarmReason;
+    this.lastDisarmReason = null;
+    return reason;
+  }
+
+  private passive = new PassiveAvailabilityTracker(
+    () => this.state.status === "armed"
+  );
   private cooldown = new PostDisarmWatcher();
 
   start(): void {
@@ -168,8 +197,20 @@ export class ClaudeForceAutoCompactService {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    if (this.flashTimer) {
+      clearTimeout(this.flashTimer);
+      this.flashTimer = null;
+    }
     this.listeners.clear();
     this.cooldown.clearListeners();
+  }
+
+  /** Re-emit current state to all listeners without advancing the
+   * poll loop or touching any external resource. Used by the
+   * display-mode change handler so the widget re-renders with the
+   * new mode. */
+  rebroadcast(): void {
+    for (const listener of this.listeners) listener(this.state);
   }
 
   /** Reset-as-failsafe and startup check. Delegates to the shared
@@ -186,20 +227,6 @@ export class ClaudeForceAutoCompactService {
    * session is available. */
   setActiveContext(ctx: ActiveContextInfo | null): void {
     this.passive.setActiveContext(ctx);
-  }
-
-  /** Milliseconds remaining in the post-disarm cooldown window.
-   * The cooldown watcher still runs as a CLI-cache diagnostic
-   * (see `postDisarmWatcher.ts`) but it is NO LONGER an arm gate -
-   * the context-fraction check in the preflight resolver
-   * subsumes it. Exposed for widget tooltip / cooldown event
-   * handling. */
-  getCooldownRemainingMs(): number {
-    return this.cooldown.remainingMs();
-  }
-
-  hasCooldownLoopDetected(): boolean {
-    return this.cooldown.hasLoopDetected();
   }
 
   /** Widget-called entry point for snap checks on session token
@@ -247,8 +274,7 @@ export class ClaudeForceAutoCompactService {
    * click-through, but a race is still possible. */
   arm(
     watchTranscriptPath: string,
-    targetSessionId: string,
-    armedOverride: string = ARMED_OVERRIDE_VALUE
+    targetSessionId: string
   ): ArmResult {
     // Run the availability resolver first as a fresh defense-in-
     // depth check. `resolveForArm` scans the transcript tail
@@ -276,7 +302,7 @@ export class ClaudeForceAutoCompactService {
       };
     }
     const originalOverride = read.value;
-    if (originalOverride === armedOverride) {
+    if (originalOverride === ARMED_OVERRIDE_VALUE) {
       // Belt-and-braces: resolver should already have caught this
       // via settings-stuck-at-armed. We still guard so the sentinel
       // write cannot accidentally capture "1" as the "original".
@@ -309,7 +335,7 @@ export class ClaudeForceAutoCompactService {
       version: 1,
       settingsPath: SETTINGS_PATH,
       originalOverride,
-      armedOverride,
+      armedOverride: ARMED_OVERRIDE_VALUE,
       watchTranscriptPath,
       baselineSize,
       armedAt: Date.now(),
@@ -325,7 +351,7 @@ export class ClaudeForceAutoCompactService {
       };
     }
 
-    if (!writeAutoCompactOverride(armedOverride)) {
+    if (!writeAutoCompactOverride(ARMED_OVERRIDE_VALUE)) {
       deleteSentinel();
       return {
         ok: false,
@@ -495,7 +521,14 @@ export class ClaudeForceAutoCompactService {
 
   private flashRestored(): void {
     this.setState({ status: "restored" });
-    setTimeout(() => {
+    // Cancel any prior flash timer before scheduling a new one. Also
+    // tracked on `this.flashTimer` so `dispose()` can clear it and
+    // release the closure-over-this. Safe to call repeatedly.
+    if (this.flashTimer) {
+      clearTimeout(this.flashTimer);
+    }
+    this.flashTimer = setTimeout(() => {
+      this.flashTimer = null;
       if (!this.disposed && this.state.status === "restored") {
         this.setState({ status: "ready" });
       }

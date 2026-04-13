@@ -42,6 +42,24 @@ export interface ScanOutcome {
   nextOffset: number;
 }
 
+/** Classification of the last parseable JSONL entry in the tail.
+ * Used by the preflight gate's `claude-busy` check so we can refuse
+ * arming while Claude is mid-turn. */
+export type LastEntryKind =
+  /** Last entry is a user message (prompt or tool_result). Claude
+   * is about to respond - queued prompt or tool callback. */
+  | "user"
+  /** Last entry is an assistant message containing an unresolved
+   * `tool_use` block. Claude is waiting on tool execution. */
+  | "assistant-pending"
+  /** Last entry is an assistant text-only message. Turn complete,
+   * Claude is idle. */
+  | "assistant-done"
+  /** Could not classify (empty tail, unparseable, unknown type).
+   * Treated as "idle" by the resolver so a broken scanner never
+   * blocks arming. */
+  | "unknown";
+
 export interface TailHistoryOutcome {
   /** Count of `"isCompactSummary":true` markers seen in the tail. */
   markerCount: number;
@@ -55,10 +73,54 @@ export interface TailHistoryOutcome {
    * Used ONLY as a secondary loop-detection signal behind the
    * primary context-fraction gate. */
   mtimeMs: number;
+  /** Classification of the last parseable JSONL entry. Feeds the
+   * `claude-busy` arm gate so we do not arm mid-turn. */
+  lastEntryKind: LastEntryKind;
   /** True if any IO error occurred. Callers treat this as
    * "unknown" rather than "clear" - a broken scanner must never
    * block arming forever. */
   ioError: boolean;
+}
+
+/** Walk a tail buffer backwards, parsing the last non-empty JSONL
+ * line, and classify it. Returns `"unknown"` for any failure mode so
+ * the caller always has a defined value. Exported for unit test and
+ * direct use by callers that already have a tail buffer in hand. */
+export function classifyLastEntry(tail: string): LastEntryKind {
+  const lines = tail.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(raw);
+    } catch {
+      // Partial line (mid-write) or invalid JSON. Try the line
+      // before. Claude Code writes full JSONL lines atomically so
+      // any mid-write partial is always the very last line, never
+      // somewhere in the middle.
+      continue;
+    }
+
+    if (entry.type === "user") return "user";
+    if (entry.type === "assistant") {
+      const msg = entry.message as Record<string, unknown> | undefined;
+      const content = msg?.content;
+      if (Array.isArray(content)) {
+        const hasToolUse = content.some(
+          (p) =>
+            typeof p === "object" &&
+            p !== null &&
+            (p as Record<string, unknown>).type === "tool_use"
+        );
+        if (hasToolUse) return "assistant-pending";
+      }
+      return "assistant-done";
+    }
+    // Other entry types (system, summary, etc.) keep walking.
+  }
+  return "unknown";
 }
 
 /**
@@ -132,6 +194,7 @@ export function scanTailForCompactHistory(path: string): TailHistoryOutcome {
   const empty: TailHistoryOutcome = {
     markerCount: 0,
     mtimeMs: 0,
+    lastEntryKind: "unknown",
     ioError: false,
   };
 
@@ -173,10 +236,12 @@ export function scanTailForCompactHistory(path: string): TailHistoryOutcome {
       searchFrom = hit + COMPACT_MARKER.length;
     }
 
+    const lastEntryKind = classifyLastEntry(slice.toString("utf8"));
+
     // Store the RAW mtime, not a precomputed age. Callers age it
     // at resolve time so a cached outcome ages forward correctly
     // across many ticks even when the transcript stops growing.
-    return { markerCount, mtimeMs, ioError: false };
+    return { markerCount, mtimeMs, lastEntryKind, ioError: false };
   } catch {
     return { ...empty, ioError: true };
   } finally {
