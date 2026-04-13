@@ -11,8 +11,9 @@ const DEFAULT_BASE = 1001;
  *   1 = Claude Usage Weekly
  *   2 = Codex Usage 5 hour
  *   3 = Codex Usage Weekly
- *   4 = Claude Session Tokens
- *   5 = Codex Session Tokens
+ *   4 = Claude Force Auto-Compact (interactive)
+ *   5 = Claude Session Tokens
+ *   6 = Codex Session Tokens
  */
 export function getWidgetPriority(offset: number): number {
   const base = vscode.workspace
