@@ -5,15 +5,25 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.12] - unreleased
-
-### Added
+## [1.0.12] - 2026-04-13
 
 ### Changed
+- **The Auto-Compact button in the status bar now always shows just `🗜️ Auto-Compact`**, with no live token count. You already see token usage in the Claude Session Tokens widget next to it, and doubling it up made the button too busy. Tooltip still shows the session you're about to target and its usage
+- **Auto-Compact tooltip is shorter and clearer**: "Higher-quality summary than `/compact` - preserves tool results and reasoning."
+- **First-use consent dialog no longer shows the tool name twice.** VS Code's notification already renders the first sentence as the header, so the old code was duplicating "Claude Force Auto-Compact" at the top. Body rewritten into a cleaner three-paragraph form
+- **Reset WAT321 description now mentions the failsafe:** "If any WAT321 tool ever looks stuck, this also resets every tool back to a known-good state." Same text in both the settings page and the confirmation dialog
+- **Arm refusal message for "already at override=1" points at Reset WAT321** instead of telling you to fix the file manually. The recovery is now one click away
+- **Codebase reorganized into focused modules.** You will not notice any behavior change, but each service is now built from small, single-purpose files (parsers, discovery, heal, sentinel IO, compact detector, tooltips, messages, etc.) which makes future fixes much faster to land. 18 new internal modules under `src/shared/` and the widget folders. Every file is under 200 lines except for the handful of stateful service cores that would lose cohesion if split further
 
 ### Fixed
+- **Claude Force Auto-Compact no longer gets stuck in a loop.** The v1.0.11 detector was watching for the transcript file to shrink when a compact fired, but Claude Code's transcripts are append-only - they never shrink. The detector never fired, the tool stayed armed for the full five-minute failsafe window, and every prompt you sent in that window triggered another auto-compact. The fix: WAT321 now scans for the actual compact-summary marker that Claude writes into the transcript, catches the compact within a couple of seconds of it firing, and restores your setting immediately. The safety timeout is also now 45 seconds instead of 5 minutes
+- **Reset WAT321 now always unsticks you from a stuck override**, even if the backup file is missing or corrupt. Before, the reset flow would only restore if it could find the sentinel file; a missing sentinel meant the reset walked away and left your Claude settings stuck at override=1. Now the reset inspects `~/.claude/settings.json` directly and, if the override is still stuck at the armed value, restores it to the Claude default (85) no matter what state the backup is in. A new shared helper in `src/shared/claudeSettings.ts` is the single source of truth for reading and writing that setting, so every recovery path goes through the same code
+- **Unreadable Claude settings can no longer confuse the recovery path into deleting its backup.** Rare but real: if `~/.claude/settings.json` was corrupt or unreadable, the old recovery code treated the unreadable file the same as "nothing to fix" and would delete the backup sentinel - destroying the only record of what your override value used to be. The reader now distinguishes "file missing" from "file unreadable" from "file OK but key absent", and refuses to clean up anything on a read error. Caught by Codex during review before it shipped
+- **Arm refuses to proceed if `~/.claude/settings.json` is unreadable** rather than guessing. Previously it could have captured a false `null` as your "original" value, which would then have written the wrong thing on restore
 
 ### Removed
+- Old file-size-shrink heuristic for compact detection (`COMPACT_SIZE_RATIO`). Replaced by the marker-scan detector described above
+- Several stale comments referencing removed constants and renamed files. No behavior change
 
 ## [1.0.11] - 2026-04-13
 
