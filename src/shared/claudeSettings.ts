@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Shared reader/writer for `~/.claude/settings.json` `env` overrides.

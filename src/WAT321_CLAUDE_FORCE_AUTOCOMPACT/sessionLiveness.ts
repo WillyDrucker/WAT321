@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Session-aware disarm helper. Used by the service poll loop to detect

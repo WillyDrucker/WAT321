@@ -30,11 +30,23 @@ interface ProviderService {
   unsubscribe(listener: (state: { status: string }) => void): void;
 }
 
-export interface ProviderGroup {
+/** Base shape shared by both provider groups. The token service is
+ * left generic here so each concrete subtype can narrow it to the
+ * provider's actual class, avoiding the `as unknown as` double cast
+ * that the interactive-tier activator otherwise needs. */
+export interface ProviderGroup<
+  TTokenService extends { dispose(): void; rebroadcast(): void } = {
+    dispose(): void;
+    rebroadcast(): void;
+  }
+> {
   disposables: vscode.Disposable[];
   usageService: ProviderService;
-  tokenService: { dispose(): void; rebroadcast(): void };
+  tokenService: TTokenService;
 }
+
+export type ClaudeProviderGroup = ProviderGroup<ClaudeSessionTokenService>;
+export type CodexProviderGroup = ProviderGroup<CodexSessionTokenService>;
 
 export interface ClaudeForceAutoCompactGroup {
   disposables: vscode.Disposable[];
@@ -43,8 +55,8 @@ export interface ClaudeForceAutoCompactGroup {
 }
 
 export interface ActiveGroups {
-  claude: ProviderGroup | null;
-  codex: ProviderGroup | null;
+  claude: ClaudeProviderGroup | null;
+  codex: CodexProviderGroup | null;
   claudeForceAutoCompact: ClaudeForceAutoCompactGroup | null;
 }
 
@@ -81,7 +93,7 @@ export function updateProviderActive(
   rebroadcastAll(groups);
 }
 
-export function activateClaude(groups: ActiveGroups): ProviderGroup {
+export function activateClaude(groups: ActiveGroups): ClaudeProviderGroup {
   const usageService = new ClaudeUsageSharedService();
   const tokenService = new ClaudeSessionTokenService(workspacePath());
 
@@ -104,7 +116,7 @@ export function activateClaude(groups: ActiveGroups): ProviderGroup {
   return { disposables, usageService, tokenService };
 }
 
-export function activateCodex(groups: ActiveGroups): ProviderGroup {
+export function activateCodex(groups: ActiveGroups): CodexProviderGroup {
   const codexService = new CodexUsageSharedService();
   const tokenService = new CodexSessionTokenService(workspacePath());
 
@@ -151,13 +163,13 @@ export function activateClaudeForceAutoCompact(
   groups: ActiveGroups
 ): ClaudeForceAutoCompactGroup | null {
   if (!groups.claude) return null;
-  const tokenService =
-    groups.claude.tokenService as unknown as ClaudeSessionTokenService;
-
+  // `groups.claude.tokenService` is already typed as the concrete
+  // `ClaudeSessionTokenService` via the `ClaudeProviderGroup`
+  // narrowing, so no cast is needed.
   const service = new ClaudeForceAutoCompactService();
   const activation = activateClaudeForceAutoCompactWidget(
     service,
-    tokenService,
+    groups.claude.tokenService,
     context
   );
   const disposables: vscode.Disposable[] = [
