@@ -6,8 +6,8 @@ import { join } from "node:path";
  * Shared reader/writer for `~/.claude/settings.json` `env` overrides.
  * Two WAT321 features touch this file:
  *   - Claude session token widget (read-only, displays the override)
- *   - Claude Force Auto-Compact (read + atomic write, arm/restore cycle)
- * Both now route through this module to keep exactly one definition of
+ *   - Experimental Force Claude Auto-Compact (read + atomic write, arm/restore cycle)
+ * Both route through this module to keep exactly one definition of
  * the file path, one parser, one atomic writer, and one default value.
  */
 
@@ -16,8 +16,9 @@ export const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
 /**
  * Claude's auto-compact default threshold, as a percentage. Used when
  * the user has no `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` set, AND as the
- * failsafe target when Force Auto-Compact heals a stuck override with
- * no trustworthy sentinel to restore from.
+ * failsafe target when the experimental Force Claude Auto-Compact heal
+ * path finds a stuck override with no trustworthy sentinel to restore
+ * from.
  *
  * Claude's real default is approximately
  *   fullWindow - min(systemReserve, 20000) - 13000 tokens
@@ -33,8 +34,9 @@ export const DEFAULT_CLAUDE_AUTOCOMPACT_PCT_STR = "85";
 /**
  * Discriminated result for `readAutoCompactOverride`. Distinguishes
  * "file absent" and "file unreadable" from "file read OK but key
- * absent" so safety-critical callers (Force Auto-Compact heal, arm)
- * can refuse to make assumptions on an IO error. The lossy
+ * absent" so safety-critical callers (the experimental auto-compact
+ * heal + arm paths) can refuse to make assumptions on an IO error.
+ * The lossy
  * `readAutoCompactOverrideRaw` wrapper below collapses everything to
  * `string | null` for the session token widget, which only needs the
  * display value.
