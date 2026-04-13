@@ -45,6 +45,7 @@ export interface ClaudeForceAutoCompactSentinel {
  * gate and prevents a second consecutive arm. */
 export type UnavailableReason =
   | "below-useful-threshold"
+  | "claude-busy"
   | "loop-suspected"
   | "settings-stuck-at-armed"
   | "settings-missing"
@@ -60,3 +61,26 @@ export type ClaudeForceAutoCompactState =
   | { status: "unavailable"; reason: UnavailableReason }; // widget grayed, not clickable, tooltip explains
 
 export type StatusBarWidget = GenericStatusBarWidget<ClaudeForceAutoCompactState>;
+
+/** Why an armed session was disarmed. Surfaced to the widget so
+ * the user sees a notification explaining an unexpected restore. */
+export type DisarmReason =
+  | "user-cancel"
+  | "compact-detected"
+  | "timeout"
+  | "session-ended"
+  | "session-switched";
+
+/** What the widget knows about the current Claude session it is
+ * tracking. Lives here (not in widget.ts) so other modules that
+ * need to understand session descriptors can import it without
+ * reaching into the widget file. */
+export interface ClaudeSessionDescriptor {
+  sessionId: string;
+  label: string;
+  sessionTitle: string;
+  contextUsed: number;
+  contextWindowSize: number;
+  autoCompactPct: number;
+  source: "live" | "lastKnown";
+}

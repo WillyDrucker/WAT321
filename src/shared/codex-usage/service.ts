@@ -60,6 +60,12 @@ export class CodexUsageSharedService {
   private inFlight = false;
   private disposed = false;
   private consecutiveRateLimits = 0;
+  /** Non-zero only after a user-initiated `wake()` out of the
+   * 15-minute fallback. While > 0, a 429 response decrements this
+   * counter and keeps polling at the normal cadence instead of
+   * parking back in rate-limited. Reset to 0 on any successful
+   * fetch or non-429 error. */
+  private postWakeStrikesRemaining = 0;
   private consecutiveErrors = 0;
 
   private coordinator = new Coordinator<ServiceState>(
@@ -102,6 +108,21 @@ export class CodexUsageSharedService {
 
   rebroadcast(): void {
     for (const listener of this.listeners) listener(this.state);
+  }
+
+  /** Click-to-wake from the 15-minute fallback rate-limited state.
+   * Only valid when currently parked in `rate-limited` with
+   * `source === "fallback"`. See claude-usage/service.ts for full
+   * rationale. */
+  wake(): void {
+    if (this.disposed) return;
+    if (this.state.status !== "rate-limited") return;
+    if (this.state.source !== "fallback") return;
+    this.consecutiveRateLimits = 0;
+    this.postWakeStrikesRemaining = 3;
+    this.countdown.stop();
+    this.setState({ status: "loading" });
+    this.setPollInterval(POLL_INTERVAL_MS);
   }
 
   dispose(): void {
@@ -219,6 +240,7 @@ export class CodexUsageSharedService {
       this.coordinator.writeCache(newState);
       this.countdown.stop();
 
+      this.postWakeStrikesRemaining = 0;
       if (this.consecutiveRateLimits > 0) {
         this.setPollInterval(POLL_INTERVAL_MS);
       }
@@ -239,10 +261,28 @@ export class CodexUsageSharedService {
     if (statusCode === 429) {
       this.consecutiveRateLimits++;
       this.consecutiveErrors = 0;
+
+      // Post-wake probation: user clicked to exit the 15-min fallback,
+      // so the next few 429s are absorbed rather than triggering an
+      // immediate re-park. Keep polling at the normal cadence.
+      if (this.postWakeStrikesRemaining > 0) {
+        this.postWakeStrikesRemaining--;
+        if (this.postWakeStrikesRemaining > 0) {
+          this.setPollInterval(POLL_INTERVAL_MS);
+          this.setState({ status: "loading" });
+          return;
+        }
+        // Final strike exhausted - fall through to normal park logic.
+      }
+
       const retryAfterMs =
         error instanceof HttpError && error.retryAfterMs
           ? error.retryAfterMs
           : RATE_LIMIT_BACKOFF_MS;
+      const source: "fallback" | "server" =
+        error instanceof HttpError && error.retryAfterMs
+          ? "server"
+          : "fallback";
       if (this.consecutiveRateLimits === 1) {
         this.setPollInterval(retryAfterMs);
       }
@@ -250,6 +290,7 @@ export class CodexUsageSharedService {
         status: "rate-limited",
         retryAfterMs,
         rateLimitedAt: Date.now(),
+        source,
       };
       this.setState(newState);
       this.coordinator.writeCache(newState);
@@ -327,4 +368,5 @@ export class CodexUsageSharedService {
       },
     });
   }
+
 }

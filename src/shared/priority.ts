@@ -3,19 +3,25 @@ import * as vscode from "vscode";
 const DEFAULT_BASE = 1001;
 
 /**
- * Get widget priority based on the configured base.
- * Offset 0 = highest (leftmost), higher offsets shift right.
- *
- * Current offsets:
- *   0 = Claude Usage 5hr
- *   1 = Claude Usage Weekly
- *   2 = Codex Usage 5 hour
- *   3 = Codex Usage Weekly
- *   4 = Claude Force Auto-Compact (interactive)
- *   5 = Claude Session Tokens
- *   6 = Codex Session Tokens
+ * Status bar slot offsets. Offset 0 sits leftmost (highest priority);
+ * higher offsets shift right. Each widget imports the named constant
+ * for its slot rather than passing a magic number, so a future
+ * reordering only edits one file.
  */
-export function getWidgetPriority(offset: number): number {
+export const WIDGET_SLOT = {
+  claudeUsage5H: 0,
+  claudeUsageWeekly: 1,
+  codexUsage5H: 2,
+  codexUsageWeekly: 3,
+  claudeForceAutoCompact: 4,
+  claudeSessionTokens: 5,
+  codexSessionTokens: 6,
+} as const;
+
+export type WidgetSlot = (typeof WIDGET_SLOT)[keyof typeof WIDGET_SLOT];
+
+/** Resolve a slot offset to a concrete VS Code priority value. */
+export function getWidgetPriority(offset: WidgetSlot): number {
   const base = vscode.workspace
     .getConfiguration("wat321")
     .get<number>("statusBarPriority", DEFAULT_BASE);

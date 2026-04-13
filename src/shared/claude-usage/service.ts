@@ -13,8 +13,12 @@ import {
 } from "../polling/constants";
 import { CountdownTicker } from "../polling/countdownTicker";
 import { DiscoveryPoller } from "../polling/discovery";
-import { isNetworkError } from "../polling/errorClassification";
+import {
+  isNetworkError,
+  parseRetryAfterMs,
+} from "../polling/errorClassification";
 import { httpGetJson } from "../polling/httpClient";
+import { HttpError } from "../polling/httpError";
 import {
   isCacheableState,
   resolveStateFreshness,
@@ -51,6 +55,13 @@ export class ClaudeUsageSharedService {
   private disposed = false;
   private consecutiveRateLimits = 0;
   private consecutiveErrors = 0;
+  /** Non-zero only after a user-initiated `wake()` out of the
+   * 15-minute fallback. While > 0, a 429 response decrements this
+   * counter and keeps polling at the normal cadence instead of
+   * parking back in rate-limited. When it hits 0, we return to the
+   * fallback state. Reset to 0 on any successful fetch or any
+   * non-429 error path. */
+  private postWakeStrikesRemaining = 0;
 
   private coordinator = new Coordinator<ServiceState>(
     CACHE_FILE,
@@ -94,6 +105,28 @@ export class ClaudeUsageSharedService {
   /** Re-emit current state to all listeners without making API calls. */
   rebroadcast(): void {
     for (const listener of this.listeners) listener(this.state);
+  }
+
+  /** Click-to-wake from the 15-minute fallback rate-limited state.
+   * Only valid when currently parked in `rate-limited` with
+   * `source === "fallback"` - we never override a server-directed
+   * wait (`source === "server"`). Does NOT force an immediate
+   * fetch: transitions state to `loading`, resets the poll interval
+   * to the normal `POLL_INTERVAL_MS` cadence, and lets the next
+   * poll fire on that schedule. Arms a 3-strike post-wake counter
+   * so the next three 429s stay on normal cadence instead of
+   * immediately snapping back to the 15-minute fallback. A
+   * successful fetch during the wake window clears the counter
+   * and restores normal operation. */
+  wake(): void {
+    if (this.disposed) return;
+    if (this.state.status !== "rate-limited") return;
+    if (this.state.source !== "fallback") return;
+    this.consecutiveRateLimits = 0;
+    this.postWakeStrikesRemaining = 3;
+    this.countdown.stop();
+    this.setState({ status: "loading" });
+    this.setPollInterval(POLL_INTERVAL_MS);
   }
 
   dispose(): void {
@@ -217,6 +250,7 @@ export class ClaudeUsageSharedService {
       this.coordinator.writeCache(newState);
       this.countdown.stop();
 
+      this.postWakeStrikesRemaining = 0;
       if (this.consecutiveRateLimits > 0) {
         this.setPollInterval(POLL_INTERVAL_MS);
       }
@@ -232,20 +266,60 @@ export class ClaudeUsageSharedService {
 
   private handleFetchError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
-    const statusMatch = message.match(/^HTTP (\d+):/);
-    const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : null;
+    const statusCode =
+      error instanceof HttpError
+        ? error.statusCode
+        : (() => {
+            const m = message.match(/^HTTP (\d+):/);
+            return m ? parseInt(m[1], 10) : null;
+          })();
 
     // Rate limits always surface immediately and get written to shared cache.
+    // Honor the server's Retry-After header when present; otherwise fall
+    // back to the hardcoded 15-minute window. No consecutive-429 cap and
+    // no escape-hatch command - WAT321 stays passive and lets Anthropic's
+    // server-sent Retry-After drive the cadence until the lockout clears
+    // naturally. The one exception is the post-wake window: if the user
+    // clicked the 15-minute fallback widget to wake it, we allow up to
+    // 3 consecutive 429s at the normal poll cadence before returning to
+    // the rate-limited state. This lets a user correct our conservative
+    // guess without immediately snapping back to sleep on the first
+    // transient 429.
     if (statusCode === 429) {
       this.consecutiveRateLimits++;
       this.consecutiveErrors = 0;
+
+      // Post-wake probation: user clicked to exit the 15-min fallback,
+      // so the next few 429s are absorbed rather than triggering an
+      // immediate re-park. Keep polling at the normal cadence.
+      if (this.postWakeStrikesRemaining > 0) {
+        this.postWakeStrikesRemaining--;
+        if (this.postWakeStrikesRemaining > 0) {
+          this.setPollInterval(POLL_INTERVAL_MS);
+          this.setState({ status: "loading" });
+          return;
+        }
+        // Final strike exhausted - fall through to normal park
+        // logic. The state below will show the 15-min fallback again
+        // and the widget re-enables click-to-wake.
+      }
+
+      const retryAfterMs =
+        error instanceof HttpError && error.retryAfterMs
+          ? error.retryAfterMs
+          : RATE_LIMIT_BACKOFF_MS;
+      const source: "fallback" | "server" =
+        error instanceof HttpError && error.retryAfterMs
+          ? "server"
+          : "fallback";
       if (this.consecutiveRateLimits === 1) {
-        this.setPollInterval(RATE_LIMIT_BACKOFF_MS);
+        this.setPollInterval(retryAfterMs);
       }
       const newState: ServiceState = {
         status: "rate-limited",
-        retryAfterMs: RATE_LIMIT_BACKOFF_MS,
+        retryAfterMs,
         rateLimitedAt: Date.now(),
+        source,
       };
       this.setState(newState);
       this.coordinator.writeCache(newState);
@@ -312,6 +386,21 @@ export class ClaudeUsageSharedService {
         "anthropic-beta": "oauth-2025-04-20",
       },
       abortController: this.abortController,
+      onNon200: (statusCode, body, responseHeaders) => {
+        // Parse Retry-After so the 429 handler can honor the server's
+        // actual wait hint rather than falling back to the flat 15 min
+        // constant. Same pattern as the Codex usage service.
+        const retryAfterHeader = responseHeaders["retry-after"];
+        const retryAfterValue = Array.isArray(retryAfterHeader)
+          ? retryAfterHeader[0]
+          : retryAfterHeader;
+        return new HttpError(
+          statusCode,
+          body,
+          parseRetryAfterMs(retryAfterValue)
+        );
+      },
     });
   }
+
 }

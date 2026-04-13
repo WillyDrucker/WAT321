@@ -7,7 +7,9 @@
 /** Minimum interval between API polls per instance. */
 export const POLL_INTERVAL_MS = 122_000;
 
-/** Back off poll interval after we hit a 429 until we retry. */
+/** Back off poll interval after we hit a 429 until we retry. Used
+ * as a fallback when the server response has no `Retry-After`
+ * header. When `Retry-After` is present, it takes precedence. */
 export const RATE_LIMIT_BACKOFF_MS = 901_000;
 
 /** Minimum time between fetches before another instance can take the claim. */

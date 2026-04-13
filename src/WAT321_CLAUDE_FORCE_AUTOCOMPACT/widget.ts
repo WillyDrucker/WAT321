@@ -1,16 +1,20 @@
 import * as vscode from "vscode";
-import type { ClaudeForceAutoCompactState, StatusBarWidget } from "./types";
+import type {
+  ClaudeForceAutoCompactState,
+  ClaudeSessionDescriptor,
+  DisarmReason,
+  StatusBarWidget,
+} from "./types";
 import type {
   ClaudeForceAutoCompactService,
   CooldownEvent,
 } from "./service";
 import type { ClaudeSessionTokenService } from "../WAT321_CLAUDE_SESSION_TOKENS/service";
 import type { WidgetState as ClaudeTokenState } from "../WAT321_CLAUDE_SESSION_TOKENS/types";
-import { getWidgetPriority } from "../shared/priority";
+import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
 import { hasConsent, requestConsent } from "../shared/consent";
 import { formatPct, formatTokens } from "../shared/ui/tokenFormatters";
-import { enumerateActiveClaudeSessions } from "./activeClaudeSessions";
-import { formatDisarmMessage } from "./messages";
+import { getDisplayMode } from "../shared/displayMode";
 import {
   buildArmedTooltip,
   buildReadyTooltip,
@@ -18,24 +22,30 @@ import {
   buildUnavailableTooltip,
   truncateTitle,
 } from "./tooltips";
-import {
-  buildArmConfirmHints,
-  type ActiveContextInfo,
-} from "./preflightGate";
+import type { ActiveContextInfo } from "./preflightGate";
+
+/** Notification text for each automatic disarm reason. Returns `null`
+ * for reasons that should not surface a notification (e.g. user-cancel
+ * where the user already knows). Inlined here rather than in its own
+ * file because the widget is the only caller. */
+function formatDisarmMessage(reason: DisarmReason | null): string | null {
+  switch (reason) {
+    case "compact-detected":
+      return "Auto-compact fired. CLAUDE_AUTOCOMPACT_PCT_OVERRIDE restored.";
+    case "timeout":
+      return "Claude Force Auto-Compact timed out. Disarmed.";
+    case "session-ended":
+      return "Target Claude session ended before compact fired. CLAUDE_AUTOCOMPACT_PCT_OVERRIDE restored.";
+    case "session-switched":
+      return "Claude session switched while Claude Force Auto-Compact was armed. CLAUDE_AUTOCOMPACT_PCT_OVERRIDE restored.";
+    default:
+      return null;
+  }
+}
 
 const CLAMP = "\u{1F5DC}\u{FE0F}";
 const RED_EXCLAM = "\u2757"; // U+2757 HEAVY EXCLAMATION MARK SYMBOL
 const COMMAND_ID = "wat321.claudeForceAutoCompact";
-
-interface ClaudeSessionDescriptor {
-  sessionId: string;
-  label: string;
-  sessionTitle: string;
-  contextUsed: number;
-  contextWindowSize: number;
-  autoCompactPct: number;
-  source: "live" | "lastKnown";
-}
 
 export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -50,7 +60,7 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.claudeForceAutoCompact",
       vscode.StatusBarAlignment.Right,
-      getWidgetPriority(4)
+      getWidgetPriority(WIDGET_SLOT.claudeForceAutoCompact)
     );
     this.item.name = "WAT321: Claude Force Auto-Compact";
     this.item.command = COMMAND_ID;
@@ -65,10 +75,18 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
     // user knows *why* the widget went from armed back to ready when
     // they come back from a context switch.
     if (prev.status === "armed" && state.status === "restored") {
-      const msg = formatDisarmMessage(this.service.lastDisarmReason);
+      const msg = formatDisarmMessage(this.service.consumeLastDisarmReason());
       if (msg) vscode.window.showInformationMessage(msg);
-      this.service.lastDisarmReason = null;
     }
+
+    // Compact and minimal modes drop the "Auto-Compact" text label
+    // to save horizontal space; only the icon remains. The armed
+    // state still shows "Armed" text in every mode so users cannot
+    // miss the active state. Restored and stale states keep a short
+    // parenthetical suffix so transient/error states stay legible.
+    const mode = getDisplayMode();
+    const lean = mode === "compact" || mode === "minimal";
+    const fullLabel = "Auto-Compact";
 
     switch (state.status) {
       case "not-installed":
@@ -76,7 +94,7 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
         break;
 
       case "ready":
-        this.item.text = `${CLAMP} Auto-Compact`;
+        this.item.text = lean ? CLAMP : `${CLAMP} ${fullLabel}`;
         this.item.tooltip = buildReadyTooltip(this.liveTooltipInput());
         this.item.color = undefined;
         this.item.command = COMMAND_ID;
@@ -84,7 +102,9 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
         break;
 
       case "armed":
-        this.item.text = `${RED_EXCLAM} Auto-Compact (Armed)`;
+        this.item.text = lean
+          ? `${RED_EXCLAM} Armed`
+          : `${RED_EXCLAM} ${fullLabel} (Armed)`;
         this.item.tooltip = buildArmedTooltip();
         this.item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
         this.item.command = COMMAND_ID;
@@ -92,7 +112,9 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
         break;
 
       case "restored":
-        this.item.text = `${CLAMP} Auto-Compact (Restored)`;
+        this.item.text = lean
+          ? `${CLAMP} (Restored)`
+          : `${CLAMP} ${fullLabel} (Restored)`;
         this.item.tooltip = "Auto-compact fired - CLAUDE_AUTOCOMPACT_PCT_OVERRIDE restored.";
         this.item.color = undefined;
         this.item.command = COMMAND_ID;
@@ -100,7 +122,9 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
         break;
 
       case "stale-sentinel":
-        this.item.text = `${RED_EXCLAM} Auto-Compact (!)`;
+        this.item.text = lean
+          ? `${RED_EXCLAM} (!)`
+          : `${RED_EXCLAM} ${fullLabel} (!)`;
         this.item.tooltip = buildStaleTooltip();
         this.item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
         this.item.command = COMMAND_ID;
@@ -120,7 +144,7 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
         //   - Every other reason (auto-clearing, not our loop,
         //     not our settings, another instance owns it): hover
         //     only, command unset. Tooltip explains the reason.
-        this.item.text = `${CLAMP} Auto-Compact`;
+        this.item.text = lean ? CLAMP : `${CLAMP} ${fullLabel}`;
         this.item.tooltip = buildUnavailableTooltip(
           state.reason,
           this.unavailableTooltipContext()
@@ -190,21 +214,25 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
       this.update(this.currentServiceState);
     }
 
-    // Session-switch auto-disarm: only disarm when we can SEE a
-    // different LIVE session in the workspace (user picked session B
-    // in the extension picker). Transient flips to waiting/no-session/
-    // lastKnown are deliberately NOT handled here - they would cause
-    // spurious cancels during normal polling hiccups. The service's
-    // own poll handles "target CLI actually exited" via the stronger
-    // `isTargetSessionStillLive()` check every 2 seconds.
+    // Session-switch auto-disarm: fire whenever the session token
+    // service reports a DIFFERENT sessionId than the one we armed
+    // against, regardless of source. The previous version gated on
+    // `source === "live"`, which missed the real-world case the user
+    // hit: user picked session B in the Claude Code picker and
+    // neither session went live (they were both sitting idle in
+    // picker view), so the detector never fired and the armed
+    // state sat until the 30 s timeout.
+    //
+    // `null` current is deliberately NOT handled here - the session
+    // token service can briefly transition through no-session /
+    // waiting during normal polling hiccups and we do not want to
+    // spuriously cancel on those. Matching on sessionId inequality
+    // skips those transitions (a null `current` never has a
+    // sessionId to compare against).
     if (this.currentServiceState.status === "armed") {
       const armedTarget = this.currentServiceState.sentinel.targetSessionId;
       const current = this.currentClaudeSession;
-      if (
-        current &&
-        current.source === "live" &&
-        current.sessionId !== armedTarget
-      ) {
+      if (current && current.sessionId !== armedTarget) {
         this.service.disarm("session-switched");
       }
     }
@@ -355,42 +383,16 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
       (session.autoCompactPct / 100) * session.contextWindowSize
     );
     const pct = ceiling > 0 ? Math.round((session.contextUsed / ceiling) * 100) : 0;
-    const contextFractionOfCeiling =
-      ceiling > 0 ? session.contextUsed / ceiling : 0;
 
-    const activeSessions = enumerateActiveClaudeSessions();
-    const otherCount = activeSessions.filter(
-      (s) => s.sessionId !== session.sessionId
-    ).length;
-
-    // The widget's grayed `unavailable` state already prevents the
-    // click from reaching this code path when the tool is paused,
-    // so we do NOT run the availability resolver again here -
-    // `arm()` itself re-runs it as defense in depth. The only thing
-    // the widget still needs from preflight is the confirm-dialog
-    // hints (context near threshold, other live sessions).
-    const hints = buildArmConfirmHints({
-      contextFractionOfCeiling,
-      otherLiveSessionCount: otherCount,
-    });
-
-    // Non-modal toast confirmation - same shape and behavior as the
-    // one-time consent notification. Lives in the lower-right
-    // notification area, does not block editor work, and does not
-    // auto-commit on focus loss. A stray click anywhere outside the
-    // toast does nothing; the only way to arm is to explicitly click
-    // the "Arm Auto-Compact" button. Dismissing the toast via its X
-    // returns undefined, which the guard below treats as cancel.
+    // Non-modal toast confirmation. The widget's grayed `unavailable`
+    // state already prevents the click from reaching this path when
+    // the tool is paused, and `arm()` re-runs the resolver as
+    // defense in depth. Dismissing the toast via its X returns
+    // undefined, which the guard below treats as cancel.
     const titlePrefix = session.sessionTitle
       ? `"${truncateTitle(session.sessionTitle)}" - `
       : "";
-    const baseLine = `Arm Claude Force Auto-Compact for ${titlePrefix}${session.label} (${formatTokens(session.contextUsed)} / ${formatTokens(ceiling)}, ${formatPct(pct)})? Your next prompt in Claude will trigger auto-compact. Override is restored automatically.`;
-
-    // Confirm-dialog hints are appended inline so the user sees
-    // "near native threshold" and "other live sessions" warnings
-    // in one place.
-    const hintLines = hints.map((h) => h.text).join(" ");
-    const message = hintLines ? `${baseLine} ${hintLines}` : baseLine;
+    const message = `Arm Claude Force Auto-Compact for ${titlePrefix}${session.label} (${formatTokens(session.contextUsed)} / ${formatTokens(ceiling)} ${formatPct(pct)})? Your next prompt in Claude will trigger auto-compact. Automatically disarms in 30 seconds of no activity or click again to cancel.`;
 
     const choice = await vscode.window.showInformationMessage(
       message,
@@ -399,16 +401,17 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
     );
     if (choice !== "Arm Auto-Compact") return;
 
-    const result = this.service.arm(transcriptPath, session.sessionId, "1");
+    const result = this.service.arm(transcriptPath, session.sessionId);
     if (!result.ok) {
       vscode.window.showWarningMessage(result.message);
       return;
     }
-
-    vscode.window.showInformationMessage(
-      "Claude Force Auto-Compact is armed. Send any prompt in the target Claude window now. " +
-        "WAT321 will restore your override automatically after the compact fires."
-    );
+    // Post-arm feedback comes from the widget state flip (red + "Armed"
+    // label + armed tooltip), not a second notification toast. Every
+    // extra toast click forces VS Code to re-layout the notification
+    // area and kicks webview panels (e.g. Claude Code extension) out
+    // of their maximized layout. Keeping the arm path to exactly one
+    // toast (the confirm dialog) minimizes that disruption.
   }
 
   /** Handle post-disarm cooldown events from the service. The

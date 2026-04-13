@@ -6,7 +6,8 @@ import type {
   StatusBarWidget,
 } from "../shared/claude-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
-import { getWidgetPriority } from "../shared/priority";
+import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
+import { renderUsageNonOkState } from "../shared/ui/usageNonOkRenderer";
 
 export class ClaudeUsage5hrWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -15,7 +16,7 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.session",
       vscode.StatusBarAlignment.Right,
-      getWidgetPriority(0)
+      getWidgetPriority(WIDGET_SLOT.claudeUsage5H)
     );
     this.item.name = "WAT321: Claude Usage (5hr)";
     this.item.text = "Claude (5hr) $(loading~spin)";
@@ -25,85 +26,30 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
   }
 
   update(state: ServiceState): void {
-    switch (state.status) {
-      case "loading":
-        this.item.text = "Claude (5hr) $(loading~spin)";
-        this.item.tooltip = "Fetching Claude usage data...";
-        this.item.color = undefined;
-        this.item.show();
-        break;
+    const handled = renderUsageNonOkState(this.item, state, {
+      providerName: "Claude",
+      loadingText: "Claude (5hr) $(loading~spin)",
+      wakeCommand: "wat321.wakeClaudeUsage",
+    });
+    if (handled) return;
 
-      case "not-connected":
-        // Claude CLI is not installed - hide widget entirely
-        this.item.hide();
-        break;
-
-      case "no-auth":
-        this.item.text = "$(key) Claude - Waiting";
-        this.item.tooltip =
-          "Waiting for Claude credentials. Will connect automatically when available.";
-        this.item.color = undefined;
-        this.item.show();
-        break;
-
-      case "token-expired":
-        this.item.text = "$(key) Claude - Refreshing";
-        this.item.tooltip =
-          "Claude token refreshing. Will reconnect automatically on next activity.";
-        this.item.color = undefined;
-        this.item.show();
-        break;
-
-      case "rate-limited": {
-        this.item.text = "$(warning) Claude Usage - Offline";
-        const elapsed = Date.now() - state.rateLimitedAt;
-        const remaining = Math.max(
-          0,
-          Math.ceil((state.retryAfterMs - elapsed) / 60_000)
-        );
-        this.item.tooltip =
-          remaining > 0
-            ? `Temporarily paused. Reconnecting in ${remaining} minute${remaining !== 1 ? "s" : ""}...`
-            : "Reconnecting...";
-        this.item.color = undefined;
-        this.item.show();
-        break;
-      }
-
-      case "offline":
-        this.item.text = "$(cloud-offline) Claude - No Network";
-        this.item.tooltip = "Network unavailable. Will reconnect automatically.";
-        this.item.color = undefined;
-        this.item.show();
-        break;
-
-      case "error":
-        this.item.text = "$(cloud-offline) Claude - Offline";
-        this.item.tooltip = "Claude usage temporarily unavailable. Will retry automatically.";
-        this.item.color = undefined;
-        this.item.show();
-        break;
-
-      case "ok": {
-        const pct = state.data.five_hour?.utilization ?? 0;
-        const mode = getDisplayMode();
-        if (mode === "minimal") {
-          this.item.text = `Claude (5h): ${pct}%`;
-        } else if (mode === "compact") {
-          this.item.text = `Claude (5h) ${makeBar(pct, 5)} ${pct}%`;
-        } else {
-          // Full view keeps the long "5hr" form for space-rich layouts
-          this.item.text = `Claude (5hr) ${makeBar(pct)} ${pct}%`;
-        }
-        this.item.tooltip = buildTooltip(state.data);
-        this.item.color =
-          pct >= 90
-            ? new vscode.ThemeColor("statusBarItem.warningForeground")
-            : undefined;
-        this.item.show();
-        break;
-      }
+    // ok branch
+    const pct = state.data.five_hour?.utilization ?? 0;
+    const mode = getDisplayMode();
+    if (mode === "minimal") {
+      this.item.text = `Claude (5h): ${pct}%`;
+    } else if (mode === "compact") {
+      this.item.text = `Claude (5h) ${makeBar(pct, 5)} ${pct}%`;
+    } else {
+      // Full view keeps the long "5hr" form for space-rich layouts
+      this.item.text = `Claude (5hr) ${makeBar(pct)} ${pct}%`;
     }
+    this.item.tooltip = buildTooltip(state.data);
+    this.item.color =
+      pct >= 90
+        ? new vscode.ThemeColor("statusBarItem.warningForeground")
+        : undefined;
+    this.item.show();
   }
 
   dispose(): void {

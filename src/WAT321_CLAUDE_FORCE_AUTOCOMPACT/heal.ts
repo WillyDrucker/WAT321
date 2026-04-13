@@ -13,24 +13,29 @@ import {
 } from "./backups";
 
 /**
- * Recovery logic for Claude Force Auto-Compact. The service never
- * trusts "1" (the WAT321 armed value) as a restore target. Four
- * tiers of fallback, searched in order, each poison-checked:
+ * Recovery logic for Claude Force Auto-Compact. Four-tier restore
+ * precedence, searched in order and poison-checked at every tier
+ * ("1" is never a valid restore target anywhere):
  *
- *   1. Sentinel.originalOverride (most recent known user value)
- *   2. Newest arm backup ring entry (historical user values)
- *   3. Install snapshot (captured once on first clean activation)
- *   4. Hardcoded DEFAULT_CLAUDE_AUTOCOMPACT_PCT_STR ("85")
+ *   1. `sentinel.originalOverride` if the sentinel exists and its
+ *      recorded original is not the armed value
+ *   2. Newest arm backup ring entry (`readNewestArmBackupOverride`)
+ *   3. Install snapshot (`readInstallSnapshotOverride`)
+ *   4. `DEFAULT_CLAUDE_AUTOCOMPACT_PCT_STR` ("85") as the hardcoded
+ *      failsafe
  *
- * Entry points:
+ * Two entry points:
  *
- *   - `safeRestoreValue()` - coerces the WAT321 armed value to the
- *     Claude default; used inside the normal in-memory disarm path
- *     where the caller already has a sentinel object in hand.
- *   - `healStuckOverride()` - inspects settings.json directly, used
- *     as the startup failsafe and by Reset WAT321. This is the ONLY
- *     path that can recover a user whose sentinel is missing,
- *     corrupt, or self-referential.
+ *   - `safeRestoreValue()` - in-memory disarm path with a sentinel
+ *     object already in hand.
+ *   - `healStuckOverride()` - inspects settings.json directly,
+ *     called from `start()`, the widget retry, and Reset WAT321.
+ *     The only path that can recover a user whose sentinel is
+ *     missing, corrupt, or self-referential. An unreadable
+ *     settings file biases toward preserving the sentinel: on
+ *     `io-error` we return without touching it, because the
+ *     sentinel may be the only trustworthy record of the
+ *     original value.
  */
 
 // Re-export so existing callers (service.ts) keep working. The
@@ -57,36 +62,16 @@ export type HealResult =
   | "io-error";
 
 /**
- * Inspect `~/.claude/settings.json` directly and, if
- * `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is stuck at the WAT321 armed value
- * `"1"`, restore it to a safe value and clean up the sentinel.
+ * Inspect `~/.claude/settings.json` directly and, if the override
+ * is stuck at `"1"`, restore via the four-tier precedence chain
+ * documented in the file-level docstring above, then clean up the
+ * sentinel.
  *
- * Restore target precedence (all poison-checked - `"1"` is never a
- * valid candidate at any tier, it always falls through):
- *
- *   1. `sentinel.originalOverride` if the sentinel exists and its
- *      original is NOT `"1"` (string, or `null` for "no override")
- *   2. Newest arm backup ring entry (historical user values captured
- *      at each arm, survives a corrupt sentinel)
- *   3. Install snapshot value (the canonical baseline, captured once
- *      on first activation that saw a clean settings.json)
- *   4. `"85"` (Claude's default auto-compact threshold) as the final
- *      hardcoded failsafe
- *
- * **Safety: unreadable settings.json biases toward preserve.** The
- * reader distinguishes "missing file" / "present" / "io-error".
- * On `io-error` we return `"io-error"` WITHOUT touching the sentinel.
- * The sentinel may be the only trustworthy record of the original
- * override, so a corrupt settings file must never let us delete it.
- * Only a confirmed read of a non-`"1"` value is allowed to clean up
- * an orphaned sentinel.
- *
- * This is called from `start()` (no-sentinel / stale paths),
- * `retryStaleRestore` (widget click retry), and `clearSettings`
- * (Reset WAT321). Running any of those MUST unstick the user, even
- * if the sentinel is missing, corrupt, or self-referential - but
- * must also NOT make things worse if the settings file itself is
- * the broken piece.
+ * Safety invariant: an unreadable settings.json biases toward
+ * preserve. On `io-error` we return without touching the sentinel,
+ * because the sentinel may be the only trustworthy record of the
+ * user's original value. Only a confirmed read of a non-`"1"`
+ * value is allowed to delete an orphaned sentinel.
  */
 export function healStuckOverride(): HealResult {
   const readResult = readAutoCompactOverride();

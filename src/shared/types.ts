@@ -11,7 +11,17 @@ export type ServiceState<TData> =
   | { status: "not-connected" }
   | { status: "no-auth" }
   | { status: "token-expired"; message: string }
-  | { status: "rate-limited"; retryAfterMs: number; rateLimitedAt: number }
+  | {
+      status: "rate-limited";
+      retryAfterMs: number;
+      rateLimitedAt: number;
+      /** Distinguishes a server-directed backoff (Retry-After header
+       * present) from our own hardcoded 15-minute fallback. The widget
+       * exposes a click-to-wake affordance ONLY when source is
+       * "fallback" - we never override a wait the server explicitly
+       * asked for. */
+      source: "fallback" | "server";
+    }
   | { status: "offline"; message: string }
   | { status: "error"; message: string }
   | { status: "ok"; data: TData; fetchedAt: number };

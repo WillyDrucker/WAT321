@@ -5,54 +5,31 @@ import {
   scanTailForCompactHistory,
   type TailHistoryOutcome,
 } from "./compactDetector";
+import {
+  CLAUDE_BUSY_WINDOW_MS,
+  LOOP_WINDOW_MS,
+  USEFUL_CONTEXT_FRACTION,
+} from "./constants";
 import { SENTINEL_PATH } from "./sentinel";
 import type { UnavailableReason } from "./types";
 
 /**
  * Unified safety / availability gate for Claude Force Auto-Compact.
- * One module, one answer, consulted by:
+ * The single pure resolver consulted by the passive poll, the
+ * widget's snap check, and `arm()` as a final defense-in-depth.
  *
- *   - The service's passive poll, which moves the widget between
- *     `ready` and `unavailable` as conditions change
- *   - The widget's snap check on session token updates and click-time
- *   - `arm()` as a final defense-in-depth check before touching disk
+ * Primary arm gate: the context-fraction check. Below
+ * `USEFUL_CONTEXT_FRACTION` (20%) there is nothing meaningful to
+ * compact, so arming grays out. `loop-suspected` is a secondary
+ * defense for small-ceiling sessions that can land above 20%
+ * post-compact. `claude-busy` keeps the user from arming mid-turn
+ * so a queued prompt or tool-result callback cannot become the
+ * unintended compact trigger.
  *
- * The primary arm gate is the **context-fraction check**: the
- * user must be above `USEFUL_CONTEXT_FRACTION` (20%) of their
- * auto-compact ceiling before arming makes sense. Below that
- * there is nothing meaningful to compact and a compact would
- * either waste a summary or immediately loop with the next one.
- *
- * This single check subsumes what used to be
- * `recent-native-compact` (30 s recency window) and
- * `post-disarm-cooldown` (30 s watcher window) because in both of
- * those cases the user is always in the low-context post-compact
- * zone. `loop-suspected` stays as a secondary defense for
- * small-ceiling users whose post-compact state can land above the
- * 20% gate.
- *
- * The post-disarm cooldown watcher itself still runs in the
- * service - its job is detecting stray compacts from a CLI-cached
- * env var and warning the user to restart their terminal. That
- * purpose is separate from gating arm.
+ * The post-disarm cooldown watcher still runs in the service as a
+ * CLI-cache diagnostic (detects stray compacts from a cached env
+ * var) but no longer gates arming.
  */
-
-/** Minimum context usage (as a fraction of the user's auto-compact
- * ceiling) required to arm. Below this the button grays out with
- * a `below-useful-threshold` tooltip explaining where the user is
- * and where the activation point sits. */
-export const USEFUL_CONTEXT_FRACTION = 0.20;
-
-/** Window used by the secondary loop-detection backup. When 2+
- * compact markers are visible in the tail AND the file mtime is
- * within this window, treat it as "clustered in time" and refuse
- * arm. Loose signal; the primary context gate does the real work. */
-export const LOOP_WINDOW_MS = 2 * 60_000;
-
-/** Context usage (as a fraction of the user's auto-compact ceiling)
- * that triggers a "near native threshold" informational hint in
- * the arm confirm dialog. Not a safety gate. */
-export const NEAR_NATIVE_THRESHOLD_FRACTION = 0.8;
 
 /** What the widget knows about the current live Claude session.
  * Fed into the service via `setActiveContext` and cached for the
@@ -128,7 +105,35 @@ export function determineUnavailableReason(
     }
   }
 
-  // 4. Secondary loop detection backup. Uses mtime as a loose
+  // 4. Busy-Claude gate. If the last JSONL entry in the active
+  //    transcript is a user message OR an assistant message with an
+  //    unresolved tool_use block, Claude is either about to respond
+  //    or is mid-turn. Arming now risks the next compact firing on
+  //    a queued prompt or a tool-result callback rather than the
+  //    prompt the user actually intended to be the trigger. Wait
+  //    for the turn to complete. Auto-clears as soon as the tail
+  //    flips to `assistant-done`. Only a fresh-ish transcript is
+  //    gated: a dormant session whose last entry happens to be a
+  //    user message from yesterday should not block arming, so we
+  //    combine the last-entry check with an mtime recency window.
+  const history = input.loopHistory;
+  if (
+    ctx !== null &&
+    history !== null &&
+    !history.ioError &&
+    history.mtimeMs > 0
+  ) {
+    const age = Date.now() - history.mtimeMs;
+    const recentWrite = age >= 0 && age < CLAUDE_BUSY_WINDOW_MS;
+    const busyKind =
+      history.lastEntryKind === "user" ||
+      history.lastEntryKind === "assistant-pending";
+    if (recentWrite && busyKind) {
+      return "claude-busy";
+    }
+  }
+
+  // 5. Secondary loop detection backup. Uses mtime as a loose
   //    recency signal because we don't need per-marker accuracy
   //    for a backup gate - the context gate already catches the
   //    common case. False positives here are "refuse arm for a
@@ -142,7 +147,6 @@ export function determineUnavailableReason(
   //    invalidated the cache. Computing age at resolve time lets
   //    a cached outcome age forward naturally over successive
   //    resolver calls.
-  const history = input.loopHistory;
   if (
     history !== null &&
     !history.ioError &&
@@ -176,34 +180,3 @@ export function determineUnavailableReasonForArm(
   });
 }
 
-/** Informational hints shown inside the arm confirmation dialog
- * built by the widget. These are NOT safety gates - they inform
- * the user about context adjacent to the action. */
-export interface ConfirmHintInput {
-  contextFractionOfCeiling?: number;
-  otherLiveSessionCount?: number;
-}
-
-export interface ConfirmHint {
-  code: "near-native-threshold" | "other-live-sessions";
-  text: string;
-}
-
-export function buildArmConfirmHints(input: ConfirmHintInput): ConfirmHint[] {
-  const hints: ConfirmHint[] = [];
-  const frac = input.contextFractionOfCeiling;
-  if (typeof frac === "number" && frac >= NEAR_NATIVE_THRESHOLD_FRACTION && frac < 1) {
-    hints.push({
-      code: "near-native-threshold",
-      text: "Heads up: your context is close to the native auto-compact threshold. A normal compact may fire on its own before WAT321 does.",
-    });
-  }
-  const others = input.otherLiveSessionCount ?? 0;
-  if (others > 0) {
-    hints.push({
-      code: "other-live-sessions",
-      text: `${others} other Claude session${others === 1 ? "" : "s"} detected. The override is global, so prompt in the target first.`,
-    });
-  }
-  return hints;
-}
