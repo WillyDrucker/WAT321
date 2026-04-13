@@ -8,18 +8,19 @@ import {
   CACHE_FRESHNESS_OK_MS,
   CLAIM_TTL_MS,
   ERROR_ABSORPTION_THRESHOLD,
-  FETCH_COOLDOWN_MS,
   POLL_INTERVAL_MS,
   RATE_LIMIT_BACKOFF_MS,
-  STARTUP_JITTER_MS,
 } from "../polling/constants";
+import { CountdownTicker } from "../polling/countdownTicker";
 import { DiscoveryPoller } from "../polling/discovery";
+import { isNetworkError } from "../polling/errorClassification";
 import { httpGetJson } from "../polling/httpClient";
 import {
   isCacheableState,
   resolveStateFreshness,
   statesEqual,
 } from "../polling/stateMachine";
+import { computeStartupDelay } from "../polling/startupDelay";
 import type { ServiceState, UsageResponse } from "./types";
 
 const AUTH_DIR = join(homedir(), ".claude");
@@ -28,7 +29,6 @@ const CACHE_FILE = join(STAMP_DIR, "claude-usage.cache.json");
 const CLAIM_FILE = join(STAMP_DIR, "claude-usage.claim");
 const CREDENTIALS_FILE = join(AUTH_DIR, ".credentials.json");
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
-const COUNTDOWN_TICK_MS = 60_000;
 const NO_CACHE_RETRY_MS = 10_000;
 
 type Listener = (state: ServiceState) => void;
@@ -45,7 +45,6 @@ export class ClaudeUsageSharedService {
 
   private listeners = new Set<Listener>();
   private timer: ReturnType<typeof setInterval> | null = null;
-  private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private discoveryPoller: DiscoveryPoller | null = null;
   private abortController: AbortController | null = null;
   private inFlight = false;
@@ -60,6 +59,13 @@ export class ClaudeUsageSharedService {
     CLAIM_TTL_MS,
     undefined,
     resolveStateFreshness
+  );
+
+  private countdown = new CountdownTicker(
+    () => {
+      for (const listener of this.listeners) listener(this.state);
+    },
+    () => this.state.status === "rate-limited"
   );
 
   start(): void {
@@ -98,7 +104,7 @@ export class ClaudeUsageSharedService {
     }
     this.discoveryPoller?.dispose();
     this.discoveryPoller = null;
-    this.stopCountdownTicker();
+    this.countdown.stop();
     this.abortController?.abort();
     this.listeners.clear();
   }
@@ -114,29 +120,12 @@ export class ClaudeUsageSharedService {
 
   private startPolling(): void {
     this.discoveryPoller?.stop();
-
-    // Delay first refresh cycle. If a fresh cache exists, wait against
-    // that state's own freshness window so short-bucket states (no-auth,
-    // token-expired, offline, error) recheck quickly after the user fixes
-    // them. Otherwise use cooldown.
-    const cache = this.coordinator.readCache();
-    let base: number;
-    if (cache && this.coordinator.isFresh(cache)) {
-      const elapsed = Date.now() - cache.timestamp;
-      const stateFreshness = resolveStateFreshness(cache.state);
-      base = Math.max(5_000, stateFreshness - elapsed);
-    } else {
-      const lastFetchTime = cache?.timestamp ?? 0;
-      const elapsed = Date.now() - lastFetchTime;
-      base = Math.max(5_000, FETCH_COOLDOWN_MS - elapsed);
-    }
-    // Random jitter avoids simultaneous instance startups firing in the same ms.
-    const jitter = Math.floor(Math.random() * STARTUP_JITTER_MS);
+    const delay = computeStartupDelay(this.coordinator);
     setTimeout(() => {
       if (this.disposed) return;
       this.refresh();
       this.timer = setInterval(() => this.refresh(), POLL_INTERVAL_MS);
-    }, base + jitter);
+    }, delay);
   }
 
   private setState(state: ServiceState): void {
@@ -151,41 +140,18 @@ export class ClaudeUsageSharedService {
     this.timer = setInterval(() => this.refresh(), ms);
   }
 
-  private startCountdownTicker(): void {
-    this.stopCountdownTicker();
-    this.countdownTimer = setInterval(() => {
-      if (this.state.status === "rate-limited") {
-        for (const listener of this.listeners) listener(this.state);
-      } else {
-        this.stopCountdownTicker();
-      }
-    }, COUNTDOWN_TICK_MS);
-  }
-
-  private stopCountdownTicker(): void {
-    if (this.countdownTimer) {
-      clearInterval(this.countdownTimer);
-      this.countdownTimer = null;
-    }
-  }
-
   private async refresh(): Promise<void> {
     if (this.disposed) return;
     if (this.inFlight) return;
 
-    // If the auth directory was deleted mid-session, transition back to
-    // discovery mode so a re-install picks up without manual reset.
-    // Covers the case where a user uninstalls the Claude CLI while VS
-    // Code is running - without this check the service would poll
-    // forever looking for credentials in a directory that no longer
-    // exists. The poll timer and countdown ticker are cleared because
-    // startDiscovery() is the new source of wakeups.
+    // If the auth directory was deleted mid-session, transition back
+    // to discovery mode so a re-install picks up without manual reset.
     if (!existsSync(AUTH_DIR)) {
       if (this.timer) {
         clearInterval(this.timer);
         this.timer = null;
       }
-      this.stopCountdownTicker();
+      this.countdown.stop();
       this.setState({ status: "not-connected" });
       this.startDiscovery();
       return;
@@ -197,9 +163,9 @@ export class ClaudeUsageSharedService {
       this.setState(cache.state);
       if (cache.state.status === "ok") this.consecutiveErrors = 0;
       if (cache.state.status === "rate-limited") {
-        this.startCountdownTicker();
+        this.countdown.start();
       } else {
-        this.stopCountdownTicker();
+        this.countdown.stop();
       }
       return;
     }
@@ -249,7 +215,7 @@ export class ClaudeUsageSharedService {
       };
       this.setState(newState);
       this.coordinator.writeCache(newState);
-      this.stopCountdownTicker();
+      this.countdown.stop();
 
       if (this.consecutiveRateLimits > 0) {
         this.setPollInterval(POLL_INTERVAL_MS);
@@ -283,14 +249,15 @@ export class ClaudeUsageSharedService {
       };
       this.setState(newState);
       this.coordinator.writeCache(newState);
-      this.startCountdownTicker();
+      this.countdown.start();
       return;
     }
 
-    // Absorb transient errors silently. Only surface "offline" after 3
-    // consecutive failures. Covers stale keep-alive sockets after idle,
-    // brief network blips, and server-side reset windows. On startup
-    // (loading), also absorb to prevent a false "Offline" flash.
+    // Absorb transient errors silently. Only surface "offline" after
+    // ERROR_ABSORPTION_THRESHOLD consecutive failures. Covers stale
+    // keep-alive sockets after idle, brief network blips, and
+    // server-side reset windows. On startup (loading), also absorb
+    // to prevent a false "Offline" flash.
     this.consecutiveErrors++;
     if (this.consecutiveErrors < ERROR_ABSORPTION_THRESHOLD) {
       if (this.state.status === "ok" || this.state.status === "loading") return;
@@ -347,16 +314,4 @@ export class ClaudeUsageSharedService {
       abortController: this.abortController,
     });
   }
-}
-
-/** Is this error message a transient network failure we should absorb? */
-function isNetworkError(message: string): boolean {
-  return (
-    message.includes("ENOTFOUND") ||
-    message.includes("ETIMEDOUT") ||
-    message.includes("EAI_AGAIN") ||
-    message.includes("ECONNRESET") ||
-    message.includes("Request timed out") ||
-    message.includes("ECONNREFUSED")
-  );
 }
