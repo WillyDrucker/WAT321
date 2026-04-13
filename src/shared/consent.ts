@@ -63,8 +63,14 @@ export async function requestConsent(
     return true;
   }
 
+  // VS Code's information-message header already renders the first
+  // sentence prominently, so we show only the body. Prepending the
+  // title caused a visible duplicate ("Claude Force Auto-Compact" once
+  // as the header, once as the first words of the body paragraph).
+  // The `title` field is retained on the request interface for
+  // telemetry / accessibility surfaces that don't read the body.
   const choice = await vscode.window.showInformationMessage(
-    `${request.title}\n\n${request.body}`,
+    request.body,
     request.acceptLabel,
     "Cancel"
   );

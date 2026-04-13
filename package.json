@@ -109,7 +109,7 @@
             "type": "boolean",
             "default": false,
             "order": 99,
-            "markdownDescription": "**Reset WAT321** - Restore WAT321 to its default state and clear its saved local data. This resets all WAT321 settings and clears anything WAT321 has stored locally, so everything rebuilds cleanly on the next refresh. A confirmation dialog appears before anything is changed."
+            "markdownDescription": "**Reset WAT321** - Restore WAT321 to its default state and clear its saved local data. This resets all WAT321 settings and clears anything WAT321 has stored locally, so everything rebuilds cleanly on the next refresh. If any WAT321 tool ever looks stuck, this also resets every tool back to a known-good state. A confirmation dialog appears before anything is changed."
           }
         }
       }

@@ -1,14 +1,19 @@
 import * as vscode from "vscode";
-import { readdirSync, readFileSync, existsSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
 import type { ClaudeForceAutoCompactState, StatusBarWidget } from "./types";
-import type { ClaudeForceAutoCompactService, DisarmReason } from "./service";
+import type { ClaudeForceAutoCompactService } from "./service";
 import type { ClaudeSessionTokenService } from "../WAT321_CLAUDE_SESSION_TOKENS/service";
 import type { WidgetState as ClaudeTokenState } from "../WAT321_CLAUDE_SESSION_TOKENS/types";
 import { getWidgetPriority } from "../shared/priority";
-import { requestConsent, hasConsent } from "../shared/consent";
-import { formatTokens, formatPct } from "../shared/ui/tokenFormatters";
+import { hasConsent, requestConsent } from "../shared/consent";
+import { formatPct, formatTokens } from "../shared/ui/tokenFormatters";
+import { enumerateActiveClaudeSessions } from "./activeClaudeSessions";
+import { formatArmErrorMessage, formatDisarmMessage } from "./messages";
+import {
+  buildArmedTooltip,
+  buildReadyTooltip,
+  buildStaleTooltip,
+  truncateTitle,
+} from "./tooltips";
 
 const CLAMP = "\u{1F5DC}\u{FE0F}";
 const RED_EXCLAM = "\u2757"; // U+2757 HEAVY EXCLAMATION MARK SYMBOL
@@ -52,8 +57,7 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
     // user knows *why* the widget went from armed back to ready when
     // they come back from a context switch.
     if (prev.status === "armed" && state.status === "restored") {
-      const reason = this.service.lastDisarmReason;
-      const msg = this.formatDisarmMessage(reason);
+      const msg = formatDisarmMessage(this.service.lastDisarmReason);
       if (msg) vscode.window.showInformationMessage(msg);
       this.service.lastDisarmReason = null;
     }
@@ -64,30 +68,18 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
         break;
 
       case "ready":
-        {
-          const live = this.currentClaudeSession?.source === "live" ? this.currentClaudeSession : null;
-          if (live) {
-            this.item.text = `${CLAMP} Auto-Compact ${formatTokens(live.contextUsed)}`;
-          } else {
-            this.item.text = `${CLAMP} Auto-Compact`;
-          }
-        }
-        this.item.tooltip = this.buildReadyTooltip();
+        this.item.text = `${CLAMP} Auto-Compact`;
+        this.item.tooltip = buildReadyTooltip(this.liveTooltipInput());
         this.item.color = undefined;
         this.item.show();
         break;
 
-      case "armed": {
-        const mins = Math.max(
-          0,
-          Math.round((Date.now() - state.sentinel.armedAt) / 60000)
-        );
+      case "armed":
         this.item.text = `${RED_EXCLAM} Auto-Compact (Armed)`;
-        this.item.tooltip = this.buildArmedTooltip(state.sentinel.targetSessionId, mins);
+        this.item.tooltip = buildArmedTooltip();
         this.item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
         this.item.show();
         break;
-      }
 
       case "restored":
         this.item.text = `${CLAMP} Auto-Compact (Restored)`;
@@ -98,7 +90,7 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
 
       case "stale-sentinel":
         this.item.text = `${RED_EXCLAM} Auto-Compact (!)`;
-        this.item.tooltip = this.buildStaleTooltip();
+        this.item.tooltip = buildStaleTooltip();
         this.item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
         this.item.show();
         break;
@@ -120,8 +112,6 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
     } else {
       this.currentClaudeSession = null;
     }
-    // Refresh widget display so the new token count is reflected
-    // immediately on the status bar (e.g. after a prompt completes).
     if (this.currentServiceState.status !== "not-installed") {
       this.update(this.currentServiceState);
     }
@@ -146,58 +136,54 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
     }
   }
 
-  private formatDisarmMessage(reason: DisarmReason | null): string | null {
-    switch (reason) {
-      case "compact-detected":
-        return "Auto-compact fired. CLAUDE_AUTOCOMPACT_PCT_OVERRIDE restored.";
-      case "timeout":
-        return "Claude Force Auto-Compact timed out (5 min). CLAUDE_AUTOCOMPACT_PCT_OVERRIDE restored - no compact fired.";
-      case "session-ended":
-        return "Target Claude session ended before compact fired. CLAUDE_AUTOCOMPACT_PCT_OVERRIDE restored.";
-      case "session-switched":
-        return "Claude session switched while Claude Force Auto-Compact was armed. CLAUDE_AUTOCOMPACT_PCT_OVERRIDE restored.";
-      default:
-        return null;
-    }
+  private liveTooltipInput() {
+    const c = this.currentClaudeSession;
+    if (!c || c.source !== "live") return null;
+    return {
+      label: c.label,
+      sessionTitle: c.sessionTitle,
+      contextUsed: c.contextUsed,
+      contextWindowSize: c.contextWindowSize,
+      autoCompactPct: c.autoCompactPct,
+    };
   }
 
   /** Command handler for the click / palette entry. */
   async onCommand(): Promise<void> {
     // Enforce consent before first use. We intentionally do NOT pass
-    // `settingToRevert` - cancelling the consent dialog should not uncheck
-    // the user's setting. They enabled it deliberately; they can simply
-    // decline this one use and click again later when they are ready.
+    // `settingToRevert` - cancelling the consent dialog should not
+    // uncheck the user's setting. They enabled it deliberately.
     if (!hasConsent(this.context, "claudeForceAutoCompact")) {
       const granted = await requestConsent(this.context, {
         toolKey: "claudeForceAutoCompact",
         title: "Claude Force Auto-Compact",
         body:
           "Claude Force Auto-Compact works by making a small, temporary change to " +
-          "~/.claude/settings.json that tells Claude to run its built-in auto-compact on your " +
-          "next prompt.\n\n" +
-          "Any files WAT321 changes are backed up first and restored automatically after the " +
-          "auto-compact fires.\n\n" +
-          "This produces a higher-quality compaction result than the /compact slash command. " +
-          "More of your conversation context, tool results, and reasoning is preserved in the " +
-          "summary.\n\n" +
-          "This is the only WAT321 feature that writes outside ~/.wat321/. Reset WAT321 clears " +
-          "this grant and restores anything WAT321 changed.\n\n" +
-          "Grant consent to enable Claude Force Auto-Compact?",
+          "~/.claude/settings.json to run the built-in auto-compact on your next prompt. " +
+          "Any files WAT321 changes are backed up first and restored automatically after " +
+          "the auto-compact fires. This produces a higher-quality compaction result than " +
+          "the /compact slash command.\n\n" +
+          "This is the only WAT321 feature that writes outside ~/.wat321/. Reset WAT321 " +
+          "clears this grant and restores anything WAT321 changed.\n\n" +
+          "Grant consent to enable Claude Force Auto-Compact feature?",
         acceptLabel: "Grant Consent",
       });
       if (!granted) return;
     }
 
     const state = this.currentServiceState;
-    if (state.status === "stale-sentinel") {
-      return this.handleStaleRestore();
-    }
+    if (state.status === "stale-sentinel") return this.handleStaleRestore();
     if (state.status === "armed") {
-      return this.handleArmedClick();
+      // One-click disarm. Arming required an explicit confirm toast,
+      // so an armed widget can only exist because the user deliberately
+      // put it there moments ago. Disarming is a safe undo (restores
+      // the original override, nothing is destroyed), so we do not
+      // interpose a second toast - the "armed -> restored" state
+      // flash + auto-disarm notification is sufficient feedback.
+      this.service.disarm();
+      return;
     }
-    if (state.status === "ready") {
-      return this.handleReadyClick();
-    }
+    if (state.status === "ready") return this.handleReadyClick();
   }
 
   private async handleReadyClick(): Promise<void> {
@@ -208,11 +194,11 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
       return;
     }
 
-    // Do not arm against a fallback (last-known) session. The widget might
-    // be showing cached tokens from a closed session, in which case there
-    // is no live CLI process to actually trigger the compact on - lowering
-    // the global override would only affect whichever Claude session the
-    // user opens next, which is the opposite of what they want.
+    // Do not arm against a fallback (last-known) session. The widget
+    // might be showing cached tokens from a closed session, in which
+    // case there is no live CLI process to actually trigger the compact
+    // on - lowering the global override would only affect whichever
+    // Claude session the user opens next.
     if (this.currentClaudeSession.source !== "live") {
       vscode.window.showInformationMessage(
         "No live Claude session in this workspace. WAT321 is showing the last-known context from a closed session. Open Claude Code and send a prompt to establish a live session, then try again."
@@ -229,21 +215,32 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
     }
 
     const session = this.currentClaudeSession;
-    const ceiling = Math.round((session.autoCompactPct / 100) * session.contextWindowSize);
+    const ceiling = Math.round(
+      (session.autoCompactPct / 100) * session.contextWindowSize
+    );
     const pct = ceiling > 0 ? Math.round((session.contextUsed / ceiling) * 100) : 0;
 
-    const activeSessions = this.enumerateActiveClaudeSessions();
-    const otherCount = activeSessions.filter((s) => s.sessionId !== session.sessionId).length;
+    const activeSessions = enumerateActiveClaudeSessions();
+    const otherCount = activeSessions.filter(
+      (s) => s.sessionId !== session.sessionId
+    ).length;
 
-    const titleLine = session.sessionTitle
-      ? `"${this.truncateTitle(session.sessionTitle)}"  -  `
+    // Non-modal toast confirmation - same shape and behavior as the
+    // one-time consent notification. Lives in the lower-right
+    // notification area, does not block editor work, and does not
+    // auto-commit on focus loss. A stray click anywhere outside the
+    // toast does nothing; the only way to arm is to explicitly click
+    // the "Arm Auto-Compact" button. Dismissing the toast via its X
+    // returns undefined, which the guard below treats as cancel.
+    const titlePrefix = session.sessionTitle
+      ? `"${truncateTitle(session.sessionTitle)}" - `
       : "";
     const multiWarning =
       otherCount > 0
         ? ` ${otherCount} other Claude session${otherCount === 1 ? "" : "s"} detected; the override is global, so prompt in the target first.`
         : "";
     const message =
-      `Arm Claude Force Auto-Compact for ${titleLine}${session.label} (${formatTokens(session.contextUsed)} / ${formatTokens(ceiling)}, ${formatPct(pct)})?` +
+      `Arm Claude Force Auto-Compact for ${titlePrefix}${session.label} (${formatTokens(session.contextUsed)} / ${formatTokens(ceiling)}, ${formatPct(pct)})?` +
       multiWarning +
       " Your next prompt in Claude will trigger auto-compact. Override is restored automatically.";
 
@@ -252,45 +249,18 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
       "Arm Auto-Compact",
       "Cancel"
     );
-
     if (choice !== "Arm Auto-Compact") return;
 
     const result = this.service.arm(transcriptPath, session.sessionId, "1");
     if (!result.ok) {
-      const msg = this.formatArmErrorMessage(result.reason);
-      vscode.window.showErrorMessage(msg);
+      vscode.window.showErrorMessage(formatArmErrorMessage(result.reason));
       return;
     }
 
-    // Non-modal info notification to guide the user
     vscode.window.showInformationMessage(
       "Claude Force Auto-Compact is armed. Send any prompt in the target Claude window now. " +
-      "WAT321 will restore your override automatically after the compact fires."
+        "WAT321 will restore your override automatically after the compact fires."
     );
-  }
-
-  private formatArmErrorMessage(reason: string): string {
-    switch (reason) {
-      case "sentinel-exists":
-        return "A Claude Force Auto-Compact sentinel already exists at ~/.wat321/claude-force-auto-compact-sentinel.json. Another WAT321 instance may have armed it, or a previous run left it behind. Wait for the other instance, or check the file manually.";
-      case "already-armed-value":
-        return "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is already set to 1 in ~/.claude/settings.json. WAT321 refuses to treat 1 as the original value. Restore your real override manually and try again.";
-      case "settings-missing":
-        return "~/.claude/settings.json does not exist. Claude Force Auto-Compact needs an existing Claude settings file to back up and restore.";
-      default:
-        return "Failed to arm Claude Force Auto-Compact. Check that ~/.claude/settings.json exists and is writable.";
-    }
-  }
-
-  private async handleArmedClick(): Promise<void> {
-    const choice = await vscode.window.showInformationMessage(
-      "Claude Force Auto-Compact is armed. Cancel and restore without triggering auto-compact?",
-      "Cancel and Restore",
-      "Leave Armed"
-    );
-    if (choice === "Cancel and Restore") {
-      this.service.disarm();
-    }
   }
 
   private async handleStaleRestore(): Promise<void> {
@@ -307,105 +277,6 @@ export class ClaudeForceAutoCompactWidget implements StatusBarWidget {
         );
       }
     }
-  }
-
-  /**
-   * Scan ~/.claude/sessions/*.json for active Claude CLI processes and
-   * return descriptors for the confirm dialog.
-   */
-  private enumerateActiveClaudeSessions(): Array<{ sessionId: string; cwd: string }> {
-    const sessionsDir = join(homedir(), ".claude", "sessions");
-    if (!existsSync(sessionsDir)) return [];
-
-    const out: Array<{ sessionId: string; cwd: string }> = [];
-    try {
-      const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
-      for (const file of files) {
-        try {
-          const raw = readFileSync(join(sessionsDir, file), "utf8");
-          const entry = JSON.parse(raw) as { sessionId?: string; cwd?: string };
-          if (entry.sessionId && entry.cwd) {
-            out.push({ sessionId: entry.sessionId, cwd: entry.cwd });
-          }
-        } catch {
-          // skip
-        }
-      }
-    } catch {
-      // skip
-    }
-    return out;
-  }
-
-  private truncateTitle(raw: string): string {
-    const maxTitleLen = 38;
-    if (!raw) return "";
-    return raw.length > maxTitleLen ? raw.slice(0, maxTitleLen) + "..." : raw;
-  }
-
-  private buildReadyTooltip(): vscode.MarkdownString {
-    const md = new vscode.MarkdownString();
-    md.isTrusted = false;
-    md.supportHtml = false;
-    md.appendMarkdown("**Claude Force Auto-Compact**  \n");
-
-    const live = this.currentClaudeSession?.source === "live" ? this.currentClaudeSession : null;
-
-    if (live) {
-      const title = this.truncateTitle(live.sessionTitle);
-      if (title) {
-        md.appendMarkdown(`"${title}"  \n`);
-      }
-      const ceiling = Math.round((live.autoCompactPct / 100) * live.contextWindowSize);
-      const pct = ceiling > 0 ? Math.round((live.contextUsed / ceiling) * 100) : 0;
-      md.appendMarkdown(
-        `📁 ${live.label} ${formatTokens(live.contextUsed)} / ${formatTokens(ceiling)} (${formatPct(pct)})\n\n`
-      );
-      md.appendMarkdown("Click to trigger Claude's **auto-compact** on your next prompt.  \n");
-      md.appendMarkdown("Higher-quality summary than `/compact` - Claude uses the main model and preserves tool results and reasoning.");
-    } else {
-      md.appendMarkdown("No live Claude session in this workspace.  \n\n");
-      md.appendMarkdown("Open Claude Code and send a prompt to establish a live session, then click to arm.");
-    }
-
-    return md;
-  }
-
-  private buildArmedTooltip(targetSessionId: string, minsArmed: number): vscode.MarkdownString {
-    const md = new vscode.MarkdownString();
-    md.isTrusted = false;
-    md.supportHtml = false;
-    md.appendMarkdown("**Claude Force Auto-Compact - Armed**  \n");
-
-    // Show the target session title + label if we still have them in the
-    // widget state. The targetSessionId from the sentinel is the truth;
-    // currentClaudeSession may have flipped during the armed window but
-    // the title is informational so using the latest is acceptable.
-    const current = this.currentClaudeSession;
-    if (current && current.sessionId === targetSessionId) {
-      const title = this.truncateTitle(current.sessionTitle);
-      if (title) {
-        md.appendMarkdown(`"${title}"  \n`);
-      }
-      md.appendMarkdown(`📁 ${current.label}  \n`);
-    } else {
-      md.appendMarkdown(`Target session: \`${targetSessionId.slice(0, 8)}\`  \n`);
-    }
-    md.appendMarkdown(`Armed ${minsArmed}m ago  \n\n`);
-    md.appendMarkdown("Send any prompt in the target Claude window to trigger **auto-compact**.  \n");
-    md.appendMarkdown("`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` will be restored automatically.  \n\n");
-    md.appendMarkdown("Click to cancel and restore without triggering auto-compact.");
-    return md;
-  }
-
-  private buildStaleTooltip(): vscode.MarkdownString {
-    const md = new vscode.MarkdownString();
-    md.isTrusted = false;
-    md.supportHtml = false;
-    md.appendMarkdown("**Claude Force Auto-Compact - Needs Attention**  \n");
-    md.appendMarkdown("A leftover sentinel from a previous session could not be restored automatically.  \n\n");
-    md.appendMarkdown("Click to retry the restore.");
-    return md;
   }
 
   dispose(): void {
@@ -440,10 +311,11 @@ export function activateClaudeForceAutoCompactWidget(
 }
 
 /**
- * Register the `wat321.claudeForceAutoCompact` command unconditionally so the
- * command palette entry always has a handler, even when the feature is
- * disabled. When disabled, the handler shows an info message pointing
- * to the setting. Called once during top-level `activate()`.
+ * Register the `wat321.claudeForceAutoCompact` command unconditionally
+ * so the command palette entry always has a handler, even when the
+ * feature is disabled. When disabled, the handler shows an info
+ * message pointing to the setting. Called once during top-level
+ * `activate()`.
  */
 export function registerClaudeForceAutoCompactCommand(
   context: vscode.ExtensionContext,

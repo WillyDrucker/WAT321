@@ -9,7 +9,7 @@ const STAMP_DIR = join(homedir(), ".wat321");
 
 async function performClear(context: vscode.ExtensionContext): Promise<void> {
   const confirm = await vscode.window.showWarningMessage(
-    "This will reset all WAT321 settings to defaults and clear stored data. Continue?",
+    "This will reset all WAT321 settings to defaults and clear stored data. If any WAT321 tool ever looks stuck, this also resets every tool back to a known-good state. Continue?",
     "Clear Everything",
     "Cancel"
   );
@@ -22,24 +22,32 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
     return;
   }
 
-  // CRITICAL: if Claude Force Auto-Compact is armed, restore the user's original
-  // CLAUDE_AUTOCOMPACT_PCT_OVERRIDE BEFORE we wipe ~/.wat321/. The
-  // sentinel file is the only record of the original value, so if the
-  // restore FAILS we must abort the reset entirely rather than delete
-  // the sentinel and strand the user at override=1.
-  let sentinelResult: "no-sentinel" | "restored" | "restore-failed" = "no-sentinel";
+  // CRITICAL: before wiping ~/.wat321/, make absolutely sure
+  // ~/.claude/settings.json is not stuck at the Claude Force Auto-Compact
+  // armed value "1". healStuckOverride inspects settings.json directly
+  // (NOT via the sentinel) so it works even if the sentinel is missing,
+  // corrupt, or self-referential. It restores to the sentinel's original
+  // value if trustworthy, or to "85" (Claude's default auto-compact
+  // threshold) as a hardcoded failsafe. This is the reset-as-failsafe
+  // guarantee: Reset WAT321 must ALWAYS unstick the user.
+  let healResult:
+    | "not-stuck"
+    | "restored-from-sentinel"
+    | "restored-to-default"
+    | "no-settings"
+    | "io-error" = "not-stuck";
   try {
-    sentinelResult = ClaudeForceAutoCompactService.restoreSentinelIfPresent();
+    healResult = ClaudeForceAutoCompactService.healStuckOverride();
   } catch {
-    sentinelResult = "restore-failed";
+    healResult = "io-error";
   }
 
-  if (sentinelResult === "restore-failed") {
+  if (healResult === "io-error") {
     await vscode.workspace
       .getConfiguration("wat321")
       .update("clearAllData", false, vscode.ConfigurationTarget.Global);
     await vscode.window.showErrorMessage(
-      "WAT321 could not restore your CLAUDE_AUTOCOMPACT_PCT_OVERRIDE from the Claude Force Auto-Compact sentinel. Reset aborted - your sentinel at ~/.wat321/claude-force-auto-compact-sentinel.json is preserved as the only record of your original value. Fix ~/.claude/settings.json manually (either restore the original value and delete the sentinel, or retry from the Claude Force Auto-Compact widget) and then run Reset WAT321 again.",
+      "WAT321 could not write to ~/.claude/settings.json while trying to heal a stuck CLAUDE_AUTOCOMPACT_PCT_OVERRIDE. Reset aborted so we do not wipe ~/.wat321/ while settings are still at \"1\". Check that the file is not locked or read-only, then run Reset WAT321 again.",
       { modal: true }
     );
     return;
