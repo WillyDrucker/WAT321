@@ -97,14 +97,14 @@ async function resetStatusBarItemVisibility(): Promise<void> {
 }
 
 async function performClear(): Promise<void> {
-  // Modal so a destructive reset cannot be missed as a bottom-right
-  // toast that auto-dismisses. Matches the modal error path lower in
-  // this function and the VS Code convention for "are you sure" on
-  // irreversible operations.
+  // Non-modal bottom-right notification - keeps the confirmation in
+  // VS Code's normal notification area instead of a center-screen
+  // modal that blocks the whole UI. The user has explicitly asked
+  // for this placement.
   const confirm = await vscode.window.showWarningMessage(
-    "Reset all WAT321 settings to defaults and clear stored data? If any WAT321 tool appears unresponsive, this will reset every tool back to a known-good state.",
-    { modal: true },
-    "Clear Everything"
+    "This will reset all WAT321 settings to defaults and clear stored data. If any WAT321 tool appears unresponsive, this will reset every tool back to a known-good state. Continue?",
+    "Clear Everything",
+    "Cancel"
   );
 
   if (confirm !== "Clear Everything") {
