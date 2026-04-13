@@ -1,28 +1,39 @@
+import { existsSync, statSync } from "fs";
+import type {
+  ClaudeForceAutoCompactSentinel,
+  ClaudeForceAutoCompactState,
+} from "./types";
 import {
-  existsSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-  writeFileSync,
-  renameSync,
-  unlinkSync,
-  mkdirSync,
-} from "fs";
-import { homedir } from "os";
-import { join } from "path";
-import type { ClaudeForceAutoCompactSentinel, ClaudeForceAutoCompactState } from "./types";
+  readAutoCompactOverride,
+  SETTINGS_PATH,
+  writeAutoCompactOverride,
+} from "../shared/claudeSettings";
+import {
+  deleteSentinel,
+  readSentinel,
+  SENTINEL_PATH,
+  writeSentinel,
+} from "./sentinel";
+import {
+  ARMED_OVERRIDE_VALUE,
+  healStuckOverride,
+  type HealResult,
+  safeRestoreValue,
+} from "./heal";
+import { scanForCompactMarker } from "./compactDetector";
+import { isTargetSessionStillLive } from "./sessionLiveness";
 
 const POLL_INTERVAL_MS = 2_000;
-const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes before forced restore
-const COMPACT_SIZE_RATIO = 0.25; // compact fired when size drops below 25% of baseline
-const SENTINEL_PATH = join(homedir(), ".wat321", "claude-force-auto-compact-sentinel.json");
-const RESTORED_DISPLAY_MS = 3_000; // how long to show "Restored" state
+// Short failsafe: one Claude turn fires compact within seconds. If the
+// marker never appears within this window, something is wrong and we
+// restore to keep the user out of a compact loop.
+const TIMEOUT_MS = 45_000;
+const RESTORED_DISPLAY_MS = 3_000;
 
 type Listener = (state: ClaudeForceAutoCompactState) => void;
 
 /** Why an armed session was disarmed. Surfaced to the widget so the user
- * sees a notification explaining an unexpected restore.
- */
+ * sees a notification explaining an unexpected restore. */
 export type DisarmReason =
   | "user-cancel"
   | "compact-detected"
@@ -36,11 +47,14 @@ export class ClaudeForceAutoCompactService {
   private listeners: Set<Listener> = new Set();
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
+  /** Rolling offset into the watched transcript for compact-marker
+   * scanning. Reset to `baselineSize` on entry to the armed state,
+   * advanced on each poll. */
+  private armedScanOffset = 0;
   /** Read by the widget after it sees an armed -> restored transition. */
   lastDisarmReason: DisarmReason | null = null;
 
   constructor() {
-    // Initial state is determined on start() - constructor cannot do async work
     this.state = { status: "not-installed" };
   }
 
@@ -48,33 +62,25 @@ export class ClaudeForceAutoCompactService {
     if (this.timer) return;
 
     // Sentinel recovery policy:
-    // - If no sentinel exists -> ready
-    // - If a sentinel exists AND it is within the TIMEOUT_MS freshness
-    //   window, adopt it as an armed state. This handles three cases
-    //   without stepping on the owning instance: (a) we just restarted
-    //   and are the owner, (b) another VS Code window armed and we are
-    //   a second instance opening mid-flow, (c) the extension reloaded
-    //   while armed. In all three, poll() will catch the compact or
-    //   the timeout and disarm.
-    // - If a sentinel exists AND it is older than TIMEOUT_MS, it is a
-    //   real crash leftover. Try to restore; on failure, surface the
-    //   stale-sentinel error state so the user can retry manually.
-    const existing = this.readSentinel();
-    if (existing) {
-      const age = Date.now() - existing.armedAt;
-      if (age < TIMEOUT_MS) {
-        // Fresh - adopt without touching the sentinel or settings
-        this.setState({ status: "armed", sentinel: existing });
-      } else {
-        const restored = this.restoreFromSentinel(existing);
-        if (restored) {
-          this.setState({ status: "ready" });
-        } else {
-          this.setState({ status: "stale-sentinel", sentinel: existing });
-        }
-      }
+    // - Fresh sentinel (age < TIMEOUT_MS): legitimate in-flight arm,
+    //   adopt without touching settings. poll() catches compact/timeout.
+    // - No sentinel OR stale sentinel: run healStuckOverride as the
+    //   startup failsafe. It inspects settings.json directly and will
+    //   restore any override stuck at "1" using the sentinel's original
+    //   value (if trustworthy) or the Claude default.
+    // - If heal cannot write AND we still have a stale sentinel on
+    //   disk, park in stale-sentinel state so the widget shows an
+    //   error and the user can retry via click or Reset WAT321.
+    const existing = readSentinel();
+    if (existing && Date.now() - existing.armedAt < TIMEOUT_MS) {
+      this.setState({ status: "armed", sentinel: existing });
     } else {
-      this.setState({ status: "ready" });
+      const result = healStuckOverride();
+      if (result === "io-error" && existing) {
+        this.setState({ status: "stale-sentinel", sentinel: existing });
+      } else {
+        this.setState({ status: "ready" });
+      }
     }
 
     this.timer = setInterval(() => this.poll(), POLL_INTERVAL_MS);
@@ -98,52 +104,51 @@ export class ClaudeForceAutoCompactService {
     this.listeners.clear();
   }
 
-  /**
-   * Arm the force-auto-compact by writing the sentinel and lowering the
-   * CLAUDE_AUTOCOMPACT_PCT_OVERRIDE in ~/.claude/settings.json.
-   *
-   * Returns true on success, false if any step failed.
-   */
-  /**
-   * Result codes for arm(). Distinguishes "refused because something is
-   * already in flight / unsafe" from "failed because of an IO error" so
-   * the widget can show the user a helpful message.
-   */
+  /** Reset-as-failsafe and startup check. Delegates to the shared
+   * heal module so every recovery path uses the same logic. */
+  static healStuckOverride(): HealResult {
+    return healStuckOverride();
+  }
+
+  /** Arm the force-auto-compact. Writes the sentinel first, then lowers
+   * `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in `~/.claude/settings.json`.
+   * Rolls back the sentinel on settings-write failure so we never leave
+   * a dangling record. */
   arm(
     watchTranscriptPath: string,
     targetSessionId: string,
-    armedOverride: string = "1"
+    armedOverride: string = ARMED_OVERRIDE_VALUE
   ):
     | { ok: true }
-    | { ok: false; reason: "sentinel-exists" | "already-armed-value" | "io-error" | "settings-missing" } {
-    const settingsPath = join(homedir(), ".claude", "settings.json");
-    if (!existsSync(settingsPath)) return { ok: false, reason: "settings-missing" };
-
-    // Refuse if another arm is already in flight. Protects against a
-    // second VS Code window or a stray retry overwriting the live
-    // sentinel's `originalOverride` with the current (armed) value,
-    // which would trap the user at the low override forever.
+    | {
+        ok: false;
+        reason:
+          | "sentinel-exists"
+          | "already-armed-value"
+          | "io-error"
+          | "settings-missing";
+      } {
+    // Refuse if another arm is already in flight.
     if (existsSync(SENTINEL_PATH)) {
       return { ok: false, reason: "sentinel-exists" };
     }
 
-    let settings: Record<string, unknown>;
-    let originalOverride: string | null = null;
-    try {
-      const raw = readFileSync(settingsPath, "utf8");
-      settings = JSON.parse(raw);
-      const env = (settings.env as Record<string, unknown>) || {};
-      const v = env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE;
-      originalOverride =
-        typeof v === "string" ? v : v === null || v === undefined ? null : String(v);
-    } catch {
+    // Read the current override through the discriminated reader so
+    // we can distinguish "file missing" / "file unreadable" / "file
+    // OK". An unreadable settings file must NOT be captured as
+    // `null` original because that would bake the wrong assumption
+    // into the sentinel on disk.
+    const readResult = readAutoCompactOverride();
+    if (readResult.kind === "missing") {
+      return { ok: false, reason: "settings-missing" };
+    }
+    if (readResult.kind === "io-error") {
       return { ok: false, reason: "io-error" };
     }
+    const originalOverride = readResult.value;
 
-    // Refuse if the override is already at the armed value. This is the
-    // "1 is not the original" safety: we never capture the compact-
-    // triggering value as the baseline to restore to. The user has to
-    // manually restore settings first and then re-arm.
+    // Refuse if the override is already at the armed value. The user
+    // can run Reset WAT321 (which heals the stuck value) and retry.
     if (originalOverride === armedOverride) {
       return { ok: false, reason: "already-armed-value" };
     }
@@ -157,7 +162,7 @@ export class ClaudeForceAutoCompactService {
 
     const sentinel: ClaudeForceAutoCompactSentinel = {
       version: 1,
-      settingsPath,
+      settingsPath: SETTINGS_PATH,
       originalOverride,
       armedOverride,
       watchTranscriptPath,
@@ -166,24 +171,10 @@ export class ClaudeForceAutoCompactService {
       targetSessionId,
     };
 
-    // Write sentinel FIRST so self-heal can recover even if the settings
-    // write fails below.
-    if (!this.writeSentinel(sentinel)) return { ok: false, reason: "io-error" };
+    if (!writeSentinel(sentinel)) return { ok: false, reason: "io-error" };
 
-    // Now edit settings.json with the new override value. Atomic
-    // tmp+rename so a crash mid-write cannot truncate the user's
-    // settings file.
-    try {
-      const env = (settings.env as Record<string, unknown>) || {};
-      env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = armedOverride;
-      settings.env = env;
-      const tmp = `${settingsPath}.wat321.tmp`;
-      writeFileSync(tmp, JSON.stringify(settings, null, 2), "utf8");
-      renameSync(tmp, settingsPath);
-    } catch {
-      // Settings write failed - clean up the sentinel so we don't leave
-      // dangling state.
-      this.deleteSentinel();
+    if (!writeAutoCompactOverride(armedOverride)) {
+      deleteSentinel();
       return { ok: false, reason: "io-error" };
     }
 
@@ -191,80 +182,37 @@ export class ClaudeForceAutoCompactService {
     return { ok: true };
   }
 
-  /**
-   * User-initiated cancel OR automatic restore after compact detection.
-   * Restores the original override and deletes the sentinel.
-   *
+  /** User-initiated cancel OR automatic restore after compact detection.
    * Multi-instance race: if another VS Code window's service already
    * restored the sentinel, we find it gone and treat that as a
-   * successful disarm on our side (the global state is correct, we just
-   * missed being the one to write it).
-   */
+   * successful disarm on our side. */
   disarm(reason: DisarmReason = "user-cancel"): boolean {
     if (this.state.status !== "armed") return false;
     const sentinel = this.state.sentinel;
     this.lastDisarmReason = reason;
 
-    // Multi-instance race guard: if the sentinel is gone, another
-    // instance already handled the restore. Just update our own state.
     if (!existsSync(SENTINEL_PATH)) {
-      this.setState({ status: "restored" });
-      setTimeout(() => {
-        if (!this.disposed && this.state.status === "restored") {
-          this.setState({ status: "ready" });
-        }
-      }, RESTORED_DISPLAY_MS);
+      this.flashRestored();
       return true;
     }
 
-    const ok = this.restoreFromSentinel(sentinel);
-    if (!ok) {
+    if (!this.restoreFromSentinel(sentinel)) {
       this.setState({ status: "stale-sentinel", sentinel });
       return false;
     }
 
-    this.setState({ status: "restored" });
-    // Auto-return to "ready" after a brief display of "restored"
-    setTimeout(() => {
-      if (!this.disposed && this.state.status === "restored") {
-        this.setState({ status: "ready" });
-      }
-    }, RESTORED_DISPLAY_MS);
+    this.flashRestored();
     return true;
   }
 
-  /**
-   * Static helper for external callers (the reset flow) that need to
-   * honor a pre-existing sentinel before wiping ~/.wat321/. Returns a
-   * discriminated outcome so the caller can tell whether it is safe to
-   * proceed:
-   *
-   *   "no-sentinel"   - nothing to restore, safe to proceed
-   *   "restored"      - sentinel found and successfully restored, safe
-   *   "restore-failed" - sentinel found but restore failed. Caller
-   *                     MUST NOT delete the sentinel; it is the only
-   *                     record of the user's original override value
-   */
-  static restoreSentinelIfPresent(): "no-sentinel" | "restored" | "restore-failed" {
-    const service = new ClaudeForceAutoCompactService();
-    const existing = service.readSentinel();
-    if (!existing) return "no-sentinel";
-    const ok = service.restoreFromSentinel(existing);
-    return ok ? "restored" : "restore-failed";
-  }
-
-  /**
-   * Manual retry of a stale-sentinel restore. Called from the widget when
-   * the user clicks on an error-state widget.
-   */
+  /** Manual retry of a stale-sentinel restore. Routes through
+   * `healStuckOverride` so even a corrupt sentinel is recoverable. */
   retryStaleRestore(): boolean {
     if (this.state.status !== "stale-sentinel") return false;
-    const ok = this.restoreFromSentinel(this.state.sentinel);
-    if (ok) {
-      this.setState({ status: "ready" });
-      return true;
-    }
-    return false;
+    const result = healStuckOverride();
+    if (result === "io-error") return false;
+    this.setState({ status: "ready" });
+    return true;
   }
 
   private poll(): void {
@@ -274,132 +222,88 @@ export class ClaudeForceAutoCompactService {
     const sentinel = this.state.sentinel;
     const now = Date.now();
 
-    // Timeout failsafe: restore after TIMEOUT_MS even if compact never fired
+    // External disarm detection: if the sentinel file is gone while
+    // we still think we are armed, some other actor has already
+    // restored the override and cleaned up on disk. Typical sources:
+    //   - Reset WAT321 ran `healStuckOverride` and deleted it
+    //   - Another VS Code window observed compact first and disarmed
+    //   - User manually removed the sentinel
+    // Flash restored and return to ready within the next 2s poll
+    // tick instead of waiting for the 45s timeout. We suppress the
+    // disarm notification (`lastDisarmReason = null`) because the
+    // user already knows what they just did - a "Auto-compact fired"
+    // toast after hitting Reset would be misleading.
+    if (!existsSync(SENTINEL_PATH)) {
+      this.lastDisarmReason = null;
+      this.flashRestored();
+      return;
+    }
+
+    // Timeout failsafe: restore even if compact never fired.
     if (now - sentinel.armedAt > TIMEOUT_MS) {
       this.disarm("timeout");
       return;
     }
 
-    // Session-aware: if the target Claude session's <pid>.json has
-    // disappeared from ~/.claude/sessions/, the CLI that owned it has
-    // exited. There is no live process left to trigger compact on, so
-    // auto-disarm immediately and restore. This is the "user closed
-    // the Claude terminal mid-arm" recovery path.
-    if (!this.isTargetSessionStillLive(sentinel.targetSessionId)) {
+    // Session-aware: if the target CLI has exited, auto-disarm.
+    if (!isTargetSessionStillLive(sentinel.targetSessionId)) {
       this.disarm("session-ended");
       return;
     }
 
-    // Check the watched transcript for a dramatic size collapse
+    // Scan newly appended bytes for the compact-summary marker.
     try {
       const size = statSync(sentinel.watchTranscriptPath).size;
-      if (size < sentinel.baselineSize * COMPACT_SIZE_RATIO) {
-        // Compact fired!
+      const outcome = scanForCompactMarker(
+        sentinel.watchTranscriptPath,
+        this.armedScanOffset,
+        size
+      );
+      this.armedScanOffset = outcome.nextOffset;
+      if (outcome.found) {
         this.disarm("compact-detected");
-        return;
       }
     } catch {
-      // Transcript file may have been replaced mid-compact. If the path
-      // no longer exists, treat that as "compact fired" - Claude may
-      // start a new session file after compacting.
+      // Transcript file may have been replaced mid-compact.
       if (!existsSync(sentinel.watchTranscriptPath)) {
         this.disarm("compact-detected");
       }
     }
   }
 
-  /**
-   * Scan ~/.claude/sessions/*.json for a live entry whose sessionId
-   * matches the targeted session. Returns true if found. Used during
-   * the armed poll to detect "user closed the Claude terminal" before
-   * the 5-minute timeout.
-   */
-  private isTargetSessionStillLive(targetSessionId: string): boolean {
-    const sessionsDir = join(homedir(), ".claude", "sessions");
-    if (!existsSync(sessionsDir)) return false;
-    try {
-      const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
-      for (const file of files) {
-        try {
-          const raw = readFileSync(join(sessionsDir, file), "utf8");
-          const entry = JSON.parse(raw) as { sessionId?: string };
-          if (entry.sessionId === targetSessionId) return true;
-        } catch {
-          // skip malformed entries
-        }
-      }
-    } catch {
-      // If we cannot read the directory at all, err on the side of
-      // "still live" so we do not disarm on a transient filesystem hiccup
-      return true;
-    }
-    return false;
-  }
-
   private setState(s: ClaudeForceAutoCompactState): void {
     if (this.disposed) return;
+    // Reset the rolling compact-marker scan offset on any entry into
+    // the armed state (fresh arm OR adoption from a sentinel after an
+    // extension reload). Starting at `baselineSize` means we only scan
+    // bytes appended after arming - older compact markers from earlier
+    // in the same jsonl are correctly ignored.
+    if (s.status === "armed" && this.state.status !== "armed") {
+      this.armedScanOffset = s.sentinel.baselineSize;
+    }
     this.state = s;
     for (const fn of this.listeners) fn(s);
   }
 
-  private readSentinel(): ClaudeForceAutoCompactSentinel | null {
-    if (!existsSync(SENTINEL_PATH)) return null;
-    try {
-      const raw = readFileSync(SENTINEL_PATH, "utf8");
-      const parsed = JSON.parse(raw) as ClaudeForceAutoCompactSentinel;
-      if (parsed.version !== 1) return null;
-      return parsed;
-    } catch {
-      return null;
-    }
-  }
-
-  private writeSentinel(sentinel: ClaudeForceAutoCompactSentinel): boolean {
-    try {
-      mkdirSync(join(homedir(), ".wat321"), { recursive: true });
-      const tmp = SENTINEL_PATH + ".tmp";
-      writeFileSync(tmp, JSON.stringify(sentinel, null, 2), "utf8");
-      renameSync(tmp, SENTINEL_PATH);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private deleteSentinel(): void {
-    try {
-      if (existsSync(SENTINEL_PATH)) unlinkSync(SENTINEL_PATH);
-    } catch {
-      // best-effort
-    }
-  }
-
-  /**
-   * Restore the original CLAUDE_AUTOCOMPACT_PCT_OVERRIDE value and
-   * delete the sentinel. Returns true on success.
-   */
-  private restoreFromSentinel(sentinel: ClaudeForceAutoCompactSentinel): boolean {
-    try {
-      const raw = readFileSync(sentinel.settingsPath, "utf8");
-      const settings = JSON.parse(raw) as Record<string, unknown>;
-      const env = (settings.env as Record<string, unknown>) || {};
-
-      if (sentinel.originalOverride === null) {
-        delete env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE;
-      } else {
-        env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = sentinel.originalOverride;
+  private flashRestored(): void {
+    this.setState({ status: "restored" });
+    setTimeout(() => {
+      if (!this.disposed && this.state.status === "restored") {
+        this.setState({ status: "ready" });
       }
-      settings.env = env;
-      // Atomic tmp+rename so a crash mid-restore cannot truncate the
-      // user's settings file. Critical: this IS the recovery path, so
-      // it must not make things worse on failure.
-      const tmp = `${sentinel.settingsPath}.wat321.tmp`;
-      writeFileSync(tmp, JSON.stringify(settings, null, 2), "utf8");
-      renameSync(tmp, sentinel.settingsPath);
-    } catch {
-      return false;
-    }
-    this.deleteSentinel();
+    }, RESTORED_DISPLAY_MS);
+  }
+
+  /** Restore the original `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` value and
+   * delete the sentinel. Uses `safeRestoreValue` so a corrupt sentinel
+   * whose `originalOverride` is itself "1" cannot trap the user at the
+   * armed value. */
+  private restoreFromSentinel(
+    sentinel: ClaudeForceAutoCompactSentinel
+  ): boolean {
+    const target = safeRestoreValue(sentinel.originalOverride);
+    if (!writeAutoCompactOverride(target)) return false;
+    deleteSentinel();
     return true;
   }
 }

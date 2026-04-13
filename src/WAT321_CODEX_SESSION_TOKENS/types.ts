@@ -15,7 +15,7 @@ export interface CodexResolvedSession {
   contextUsed: number; // last_token_usage.input_tokens
   contextWindowSize: number; // effective model context window from token_count
   autoCompactTokens: number; // actual Codex auto-compact ceiling for display
-  lastActiveAt: number; // ms - rollout file mtime, metadata only in v1.0.11
+  lastActiveAt: number; // ms - rollout file mtime (display metadata only)
 }
 
 export type CodexTokenWidgetState =
