@@ -10,6 +10,7 @@ import {
 } from "./bootstrap";
 import { registerClaudeForceAutoCompactCommand } from "./WAT321_CLAUDE_FORCE_AUTOCOMPACT/widget";
 import { registerClearSettingsCommand } from "./shared/clearSettings";
+import { registerWakeCommands } from "./shared/wakeCommands";
 
 /**
  * Top-level entry point. Owns the `activate` / `deactivate` contract
@@ -60,6 +61,11 @@ export function activate(context: vscode.ExtensionContext) {
     context,
     () => groups.claudeForceAutoCompact?.widget ?? null
   );
+  // Internal click-to-wake commands for the usage widgets. NOT
+  // listed in package.json contributes.commands, so they never
+  // appear in the palette - they exist only as status bar click
+  // targets when the widget is in the 15-minute fallback state.
+  registerWakeCommands(context, groups);
 }
 
 export function deactivate() {

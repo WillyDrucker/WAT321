@@ -31,7 +31,9 @@ export function statesEqual<TData>(
   }
   if (a.status === "rate-limited" && b.status === "rate-limited") {
     return (
-      a.rateLimitedAt === b.rateLimitedAt && a.retryAfterMs === b.retryAfterMs
+      a.rateLimitedAt === b.rateLimitedAt &&
+      a.retryAfterMs === b.retryAfterMs &&
+      a.source === b.source
     );
   }
   return true;

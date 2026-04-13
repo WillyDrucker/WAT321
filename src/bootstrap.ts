@@ -26,6 +26,7 @@ import { providerState } from "./shared/displayMode";
 interface ProviderService {
   dispose(): void;
   rebroadcast(): void;
+  wake(): void;
   subscribe(listener: (state: { status: string }) => void): void;
   unsubscribe(listener: (state: { status: string }) => void): void;
 }
@@ -72,6 +73,7 @@ export function rebroadcastAll(groups: ActiveGroups): void {
   groups.codex?.usageService.rebroadcast();
   groups.claude?.tokenService.rebroadcast();
   groups.codex?.tokenService.rebroadcast();
+  groups.claudeForceAutoCompact?.service.rebroadcast();
 }
 
 /** Sync `providerState` with a usage service state change and trigger
