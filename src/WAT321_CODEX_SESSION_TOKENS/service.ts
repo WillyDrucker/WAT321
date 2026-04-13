@@ -7,7 +7,6 @@ import { normalizePath } from "../shared/fs/pathUtils";
 
 const POLL_INTERVAL = 5_000;
 const SESSION_SCAN_INTERVAL = 51_000;
-const STALE_TIMEOUT = 60_000;
 const DEFAULT_CODEX_EFFECTIVE_CONTEXT_PCT = 95;
 const DEFAULT_CODEX_AUTO_COMPACT_PCT = 90;
 
@@ -41,9 +40,6 @@ export class CodexSessionTokenService {
   private cachedModelPath = "";
   private cachedAutoCompactTokens: number | null = null;
   private cachedAutoCompactModel = "";
-
-  // Last known good tracking
-  private lastOkTime = 0;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath.replace(/\\/g, "/");
@@ -79,7 +75,6 @@ export class CodexSessionTokenService {
   private setState(s: CodexTokenWidgetState): void {
     if (this.disposed) return;
     this.state = s;
-    if (s.status === "ok") this.lastOkTime = Date.now();
     for (const fn of this.listeners) fn(s);
   }
 
@@ -90,7 +85,8 @@ export class CodexSessionTokenService {
     sessionTitle: string,
     contextUsed: number,
     contextWindowSize: number,
-    autoCompactTokens: number
+    autoCompactTokens: number,
+    lastActiveAt: number,
   ): void {
     if (this.state.status === "ok") {
       const prev = this.state.session;
@@ -100,9 +96,9 @@ export class CodexSessionTokenService {
         prev.sessionTitle === sessionTitle &&
         prev.contextUsed === contextUsed &&
         prev.contextWindowSize === contextWindowSize &&
-        prev.autoCompactTokens === autoCompactTokens
+        prev.autoCompactTokens === autoCompactTokens &&
+        prev.lastActiveAt === lastActiveAt
       ) {
-        this.lastOkTime = Date.now();
         return;
       }
     }
@@ -115,6 +111,7 @@ export class CodexSessionTokenService {
         contextUsed,
         contextWindowSize,
         autoCompactTokens,
+        lastActiveAt,
       },
     });
   }
@@ -146,7 +143,11 @@ export class CodexSessionTokenService {
     }
 
     if (!this.cachedRolloutPath || !existsSync(this.cachedRolloutPath)) {
-      if (hasGoodData && now - this.lastOkTime < STALE_TIMEOUT) return;
+      // Never degrade "ok" back to "no-session" once we have good data.
+      // The most recent rollout for this workspace is always shown until
+      // a better one appears. Only fall through to no-session when we
+      // have never found a rollout for this workspace at all.
+      if (hasGoodData) return;
       this.setState({ status: "no-session" });
       return;
     }
@@ -161,11 +162,13 @@ export class CodexSessionTokenService {
       this.cachedAutoCompactTokens = null;
     }
 
-    // Skip re-parse if file hasn't changed
+    // Stat once for both size-delta check and lastActiveAt
+    let rolloutMtime: number;
     try {
-      const size = statSync(this.cachedRolloutPath).size;
-      if (size === this.lastFileSize && hasGoodData) return;
-      this.lastFileSize = size;
+      const st = statSync(this.cachedRolloutPath);
+      if (st.size === this.lastFileSize && hasGoodData) return;
+      this.lastFileSize = st.size;
+      rolloutMtime = st.mtimeMs;
     } catch {
       return;
     }
@@ -227,6 +230,7 @@ export class CodexSessionTokenService {
       usage.inputTokens,
       usage.contextWindowSize,
       this.cachedAutoCompactTokens,
+      rolloutMtime,
     );
   }
 
