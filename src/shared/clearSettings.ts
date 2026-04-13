@@ -13,6 +13,47 @@ import { clearConsent } from "./consent";
 
 const STAMP_DIR = join(homedir(), ".wat321");
 
+/** Update a single wat321.* setting at every applicable configuration
+ * scope. Necessary because `config.get()` returns the merged effective
+ * value and a workspace-level override otherwise survives a global-only
+ * reset. Pass `undefined` to remove the user-set value and fall back
+ * to the schema default; pass `false` (or any concrete value) to
+ * force-set to that value at every scope.
+ *
+ * Global is always updated. Workspace and WorkspaceFolder are only
+ * attempted when a workspace folder is actually open, avoiding two
+ * guaranteed-to-throw calls on the common case of "no workspace."
+ * Each applicable scope update is still individually guarded so a
+ * scope that exists but rejects (e.g. read-only settings file) is
+ * a silent no-op instead of an unhandled promise rejection. Updates
+ * run in parallel via `Promise.all` because they target distinct
+ * config scopes and do not need to be serialized. */
+async function updateSettingAllScopes(
+  key: string,
+  value: unknown
+): Promise<void> {
+  const config = vscode.workspace.getConfiguration("wat321");
+  const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+  const targets: vscode.ConfigurationTarget[] = [
+    vscode.ConfigurationTarget.Global,
+  ];
+  if (hasWorkspace) {
+    targets.push(
+      vscode.ConfigurationTarget.Workspace,
+      vscode.ConfigurationTarget.WorkspaceFolder
+    );
+  }
+  await Promise.all(
+    targets.map(async (scope) => {
+      try {
+        await config.update(key, value, scope);
+      } catch {
+        // Scope applicable but update rejected (read-only, etc.).
+      }
+    })
+  );
+}
+
 async function performClear(context: vscode.ExtensionContext): Promise<void> {
   const confirm = await vscode.window.showWarningMessage(
     "This will reset all WAT321 settings to defaults and clear stored data. If any WAT321 tool appears unresponsive, this will reset every tool back to a known-good state. Continue?",
@@ -21,10 +62,11 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
   );
 
   if (confirm !== "Clear Everything") {
-    // User cancelled - reset the checkbox back to false
-    await vscode.workspace
-      .getConfiguration("wat321")
-      .update("clearAllData", false, vscode.ConfigurationTarget.Global);
+    // User cancelled - reset the checkbox back to false at every
+    // scope so the visible checkbox immediately reflects the
+    // cancel regardless of which Settings tab the user clicked
+    // from.
+    await updateSettingAllScopes("clearAllData", false);
     return;
   }
 
@@ -44,9 +86,7 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
   }
 
   if (healResult === "io-error") {
-    await vscode.workspace
-      .getConfiguration("wat321")
-      .update("clearAllData", false, vscode.ConfigurationTarget.Global);
+    await updateSettingAllScopes("clearAllData", false);
     await vscode.window.showErrorMessage(
       "WAT321 could not write to ~/.claude/settings.json while trying to heal a stuck CLAUDE_AUTOCOMPACT_PCT_OVERRIDE. Reset aborted so we do not wipe ~/.wat321/ while settings are still at \"1\". Check that the file is not locked or read-only, then run Reset WAT321 again.",
       { modal: true }
@@ -54,14 +94,24 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
     return;
   }
 
-  // Reset all settings to defaults
-  const config = vscode.workspace.getConfiguration("wat321");
-  await config.update("enableClaude", undefined, vscode.ConfigurationTarget.Global);
-  await config.update("enableCodex", undefined, vscode.ConfigurationTarget.Global);
-  await config.update("enableClaudeForceAutoCompact", undefined, vscode.ConfigurationTarget.Global);
-  await config.update("displayMode", undefined, vscode.ConfigurationTarget.Global);
-  await config.update("statusBarPriority", undefined, vscode.ConfigurationTarget.Global);
-  await config.update("clearAllData", false, vscode.ConfigurationTarget.Global);
+  // Reset all settings to defaults. Must clear at every scope
+  // (Global / Workspace / WorkspaceFolder) because `config.get()`
+  // returns the merged effective value and a workspace-level
+  // override survives a global-only reset. A user who ever set
+  // any wat321.* setting via the Workspace tab of the Settings UI
+  // or via `.vscode/settings.json` would otherwise see Reset
+  // appear to work (setting disappears from the Global view) but
+  // the workspace copy silently re-activates the tool on the next
+  // extension start. All six keys reset in parallel since they
+  // target independent config paths.
+  await Promise.all([
+    updateSettingAllScopes("enableClaude", undefined),
+    updateSettingAllScopes("enableCodex", undefined),
+    updateSettingAllScopes("enableClaudeForceAutoCompact", undefined),
+    updateSettingAllScopes("displayMode", undefined),
+    updateSettingAllScopes("statusBarPriority", undefined),
+    updateSettingAllScopes("clearAllData", false),
+  ]);
 
   // Clear persisted consent records so re-enabling an interactive tool
   // re-prompts the user. Symmetric with the settings reset.
