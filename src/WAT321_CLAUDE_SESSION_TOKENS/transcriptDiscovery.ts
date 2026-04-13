@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { homedir } from "os";
-import { basename, join } from "path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import type { SessionEntry } from "./types";
 import { getProjectKey, normalizePath } from "../shared/fs/pathUtils";
 

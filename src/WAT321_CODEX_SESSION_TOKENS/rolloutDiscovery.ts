@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import type { CodexSessionIndex } from "./types";
 import { normalizePath } from "../shared/fs/pathUtils";
 import { parseCwd } from "./parsers";
