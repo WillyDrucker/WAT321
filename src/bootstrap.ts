@@ -1,4 +1,8 @@
 import * as vscode from "vscode";
+import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
+import { CodexUsageSharedService } from "./shared/codex-usage/service";
+import { providerState } from "./shared/displayMode";
+import { activateUsageWidget } from "./shared/usageWidgetActivation";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
 import { activateClaudeTokenWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
 import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
@@ -7,15 +11,7 @@ import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service"
 import { activateCodexTokenWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 import { CodexUsage5hrWidget } from "./WAT321_CODEX_USAGE_5H/widget";
 import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/widget";
-import { ClaudeForceAutoCompactService } from "./WAT321_CLAUDE_FORCE_AUTOCOMPACT/service";
-import {
-  activateClaudeForceAutoCompactWidget,
-  type ClaudeForceAutoCompactWidget,
-} from "./WAT321_CLAUDE_FORCE_AUTOCOMPACT/widget";
-import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
-import { CodexUsageSharedService } from "./shared/codex-usage/service";
-import { providerState } from "./shared/displayMode";
-import { activateUsageWidget } from "./shared/usageWidgetActivation";
+import { ExperimentalAutoCompactService } from "./WAT321_EXPERIMENTAL_AUTOCOMPACT/service";
 
 /**
  * Provider activation and teardown. Kept out of `extension.ts` so the
@@ -35,7 +31,7 @@ interface ProviderService {
 /** Base shape shared by both provider groups. The token service is
  * left generic here so each concrete subtype can narrow it to the
  * provider's actual class, avoiding the `as unknown as` double cast
- * that the interactive-tier activator otherwise needs. */
+ * that the experimental-tier activator otherwise needs. */
 export interface ProviderGroup<
   TTokenService extends { dispose(): void; rebroadcast(): void } = {
     dispose(): void;
@@ -50,31 +46,26 @@ export interface ProviderGroup<
 export type ClaudeProviderGroup = ProviderGroup<ClaudeSessionTokenService>;
 export type CodexProviderGroup = ProviderGroup<CodexSessionTokenService>;
 
-export interface ClaudeForceAutoCompactGroup {
+export interface ExperimentalAutoCompactGroup {
   disposables: vscode.Disposable[];
-  service: ClaudeForceAutoCompactService;
-  widget: ClaudeForceAutoCompactWidget;
+  service: ExperimentalAutoCompactService;
 }
 
 export interface ActiveGroups {
   claude: ClaudeProviderGroup | null;
   codex: CodexProviderGroup | null;
-  claudeForceAutoCompact: ClaudeForceAutoCompactGroup | null;
+  experimentalAutoCompact: ExperimentalAutoCompactGroup | null;
 }
 
-/** Resolve the current workspace path or empty string. */
 function workspacePath(): string {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
 }
 
-/** Trigger a widget re-render across all currently active services
- * (for Auto display mode recompute after provider activity changes). */
 export function rebroadcastAll(groups: ActiveGroups): void {
   groups.claude?.usageService.rebroadcast();
   groups.codex?.usageService.rebroadcast();
   groups.claude?.tokenService.rebroadcast();
   groups.codex?.tokenService.rebroadcast();
-  groups.claudeForceAutoCompact?.service.rebroadcast();
 }
 
 /** Sync `providerState` with a usage service state change and trigger
@@ -158,33 +149,28 @@ export function deactivateGroup(
   return null;
 }
 
-/** Activate Claude Force Auto-Compact. Requires the Claude group to be
- * already active - the force-compact service subscribes to the Claude
- * token service for the target transcript path and session descriptor. */
-export function activateClaudeForceAutoCompact(
-  context: vscode.ExtensionContext,
+/** Activate the experimental Force Claude Auto-Compact service. The
+ * service subscribes to the configuration change event directly - no
+ * widget, no command registration, no consent prompt. Requires the
+ * Claude group to be active because the service needs
+ * `ClaudeSessionTokenService.getActiveTranscriptPath()` to know which
+ * transcript to watch for the compact marker. */
+export function activateExperimentalAutoCompact(
   groups: ActiveGroups
-): ClaudeForceAutoCompactGroup | null {
+): ExperimentalAutoCompactGroup | null {
   if (!groups.claude) return null;
-  // `groups.claude.tokenService` is already typed as the concrete
-  // `ClaudeSessionTokenService` via the `ClaudeProviderGroup`
-  // narrowing, so no cast is needed.
-  const service = new ClaudeForceAutoCompactService();
-  const activation = activateClaudeForceAutoCompactWidget(
-    service,
-    groups.claude.tokenService,
-    context
+  const service = new ExperimentalAutoCompactService(
+    groups.claude.tokenService
   );
-  const disposables: vscode.Disposable[] = [
-    ...activation.disposables,
-    { dispose: () => service.dispose() },
-  ];
   service.start();
-  return { disposables, service, widget: activation.widget };
+  return {
+    disposables: [{ dispose: () => service.dispose() }],
+    service,
+  };
 }
 
-export function deactivateClaudeForceAutoCompact(
-  group: ClaudeForceAutoCompactGroup | null
+export function deactivateExperimentalAutoCompact(
+  group: ExperimentalAutoCompactGroup | null
 ): null {
   if (!group) return null;
   for (const d of group.disposables) d.dispose();

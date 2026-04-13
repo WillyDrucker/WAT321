@@ -266,13 +266,7 @@ export class ClaudeUsageSharedService {
 
   private handleFetchError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
-    const statusCode =
-      error instanceof HttpError
-        ? error.statusCode
-        : (() => {
-            const m = message.match(/^HTTP (\d+):/);
-            return m ? parseInt(m[1], 10) : null;
-          })();
+    const statusCode = error instanceof HttpError ? error.statusCode : null;
 
     // Rate limits always surface immediately and get written to shared cache.
     // Honor the server's Retry-After header when present; otherwise fall

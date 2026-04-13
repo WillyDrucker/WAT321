@@ -12,7 +12,7 @@ Real-time AI usage widgets for your VS Code status bar.
 
 WAT321 ships with **six read-only widgets** - three for Claude, three for Codex - all enabled out of the box. They only read your existing CLI files and poll a safe stats endpoint; they never modify anything. WAT321 only shows widgets for the providers you actually use, so a Claude-only or Codex-only setup just works with nothing to configure. If you add the other provider later, its widgets show up automatically.
 
-One optional interactive tool (**Claude Force Auto-Compact**) is also available, default off - see below.
+One opt-in **Experimental** setting is also available in the Claude section - see below.
 
 ---
 
@@ -46,11 +46,9 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 ![Codex session tokens](images/screenshots/CODEX_SESSION_TOKENS.png)
 
-### Claude Force Auto-Compact *(optional, off by default)*
+### Force Claude Auto-Compact *(experimental, off by default)*
 
-A one-click button that triggers Claude's auto-compact on your next prompt. Produces a higher-quality compaction than the `/compact` slash command, preserving tool results and reasoning.
-
-**This is the only WAT321 tool that writes outside `~/.wat321/`.** Default **off**. The first click shows a one-time consent prompt. Your Claude settings are backed up automatically each time the tool is armed, and Reset WAT321 clears the grant and restores anything the tool changed.
+An **experimental** checkbox in the Claude settings section. Arms Claude's Auto-Compact for your next message prompt to Claude. Triggers Auto-Compact on next prompt. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed. Useful for long sessions when performance degrades.
 
 ---
 
@@ -71,16 +69,26 @@ WAT321 supports four display densities. Search **"wat321"** in **Settings** and 
 
 ## Installation
 
-### From the Marketplace
+### From the VS Code Marketplace
 1. Open VS Code
 2. Go to Extensions (`Ctrl+Shift+X` / `Cmd+Shift+X`)
 3. Search **"WAT321"**
 4. Click **Install**
 
+### From the Open VSX Registry
+For VS Code forks and derivatives that use Open VSX instead of the proprietary Marketplace (VSCodium, Cursor, Windsurf, Gitpod, etc.):
+1. Open the Extensions view in your editor
+2. Search **"WAT321"**
+3. Click **Install**
+
 ### From a .vsix file
 1. `Ctrl+Shift+P` / `Cmd+Shift+P` then **Extensions: Install from VSIX**
 2. Select the `.vsix` file
 3. Reload window
+
+**Where to find the files:**
+- **.vsix downloads** - every release is attached to its [GitHub Release](https://github.com/WillyDrucker/WAT321/releases) as a downloadable asset
+- **Open VSX listing** - *(coming soon - link to be added once the extension is published to Open VSX)*
 
 ---
 
@@ -112,15 +120,15 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - **Hidden when a provider isn't set up yet** - if Claude or Codex isn't installed on your machine, those widgets stay out of the way. They appear automatically as soon as the provider is ready, no reload or restart needed
 - Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
 
-### The optional interactive tool
-- **Claude Force Auto-Compact** touches one setting in `~/.claude/settings.json` to trigger Claude's built-in auto-compact, then restores the original value automatically. Default off, consent-gated on first click
+### The experimental setting
+- **Force Claude Auto-Compact** touches one setting in `~/.claude/settings.json` to trigger Claude's built-in auto-compact, then restores the original value automatically. Default off, lives under an **Experimental** label in the Claude settings section
 
 ## What It Doesn't Do
 
-- **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage.
+- **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage. *The experimental Force Claude Auto-Compact setting is the one exception and is off by default.*
 - **Does not store, transmit, or modify your credentials.** Anything WAT321 saves locally is disposable and can be cleared at any time from the settings page.
 - **Does not interfere with Claude Code, Codex CLI, or any other extension.**
-- **The six core widgets never modify user files.** They only read. Claude Force Auto-Compact is the single exception, described above.
+- **The six core widgets never modify user files.** They only read. The experimental Force Claude Auto-Compact setting is the single exception, described above.
 
 ## Requirements
 

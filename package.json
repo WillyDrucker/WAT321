@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -40,10 +40,6 @@
       {
         "command": "wat321.clearAllSettings",
         "title": "WAT321: Reset All Settings"
-      },
-      {
-        "command": "wat321.claudeForceAutoCompact",
-        "title": "WAT321: Enable Claude Force Auto-Compact tool"
       }
     ],
     "configuration": [
@@ -57,11 +53,11 @@
             "order": 1,
             "markdownDescription": "Enable Claude Usage and Claude Session Token widgets. Widgets are hidden automatically if Claude CLI is not installed. Changes apply immediately."
           },
-          "wat321.enableClaudeForceAutoCompact": {
+          "wat321.experimental.forceClaudeAutoCompact": {
             "type": "boolean",
             "default": false,
             "order": 2,
-            "markdownDescription": "Enable Claude Force Auto-Compact widget. Adds a status bar widget that triggers Claude's auto-compact on your next prompt when activated. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`, so a one-time grant prompt confirms use on first click. Your Claude settings are backed up automatically each time the tool is armed."
+            "markdownDescription": "**Experimental.** Arms Claude's Auto-Compact for your next message prompt to Claude. Triggers Auto-Compact on next prompt. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed. *Useful for long sessions when performance degrades.*"
           }
         }
       },

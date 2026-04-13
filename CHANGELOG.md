@@ -5,6 +5,19 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.15] - 2026-04-13
+
+### Added
+- **Force Claude Auto-Compact is now an experimental checkbox in the Claude settings section.** Flip `WAT321: Experimental > Force Claude Auto-Compact` on right before sending your final message to Claude for the day. WAT321 lowers `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` to `1` in `~/.claude/settings.json`, waits up to 30 seconds for the compact to fire, restores your original value, and turns the checkbox back off automatically. A 30-second cooldown after each cycle prevents accidental double-arms. Your Claude settings are backed up every time this arms, and WAT321 heals a stuck override on the next VS Code start if something goes sideways. **Heads up:** a forced compact still counts against your Claude usage the same way the manual `/compact` command does, so only flip this on when you actually want to spend a compaction
+
+### Changed
+- **Force Claude Auto-Compact no longer ships as a status bar widget.** The old one-click widget required a context-fraction gate, a claude-busy gate, a click-to-repair affordance, and a one-time consent prompt to stay safe - and even with all of that, compacting still costs you a message against your usage on the very next turn. The experimental checkbox replaces all of that with a single toggle you flip when you actually want the compaction, which is almost always only at the end of the day. The full v1.0.14 tool is archived under `ARCHIVE/WAT321_CLAUDE_FORCE_AUTOCOMPACT_v1.0.14/` inside the repo working tree in case we ever want to bring any of it back
+- **Reset WAT321 now also restores any WAT321 widgets you hid from the status bar.** If you previously right-clicked one of the six WAT321 widgets and chose Hide, running Reset WAT321 will bring them all back. The reset stays narrowly scoped to the six widget ids WAT321 actually creates - no other status bar item in your VS Code is touched
+
+### Removed
+- **Claude Force Auto-Compact status bar widget and its supporting code.** The widget, preflight gate (context-fraction / claude-busy / loop detection), passive availability resolver, post-disarm cooldown loop-detection watcher, consent helper, and tool-specific command palette entry are all gone. The `wat321.enableClaudeForceAutoCompact` setting and `wat321.claudeForceAutoCompact` command were removed from `package.json`. The sentinel, arm backup ring, install snapshot, and four-tier heal chain all survive in the new slim `src/WAT321_EXPERIMENTAL_AUTOCOMPACT/` service that powers the experimental checkbox
+- **One-time consent prompt helper** (`src/shared/consent.ts`) is no longer needed because the experimental setting is itself the opt-in gate
+
 ## [1.0.14] - 2026-04-13
 
 ### Added

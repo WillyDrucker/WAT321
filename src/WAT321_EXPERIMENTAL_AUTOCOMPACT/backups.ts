@@ -11,28 +11,26 @@ import { join } from "node:path";
 import { readAutoCompactOverride } from "../shared/claudeSettings";
 
 /**
- * Backup storage for Claude Force Auto-Compact recovery. Two tiers:
+ * Backup storage for the experimental Force Claude Auto-Compact
+ * recovery chain. Two tiers:
  *
  *   - Install snapshot: captured once on first activation that sees a
  *     clean settings.json. Never overwritten after initial capture.
- *     Final tier in the heal precedence chain, referenced by Reset
- *     WAT321 as the absolute last-resort restore source.
+ *     Final tier in the heal precedence chain.
  *
  *   - Arm backup ring (3 entries): rotated on every arm. The oldest
  *     is evicted each rotation. Second tier in the heal precedence
  *     chain so a crash mid-arm can still be recovered even if the
  *     sentinel is missing or corrupt.
  *
- * Poison invariant: no file in either tier ever contains the WAT321
- * armed value "1". Any attempt to capture a poisoned value fails
- * silently; the caller's heal path handles the stuck state on its
- * own. This prevents a second crash from re-recording "1" as the
- * "original" value and trapping the user permanently.
+ * Poison invariant: no file in either tier ever contains the armed
+ * value "1". Any attempt to capture a poisoned value fails silently;
+ * the caller's heal path handles the stuck state on its own. This
+ * prevents a second crash from re-recording "1" as the "original" and
+ * trapping the user permanently.
  */
 
-/** The override value WAT321 writes while armed. Kept here (rather
- * than in `heal.ts`) to avoid a circular import between the heal and
- * backup modules. Imported by heal.ts and service.ts. */
+/** The override value WAT321 writes while armed. */
 export const ARMED_OVERRIDE_VALUE = "1";
 
 const WAT321_DIR = join(homedir(), ".wat321");
@@ -42,8 +40,6 @@ export const INSTALL_SNAPSHOT_PATH = join(
   "settings-install-snapshot.json"
 );
 
-/** Ring slots, newest at index 0. `rotateArmBackup` shifts entries
- * from index 0 -> 1 -> 2, evicting slot 2 on overflow. */
 const ARM_BACKUP_RING_PATHS: readonly string[] = [
   join(WAT321_DIR, "settings-arm-backup-1.json"),
   join(WAT321_DIR, "settings-arm-backup-2.json"),
@@ -103,15 +99,12 @@ function readBackupFile(path: string): BackupEntry | null {
 }
 
 /**
- * Capture the install snapshot if and only if:
- *   - no snapshot file exists yet
- *   - settings.json is readable and present
- *   - current override is not the WAT321 armed value "1"
- *
- * Safe to call on every start(). No-op on any condition above. The
- * poison check is critical: if the user closes VS Code stuck at "1",
- * reopens on a fresh install, and this runs before heal, we must
- * refuse to capture so heal has a clean chain to fall back on.
+ * Capture the install snapshot if and only if no snapshot file exists
+ * yet, settings.json is readable, and the current override is not the
+ * armed value. Safe to call on every start(). The poison check is
+ * critical: if the user closes VS Code stuck at "1", reopens on a
+ * fresh install, and this runs before heal, we must refuse to capture
+ * so heal has a clean chain to fall back on.
  */
 export function maybeCaptureInstallSnapshot(): void {
   if (existsSync(INSTALL_SNAPSHOT_PATH)) return;
@@ -121,19 +114,16 @@ export function maybeCaptureInstallSnapshot(): void {
   writeBackupFile(INSTALL_SNAPSHOT_PATH, read.value);
 }
 
-/** Read the install snapshot's recorded original override. Returns
- * `null` if the file is missing, unreadable, or poisoned. A `null`
- * return means "no usable snapshot" for the heal chain. */
 export function readInstallSnapshotOverride(): string | null {
   const entry = readBackupFile(INSTALL_SNAPSHOT_PATH);
   return entry ? entry.originalOverride : null;
 }
 
 /**
- * Rotate the arm backup ring: shift slot 1 -> 2 and 0 -> 1, evict
- * the old slot 2, write the new entry into slot 0. Poisoned values
- * ("1") are refused and leave the ring untouched so a re-arm during
- * a stuck state cannot overwrite a good entry with a bad one.
+ * Rotate the arm backup ring: shift slot 1 -> 2 and 0 -> 1, evict the
+ * old slot 2, write the new entry into slot 0. Poisoned values ("1")
+ * are refused and leave the ring untouched so a re-arm during a stuck
+ * state cannot overwrite a good entry with a bad one.
  */
 export function rotateArmBackup(override: string | null): boolean {
   if (override === ARMED_OVERRIDE_VALUE) return false;
@@ -158,11 +148,6 @@ export function rotateArmBackup(override: string | null): boolean {
   }
 }
 
-/**
- * Return the newest non-poisoned arm backup override, or `null` if
- * the ring is empty or all entries are unreadable. Used as the
- * second tier in the heal precedence chain.
- */
 export function readNewestArmBackupOverride(): string | null {
   for (const p of ARM_BACKUP_RING_PATHS) {
     const entry = readBackupFile(p);
