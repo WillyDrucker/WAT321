@@ -1,12 +1,12 @@
 import * as vscode from "vscode";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
 import { activateClaudeTokenWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
-import { activateClaudeUsage5hrTool } from "./WAT321_CLAUDE_USAGE_5H/tool";
-import { activateClaudeUsageWeeklyTool } from "./WAT321_CLAUDE_USAGE_WEEKLY/tool";
+import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
+import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/widget";
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { activateCodexTokenWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
-import { activateCodexUsage5hrTool } from "./WAT321_CODEX_USAGE_5H/tool";
-import { activateCodexUsageWeeklyTool } from "./WAT321_CODEX_USAGE_WEEKLY/tool";
+import { CodexUsage5hrWidget } from "./WAT321_CODEX_USAGE_5H/widget";
+import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/widget";
 import { ClaudeForceAutoCompactService } from "./WAT321_CLAUDE_FORCE_AUTOCOMPACT/service";
 import {
   activateClaudeForceAutoCompactWidget,
@@ -15,6 +15,7 @@ import {
 import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
 import { providerState } from "./shared/displayMode";
+import { activateUsageWidget } from "./shared/usageWidgetActivation";
 
 /**
  * Provider activation and teardown. Kept out of `extension.ts` so the
@@ -100,8 +101,8 @@ export function activateClaude(groups: ActiveGroups): ClaudeProviderGroup {
   const tokenService = new ClaudeSessionTokenService(workspacePath());
 
   const disposables: vscode.Disposable[] = [
-    ...activateClaudeUsage5hrTool(usageService),
-    ...activateClaudeUsageWeeklyTool(usageService),
+    ...activateUsageWidget(usageService, new ClaudeUsage5hrWidget()),
+    ...activateUsageWidget(usageService, new ClaudeUsageWeeklyWidget()),
     ...activateClaudeTokenWidget(tokenService),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
@@ -123,8 +124,8 @@ export function activateCodex(groups: ActiveGroups): CodexProviderGroup {
   const tokenService = new CodexSessionTokenService(workspacePath());
 
   const disposables: vscode.Disposable[] = [
-    ...activateCodexUsage5hrTool(codexService),
-    ...activateCodexUsageWeeklyTool(codexService),
+    ...activateUsageWidget(codexService, new CodexUsage5hrWidget()),
+    ...activateUsageWidget(codexService, new CodexUsageWeeklyWidget()),
     ...activateCodexTokenWidget(tokenService),
     { dispose: () => codexService.dispose() },
     { dispose: () => tokenService.dispose() },

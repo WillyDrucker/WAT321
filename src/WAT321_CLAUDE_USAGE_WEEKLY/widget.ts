@@ -6,7 +6,7 @@ import type {
   StatusBarWidget,
 } from "../shared/claude-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
-import { getWidgetPriority } from "../shared/priority";
+import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
 
 export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -15,7 +15,7 @@ export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.weekly",
       vscode.StatusBarAlignment.Right,
-      getWidgetPriority(1)
+      getWidgetPriority(WIDGET_SLOT.claudeUsageWeekly)
     );
     this.item.name = "WAT321: Claude Usage (Weekly)";
     this.item.text = "Claude weekly $(loading~spin)";
