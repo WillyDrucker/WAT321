@@ -1,15 +1,21 @@
 import * as vscode from "vscode";
-import { existsSync, rmSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { ClaudeForceAutoCompactService } from "../WAT321_CLAUDE_FORCE_AUTOCOMPACT/service";
+import {
+  clearArmBackupRing,
+  readInstallSnapshotBytes,
+  writeInstallSnapshotBytes,
+} from "../WAT321_CLAUDE_FORCE_AUTOCOMPACT/backups";
+import type { HealResult } from "../WAT321_CLAUDE_FORCE_AUTOCOMPACT/heal";
 import { clearConsent } from "./consent";
 
 const STAMP_DIR = join(homedir(), ".wat321");
 
 async function performClear(context: vscode.ExtensionContext): Promise<void> {
   const confirm = await vscode.window.showWarningMessage(
-    "This will reset all WAT321 settings to defaults and clear stored data. If any WAT321 tool ever looks stuck, this also resets every tool back to a known-good state. Continue?",
+    "This will reset all WAT321 settings to defaults and clear stored data. If any WAT321 tool appears unresponsive, this will reset every tool back to a known-good state. Continue?",
     "Clear Everything",
     "Cancel"
   );
@@ -30,12 +36,7 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
   // value if trustworthy, or to "85" (Claude's default auto-compact
   // threshold) as a hardcoded failsafe. This is the reset-as-failsafe
   // guarantee: Reset WAT321 must ALWAYS unstick the user.
-  let healResult:
-    | "not-stuck"
-    | "restored-from-sentinel"
-    | "restored-to-default"
-    | "no-settings"
-    | "io-error" = "not-stuck";
+  let healResult: HealResult = "not-stuck";
   try {
     healResult = ClaudeForceAutoCompactService.healStuckOverride();
   } catch {
@@ -66,6 +67,19 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
   // re-prompts the user. Symmetric with the settings reset.
   await clearConsent(context, "claudeForceAutoCompact");
 
+  // Clear the arm backup ring explicitly (best-effort) before the
+  // recursive wipe. Ring entries are historical user values; a reset
+  // is the moment to drop them so they cannot resurrect via the heal
+  // chain on the next arm.
+  clearArmBackupRing();
+
+  // Preserve the install snapshot across the recursive wipe of
+  // ~/.wat321/. The snapshot is the "original install baseline" the
+  // user explicitly asked us to keep available as a last-resort
+  // restore source even after Reset runs. Read its raw bytes now
+  // and rewrite them after the directory is rebuilt.
+  const preservedInstallSnapshot = readInstallSnapshotBytes();
+
   // Remove the entire ~/.wat321/ folder. This catches the active shared
   // caches and claim files, plus any deprecated artifacts from earlier
   // versions (e.g. claude-usage-last-fetch, codex-usage-last-fetch,
@@ -78,6 +92,14 @@ async function performClear(context: vscode.ExtensionContext): Promise<void> {
     }
   } catch {
     // best-effort
+  }
+
+  // Rehydrate the preserved install snapshot so it survives Reset.
+  // The next start() will NOT re-capture this file (it still exists
+  // on disk), which is exactly the behavior the user asked for: the
+  // original install baseline stays stable across resets.
+  if (preservedInstallSnapshot) {
+    writeInstallSnapshotBytes(preservedInstallSnapshot);
   }
 
   vscode.window.showInformationMessage(

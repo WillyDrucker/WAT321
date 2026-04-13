@@ -1,6 +1,6 @@
-import { existsSync, statSync } from "fs";
-import { homedir } from "os";
-import { basename, join } from "path";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import type { WidgetState } from "./types";
 import { readTail } from "../shared/fs/fileReaders";
 import { getProjectKey } from "../shared/fs/pathUtils";

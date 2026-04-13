@@ -24,11 +24,39 @@ export interface ClaudeForceAutoCompactSentinel {
   targetSessionId: string;
 }
 
+/** Reasons the widget may enter the grayed `unavailable` state. Each
+ * has its own tooltip and clears differently - some automatically as
+ * context grows back, others require the user to run the reset
+ * command. Widgets render all of them in the same muted color so
+ * the user reads the tooltip to learn which applies; RED remains
+ * reserved for the armed state to prevent visual confusion.
+ *
+ * The primary gate is `below-useful-threshold`: the user's current
+ * context must be at least `USEFUL_CONTEXT_FRACTION` (20%) of the
+ * auto-compact ceiling before arming makes sense. Below that there
+ * is nothing meaningful to compact. This single check subsumes the
+ * old `recent-native-compact` and `post-disarm-cooldown` gates
+ * because in both of those cases the user is always in the
+ * low-context post-compact zone.
+ *
+ * `loop-suspected` stays as a secondary defense: in the tiny
+ * edge-case where a small-ceiling user's post-compact state lands
+ * above the 20% gate, the loop detection backstops the context
+ * gate and prevents a second consecutive arm. */
+export type UnavailableReason =
+  | "below-useful-threshold"
+  | "loop-suspected"
+  | "settings-stuck-at-armed"
+  | "settings-missing"
+  | "settings-io-error"
+  | "sentinel-exists-external";
+
 export type ClaudeForceAutoCompactState =
   | { status: "not-installed" } // Claude CLI not installed or enableClaudeForceAutoCompact false
   | { status: "ready" }
   | { status: "armed"; sentinel: ClaudeForceAutoCompactSentinel }
   | { status: "restored" } // briefly after successful restore, auto-returns to "ready"
-  | { status: "stale-sentinel"; sentinel: ClaudeForceAutoCompactSentinel }; // found on startup, restore failed
+  | { status: "stale-sentinel"; sentinel: ClaudeForceAutoCompactSentinel } // found on startup, restore failed
+  | { status: "unavailable"; reason: UnavailableReason }; // widget grayed, not clickable, tooltip explains
 
 export type StatusBarWidget = GenericStatusBarWidget<ClaudeForceAutoCompactState>;

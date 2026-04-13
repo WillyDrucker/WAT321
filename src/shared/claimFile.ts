@@ -7,8 +7,8 @@ import {
   rmSync,
   statSync,
   writeSync,
-} from "fs";
-import { dirname } from "path";
+} from "node:fs";
+import { dirname } from "node:path";
 
 /**
  * Atomic single-holder claim file for cross-instance coordination.

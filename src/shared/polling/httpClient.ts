@@ -1,4 +1,4 @@
-import https from "https";
+import https from "node:https";
 
 import { REQUEST_TIMEOUT_MS } from "./constants";
 import { HttpError } from "./httpError";

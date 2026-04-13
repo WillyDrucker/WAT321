@@ -4,7 +4,7 @@ import {
   openSync,
   readSync,
   closeSync,
-} from "fs";
+} from "node:fs";
 
 const DEFAULT_TAIL_BYTES = 262_144;
 const DEFAULT_HEAD_BYTES = 8_192;
