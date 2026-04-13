@@ -13,7 +13,7 @@ WAT321 has two distinct tool categories with different trust contracts:
 
 **Read-only core (locked)** - the 6 existing widgets: Claude usage 5h/weekly, Codex usage 5h/weekly, Claude session tokens, Codex session tokens. These never modify user files. Only writes are disposable caches, claims, and stamps in `~/.wat321/`. This guarantee does not change.
 
-**Interactive tools (opt-in, consent-gated)** - tools that may write outside `~/.wat321/` (e.g. Claude Force Auto-Compact writes to `~/.claude/settings.json`). Each requires its own `wat321.enable*` setting defaulting to `false`, plus a one-time non-modal consent notification on first use via the shared helper in `src/shared/consent.ts`.
+**Experimental settings (opt-in)** - settings that may write outside `~/.wat321/` (currently only `wat321.experimental.forceClaudeAutoCompact`, which writes `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in `~/.claude/settings.json` through the service in `src/WAT321_EXPERIMENTAL_AUTOCOMPACT/`). These default to `false`, live under an **Experimental** label in settings, and route every write through the same four-tier sentinel + backup ring + install snapshot + default heal chain so any crash mid-arm self-heals on the next VS Code start.
 
 ## Product Principles
 - **No data collection** - no telemetry, no tracking, no analytics. All data stays local
@@ -26,7 +26,7 @@ WAT321 has two distinct tool categories with different trust contracts:
 - **Zero bloat** - everything WAT321 writes is tiny, disposable, and clearable via the reset command
 
 ## Key Rules
-- **Read-only core never writes outside `~/.wat321/`.** Interactive tools may, but only after consent and with a self-healing backup sentinel
+- **Read-only core never writes outside `~/.wat321/`.** Experimental settings may, but only with a self-healing backup sentinel and a four-tier restore precedence chain
 - **API rate limiting** - keep polling >=122s, cooldown >=61s. Never bypass cooldown
 - **No bundler** - tsc only, no external runtime deps
 - **CHANGELOG.md must be updated before any version bump.** Use `/wat321-publish` skill
