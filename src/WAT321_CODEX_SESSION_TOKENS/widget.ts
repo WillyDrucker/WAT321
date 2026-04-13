@@ -10,6 +10,7 @@ import { getDisplayMode } from "../shared/displayMode";
 import { getWidgetPriority } from "../shared/priority";
 
 const CLAMP = "\u{1F5DC}\u{FE0F}";
+const THOUGHT = "\u{1F4AD}";
 const FOLDER = "\u{1F4C1}";
 
 export class CodexSessionTokensWidget implements StatusBarWidget {
@@ -19,10 +20,10 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
     this.item = vscode.window.createStatusBarItem(
       "wat321.codexSessionTokens",
       vscode.StatusBarAlignment.Right,
-      getWidgetPriority(5)
+      getWidgetPriority(6)
     );
     this.item.name = "WAT321: Codex Session Tokens";
-    this.item.text = `${CLAMP} Codex -`;
+    this.item.text = `${THOUGHT} Codex -`;
     this.item.tooltip = "No active Codex session";
     // First state delivered by subscribe() decides visibility.
   }
@@ -36,7 +37,7 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 
       case "no-session":
       case "waiting":
-        this.item.text = `${CLAMP} Codex -`;
+        this.item.text = `${THOUGHT} Codex -`;
         this.item.tooltip = "No active Codex session";
         this.item.color = undefined;
         this.item.show();
@@ -50,10 +51,10 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 
         const mode = getDisplayMode();
         if (mode === "minimal" || mode === "compact") {
-          this.item.text = `${CLAMP} Codex ${formatTokens(session.contextUsed)} ${formatPct(usedPct)}`;
+          this.item.text = `${THOUGHT} Codex ${formatTokens(session.contextUsed)} ${formatPct(usedPct)}`;
         } else {
           this.item.text =
-            `${CLAMP} Codex ${formatTokens(session.contextUsed)} / ` +
+            `${THOUGHT} Codex ${formatTokens(session.contextUsed)} / ` +
             `${formatTokens(session.autoCompactTokens)} ${formatPct(usedPct)}`;
         }
 

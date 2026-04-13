@@ -88,10 +88,11 @@ export class CodexUsage5hrWidget implements StatusBarWidget {
         const remainingPct = getRemainingPct(usedPct);
         const mode = getDisplayMode();
         if (mode === "minimal") {
-          this.item.text = `Codex (5 hour): ${remainingPct}%`;
+          this.item.text = `Codex (5h): ${remainingPct}%`;
         } else if (mode === "compact") {
-          this.item.text = `Codex (5 hour) ${makeBar(usedPct, 5)} ${remainingPct}%`;
+          this.item.text = `Codex (5h) ${makeBar(usedPct, 5)} ${remainingPct}%`;
         } else {
+          // Full view keeps the long "5 hour" form for space-rich layouts
           this.item.text = `Codex (5 hour) ${makeBar(usedPct)} ${remainingPct}%`;
         }
         this.item.tooltip = buildTooltip(state.data);

@@ -13,25 +13,6 @@ export function makeBar(usedPct: number, width: number = 10): string {
   return FILLED.repeat(filled) + EMPTY.repeat(empty);
 }
 
-export function formatWindowReset(resetAtEpoch: number): string {
-  const resetDate = new Date(resetAtEpoch * 1000);
-  if (resetDate.getTime() <= Date.now()) return "now";
-
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
-  const month = months[resetDate.getMonth()];
-  const day = resetDate.getDate();
-  const year = resetDate.getFullYear();
-  let hours = resetDate.getHours();
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  const minutes = resetDate.getMinutes().toString().padStart(2, "0");
-
-  return `${month} ${day}, ${year} ${hours}:${minutes} ${ampm}`;
-}
-
 export function formatPlanLabel(planType: string): string {
   const labels: Record<string, string> = {
     free: "Free",

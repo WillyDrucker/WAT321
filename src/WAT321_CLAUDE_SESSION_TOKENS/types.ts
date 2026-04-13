@@ -17,6 +17,8 @@ export interface ResolvedSession {
   contextUsed: number; // tokens currently in context
   contextWindowSize: number; // 200k or 1M
   autoCompactPct: number; // e.g. 70
+  source: "live" | "lastKnown"; // live = CLI process active, lastKnown = fallback from transcript mtime
+  lastActiveAt: number; // ms - live: Date.now(); lastKnown: transcript file mtime
 }
 
 export type WidgetState =

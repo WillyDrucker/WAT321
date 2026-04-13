@@ -5,6 +5,27 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.11] - 2026-04-13
+
+### Added
+- **Claude Force Auto-Compact** - a new optional status bar button that triggers Claude's real auto-compact on your next prompt. Produces a much higher-quality summary than running `/compact` manually because Claude uses the main model (not Haiku) and preserves tool results and reasoning. Click the button, confirm, send any prompt, and the auto-compact fires mid-turn. WAT321 backs up your current Claude setting before arming and restores it automatically within seconds of the compact firing. Safe by design: it auto-disarms if you close the Claude session, switch to a different one, or five minutes pass without anything happening. Default **off** with a one-time friendly consent prompt on first click, because this is the only WAT321 feature that writes outside `~/.wat321/`. Lives in a new **Claude Force Auto-Compact** setting under the Claude category. Also available as `WAT321: Claude Force Auto-Compact` in the command palette
+- **Claude session tokens keep showing your last session after a VS Code restart.** Before, the widget would go blank the moment you closed VS Code and not recover until you clicked a session in the Claude picker and sent a prompt. Now it shows your most recent session in the workspace with a subtle `Last active Xm ago` line in the tooltip so you know it's a snapshot. The instant you resume a session, it flips back to live
+- **Two-tier tool model** - WAT321 now formally separates its read-only core widgets (which never modify user files) from opt-in interactive tools like Claude Force Auto-Compact. Interactive tools are always default-off and always ask for consent on first use. Documented in `CLAUDE.md` and the framework README
+
+### Changed
+- **Session token widgets now use 💭 (thought bubble)** instead of the old 🗜️ clamp icon. The clamp is now reserved for the Claude Force Auto-Compact button where it reinforces the compact-ceiling meaning. Tooltip "Auto-compact at" lines still show the clamp
+- **Tooltip reset lines now read identically on Claude and Codex.** Both providers now show `Resets 1:30AM (3hr 30min)` for 5-hour windows and `Resets in Thu (4d 1hr)` for weekly windows. Before, each provider had its own wording
+- **5-hour status bar labels** say `Claude (5h)` and `Codex (5h)` in compact and minimal views for consistency and to save space. Full view still shows `Claude (5hr)` and `Codex (5 hour)` to match what each CLI shows
+
+### Fixed
+- **Claude session token widget no longer goes blank on huge post-compact transcripts.** On very large sessions, the widget could show `Claude -` after a compact because it was only scanning a tiny window at the end of the transcript and missing the most recent usage entry. The scan window is now four times larger and searches the whole tail instead of the last 100 lines
+- **Codex session token widget no longer mysteriously blanks while you're still working.** An old 60-second staleness timer would drop the widget to the empty state if the rollout file stopped growing for a minute, even though the cached data was still good. Now the most recent rollout for the workspace is shown for as long as it exists on disk
+- **Claude settings writes are now atomic.** Both the arm and restore paths for Claude Force Auto-Compact write `~/.claude/settings.json` via a temp-file rename, so a process crash mid-write can't truncate the real settings file. The restore path is the recovery path, so it especially needs to not make things worse on failure
+
+### Removed
+- Old provider-specific reset line formatters (`formatSessionReset`, `formatWeeklyReset`, `formatWindowReset`) now superseded by the shared `resetFormatters.ts` helper
+- `STALE_TIMEOUT` dead code from the Codex session token service after the blanking behavior was removed
+
 ## [1.0.10] - 2026-04-12
 
 ### Added

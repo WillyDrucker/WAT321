@@ -88,10 +88,11 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
         const pct = state.data.five_hour?.utilization ?? 0;
         const mode = getDisplayMode();
         if (mode === "minimal") {
-          this.item.text = `Claude (5hr): ${pct}%`;
+          this.item.text = `Claude (5h): ${pct}%`;
         } else if (mode === "compact") {
-          this.item.text = `Claude (5hr) ${makeBar(pct, 5)} ${pct}%`;
+          this.item.text = `Claude (5h) ${makeBar(pct, 5)} ${pct}%`;
         } else {
+          // Full view keeps the long "5hr" form for space-rich layouts
           this.item.text = `Claude (5hr) ${makeBar(pct)} ${pct}%`;
         }
         this.item.tooltip = buildTooltip(state.data);

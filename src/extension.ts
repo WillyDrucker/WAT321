@@ -14,6 +14,13 @@ import { activateClaudeTokenWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { activateCodexTokenWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 
+import { ClaudeForceAutoCompactService } from "./WAT321_CLAUDE_FORCE_AUTOCOMPACT/service";
+import {
+  activateClaudeForceAutoCompactWidget,
+  registerClaudeForceAutoCompactCommand,
+} from "./WAT321_CLAUDE_FORCE_AUTOCOMPACT/widget";
+import type { ClaudeForceAutoCompactWidget } from "./WAT321_CLAUDE_FORCE_AUTOCOMPACT/widget";
+
 import { registerClearSettingsCommand } from "./shared/clearSettings";
 import { providerState } from "./shared/displayMode";
 
@@ -30,6 +37,13 @@ interface ProviderGroup {
 
 let claudeGroup: ProviderGroup | null = null;
 let codexGroup: ProviderGroup | null = null;
+
+interface ClaudeForceAutoCompactGroup {
+  disposables: vscode.Disposable[];
+  service: ClaudeForceAutoCompactService;
+  widget: ClaudeForceAutoCompactWidget;
+}
+let claudeForceAutoCompactGroup: ClaudeForceAutoCompactGroup | null = null;
 
 /** Trigger a widget re-render across all services (for Auto display mode recompute). */
 function rebroadcastAll(): void {
@@ -110,6 +124,29 @@ function deactivateGroup(group: ProviderGroup | null, provider: "claude" | "code
   return null;
 }
 
+function activateClaudeForceAutoCompact(context: vscode.ExtensionContext): ClaudeForceAutoCompactGroup | null {
+  // Force-compact depends on the Claude session token service for the
+  // target transcript path and session descriptor, so Claude must be
+  // enabled and already activated before we wire this up.
+  if (!claudeGroup) return null;
+  const tokenService = claudeGroup.tokenService as unknown as ClaudeSessionTokenService;
+
+  const service = new ClaudeForceAutoCompactService();
+  const activation = activateClaudeForceAutoCompactWidget(service, tokenService, context);
+  const disposables: vscode.Disposable[] = [
+    ...activation.disposables,
+    { dispose: () => service.dispose() },
+  ];
+  service.start();
+  return { disposables, service, widget: activation.widget };
+}
+
+function deactivateClaudeForceAutoCompact(): null {
+  if (!claudeForceAutoCompactGroup) return null;
+  for (const d of claudeForceAutoCompactGroup.disposables) d.dispose();
+  return null;
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("wat321");
 
@@ -119,6 +156,10 @@ export function activate(context: vscode.ExtensionContext) {
   }
   if (config.get<boolean>("enableCodex", true)) {
     codexGroup = activateCodex();
+  }
+  // Claude Force Auto-Compact is interactive tier - default OFF, requires claude group
+  if (config.get<boolean>("enableClaudeForceAutoCompact", false)) {
+    claudeForceAutoCompactGroup = activateClaudeForceAutoCompact(context);
   }
 
   // --- Dynamic enable/disable on settings change ---
@@ -130,7 +171,18 @@ export function activate(context: vscode.ExtensionContext) {
           .get<boolean>("enableClaude", true);
         if (enabled && !claudeGroup) {
           claudeGroup = activateClaude();
+          // If force-auto-compact was enabled before Claude, it couldn't
+          // activate because it depends on claudeGroup. Now that Claude
+          // is back, bring force-auto-compact up if its setting is still on.
+          const claudeForceAutoCompactEnabled = vscode.workspace
+            .getConfiguration("wat321")
+            .get<boolean>("enableClaudeForceAutoCompact", false);
+          if (claudeForceAutoCompactEnabled && !claudeForceAutoCompactGroup) {
+            claudeForceAutoCompactGroup = activateClaudeForceAutoCompact(context);
+          }
         } else if (!enabled && claudeGroup) {
+          // Claude Force Auto-Compact depends on Claude - tear it down first
+          claudeForceAutoCompactGroup = deactivateClaudeForceAutoCompact();
           claudeGroup = deactivateGroup(claudeGroup, "claude");
         }
       }
@@ -146,6 +198,17 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
 
+      if (e.affectsConfiguration("wat321.enableClaudeForceAutoCompact")) {
+        const enabled = vscode.workspace
+          .getConfiguration("wat321")
+          .get<boolean>("enableClaudeForceAutoCompact", false);
+        if (enabled && !claudeForceAutoCompactGroup && claudeGroup) {
+          claudeForceAutoCompactGroup = activateClaudeForceAutoCompact(context);
+        } else if (!enabled && claudeForceAutoCompactGroup) {
+          claudeForceAutoCompactGroup = deactivateClaudeForceAutoCompact();
+        }
+      }
+
       // Re-render all widgets immediately when display settings change
       if (e.affectsConfiguration("wat321.displayMode")) {
         rebroadcastAll();
@@ -155,9 +218,14 @@ export function activate(context: vscode.ExtensionContext) {
 
   // --- Command palette ---
   registerClearSettingsCommand(context);
+  // Claude Force Auto-Compact command always registered so the palette entry has a
+  // handler even when the feature is disabled. The handler itself shows
+  // an info message pointing to the setting if the widget is not active.
+  registerClaudeForceAutoCompactCommand(context, () => claudeForceAutoCompactGroup?.widget ?? null);
 }
 
 export function deactivate() {
+  claudeForceAutoCompactGroup = deactivateClaudeForceAutoCompact();
   claudeGroup = deactivateGroup(claudeGroup, "claude");
   codexGroup = deactivateGroup(codexGroup, "codex");
 }

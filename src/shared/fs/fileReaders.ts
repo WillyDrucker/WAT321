@@ -6,7 +6,7 @@ import {
   closeSync,
 } from "fs";
 
-const DEFAULT_TAIL_BYTES = 65_536;
+const DEFAULT_TAIL_BYTES = 262_144;
 const DEFAULT_HEAD_BYTES = 8_192;
 
 /**
@@ -22,10 +22,13 @@ export function readTail(
     if (size <= bytes) return readFileSync(path, "utf8");
 
     const fd = openSync(path, "r");
-    const buf = Buffer.alloc(bytes);
-    readSync(fd, buf, 0, bytes, size - bytes);
-    closeSync(fd);
-    return buf.toString("utf8");
+    try {
+      const buf = Buffer.alloc(bytes);
+      readSync(fd, buf, 0, bytes, size - bytes);
+      return buf.toString("utf8");
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return null;
   }
@@ -44,10 +47,13 @@ export function readHead(
     if (size <= bytes) return readFileSync(path, "utf8");
 
     const fd = openSync(path, "r");
-    const buf = Buffer.alloc(bytes);
-    readSync(fd, buf, 0, bytes, 0);
-    closeSync(fd);
-    return buf.toString("utf8");
+    try {
+      const buf = Buffer.alloc(bytes);
+      readSync(fd, buf, 0, bytes, 0);
+      return buf.toString("utf8");
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return null;
   }
