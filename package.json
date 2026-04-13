@@ -39,11 +39,11 @@
     "commands": [
       {
         "command": "wat321.clearAllSettings",
-        "title": "WAT321: Clear All Settings"
+        "title": "WAT321: Reset All Settings"
       },
       {
         "command": "wat321.claudeForceAutoCompact",
-        "title": "WAT321: Claude Force Auto-Compact"
+        "title": "WAT321: Enable Claude Force Auto-Compact tool"
       }
     ],
     "configuration": [
@@ -55,13 +55,13 @@
             "type": "boolean",
             "default": true,
             "order": 1,
-            "markdownDescription": "Enable Claude usage and session token widgets. Widgets are hidden automatically if Claude CLI is not installed. Changes apply immediately."
+            "markdownDescription": "Enable Claude Usage and Claude Session Token widgets. Widgets are hidden automatically if Claude CLI is not installed. Changes apply immediately."
           },
           "wat321.enableClaudeForceAutoCompact": {
             "type": "boolean",
             "default": false,
             "order": 2,
-            "markdownDescription": "**Claude Force Auto-Compact** - adds a status bar widget that triggers Claude's auto-compact on your next prompt when selected. Produces a higher-quality compaction result than the manual `/compact` command because Claude uses the main model instead of Haiku and preserves tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`, so a one-time grant prompt confirms use on first click. Your Claude settings are backed up automatically before the write and restored as soon as the auto-compact fires. Off by default."
+            "markdownDescription": "Enable Claude Force Auto-Compact widget. Adds a status bar widget that triggers Claude's auto-compact on your next prompt when activated. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`, so a one-time grant prompt confirms use on first click. Your Claude settings are backed up automatically each time the tool is armed."
           }
         }
       },
@@ -73,7 +73,7 @@
             "type": "boolean",
             "default": true,
             "order": 1,
-            "markdownDescription": "Enable Codex usage and session token widgets. Widgets are hidden automatically if Codex CLI is not installed. Changes apply immediately."
+            "markdownDescription": "Enable Codex Usage and Codex Session Token widgets. Widgets are hidden automatically if Codex CLI is not installed. Changes apply immediately."
           }
         }
       },
@@ -109,7 +109,7 @@
             "type": "boolean",
             "default": false,
             "order": 99,
-            "markdownDescription": "**Reset WAT321** - Restore WAT321 to its default state and clear its saved local data. This resets all WAT321 settings and clears anything WAT321 has stored locally, so everything rebuilds cleanly on the next refresh. If any WAT321 tool ever looks stuck, this also resets every tool back to a known-good state. A confirmation dialog appears before anything is changed."
+            "markdownDescription": "**Reset WAT321** - Restore WAT321 to its default state and clear its saved local data. This resets all WAT321 settings and clears anything WAT321 has stored locally, so everything rebuilds cleanly on the next refresh. If any WAT321 tool appears unresponsive, this will reset every tool back to a known-good state. A confirmation dialog will appear on this screen before anything is changed."
           }
         }
       }

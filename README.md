@@ -48,11 +48,9 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 ### Claude Force Auto-Compact *(optional, off by default)*
 
-A one-click button that asks Claude to run its built-in auto-compact on your next prompt. The result is a higher-quality compaction than the `/compact` slash command - more of your conversation context, tool results, and reasoning is preserved in the summary.
+A one-click button that triggers Claude's auto-compact on your next prompt. Produces a higher-quality compaction than the `/compact` slash command, preserving tool results and reasoning.
 
-**This is the only WAT321 tool that writes outside its own cache folder.**
-
-Default **off**. Because it needs write access outside the WAT321 cache folder, the first click shows a one-time consent prompt explaining exactly what it will do. You can enable the tool from the Claude section of the WAT321 settings page. Reset WAT321 clears the grant and restores anything the tool changed.
+**This is the only WAT321 tool that writes outside `~/.wat321/`.** Default **off**. The first click shows a one-time consent prompt. Your Claude settings are backed up automatically each time the tool is armed, and Reset WAT321 clears the grant and restores anything the tool changed.
 
 ---
 
@@ -115,17 +113,14 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
 
 ### The optional interactive tool
-- **Claude Force Auto-Compact** is the one WAT321 tool that writes outside its own cache folder. It touches one setting in `~/.claude/settings.json` to trigger Claude's built-in auto-compact, then restores the original value automatically
-- Default **off**. The tool does nothing unless you enable it in settings
-- The first click shows a one-time consent prompt explaining exactly what it will change. Your settings are backed up before any write
-- Reset WAT321 clears the consent grant and restores anything the tool changed
+- **Claude Force Auto-Compact** touches one setting in `~/.claude/settings.json` to trigger Claude's built-in auto-compact, then restores the original value automatically. Default off, consent-gated on first click
 
 ## What It Doesn't Do
 
 - **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage.
 - **Does not store, transmit, or modify your credentials.** Anything WAT321 saves locally is disposable and can be cleared at any time from the settings page.
 - **Does not interfere with Claude Code, Codex CLI, or any other extension.**
-- **The six core widgets never modify user files.** They only read. Claude Force Auto-Compact is the single exception, and it is opt-in, consent-gated, and limited to one setting key in `~/.claude/settings.json` that it restores automatically.
+- **The six core widgets never modify user files.** They only read. Claude Force Auto-Compact is the single exception, described above.
 
 ## Requirements
 
@@ -155,11 +150,10 @@ If a lockout occurs, the status bar will show "Offline" and the tooltip will dis
 ## Additional Settings
 
 - **Status Bar Priority** - Adjust widget ordering if they overlap with other extensions (requires window reload).
-- **Enable Claude Force Auto-Compact** - Turn on the optional interactive tool described above. Default off. Lives in the **Claude** section of WAT321 settings.
 
 ## Reset WAT321
 
-Need a clean slate? Open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Clear All Settings**, or check the **Reset WAT321** box at the bottom of the WAT321 settings page. That restores WAT321 to its defaults, clears its saved local data, and lets everything rebuild automatically on the next refresh. No restart needed.
+Need a clean slate? Open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Reset All Settings**, or check the **Reset WAT321** box at the bottom of the WAT321 settings page. That restores WAT321 to its defaults and clears its saved local data. If any WAT321 tool ever appears unresponsive, this also resets every tool back to a known-good state. No restart needed.
 
 ## Issues & Feedback
 
