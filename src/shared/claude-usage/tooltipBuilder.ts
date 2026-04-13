@@ -1,22 +1,22 @@
 import * as vscode from "vscode";
 import type { UsageResponse } from "./types";
-import {
-  makeBar,
-  formatSessionReset,
-  formatWeeklyReset,
-  getMaxLabel,
-} from "./formatters";
+import { makeBar, getMaxLabel } from "./formatters";
+import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
 import { getDisplayMode } from "../displayMode";
+
+function isoToMs(iso: string | undefined): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : null;
+}
 
 export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
   const sPct = usage.five_hour?.utilization ?? 0;
-  const sReset = usage.five_hour?.resets_at
-    ? formatSessionReset(usage.five_hour.resets_at)
-    : "unknown";
+  const sResetMs = isoToMs(usage.five_hour?.resets_at);
+  const sReset = sResetMs !== null ? formatFiveHourReset(sResetMs) : "Resets unknown";
   const wPct = usage.seven_day?.utilization ?? 0;
-  const wReset = usage.seven_day?.resets_at
-    ? formatWeeklyReset(usage.seven_day.resets_at)
-    : "unknown";
+  const wResetMs = isoToMs(usage.seven_day?.resets_at);
+  const wReset = wResetMs !== null ? formatWeeklyReset(wResetMs) : "Resets unknown";
   const planLabel = getMaxLabel(usage.extra_usage);
   const mode = getDisplayMode();
 
@@ -27,10 +27,10 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
     md.appendMarkdown(`**Claude usage limits** ${planLabel}\n\n`);
     md.appendMarkdown(`**Current session (5hr)** ${sPct}% used  \n`);
     md.appendMarkdown(`${makeBar(sPct)}  \n`);
-    md.appendMarkdown(`⧗ Resets in ${sReset}\n\n`);
+    md.appendMarkdown(`⧗ ${sReset}\n\n`);
     md.appendMarkdown(`**Weekly limits** ${wPct}% used  \n`);
     md.appendMarkdown(`${makeBar(wPct)}  \n`);
-    md.appendMarkdown(`⧗ Resets ${wReset}\n\n`);
+    md.appendMarkdown(`⧗ ${wReset}\n\n`);
     md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
     return md;
   }
@@ -58,7 +58,7 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
 <div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
 <div style="width:${Math.min(sPct, 100)}%;height:100%;border-radius:4px;background:${sBarColor};"></div>
 </div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ Resets in ${sReset}</div>
+<div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ ${sReset}</div>
 </div>
 
 <hr style="border:none;border-top:1px solid rgba(255,255,255,0.12);margin:8px 0;">
@@ -71,7 +71,7 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
 <div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
 <div style="width:${Math.min(wPct, 100)}%;height:100%;border-radius:4px;background:${wBarColor};"></div>
 </div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ Resets ${wReset}</div>
+<div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ ${wReset}</div>
 </div>
 
 <div style="font-size:9px;opacity:0.4;margin-top:8px;">Updated ${new Date().toLocaleTimeString()}</div>
