@@ -3,8 +3,7 @@
 ## Read Order
 1. This file (rules and conventions)
 2. `AIDOCS/WD_WAT321_MEMORY_EXTENDED.md` (architecture, file layout, shared services, display modes, all reference material)
-3. `WDDOCS/WAT321_FRAMEWORK/WAT321_FRAMEWORK_README.md` (per-tool framework detail)
-4. `AIDOCS/WD_WAT321_SESSION_HANDOFF.md` (current dev state)
+3. `AIDOCS/WD_WAT321_SESSION_HANDOFF.md` (current dev state)
 
 ## Project
 VS Code extension providing real-time AI usage status bar widgets (Claude + Codex).
