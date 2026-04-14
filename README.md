@@ -48,13 +48,7 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 ### Force Claude Auto-Compact *(experimental, off by default)*
 
-An **experimental** checkbox in the Claude settings section. Tick the box, confirm the dialog, and your next prompt to Claude will fire the built-in Auto-Compact. Produces a higher-quality compaction result than the manual `/compact` command because it preserves tool results and reasoning.
-
-The checkbox is the armed state itself: while it is ticked, a red `❗ ARMED` widget sits next to your Claude session token widget and the tool is waiting for your next prompt. Click the widget (or untick the checkbox) to disarm immediately. WAT321 also disarms automatically the moment Auto-Compact fires, or after 30 seconds with no activity.
-
-Before arming, WAT321 runs a one-shot preflight that refuses arming when it would waste a compact: no live Claude session, Claude is mid-turn on a prompt or tool call, you are below 15% of the auto-compact ceiling, your session was already compacted in the last two minutes, you are still inside the 30-second post-disarm cooldown, or your auto-compact override is already stuck from a prior session. Each refusal shows a friendly toast explaining what to fix.
-
-This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed, and a four-tier restore chain heals a stuck override on the next VS Code start if anything ever crashes mid-arm. Useful for long sessions when performance degrades.
+An **experimental** checkbox in the Claude settings section. Arms Claude's Auto-Compact for your next message prompt to Claude. Triggers Auto-Compact on next prompt. Disarms after 30 seconds of no activity. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed. A confirmation dialog will appear before arming. *Useful for long sessions when performance degrades.*
 
 ---
 
