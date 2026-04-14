@@ -143,18 +143,6 @@ async function resetStatusBarItemVisibility(): Promise<void> {
 }
 
 async function performClear(): Promise<void> {
-  // Clear the checkbox IMMEDIATELY, before the dialog appears.
-  // VS Code's Settings UI has a known issue where config.update
-  // does not reliably re-render a checkbox back to unchecked on
-  // X-close dismissal of a notification opened from that same
-  // checkbox tick. Working around it by clearing the visual up
-  // front: by the time the dialog is visible, the checkbox is
-  // already unchecked, so the X-close path never has to touch it.
-  // Treating the checkbox as a pure trigger (not a persistent
-  // state) makes this safe - there is no "reset in progress"
-  // mode the UI needs to show.
-  await clearCheckboxSettingAllScopes("clearAllData");
-
   // Non-modal bottom-right notification - keeps the confirmation in
   // VS Code's normal notification area instead of a center-screen
   // modal that blocks the whole UI. The user has explicitly asked
@@ -165,9 +153,24 @@ async function performClear(): Promise<void> {
     "Cancel"
   );
 
+  // Schedule a deferred checkbox clear 1 second after the dialog
+  // closes. VS Code's Settings UI swallows config.update UI
+  // refreshes that originate from the same tick-origin handler
+  // call stack as the user's original checkbox tick; writes fired
+  // from a timer callback well after the dialog has closed land
+  // on a "clean" event loop turn and DO propagate to the visual.
+  // The 30s auto-compact disarm path uses this same pattern and
+  // clears its checkbox reliably. Fires regardless of outcome
+  // (Cancel / X-close / Clear Everything) - in the Clear
+  // Everything path it redundantly chases the inline clear later
+  // in this function, which is harmless.
+  setTimeout(() => {
+    void clearCheckboxSettingAllScopes("clearAllData");
+  }, 1000);
+
   if (confirm !== "Clear Everything") {
-    // Cancelled or X-closed. Checkbox was already cleared at the
-    // top of the function, so there is nothing to do here.
+    // Cancelled or X-closed. The deferred clear above handles the
+    // checkbox visual - nothing to do here.
     return;
   }
 
@@ -266,25 +269,17 @@ export function registerClearSettingsCommand(
     vscode.commands.registerCommand("wat321.clearAllSettings", () => performClear())
   );
 
-  // Settings page checkbox trigger. Defer the entire performClear
-  // flow via setTimeout so it runs OUTSIDE the
-  // onDidChangeConfiguration handler's call stack. VS Code's
-  // Settings UI holds an optimistic "checked" visual during any
-  // config.update call that originates from within its own
-  // tick-origin handler, which is why inline config.update(false)
-  // calls silently fail to refresh the checkbox on X-close. The
-  // auto-compact 30s disarm path already proves that writes fired
-  // from a later event-loop turn DO propagate to the visual, so
-  // we match that pattern here.
+  // Settings page checkbox trigger. performClear schedules its own
+  // deferred checkbox clear 1 second after the confirmation dialog
+  // closes - see the comment inside performClear for the Settings
+  // UI rationale.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("wat321.clearAllData")) {
         const checked = vscode.workspace
           .getConfiguration("wat321")
           .get<boolean>("clearAllData", false);
-        if (checked) {
-          setTimeout(() => void performClear(), 0);
-        }
+        if (checked) performClear();
       }
     })
   );
