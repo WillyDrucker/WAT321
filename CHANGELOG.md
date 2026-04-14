@@ -5,7 +5,7 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.17] - unreleased
+## [1.0.17] - 2026-04-14
 
 ### Fixed
 - **Reset WAT321 now actually responds the first time you click it.** The checkbox at the bottom of the WAT321 settings page was getting silently blocked by a stale workspace-level value left behind by an early-adopter build, so clicking it in user settings would do nothing - no toast, no dialog, nothing. The reset trigger and the experimental Force Claude Auto-Compact checkbox have both been hardened so they can only ever live at the user level, never per-workspace, and a quiet one-shot heal runs the first time you open WAT321 after upgrading to scrub any stale value out of your workspace settings file. After the upgrade the click-and-confirm flow works on the first try.
