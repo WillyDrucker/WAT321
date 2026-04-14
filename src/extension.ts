@@ -10,6 +10,7 @@ import {
 } from "./bootstrap";
 import { registerClearSettingsCommand } from "./shared/clearSettings";
 import { registerWakeCommands } from "./shared/wakeCommands";
+import { registerCancelExperimentalAutoCompactCommand } from "./WAT321_EXPERIMENTAL_AUTOCOMPACT/service";
 
 /**
  * Top-level entry point. Owns the `activate` / `deactivate` contract
@@ -54,6 +55,13 @@ export function activate(context: vscode.ExtensionContext) {
   // palette - they exist only as status bar click targets when the
   // widget is in the 15-minute fallback state.
   registerWakeCommands(context, groups);
+  // Internal click-to-disarm command for the experimental Force Claude
+  // Auto-Compact armed status bar item. Also not listed in
+  // contributes.commands - the only surface is the armed widget click.
+  registerCancelExperimentalAutoCompactCommand(
+    context,
+    () => groups.experimentalAutoCompact?.service ?? null
+  );
 }
 
 export function deactivate() {

@@ -13,8 +13,9 @@ export const WIDGET_SLOT = {
   claudeUsageWeekly: 1,
   codexUsage5H: 2,
   codexUsageWeekly: 3,
-  claudeSessionTokens: 4,
-  codexSessionTokens: 5,
+  claudeAutoCompactArmed: 4,
+  claudeSessionTokens: 5,
+  codexSessionTokens: 6,
 } as const;
 
 export type WidgetSlot = (typeof WIDGET_SLOT)[keyof typeof WIDGET_SLOT];
