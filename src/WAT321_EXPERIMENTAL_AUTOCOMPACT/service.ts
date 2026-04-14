@@ -5,6 +5,7 @@ import {
   SETTINGS_PATH,
   writeAutoCompactOverride,
 } from "../shared/claudeSettings";
+import { clearCheckboxSetting } from "../shared/clearSettings";
 import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
 import type { ClaudeSessionTokenService } from "../WAT321_CLAUDE_SESSION_TOKENS/service";
 import type { WidgetState as ClaudeTokenWidgetState } from "../WAT321_CLAUDE_SESSION_TOKENS/types";
@@ -34,14 +35,16 @@ import type {
  *     ticked while armed. If the gate blocks or the user cancels
  *     the dialog, the box is unticked immediately.
  *
- *   - Unticking the box while armed disarms silently (user-cancel).
- *
- *   - On compact detection or 30s timeout, the service disarms,
- *     restores the override, disposes the armed status bar item,
- *     and unticks the box.
+ *   - Unticking the box while armed disarms immediately, restores
+ *     the override, disposes the armed widget, and surfaces a
+ *     `Claude Auto-Compact Disarmed. Cancelled.` toast.
  *
  *   - Clicking the red `! ARMED` status bar item disarms the same
  *     way as unticking.
+ *
+ *   - On compact detection or 30s timeout, the service disarms,
+ *     restores the override, disposes the armed status bar item,
+ *     and unticks the box, each with its own information toast.
  *
  * Safety contracts:
  *   - Sentinel + 3-slot arm backup ring + install snapshot +
@@ -124,7 +127,7 @@ export class ExperimentalAutoCompactService {
       .getConfiguration("wat321")
       .get<boolean>(SETTING_KEY, false);
     if (current) {
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
     }
 
     // Subscribe to the Claude session token service so the preflight
@@ -239,7 +242,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         formatArmBlockerMessage(blocker, this.activeContext, cooldownRemaining)
       );
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -253,7 +256,7 @@ export class ExperimentalAutoCompactService {
       "Cancel"
     );
     if (choice !== "Arm Auto-Compact") {
-      await this.resetSetting();
+      await clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -282,7 +285,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 lost sight of your active Claude session. Try again in a moment."
       );
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -291,7 +294,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 lost access to ~/.claude/settings.json. Try again in a moment."
       );
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
     const originalOverride = read.value;
@@ -299,7 +302,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "Your Claude auto-compact override is already set to 1. WAT321 will heal this on the next VS Code start. Run WAT321: Reset All Settings if you need to unstick it now."
       );
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -310,7 +313,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 could not read the Claude transcript file. Try again in a moment."
       );
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -332,7 +335,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 could not save its arm record. Check disk space and file permissions, then try again."
       );
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -341,7 +344,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 could not update ~/.claude/settings.json. Check that the file is not locked or read-only, then try again."
       );
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -384,7 +387,7 @@ export class ExperimentalAutoCompactService {
 
     // Flip the checkbox off to reflect the disarmed state. Our
     // config listener short-circuits because armedSentinel is null.
-    void this.resetSetting();
+    void clearCheckboxSetting(SETTING_KEY);
 
     if (reason === "compact-detected") {
       vscode.window.showInformationMessage(
@@ -451,51 +454,6 @@ export class ExperimentalAutoCompactService {
     this.disarm("user-cancel");
   }
 
-  /** Flip the experimental checkbox off. Uses `config.inspect()` to
-   * find the exact scope(s) where the user's `true` lives, then
-   * writes an explicit `false` at each of those scopes sequentially
-   * with awaits. This reliably lands the underlying config state
-   * at `false` across Global / Workspace / WorkspaceFolder.
-   *
-   * Note: the Settings UI does not always repaint the visible
-   * checkbox row in place after a config.update originating from
-   * the row's own tick-origin handler call stack. That is a VS
-   * Code rendering bug - scrolling the setting off-screen and back
-   * forces a repaint and shows the correct unchecked state. The
-   * config value itself is always correct; we cannot fix the
-   * stale paint from an extension. */
-  private async resetSetting(): Promise<void> {
-    const config = vscode.workspace.getConfiguration("wat321");
-    const inspect = config.inspect<boolean>(SETTING_KEY);
-
-    const safeUpdate = async (
-      scope: vscode.ConfigurationTarget
-    ): Promise<void> => {
-      try {
-        await config.update(SETTING_KEY, false, scope);
-      } catch {
-        // Scope applicable but update rejected (read-only, etc.).
-      }
-    };
-
-    let hit = false;
-    if (inspect?.globalValue !== undefined) {
-      await safeUpdate(vscode.ConfigurationTarget.Global);
-      hit = true;
-    }
-    if (inspect?.workspaceValue !== undefined) {
-      await safeUpdate(vscode.ConfigurationTarget.Workspace);
-      hit = true;
-    }
-    if (inspect?.workspaceFolderValue !== undefined) {
-      await safeUpdate(vscode.ConfigurationTarget.WorkspaceFolder);
-      hit = true;
-    }
-    if (!hit) {
-      await safeUpdate(vscode.ConfigurationTarget.Global);
-    }
-  }
-
   private schedulePoll(): void {
     if (this.disposed || !this.armedSentinel) return;
     if (this.pollTimer) clearTimeout(this.pollTimer);
@@ -518,7 +476,7 @@ export class ExperimentalAutoCompactService {
     if (!existsSync(SENTINEL_PATH)) {
       this.armedSentinel = null;
       this.disposeArmedItem();
-      void this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 

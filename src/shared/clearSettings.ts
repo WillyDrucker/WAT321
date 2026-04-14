@@ -25,6 +25,7 @@ const STATUS_BAR_ITEM_IDS = [
   "wat321.codexSession",
   "wat321.codexWeekly",
   "wat321.codexSessionTokens",
+  "wat321.claudeAutoCompactArmed",
 ] as const;
 
 /** Update a single wat321.* setting at every applicable configuration
@@ -57,6 +58,11 @@ async function updateSettingAllScopes(
  * the underlying config state at `false` across Global /
  * Workspace / WorkspaceFolder.
  *
+ * Exported because the experimental auto-compact service clears
+ * its own checkbox through this helper too, keeping both the
+ * Reset WAT321 flow and the experimental disarm paths on the
+ * exact same clearing shape.
+ *
  * Note: the Settings UI does not always repaint the visible
  * checkbox row in place after a config.update originating from
  * the row's own tick-origin handler call stack. That is a VS
@@ -64,7 +70,7 @@ async function updateSettingAllScopes(
  * forces a repaint and shows the correct unchecked state. The
  * config value itself is always correct; we cannot fix the stale
  * paint from an extension. */
-async function clearCheckboxSettingAllScopes(key: string): Promise<void> {
+export async function clearCheckboxSetting(key: string): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
   const inspect = config.inspect<boolean>(key);
 
@@ -163,7 +169,7 @@ async function performClear(): Promise<void> {
   // rendering bug - scrolling the setting off-screen and back
   // forces a repaint and shows the correct state). We write the
   // state correctly and accept the stale paint.
-  await clearCheckboxSettingAllScopes("clearAllData");
+  await clearCheckboxSetting("clearAllData");
 
   if (confirm !== "Clear Everything") return;
 
