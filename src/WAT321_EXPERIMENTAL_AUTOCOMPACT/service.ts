@@ -5,7 +5,10 @@ import {
   SETTINGS_PATH,
   writeAutoCompactOverride,
 } from "../shared/claudeSettings";
+import { clearCheckboxSetting } from "../shared/clearSettings";
+import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
 import type { ClaudeSessionTokenService } from "../WAT321_CLAUDE_SESSION_TOKENS/service";
+import type { WidgetState as ClaudeTokenWidgetState } from "../WAT321_CLAUDE_SESSION_TOKENS/types";
 import {
   ARMED_OVERRIDE_VALUE,
   maybeCaptureInstallSnapshot,
@@ -13,34 +16,47 @@ import {
 } from "./backups";
 import { scanForCompactMarker } from "./compactDetector";
 import { healStuckOverride, safeRestoreValue, type HealResult } from "./heal";
+import {
+  determineArmBlocker,
+  formatArmBlockerMessage,
+} from "./preflightGate";
 import { deleteSentinel, SENTINEL_PATH, writeSentinel } from "./sentinel";
-import type { ExperimentalAutoCompactSentinel } from "./types";
+import type {
+  ActiveContextInfo,
+  ExperimentalAutoCompactSentinel,
+} from "./types";
 
 /**
- * Experimental Force Claude Auto-Compact service. Triggered entirely
- * through the `wat321.experimental.forceClaudeAutoCompact` setting
- * checkbox - no status bar widget, no preflight gate, no passive
- * availability resolver, no consent prompt.
+ * Experimental Force Claude Auto-Compact service. Driven by the
+ * `wat321.experimental.forceClaudeAutoCompact` checkbox:
  *
- * The flow is:
- *   1. User toggles the setting ON.
- *   2. We capture the current `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` into
- *      the sentinel + arm backup ring and lower it to "1".
- *   3. We poll the active Claude transcript for the compact marker.
- *   4. On compact detected OR 30s timeout, we restore the original
- *      value, delete the sentinel, flip the setting back to OFF, and
- *      enter a 30s cooldown that refuses re-arming.
- *   5. The user may also toggle OFF mid-arm; that routes through the
- *      same restore path with a "user-cancel" reason (silent, no toast).
+ *   - Ticking the box runs a preflight gate, shows a confirmation
+ *     dialog if the gate passes, and arms on confirm. The box stays
+ *     ticked while armed. If the gate blocks or the user cancels
+ *     the dialog, the box is unticked immediately.
+ *
+ *   - Unticking the box while armed disarms immediately, restores
+ *     the override, disposes the armed widget, and surfaces a
+ *     `Claude Auto-Compact Disarmed. Cancelled.` toast.
+ *
+ *   - Clicking the red `! ARMED` status bar item disarms the same
+ *     way as unticking.
+ *
+ *   - On compact detection or 30s timeout, the service disarms,
+ *     restores the override, disposes the armed status bar item,
+ *     and unticks the box, each with its own information toast.
  *
  * Safety contracts:
- *   - Sentinel + 3-slot arm backup ring + install snapshot + hardcoded
- *     default form a four-tier restore precedence chain, poison-checked
- *     at every tier against the armed value "1".
+ *   - Sentinel + 3-slot arm backup ring + install snapshot +
+ *     hardcoded `"85"` form a four-tier restore precedence chain,
+ *     poison-checked at every tier against the armed value `"1"`.
  *   - `healStuckOverride()` on startup unsticks any override left
- *     stuck at "1" by a crash in a previous session.
- *   - On activation, the setting is force-reset to `false` so a value
- *     left `true` across a VS Code restart never auto-arms silently.
+ *     stuck by a crash in a previous session.
+ *   - On activation, the setting is force-reset to `false` so a
+ *     `true` value left across a VS Code restart never auto-arms.
+ *   - `dispose()` runs a synchronous best-effort restore before
+ *     clearing timers and listeners so a mid-arm provider teardown
+ *     still unsticks the override.
  */
 
 const SETTING_KEY = "experimental.forceClaudeAutoCompact";
@@ -55,6 +71,12 @@ const COOLDOWN_MS = 30_000;
 /** Poll cadence while armed. */
 const POLL_INTERVAL_MS = 2_000;
 
+/** Red exclamation glyph on the armed status bar item. Unicode
+ * U+2757 HEAVY EXCLAMATION MARK renders as its own red emoji
+ * regardless of theme. Paired with the `errorBackground` theme
+ * color below so the whole item reads as a red error banner. */
+const RED_EXCLAIM = "\u2757";
+
 type DisarmReason = "user-cancel" | "compact-detected" | "timeout";
 
 export class ExperimentalAutoCompactService {
@@ -63,7 +85,14 @@ export class ExperimentalAutoCompactService {
   private cooldownUntil = 0;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private configListener: vscode.Disposable | null = null;
+  private tokenListener: ((state: ClaudeTokenWidgetState) => void) | null = null;
+  private armedItem: vscode.StatusBarItem | null = null;
   private disposed = false;
+  /** Cached live context snapshot from the Claude session token
+   * service. Drives the preflight gate's context-fraction and
+   * transcript-path needs. `null` when no live Claude session is
+   * currently resolved. */
+  private activeContext: ActiveContextInfo | null = null;
 
   constructor(private tokenService: ClaudeSessionTokenService) {}
 
@@ -90,35 +119,39 @@ export class ExperimentalAutoCompactService {
     maybeCaptureInstallSnapshot();
 
     // Force the setting to false on activate regardless of its prior
-    // state. A `true` value left across restart would otherwise arm
-    // immediately on startup, which is surprising behavior. Silent -
-    // the user will see the checkbox unchecked next time they open
-    // settings.
+    // state. A `true` value left across restart would otherwise run
+    // the preflight gate immediately on startup, which is surprising.
+    // Silent - the user will see the checkbox unchecked next time
+    // they open settings.
     const current = vscode.workspace
       .getConfiguration("wat321")
       .get<boolean>(SETTING_KEY, false);
     if (current) {
-      vscode.workspace
-        .getConfiguration("wat321")
-        .update(SETTING_KEY, false, vscode.ConfigurationTarget.Global)
-        .then(undefined, () => {
-          // best-effort
-        });
+      void clearCheckboxSetting(SETTING_KEY);
     }
+
+    // Subscribe to the Claude session token service so the preflight
+    // gate always has a live context snapshot + transcript path.
+    // Updates land on every session token poll (~5 s cadence).
+    this.tokenListener = (state: ClaudeTokenWidgetState) => {
+      this.applyTokenState(state);
+    };
+    this.tokenService.subscribe(this.tokenListener);
 
     this.configListener = vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration(FULL_SETTING_PATH)) return;
       const enabled = vscode.workspace
         .getConfiguration("wat321")
         .get<boolean>(SETTING_KEY, false);
-      // Idempotent: only act when the setting and our internal state
-      // disagree. Our own writes land here too, but they always match
-      // our state (we flip setting -> false after we set armedSentinel
-      // -> null), so they no-op automatically. No internal-update flag
-      // needed.
+      // Idempotent: act only when the setting and our internal
+      // armed state disagree. Our own writes land here too and
+      // no-op automatically because they always match our state.
       if (enabled && !this.armedSentinel) {
-        this.arm();
+        void this.tryArm();
       } else if (!enabled && this.armedSentinel) {
+        // Unticking the box while armed disarms immediately and
+        // silently - the user already knows what they just did, so
+        // an extra confirm dialog would be friction, not safety.
         this.disarm("user-cancel");
       }
     });
@@ -129,15 +162,9 @@ export class ExperimentalAutoCompactService {
     this.disposed = true;
 
     // If we are armed at dispose time, restore the override
-    // synchronously before tearing down. This covers: Claude provider
-    // disabled mid-arm, VS Code closing mid-arm, any other teardown
-    // while a cycle is still in flight. Without this, the override
-    // would stay at "1" until the next start's heal failsafe picked
-    // it up - functional but not clean, and a user who then kept
-    // using Claude outside VS Code would sit in exactly the
-    // unintended auto-compact loop this tool is meant to prevent.
-    // Best-effort: if the write fails, leave the sentinel on disk so
-    // the next-start heal chain still unsticks the user.
+    // synchronously before tearing down. Covers Claude provider
+    // disabled mid-arm, VS Code closing mid-arm, or any other
+    // teardown while a cycle is still in flight.
     if (this.armedSentinel && existsSync(SENTINEL_PATH)) {
       const target = safeRestoreValue(this.armedSentinel.originalOverride);
       if (writeAutoCompactOverride(target)) {
@@ -154,33 +181,105 @@ export class ExperimentalAutoCompactService {
       this.configListener.dispose();
       this.configListener = null;
     }
+    if (this.tokenListener) {
+      this.tokenService.unsubscribe(this.tokenListener);
+      this.tokenListener = null;
+    }
+    if (this.armedItem) {
+      this.armedItem.dispose();
+      this.armedItem = null;
+    }
   }
 
-  /** Exposed for the Reset WAT321 path so it can heal a stuck override
-   * without holding a reference to service internals. */
-  static healStuckOverride(): HealResult {
-    return healStuckOverride();
+  /** Translate a Claude session token state update into the live
+   * context snapshot the preflight gate consumes. Only `ok` states
+   * with a `live` source yield a usable `ActiveContextInfo` - the
+   * `lastKnown` fallback represents a session with no live CLI
+   * process, which has no transcript to arm against. */
+  private applyTokenState(state: ClaudeTokenWidgetState): void {
+    if (state.status !== "ok" || state.session.source !== "live") {
+      this.activeContext = null;
+      return;
+    }
+    const session = state.session;
+    const transcriptPath = this.tokenService.getActiveTranscriptPath();
+    if (!transcriptPath) {
+      this.activeContext = null;
+      return;
+    }
+    const ceiling = Math.round(
+      (session.autoCompactPct / 100) * session.contextWindowSize
+    );
+    if (ceiling <= 0) {
+      this.activeContext = null;
+      return;
+    }
+    this.activeContext = {
+      transcriptPath,
+      contextUsed: session.contextUsed,
+      ceiling,
+      fraction: session.contextUsed / ceiling,
+    };
+  }
+
+  private async tryArm(): Promise<void> {
+    // Preflight gate: refuse arm with a friendly error toast if any
+    // blocker is active. On rejection, uncheck the box and bail -
+    // the user should never see a confirmation dialog for an arm
+    // that is going to fail.
+    const blocker = determineArmBlocker({
+      activeContext: this.activeContext,
+      cooldownUntil: this.cooldownUntil,
+    });
+    if (blocker !== null) {
+      const cooldownRemaining = Math.max(0, this.cooldownUntil - Date.now());
+      vscode.window.showWarningMessage(
+        formatArmBlockerMessage(blocker, this.activeContext, cooldownRemaining)
+      );
+      void clearCheckboxSetting(SETTING_KEY);
+      return;
+    }
+
+    // Confirmation dialog. Non-modal so it follows the user's
+    // preference for bottom-right notification placement. X-close
+    // on the notification returns undefined, which we treat the
+    // same as explicit Cancel (un-tick the checkbox and bail).
+    const choice = await vscode.window.showInformationMessage(
+      "Arm Claude Auto-Compact for your next message to Claude? Your next prompt will trigger Claude's built-in auto-compact. Disarms after 30 seconds of no activity.",
+      "Arm Auto-Compact",
+      "Cancel"
+    );
+    if (choice !== "Arm Auto-Compact") {
+      await clearCheckboxSetting(SETTING_KEY);
+      return;
+    }
+
+    // Race guard: the dialog is non-modal, so the user could untick
+    // the checkbox while it is open. Re-read the setting before we
+    // commit any writes. If the user already unticked, bail silently.
+    const stillEnabled = vscode.workspace
+      .getConfiguration("wat321")
+      .get<boolean>(SETTING_KEY, false);
+    if (!stillEnabled) return;
+
+    // Another guard: the service may have been disposed while the
+    // dialog was open.
+    if (this.disposed) return;
+
+    this.arm();
   }
 
   private arm(): void {
     if (this.armedSentinel) return;
 
-    const now = Date.now();
-    if (now < this.cooldownUntil) {
-      const remaining = Math.ceil((this.cooldownUntil - now) / 1000);
+    const ctx = this.activeContext;
+    if (!ctx) {
+      // Active context went stale between preflight and arm. Show a
+      // brief error and bail.
       vscode.window.showWarningMessage(
-        `WAT321 just finished a Force Auto-Compact cycle. Wait ${remaining} second${remaining !== 1 ? "s" : ""} before arming again.`
+        "WAT321 lost sight of your active Claude session. Try again in a moment."
       );
-      this.resetSetting();
-      return;
-    }
-
-    const transcriptPath = this.tokenService.getActiveTranscriptPath();
-    if (!transcriptPath) {
-      vscode.window.showWarningMessage(
-        "WAT321 could not find an active Claude Code session to target. Open Claude Code and send a prompt first, then try again."
-      );
-      this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -189,26 +288,26 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 lost access to ~/.claude/settings.json. Try again in a moment."
       );
-      this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
     const originalOverride = read.value;
     if (originalOverride === ARMED_OVERRIDE_VALUE) {
       vscode.window.showWarningMessage(
-        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is already set to 1. WAT321 will heal this on the next VS Code start. Run WAT321: Reset All Settings if you need to unstick it now."
+        "Your Claude auto-compact override is already set to 1. WAT321 will heal this on the next VS Code start. Run WAT321: Reset All Settings if you need to unstick it now."
       );
-      this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
     let baselineSize = 0;
     try {
-      baselineSize = statSync(transcriptPath).size;
+      baselineSize = statSync(ctx.transcriptPath).size;
     } catch {
       vscode.window.showWarningMessage(
         "WAT321 could not read the Claude transcript file. Try again in a moment."
       );
-      this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -221,7 +320,7 @@ export class ExperimentalAutoCompactService {
       settingsPath: SETTINGS_PATH,
       originalOverride,
       armedOverride: ARMED_OVERRIDE_VALUE,
-      watchTranscriptPath: transcriptPath,
+      watchTranscriptPath: ctx.transcriptPath,
       baselineSize,
       armedAt: Date.now(),
     };
@@ -230,7 +329,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 could not save its arm record. Check disk space and file permissions, then try again."
       );
-      this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -239,15 +338,16 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 could not update ~/.claude/settings.json. Check that the file is not locked or read-only, then try again."
       );
-      this.resetSetting();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
     this.armedSentinel = sentinel;
     this.armedScanOffset = baselineSize;
+    this.showArmedItem();
 
     vscode.window.showInformationMessage(
-      "Claude Auto-Compact armed. Your next message to Claude will trigger an auto-compact. Auto-disarms in 30 seconds if no compaction occurs."
+      "Claude Auto-Compact armed. Next prompt will trigger Auto-Compact."
     );
 
     this.schedulePoll();
@@ -273,14 +373,15 @@ export class ExperimentalAutoCompactService {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
+    this.disposeArmedItem();
 
     if (reason === "compact-detected" || reason === "timeout") {
       this.cooldownUntil = Date.now() + COOLDOWN_MS;
     }
 
-    // Flip the checkbox off to reflect the disarmed state. Our config
-    // listener short-circuits because armedSentinel is already null.
-    this.resetSetting();
+    // Flip the checkbox off to reflect the disarmed state. Our
+    // config listener short-circuits because armedSentinel is null.
+    void clearCheckboxSetting(SETTING_KEY);
 
     if (reason === "compact-detected") {
       vscode.window.showInformationMessage(
@@ -288,19 +389,63 @@ export class ExperimentalAutoCompactService {
       );
     } else if (reason === "timeout") {
       vscode.window.showInformationMessage(
-        "Claude Force Auto-Compact timed out without detecting a compaction. Your Claude settings have been restored."
+        "Claude Auto-Compact disarmed. Timed out after 30 seconds."
+      );
+    } else if (reason === "user-cancel") {
+      vscode.window.showInformationMessage(
+        "Claude Auto-Compact Disarmed. Cancelled."
       );
     }
-    // user-cancel is silent - the user just unchecked the box.
   }
 
-  private resetSetting(): void {
-    vscode.workspace
-      .getConfiguration("wat321")
-      .update(SETTING_KEY, false, vscode.ConfigurationTarget.Global)
-      .then(undefined, () => {
-        // best-effort
-      });
+  /** Create and show the red `! ARMED` status bar item. Idempotent:
+   * calling twice in a row is a no-op. Tooltip is a MarkdownString
+   * so the leading exclaim can render red via the emoji glyph and
+   * the `Click to disarm.` line can render in bold. `isTrusted`
+   * stays false - the tooltip contains no commands. */
+  private showArmedItem(): void {
+    if (this.armedItem) return;
+    const item = vscode.window.createStatusBarItem(
+      "wat321.claudeAutoCompactArmed",
+      vscode.StatusBarAlignment.Right,
+      getWidgetPriority(WIDGET_SLOT.claudeAutoCompactArmed)
+    );
+    item.name = "WAT321: Claude Auto-Compact (Armed)";
+    item.text = `${RED_EXCLAIM} ARMED`;
+    // VS Code's StatusBarItem API only honors "prominent" theme
+    // colors for foreground (statusBarItem.errorForeground,
+    // warningForeground, prominentForeground). On default themes
+    // statusBarItem.errorForeground is WHITE (intended to contrast
+    // with errorBackground) which is why "ARMED" rendered white
+    // in the previous pass. Setting both color and backgroundColor
+    // gives the sanctioned VS Code "error" look: dark-red banner
+    // background with contrasting white text, plus the red emoji
+    // prefix that renders its own color on top of both.
+    item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
+    item.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+    const tooltip = new vscode.MarkdownString();
+    tooltip.isTrusted = false;
+    tooltip.supportThemeIcons = true;
+    tooltip.appendMarkdown(
+      "\u2757 Claude Auto-Compact - Armed\n\nYour Claude session will Auto-Compact on next prompt.\n\n**Click to disarm.**"
+    );
+    item.tooltip = tooltip;
+    item.command = CANCEL_COMMAND_ID;
+    item.show();
+    this.armedItem = item;
+  }
+
+  private disposeArmedItem(): void {
+    if (!this.armedItem) return;
+    this.armedItem.dispose();
+    this.armedItem = null;
+  }
+
+  /** Command handler for the armed status bar item's click. Wired
+   * in `registerCancelCommand` below. */
+  cancelFromWidget(): void {
+    if (!this.armedSentinel) return;
+    this.disarm("user-cancel");
   }
 
   private schedulePoll(): void {
@@ -324,7 +469,8 @@ export class ExperimentalAutoCompactService {
     // Reset WAT321 already cleaned up).
     if (!existsSync(SENTINEL_PATH)) {
       this.armedSentinel = null;
-      this.resetSetting();
+      this.disposeArmedItem();
+      void clearCheckboxSetting(SETTING_KEY);
       return;
     }
 
@@ -352,4 +498,25 @@ export class ExperimentalAutoCompactService {
       }
     }
   }
+}
+
+/** Internal command id for the armed status bar item's click
+ * target. NOT listed in `package.json contributes.commands` so it
+ * never appears in the palette - it exists only as a click target
+ * on the armed widget. */
+export const CANCEL_COMMAND_ID = "wat321.cancelExperimentalAutoCompact";
+
+/** Register the click-to-disarm command for the armed status bar
+ * item. Called once during top-level `activate()` with a resolver
+ * that returns the currently-active service instance (or null when
+ * the Claude provider group is not active). */
+export function registerCancelExperimentalAutoCompactCommand(
+  context: vscode.ExtensionContext,
+  getActiveService: () => ExperimentalAutoCompactService | null
+): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand(CANCEL_COMMAND_ID, () => {
+      getActiveService()?.cancelFromWidget();
+    })
+  );
 }

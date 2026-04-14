@@ -48,7 +48,7 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 
 ### Force Claude Auto-Compact *(experimental, off by default)*
 
-An **experimental** checkbox in the Claude settings section. Arms Claude's Auto-Compact for your next message prompt to Claude. Triggers Auto-Compact on next prompt. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed. Useful for long sessions when performance degrades.
+An **experimental** checkbox in the Claude settings section. Arms Claude's Auto-Compact for your next message prompt to Claude. Triggers Auto-Compact on next prompt. Disarms after 30 seconds of no activity. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed. A confirmation dialog will appear before arming. *Useful for long sessions when performance degrades.*
 
 ---
 
