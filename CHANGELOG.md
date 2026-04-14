@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.0.18] - 2026-04-14
+
+### Fixed
+- **Packaging hardening, no behavior change.** Local environment files (`.env`, `.env.*`) are now excluded from the packaged extension so a developer's local credentials cannot end up bundled inside the `.vsix`. If you are upgrading from 1.0.17, every WAT321 feature behaves the same as before - this release exists purely to ship the cleaner package.
+
+## [1.0.17] - 2026-04-14
+
+### Fixed
+- **Reset WAT321 now actually responds the first time you click it.** The checkbox at the bottom of the WAT321 settings page was getting silently blocked by a stale workspace-level value left behind by an early-adopter build, so clicking it in user settings would do nothing - no toast, no dialog, nothing. The reset trigger and the experimental Force Claude Auto-Compact checkbox have both been hardened so they can only ever live at the user level, never per-workspace, and a quiet one-shot heal runs the first time you open WAT321 after upgrading to scrub any stale value out of your workspace settings file. After the upgrade the click-and-confirm flow works on the first try.
+- **Claude Session Tokens now keeps showing your most recent session at startup, even when no Claude session is actively running.** Before this, the widget would land at "Claude -" with a "No active Claude session" tooltip on a fresh VS Code launch, even though Codex Session Tokens correctly showed the last session in the same situation. The Claude widget now mirrors how Codex resolves the last-known session: scan the current workspace's transcripts first, fall back to the globally newest transcript across every project if nothing matches, and never quietly degrade a known-good session back to a blank state mid-poll. When the widget is showing a snapshot from a previous session, the tooltip already says "Last active: X ago" so you know what you are looking at, and the cross-project fallback now correctly labels the snapshot with its real project name instead of the current workspace's name.
+- **The experimental auto-compact arm-blocker toast now says something useful when there is nothing to arm.** Before this it read `Open Claude Code and send a prompt first so WAT321 can target your session.`, which described the wrong sequence of events. It now reads `No active Claude session. Send a prompt to activate Claude session.` so the message matches what is actually missing.
+
 ## [1.0.16] - 2026-04-13
 
 ### Added

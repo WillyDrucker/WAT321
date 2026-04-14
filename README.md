@@ -8,11 +8,18 @@
 
 ![Hero](images/screenshots/HERO_SHOT.png)
 
-Real-time AI usage widgets for your VS Code status bar.
+Claude and Codex usage bars built right into your IDE.
 
-WAT321 ships with **six read-only widgets** - three for Claude, three for Codex - all enabled out of the box. They only read your existing CLI files and poll a safe stats endpoint; they never modify anything. WAT321 only shows widgets for the providers you actually use, so a Claude-only or Codex-only setup just works with nothing to configure. If you add the other provider later, its widgets show up automatically.
+WAT321 ships with **six read-only widgets** - three for Claude, three for Codex - all enabled out of the box. They only read your existing CLI files and poll a safe stats endpoint; they never modify anything.
 
 One opt-in **Experimental** setting is also available in the Claude section - see below.
+
+- 4 updated usage limits progress bars
+- 2 real-time session token status bars
+- Hover tooltips for breakdown - limits remaining, compact status, etc.
+- Auto-Compact feature (Experimental) - triggers built-in auto-compaction for higher quality compacts compared to `/compact`
+- "Epic Handshake" in development - enables automatic crosstalk between Claude and Codex for epic results (Kick off Claude/Codex as a true <s>sub</s>agent on steroids)
+- Available on the VS Marketplace and Open VSX Registry or direct download
 
 ---
 
@@ -30,7 +37,7 @@ Live progress bars showing your 5-hour session utilization and weekly limits. Si
 
 Tracks your active Claude Code session's context window usage against the auto-compact ceiling. See how much room you have before compaction kicks in.
 
-![Claude session tokens](images/screenshots/CLAUDE_SESSION_TOKENS.png)
+<img src="images/screenshots/CLAUDE_SESSION_TOKENS.png" width="250">
 
 ### Codex Usage
 
@@ -44,7 +51,7 @@ Same concept, **green** bars for Codex. Shows **remaining** capacity - the bars 
 
 Monitors your Codex session's context window fill level. Same layout as Claude session tokens.
 
-![Codex session tokens](images/screenshots/CODEX_SESSION_TOKENS.png)
+<img src="images/screenshots/CODEX_SESSION_TOKENS.png" width="250">
 
 ### Force Claude Auto-Compact *(experimental, off by default)*
 
@@ -107,7 +114,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 
 ![Status bar button](images/screenshots/STATUS_BAR_BUTTON.png)
 
-<img src="images/screenshots/STATUS_BAR_TOGGLE_MENU.png" width="300">
+<img src="images/screenshots/STATUS_BAR_TOGGLE_MENU.png" width="250">
 
 ---
 
