@@ -5,7 +5,7 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.16] - unreleased
+## [1.0.16] - 2026-04-13
 
 ### Added
 - **A red `❗ ARMED` status bar item now shows up whenever the experimental Force Claude Auto-Compact is armed.** It sits just to the left of your Claude session token widget. Hover to see what it is, click it to disarm immediately. The widget only exists while armed - it appears the moment you confirm the arm dialog and disappears the moment the tool disarms for any reason (your next prompt fires a compact, the 30-second timeout hits, you click the armed widget, or you untick the checkbox)
