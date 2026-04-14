@@ -266,14 +266,25 @@ export function registerClearSettingsCommand(
     vscode.commands.registerCommand("wat321.clearAllSettings", () => performClear())
   );
 
-  // Settings page checkbox trigger
+  // Settings page checkbox trigger. Defer the entire performClear
+  // flow via setTimeout so it runs OUTSIDE the
+  // onDidChangeConfiguration handler's call stack. VS Code's
+  // Settings UI holds an optimistic "checked" visual during any
+  // config.update call that originates from within its own
+  // tick-origin handler, which is why inline config.update(false)
+  // calls silently fail to refresh the checkbox on X-close. The
+  // auto-compact 30s disarm path already proves that writes fired
+  // from a later event-loop turn DO propagate to the visual, so
+  // we match that pattern here.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("wat321.clearAllData")) {
         const checked = vscode.workspace
           .getConfiguration("wat321")
           .get<boolean>("clearAllData", false);
-        if (checked) performClear();
+        if (checked) {
+          setTimeout(() => void performClear(), 0);
+        }
       }
     })
   );
