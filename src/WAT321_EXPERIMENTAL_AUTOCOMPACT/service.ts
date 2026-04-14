@@ -191,12 +191,6 @@ export class ExperimentalAutoCompactService {
     }
   }
 
-  /** Exposed for the Reset WAT321 path so it can heal a stuck override
-   * without holding a reference to service internals. */
-  static healStuckOverride(): HealResult {
-    return healStuckOverride();
-  }
-
   /** Translate a Claude session token state update into the live
    * context snapshot the preflight gate consumes. Only `ok` states
    * with a `live` source yield a usable `ActiveContextInfo` - the

@@ -7,8 +7,7 @@ import {
   readInstallSnapshotBytes,
   writeInstallSnapshotBytes,
 } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/backups";
-import type { HealResult } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/heal";
-import { ExperimentalAutoCompactService } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/service";
+import { healStuckOverride, type HealResult } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/heal";
 
 const STAMP_DIR = join(homedir(), ".wat321");
 
@@ -184,7 +183,7 @@ async function performClear(): Promise<void> {
   // failsafe guarantee: Reset WAT321 must ALWAYS unstick the user.
   let healResult: HealResult = "not-stuck";
   try {
-    healResult = ExperimentalAutoCompactService.healStuckOverride();
+    healResult = healStuckOverride();
   } catch {
     healResult = "io-error";
   }
@@ -266,10 +265,10 @@ export function registerClearSettingsCommand(
     vscode.commands.registerCommand("wat321.clearAllSettings", () => performClear())
   );
 
-  // Settings page checkbox trigger. performClear schedules its own
-  // deferred checkbox clear 1 second after the confirmation dialog
+  // Settings page checkbox trigger. performClear clears the
+  // checkbox via clearCheckboxSetting once the confirmation dialog
   // closes - see the comment inside performClear for the Settings
-  // UI rationale.
+  // UI rendering caveat.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("wat321.clearAllData")) {
