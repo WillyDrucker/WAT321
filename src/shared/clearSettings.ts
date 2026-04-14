@@ -143,6 +143,18 @@ async function resetStatusBarItemVisibility(): Promise<void> {
 }
 
 async function performClear(): Promise<void> {
+  // Clear the checkbox IMMEDIATELY, before the dialog appears.
+  // VS Code's Settings UI has a known issue where config.update
+  // does not reliably re-render a checkbox back to unchecked on
+  // X-close dismissal of a notification opened from that same
+  // checkbox tick. Working around it by clearing the visual up
+  // front: by the time the dialog is visible, the checkbox is
+  // already unchecked, so the X-close path never has to touch it.
+  // Treating the checkbox as a pure trigger (not a persistent
+  // state) makes this safe - there is no "reset in progress"
+  // mode the UI needs to show.
+  await clearCheckboxSettingAllScopes("clearAllData");
+
   // Non-modal bottom-right notification - keeps the confirmation in
   // VS Code's normal notification area instead of a center-screen
   // modal that blocks the whole UI. The user has explicitly asked
@@ -154,12 +166,8 @@ async function performClear(): Promise<void> {
   );
 
   if (confirm !== "Clear Everything") {
-    // User cancelled (explicit Cancel or X-close on the toast) -
-    // clear the checkbox via the inspect-first helper so the
-    // Settings UI visual reliably refreshes. There is no scenario
-    // where the clearAllData checkbox should stay ticked after the
-    // dialog closes without running the reset.
-    await clearCheckboxSettingAllScopes("clearAllData");
+    // Cancelled or X-closed. Checkbox was already cleared at the
+    // top of the function, so there is nothing to do here.
     return;
   }
 
