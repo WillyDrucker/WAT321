@@ -21,9 +21,8 @@ import type { ActiveContextInfo, ArmBlocker } from "./types";
 
 /** Minimum `contextUsed / ceiling` required to arm. Below this
  * fraction there is nothing meaningful for auto-compact to summarize,
- * so arming would waste a compact on an empty-ish session. Matches
- * the v1.0.14 primary arm gate. */
-export const USEFUL_CONTEXT_FRACTION = 0.20;
+ * so arming would waste a compact on an empty-ish session. */
+export const USEFUL_CONTEXT_FRACTION = 0.15;
 
 /** Window in which a just-fired native auto-compact still blocks a
  * re-arm. The marker's file mtime is compared against `Date.now()`;
@@ -33,12 +32,6 @@ export const USEFUL_CONTEXT_FRACTION = 0.20;
  * is enough slack for a freshly compacted session to start growing
  * context again without an arbitrary long wait. */
 export const RECENT_COMPACT_WINDOW_MS = 2 * 60_000;
-
-/** Window in which a recent `user` or `assistant-pending` tail entry
- * means Claude is still mid-turn. The preflight gate refuses to arm
- * during this window so the next compact cannot fire on a queued
- * prompt or a pending tool_use callback. */
-export const CLAUDE_BUSY_WINDOW_MS = 60_000;
 
 export interface PreflightInput {
   /** Live context snapshot from the Claude session token service,
@@ -78,14 +71,19 @@ export function determineArmBlocker(input: PreflightInput): ArmBlocker | null {
   const tail = scanTailForCompactHistory(input.activeContext.transcriptPath);
   if (tail.ioError) return null; // bias toward allow
 
-  // claude-busy: mid-turn detection. Only block if the transcript
-  // is actively moving - a tail whose mtime is hours old with a
-  // stale user message at the end must not freeze the gate.
-  const age = Date.now() - tail.mtimeMs;
+  // claude-busy: mid-turn detection. Trust classifyLastEntry
+  // directly - if the last parsed JSONL entry is a user message
+  // (prompt just landed, assistant turn not yet written) or an
+  // assistant message with an unresolved tool_use block (waiting
+  // on a tool callback), Claude is mid-turn. No age window: the
+  // upstream no-live-session gate already guarantees the session
+  // is currently running, so a stale tail cannot freeze us here.
+  // A long-running tool call whose transcript mtime is minutes
+  // old is exactly the scenario we MUST block - it was slipping
+  // through the old 60s window gate.
   if (
-    age < CLAUDE_BUSY_WINDOW_MS &&
-    (tail.lastEntryKind === "user" ||
-      tail.lastEntryKind === "assistant-pending")
+    tail.lastEntryKind === "user" ||
+    tail.lastEntryKind === "assistant-pending"
   ) {
     return "claude-busy";
   }
@@ -94,6 +92,7 @@ export function determineArmBlocker(input: PreflightInput): ArmBlocker | null {
   // within the recent-compact window. This is the loop backstop -
   // even if the context fraction gate passes, two compacts in
   // quick succession are refused.
+  const age = Date.now() - tail.mtimeMs;
   if (tail.markerCount > 0 && age < RECENT_COMPACT_WINDOW_MS) {
     return "recent-compact";
   }
@@ -113,12 +112,12 @@ export function formatArmBlockerMessage(
     case "no-live-session":
       return "Open Claude Code and send a prompt first so WAT321 can target your session.";
     case "claude-busy":
-      return "Claude is currently working on a prompt or tool call. Wait for it to finish, then try again.";
+      return "Your Claude session is currently running a prompt. Wait for it to finish, then try again.";
     case "below-threshold": {
       const pct = ctx
         ? Math.round(ctx.fraction * 100)
         : 0;
-      return `Your session is only at ${pct}% of the auto-compact ceiling. Nothing meaningful to compact yet.`;
+      return `Your session is only at ${pct}%, can't arm until 15%.`;
     }
     case "recent-compact":
       return "Your session was compacted recently. Give it a few minutes before arming again.";
