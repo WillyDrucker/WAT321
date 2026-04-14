@@ -68,11 +68,11 @@ const COOLDOWN_MS = 30_000;
 /** Poll cadence while armed. */
 const POLL_INTERVAL_MS = 2_000;
 
-/** Glyph prefix on the armed status bar item. Plain ASCII exclamation
- * so the theme color (`statusBarItem.errorForeground`) paints the
- * whole text uniformly red. The emoji form (U+2757) renders as its
- * own multi-color glyph and clashes with the text portion. */
-const RED_EXCLAIM = "!";
+/** Red exclamation glyph on the armed status bar item. Unicode
+ * U+2757 HEAVY EXCLAMATION MARK renders as its own red emoji
+ * regardless of theme. Paired with the `errorBackground` theme
+ * color below so the whole item reads as a red error banner. */
+const RED_EXCLAIM = "\u2757";
 
 type DisarmReason = "user-cancel" | "compact-detected" | "timeout";
 
@@ -146,7 +146,10 @@ export class ExperimentalAutoCompactService {
       if (enabled && !this.armedSentinel) {
         void this.tryArm();
       } else if (!enabled && this.armedSentinel) {
-        void this.confirmUserDisarm();
+        // Unticking the box while armed disarms immediately and
+        // silently - the user already knows what they just did, so
+        // an extra confirm dialog would be friction, not safety.
+        this.disarm("user-cancel");
       }
     });
   }
@@ -410,7 +413,17 @@ export class ExperimentalAutoCompactService {
     );
     item.name = "WAT321: Claude Auto-Compact (Armed)";
     item.text = `${RED_EXCLAIM} ARMED`;
+    // VS Code's StatusBarItem API only honors "prominent" theme
+    // colors for foreground (statusBarItem.errorForeground,
+    // warningForeground, prominentForeground). On default themes
+    // statusBarItem.errorForeground is WHITE (intended to contrast
+    // with errorBackground) which is why "ARMED" rendered white
+    // in the previous pass. Setting both color and backgroundColor
+    // gives the sanctioned VS Code "error" look: dark-red banner
+    // background with contrasting white text, plus the red emoji
+    // prefix that renders its own color on top of both.
     item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
+    item.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
     const tooltip = new vscode.MarkdownString();
     tooltip.isTrusted = false;
     tooltip.supportThemeIcons = true;
@@ -434,85 +447,43 @@ export class ExperimentalAutoCompactService {
     this.disarm("user-cancel");
   }
 
-  /** Flip the experimental checkbox off at every applicable scope.
-   * Writing at Global alone is not enough: if the user happened to
-   * toggle the setting from the Workspace tab of the Settings UI (or
-   * via a `.vscode/settings.json` override), a Global-only write
-   * leaves the effective value stuck at `true` because workspace
-   * wins over global. Same three-scope discipline as Reset WAT321
-   * uses in `src/shared/clearSettings.ts`.
-   *
-   * Writes `undefined` to remove the user-set value entirely rather
-   * than writing an explicit `false`, so we revert to the schema
-   * default without polluting settings files with scope rows the
-   * user never actively set. */
+  /** Flip the experimental checkbox off. Writes an explicit `false`
+   * at Global scope so the Settings UI reliably re-renders the
+   * checkbox as unchecked, then clears any override at Workspace
+   * and WorkspaceFolder scopes so a workspace-level `true` left
+   * over from a `.vscode/settings.json` cannot keep the effective
+   * value stuck. Previously we wrote `undefined` at all three
+   * scopes, which should have been equivalent, but some VS Code
+   * versions silently fail to re-render the Settings UI checkbox
+   * when a user-set value is cleared to default rather than
+   * overwritten to an explicit value. Explicit `false` at Global
+   * guarantees the Settings UI refreshes. */
   private async resetSetting(): Promise<void> {
-    await this.writeSettingAllScopes(undefined);
-  }
-
-  /** Re-tick the checkbox at every applicable scope. Used after the
-   * user cancels the disarm confirmation dialog, to keep the visible
-   * checkbox state in sync with the internal armed state. */
-  private async restoreSettingToTrue(): Promise<void> {
-    await this.writeSettingAllScopes(true);
-  }
-
-  private async writeSettingAllScopes(value: boolean | undefined): Promise<void> {
     const config = vscode.workspace.getConfiguration("wat321");
     const hasWorkspace =
       (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
-    const targets: vscode.ConfigurationTarget[] = [
-      vscode.ConfigurationTarget.Global,
+
+    const safeUpdate = async (
+      value: boolean | undefined,
+      scope: vscode.ConfigurationTarget
+    ): Promise<void> => {
+      try {
+        await config.update(SETTING_KEY, value, scope);
+      } catch {
+        // Scope applicable but update rejected (read-only, etc.).
+      }
+    };
+
+    const writes: Promise<void>[] = [
+      safeUpdate(false, vscode.ConfigurationTarget.Global),
     ];
     if (hasWorkspace) {
-      targets.push(
-        vscode.ConfigurationTarget.Workspace,
-        vscode.ConfigurationTarget.WorkspaceFolder
+      writes.push(
+        safeUpdate(undefined, vscode.ConfigurationTarget.Workspace),
+        safeUpdate(undefined, vscode.ConfigurationTarget.WorkspaceFolder)
       );
     }
-    await Promise.all(
-      targets.map(async (scope) => {
-        try {
-          await config.update(SETTING_KEY, value, scope);
-        } catch {
-          // Scope applicable but update rejected (read-only, etc.).
-        }
-      })
-    );
-  }
-
-  /** Pop a confirmation dialog when the user unchecks the box while
-   * armed. On confirm, disarm. On cancel (including X-out of the
-   * notification), re-tick the box so the visible state stays in
-   * sync with the still-armed internal state.
-   *
-   * Carefully handles the race where the 30-second timeout OR a
-   * compact detection fires while the dialog is still open: if we
-   * are no longer armed by the time the dialog resolves, no
-   * re-tick is needed because the automatic disarm path has
-   * already unticked the box for us. */
-  private async confirmUserDisarm(): Promise<void> {
-    if (!this.armedSentinel) return;
-
-    const choice = await vscode.window.showInformationMessage(
-      "Disarm Claude Auto-Compact? Your Claude settings will be restored.",
-      "Disarm",
-      "Cancel"
-    );
-
-    if (this.disposed) return;
-
-    if (choice === "Disarm") {
-      if (this.armedSentinel) this.disarm("user-cancel");
-      return;
-    }
-
-    // Cancel / X / dismiss. Only re-tick if we are still armed -
-    // the auto-disarm path may have fired during the dialog and
-    // already unticked the box.
-    if (this.armedSentinel) {
-      await this.restoreSettingToTrue();
-    }
+    await Promise.all(writes);
   }
 
   private schedulePoll(): void {
