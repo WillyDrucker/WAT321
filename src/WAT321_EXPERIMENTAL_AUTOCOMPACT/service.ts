@@ -447,16 +447,19 @@ export class ExperimentalAutoCompactService {
     this.disarm("user-cancel");
   }
 
-  /** Flip the experimental checkbox off so the Settings UI visibly
-   * re-renders as unchecked. Uses `config.inspect()` to find the
-   * exact scope(s) where the user's `true` lives, then writes an
-   * explicit `false` at each of those scopes sequentially.
-   * Sequential awaits matter: parallel writes at the same key can
-   * race and leave VS Code's internal state in a stale shape that
-   * does not re-render the checkbox visual. The value is `false`,
-   * not `undefined`, because Settings UI checkbox re-renders
-   * reliably pick up a concrete boolean change but can silently
-   * drop a remove-user-value change. */
+  /** Flip the experimental checkbox off. Uses `config.inspect()` to
+   * find the exact scope(s) where the user's `true` lives, then
+   * writes an explicit `false` at each of those scopes sequentially
+   * with awaits. This reliably lands the underlying config state
+   * at `false` across Global / Workspace / WorkspaceFolder.
+   *
+   * Note: the Settings UI does not always repaint the visible
+   * checkbox row in place after a config.update originating from
+   * the row's own tick-origin handler call stack. That is a VS
+   * Code rendering bug - scrolling the setting off-screen and back
+   * forces a repaint and shows the correct unchecked state. The
+   * config value itself is always correct; we cannot fix the
+   * stale paint from an extension. */
   private async resetSetting(): Promise<void> {
     const config = vscode.workspace.getConfiguration("wat321");
     const inspect = config.inspect<boolean>(SETTING_KEY);
