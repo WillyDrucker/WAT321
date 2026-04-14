@@ -124,7 +124,7 @@ export function formatArmBlockerMessage(
       return "Your session was compacted recently. Give it a few minutes before arming again.";
     case "cooldown": {
       const remaining = Math.max(1, Math.ceil(cooldownRemainingMs / 1000));
-      return `WAT321 just finished a Force Auto-Compact cycle. Wait ${remaining} second${remaining !== 1 ? "s" : ""} before arming again.`;
+      return `Claude Auto-Compact is in a short cooldown period. Wait ${remaining} second${remaining !== 1 ? "s" : ""} before arming again.`;
     }
     case "settings-stuck":
       return "Your Claude auto-compact override is already set to 1 from a prior session. Run WAT321: Reset All Settings to unstick it.";

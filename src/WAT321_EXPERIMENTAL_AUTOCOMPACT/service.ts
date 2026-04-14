@@ -68,10 +68,11 @@ const COOLDOWN_MS = 30_000;
 /** Poll cadence while armed. */
 const POLL_INTERVAL_MS = 2_000;
 
-/** Red exclaim glyph rendered on the armed status bar item. Unicode
- * U+2757 renders red on every VS Code theme we checked, unlike the
- * `$(warning)` codicon which is theme-colored. */
-const RED_EXCLAIM = "\u2757";
+/** Glyph prefix on the armed status bar item. Plain ASCII exclamation
+ * so the theme color (`statusBarItem.errorForeground`) paints the
+ * whole text uniformly red. The emoji form (U+2757) renders as its
+ * own multi-color glyph and clashes with the text portion. */
+const RED_EXCLAIM = "!";
 
 type DisarmReason = "user-cancel" | "compact-detected" | "timeout";
 
@@ -123,7 +124,7 @@ export class ExperimentalAutoCompactService {
       .getConfiguration("wat321")
       .get<boolean>(SETTING_KEY, false);
     if (current) {
-      this.resetSetting();
+      void this.resetSetting();
     }
 
     // Subscribe to the Claude session token service so the preflight
@@ -145,7 +146,7 @@ export class ExperimentalAutoCompactService {
       if (enabled && !this.armedSentinel) {
         void this.tryArm();
       } else if (!enabled && this.armedSentinel) {
-        this.disarm("user-cancel");
+        void this.confirmUserDisarm();
       }
     });
   }
@@ -235,19 +236,21 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         formatArmBlockerMessage(blocker, this.activeContext, cooldownRemaining)
       );
-      this.resetSetting();
+      void this.resetSetting();
       return;
     }
 
     // Confirmation dialog. Non-modal so it follows the user's
-    // preference for bottom-right notification placement.
+    // preference for bottom-right notification placement. X-close
+    // on the notification returns undefined, which we treat the
+    // same as explicit Cancel (un-tick the checkbox and bail).
     const choice = await vscode.window.showInformationMessage(
-      "Arm Claude Auto-Compact for your next message to Claude? Your next prompt will trigger Claude's built-in auto-compact, and the checkbox will auto-disarm after 30 seconds of no activity.",
+      "Arm Claude Auto-Compact for your next message to Claude? Your next prompt will trigger Claude's built-in auto-compact. Disarms after 30 seconds of no activity.",
       "Arm Auto-Compact",
       "Cancel"
     );
     if (choice !== "Arm Auto-Compact") {
-      this.resetSetting();
+      await this.resetSetting();
       return;
     }
 
@@ -276,7 +279,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 lost sight of your active Claude session. Try again in a moment."
       );
-      this.resetSetting();
+      void this.resetSetting();
       return;
     }
 
@@ -285,7 +288,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 lost access to ~/.claude/settings.json. Try again in a moment."
       );
-      this.resetSetting();
+      void this.resetSetting();
       return;
     }
     const originalOverride = read.value;
@@ -293,7 +296,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "Your Claude auto-compact override is already set to 1. WAT321 will heal this on the next VS Code start. Run WAT321: Reset All Settings if you need to unstick it now."
       );
-      this.resetSetting();
+      void this.resetSetting();
       return;
     }
 
@@ -304,7 +307,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 could not read the Claude transcript file. Try again in a moment."
       );
-      this.resetSetting();
+      void this.resetSetting();
       return;
     }
 
@@ -326,7 +329,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 could not save its arm record. Check disk space and file permissions, then try again."
       );
-      this.resetSetting();
+      void this.resetSetting();
       return;
     }
 
@@ -335,7 +338,7 @@ export class ExperimentalAutoCompactService {
       vscode.window.showWarningMessage(
         "WAT321 could not update ~/.claude/settings.json. Check that the file is not locked or read-only, then try again."
       );
-      this.resetSetting();
+      void this.resetSetting();
       return;
     }
 
@@ -378,7 +381,7 @@ export class ExperimentalAutoCompactService {
 
     // Flip the checkbox off to reflect the disarmed state. Our
     // config listener short-circuits because armedSentinel is null.
-    this.resetSetting();
+    void this.resetSetting();
 
     if (reason === "compact-detected") {
       vscode.window.showInformationMessage(
@@ -394,7 +397,10 @@ export class ExperimentalAutoCompactService {
   }
 
   /** Create and show the red `! ARMED` status bar item. Idempotent:
-   * calling twice in a row is a no-op. */
+   * calling twice in a row is a no-op. Tooltip is a MarkdownString
+   * so the leading exclaim can render red via the emoji glyph and
+   * the `Click to disarm.` line can render in bold. `isTrusted`
+   * stays false - the tooltip contains no commands. */
   private showArmedItem(): void {
     if (this.armedItem) return;
     const item = vscode.window.createStatusBarItem(
@@ -405,7 +411,11 @@ export class ExperimentalAutoCompactService {
     item.name = "WAT321: Claude Auto-Compact (Armed)";
     item.text = `${RED_EXCLAIM} ARMED`;
     item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
-    item.tooltip = "Claude Auto-Compact - Armed\nClick to disarm.";
+    const tooltip = new vscode.MarkdownString();
+    tooltip.isTrusted = false;
+    tooltip.supportThemeIcons = true;
+    tooltip.appendMarkdown("\u2757 Claude Auto-Compact - Armed\n\n**Click to disarm.**");
+    item.tooltip = tooltip;
     item.command = CANCEL_COMMAND_ID;
     item.show();
     this.armedItem = item;
@@ -424,13 +434,85 @@ export class ExperimentalAutoCompactService {
     this.disarm("user-cancel");
   }
 
-  private resetSetting(): void {
-    vscode.workspace
-      .getConfiguration("wat321")
-      .update(SETTING_KEY, false, vscode.ConfigurationTarget.Global)
-      .then(undefined, () => {
-        // best-effort
-      });
+  /** Flip the experimental checkbox off at every applicable scope.
+   * Writing at Global alone is not enough: if the user happened to
+   * toggle the setting from the Workspace tab of the Settings UI (or
+   * via a `.vscode/settings.json` override), a Global-only write
+   * leaves the effective value stuck at `true` because workspace
+   * wins over global. Same three-scope discipline as Reset WAT321
+   * uses in `src/shared/clearSettings.ts`.
+   *
+   * Writes `undefined` to remove the user-set value entirely rather
+   * than writing an explicit `false`, so we revert to the schema
+   * default without polluting settings files with scope rows the
+   * user never actively set. */
+  private async resetSetting(): Promise<void> {
+    await this.writeSettingAllScopes(undefined);
+  }
+
+  /** Re-tick the checkbox at every applicable scope. Used after the
+   * user cancels the disarm confirmation dialog, to keep the visible
+   * checkbox state in sync with the internal armed state. */
+  private async restoreSettingToTrue(): Promise<void> {
+    await this.writeSettingAllScopes(true);
+  }
+
+  private async writeSettingAllScopes(value: boolean | undefined): Promise<void> {
+    const config = vscode.workspace.getConfiguration("wat321");
+    const hasWorkspace =
+      (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+    const targets: vscode.ConfigurationTarget[] = [
+      vscode.ConfigurationTarget.Global,
+    ];
+    if (hasWorkspace) {
+      targets.push(
+        vscode.ConfigurationTarget.Workspace,
+        vscode.ConfigurationTarget.WorkspaceFolder
+      );
+    }
+    await Promise.all(
+      targets.map(async (scope) => {
+        try {
+          await config.update(SETTING_KEY, value, scope);
+        } catch {
+          // Scope applicable but update rejected (read-only, etc.).
+        }
+      })
+    );
+  }
+
+  /** Pop a confirmation dialog when the user unchecks the box while
+   * armed. On confirm, disarm. On cancel (including X-out of the
+   * notification), re-tick the box so the visible state stays in
+   * sync with the still-armed internal state.
+   *
+   * Carefully handles the race where the 30-second timeout OR a
+   * compact detection fires while the dialog is still open: if we
+   * are no longer armed by the time the dialog resolves, no
+   * re-tick is needed because the automatic disarm path has
+   * already unticked the box for us. */
+  private async confirmUserDisarm(): Promise<void> {
+    if (!this.armedSentinel) return;
+
+    const choice = await vscode.window.showInformationMessage(
+      "Disarm Claude Auto-Compact? Your Claude settings will be restored.",
+      "Disarm",
+      "Cancel"
+    );
+
+    if (this.disposed) return;
+
+    if (choice === "Disarm") {
+      if (this.armedSentinel) this.disarm("user-cancel");
+      return;
+    }
+
+    // Cancel / X / dismiss. Only re-tick if we are still armed -
+    // the auto-disarm path may have fired during the dialog and
+    // already unticked the box.
+    if (this.armedSentinel) {
+      await this.restoreSettingToTrue();
+    }
   }
 
   private schedulePoll(): void {
@@ -455,7 +537,7 @@ export class ExperimentalAutoCompactService {
     if (!existsSync(SENTINEL_PATH)) {
       this.armedSentinel = null;
       this.disposeArmedItem();
-      this.resetSetting();
+      void this.resetSetting();
       return;
     }
 
