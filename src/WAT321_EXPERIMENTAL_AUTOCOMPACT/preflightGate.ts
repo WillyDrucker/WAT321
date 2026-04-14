@@ -122,7 +122,7 @@ export function formatArmBlockerMessage(
 ): string {
   switch (blocker) {
     case "no-live-session":
-      return "Open Claude Code and send a prompt first so WAT321 can target your session.";
+      return "No active Claude session. Send a prompt to activate Claude session.";
     case "claude-busy":
       return "Your Claude session is running a prompt. Wait for it to finish.";
     case "below-threshold": {
