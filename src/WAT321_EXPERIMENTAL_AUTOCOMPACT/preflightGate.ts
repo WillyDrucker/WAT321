@@ -112,7 +112,7 @@ export function formatArmBlockerMessage(
     case "no-live-session":
       return "Open Claude Code and send a prompt first so WAT321 can target your session.";
     case "claude-busy":
-      return "Your Claude session is currently running a prompt. Wait for it to finish, then try again.";
+      return "Your Claude session is running a prompt. Wait for it to finish.";
     case "below-threshold": {
       const pct = ctx
         ? Math.round(ctx.fraction * 100)
