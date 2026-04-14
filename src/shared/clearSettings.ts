@@ -50,6 +50,47 @@ async function updateSettingAllScopes(
   await updateConfigKeyAllScopes(config, key, value);
 }
 
+/** Clear a checkbox-style `wat321.*` setting in a way that reliably
+ * refreshes the Settings UI visual. Uses `config.inspect()` to find
+ * exactly which scope(s) currently hold a user-set value, clears
+ * each one, then writes an explicit `false` at Global as a
+ * belt-and-braces refresh nudge. This is the same pattern the
+ * experimental auto-compact service uses for its own checkbox -
+ * blanket writes at every scope were leaving the visual stuck at
+ * checked on some VS Code builds. Pulled into a shared helper so
+ * the Reset WAT321 cancel path and the experimental service both
+ * behave the same way. */
+async function clearCheckboxSettingAllScopes(key: string): Promise<void> {
+  const config = vscode.workspace.getConfiguration("wat321");
+  const inspect = config.inspect<boolean>(key);
+
+  const safeUpdate = async (
+    value: boolean | undefined,
+    scope: vscode.ConfigurationTarget
+  ): Promise<void> => {
+    try {
+      await config.update(key, value, scope);
+    } catch {
+      // Scope applicable but update rejected (read-only, etc.).
+    }
+  };
+
+  const writes: Promise<void>[] = [];
+  if (inspect?.globalValue !== undefined) {
+    writes.push(safeUpdate(undefined, vscode.ConfigurationTarget.Global));
+  }
+  if (inspect?.workspaceValue !== undefined) {
+    writes.push(safeUpdate(undefined, vscode.ConfigurationTarget.Workspace));
+  }
+  if (inspect?.workspaceFolderValue !== undefined) {
+    writes.push(
+      safeUpdate(undefined, vscode.ConfigurationTarget.WorkspaceFolder)
+    );
+  }
+  writes.push(safeUpdate(false, vscode.ConfigurationTarget.Global));
+  await Promise.all(writes);
+}
+
 /** Same three-scope update pattern as `updateSettingAllScopes`, but
  * takes an already-resolved `WorkspaceConfiguration` so callers can
  * target non-`wat321.*` namespaces (e.g. `workbench.statusBarItem.*`
@@ -108,11 +149,12 @@ async function performClear(): Promise<void> {
   );
 
   if (confirm !== "Clear Everything") {
-    // User cancelled - reset the checkbox back to false at every
-    // scope so the visible checkbox immediately reflects the
-    // cancel regardless of which Settings tab the user clicked
-    // from.
-    await updateSettingAllScopes("clearAllData", false);
+    // User cancelled (explicit Cancel or X-close on the toast) -
+    // clear the checkbox via the inspect-first helper so the
+    // Settings UI visual reliably refreshes. There is no scenario
+    // where the clearAllData checkbox should stay ticked after the
+    // dialog closes without running the reset.
+    await clearCheckboxSettingAllScopes("clearAllData");
     return;
   }
 
@@ -133,7 +175,7 @@ async function performClear(): Promise<void> {
   }
 
   if (healResult === "io-error") {
-    await updateSettingAllScopes("clearAllData", false);
+    await clearCheckboxSettingAllScopes("clearAllData");
     await vscode.window.showErrorMessage(
       "WAT321 could not write to ~/.claude/settings.json while trying to heal a stuck CLAUDE_AUTOCOMPACT_PCT_OVERRIDE. Reset aborted so we do not wipe ~/.wat321/ while settings are still at \"1\". Check that the file is not locked or read-only, then run Reset WAT321 again.",
       { modal: true }
@@ -157,7 +199,7 @@ async function performClear(): Promise<void> {
     updateSettingAllScopes("experimental.forceClaudeAutoCompact", undefined),
     updateSettingAllScopes("displayMode", undefined),
     updateSettingAllScopes("statusBarPriority", undefined),
-    updateSettingAllScopes("clearAllData", false),
+    clearCheckboxSettingAllScopes("clearAllData"),
     // Restore any WAT321 status bar items the user hid via right-click.
     // Narrowly scoped to our six known widget ids - see STATUS_BAR_ITEM_IDS.
     resetStatusBarItemVisibility(),
