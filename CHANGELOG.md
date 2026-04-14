@@ -8,8 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.16] - unreleased
 
 ### Added
+- **A red `❗ ARMED` status bar item now shows up whenever the experimental Force Claude Auto-Compact is armed.** It sits just to the left of your Claude session token widget. Hover to see what it is, click it to disarm immediately. The widget only exists while armed - it appears the moment you confirm the arm dialog and disappears the moment the tool disarms for any reason (your next prompt fires a compact, the 30-second timeout hits, you click the armed widget, or you untick the checkbox)
+- **Arming now asks you to confirm first.** Ticking the experimental Force Claude Auto-Compact checkbox pops a confirmation dialog asking if you really want to arm for your next message. Cancelling the dialog leaves your Claude settings untouched and unticks the checkbox. This matches the new settings description, which now says "A confirmation dialog will appear before arming."
+- **Preflight safety gates now refuse arming when it would waste a compact or risk a loop.** Before the confirmation dialog appears, WAT321 checks six things about your current Claude session: no live session to target, Claude is still mid-turn on a prompt or tool call, you are below 20% of the auto-compact ceiling (nothing meaningful to compact), your session was compacted within the last two minutes, you are still inside the 30-second post-disarm cooldown, or your auto-compact override is already stuck at 1 from a prior session. Each failure shows a friendly toast explaining exactly what to fix. No background polling, no passive widget grayed-state - the gates run once when you tick the box and never again
 
 ### Changed
+- **The experimental Force Claude Auto-Compact checkbox is now the armed state itself**, not a fire-once trigger. Ticking the box and confirming the dialog arms the tool and leaves the box ticked while armed. Unticking the box at any point during the armed window disarms immediately. On compact detection or the 30-second timeout, WAT321 unticks the box for you. One source of truth for whether the tool is armed right now: the checkbox
+- **Toast wording is shorter and more specific.** The arm toast now reads `Claude Auto-Compact armed. Next prompt will trigger Auto-Compact.` and the timeout disarm reads `Claude Auto-Compact disarmed. Timed out after 30 seconds.` User-cancel disarms (unticking the box, clicking the armed widget) are silent - you already know what you did
+- **Reset WAT321 description tightened.** Small wording pass on the setting's description so the reset-as-failsafe guarantee reads more clearly
 
 ### Fixed
 
