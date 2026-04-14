@@ -108,12 +108,6 @@ export type LastEntryKind =
 export interface TailHistoryOutcome {
   /** Count of `"isCompactSummary":true` markers in the tail window. */
   markerCount: number;
-  /** File `mtime` in ms since epoch, or 0 if the file could not be
-   * stat'd. Retained for diagnostics; the recent-compact gate keys
-   * off `newestMarkerTimestampMs` instead because file mtime
-   * advances on every transcript write and would false-positive
-   * any time an old marker was still inside the tail window. */
-  mtimeMs: number;
   /** Wall-clock timestamp (ms since epoch) parsed from the JSONL
    * `timestamp` field of the line containing the *newest* compact
    * marker in the tail window. Zero when no marker was found OR
@@ -179,23 +173,19 @@ export function classifyLastEntry(tail: string): LastEntryKind {
 export function scanTailForCompactHistory(path: string): TailHistoryOutcome {
   const empty: TailHistoryOutcome = {
     markerCount: 0,
-    mtimeMs: 0,
     newestMarkerTimestampMs: 0,
     lastEntryKind: "unknown",
     ioError: false,
   };
 
   let size: number;
-  let mtimeMs: number;
   try {
-    const st = statSync(path);
-    size = st.size;
-    mtimeMs = st.mtimeMs;
+    size = statSync(path).size;
   } catch {
     return { ...empty, ioError: true };
   }
 
-  if (size <= 0) return { ...empty, mtimeMs };
+  if (size <= 0) return empty;
 
   const toRead = Math.min(size, TAIL_HISTORY_SCAN_BYTES);
   const start = size - toRead;
@@ -210,7 +200,7 @@ export function scanTailForCompactHistory(path: string): TailHistoryOutcome {
   try {
     const buf = Buffer.alloc(toRead);
     const bytesRead = readSync(fd, buf, 0, toRead, start);
-    if (bytesRead <= 0) return { ...empty, mtimeMs };
+    if (bytesRead <= 0) return empty;
 
     const slice = bytesRead === toRead ? buf : buf.subarray(0, bytesRead);
 
@@ -237,7 +227,6 @@ export function scanTailForCompactHistory(path: string): TailHistoryOutcome {
 
     return {
       markerCount,
-      mtimeMs,
       newestMarkerTimestampMs,
       lastEntryKind,
       ioError: false,
@@ -276,6 +265,10 @@ function extractTimestampForOffset(
     lineEnd += 1;
   }
 
+  // `.trim()` handles any trailing `\r` on `\r\n` line endings plus
+  // any stray whitespace. Claude Code writes LF on POSIX and is
+  // expected to do the same on Windows, but trimming costs nothing
+  // and removes one class of surprise.
   const lineText = slice.subarray(lineStart, lineEnd).toString("utf8").trim();
   if (!lineText) return 0;
 

@@ -92,12 +92,21 @@ export function determineArmBlocker(input: PreflightInput): ArmBlocker | null {
   // was written within the recent-compact window. Keyed off the
   // marker's own JSONL timestamp, NOT the file mtime - file mtime
   // advances on every transcript write and would false-positive
-  // any time an old marker was still inside the 256 KB tail. If
-  // the timestamp could not be extracted (zero), bias toward
-  // allow; the cooldown gate is the loop backstop.
+  // any time an old marker was still inside the 256 KB tail.
+  //
+  // Guards:
+  //   - tail.newestMarkerTimestampMs === 0 means the timestamp
+  //     could not be extracted. Bias toward allow; the cooldown
+  //     gate is the loop backstop.
+  //   - markerAge < 0 means the JSONL timestamp is in the future
+  //     (clock skew, corrupt entry). A negative age would otherwise
+  //     always be < RECENT_COMPACT_WINDOW_MS and would block the
+  //     user permanently. Require a non-negative age to fire.
   if (tail.newestMarkerTimestampMs > 0) {
     const markerAge = Date.now() - tail.newestMarkerTimestampMs;
-    if (markerAge < RECENT_COMPACT_WINDOW_MS) return "recent-compact";
+    if (markerAge >= 0 && markerAge < RECENT_COMPACT_WINDOW_MS) {
+      return "recent-compact";
+    }
   }
 
   return null;
