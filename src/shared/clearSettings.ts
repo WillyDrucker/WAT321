@@ -145,34 +145,23 @@ async function resetStatusBarItemVisibility(): Promise<void> {
 async function performClear(): Promise<void> {
   // Non-modal bottom-right notification - keeps the confirmation in
   // VS Code's normal notification area instead of a center-screen
-  // modal that blocks the whole UI. The user has explicitly asked
-  // for this placement.
+  // modal that blocks the whole UI.
   const confirm = await vscode.window.showWarningMessage(
     "This will reset all WAT321 settings to defaults and clear stored data. If any WAT321 tool appears unresponsive, this will reset every tool back to a known-good state. Continue?",
     "Clear Everything",
     "Cancel"
   );
 
-  // Schedule a deferred checkbox clear 1 second after the dialog
-  // closes. VS Code's Settings UI swallows config.update UI
-  // refreshes that originate from the same tick-origin handler
-  // call stack as the user's original checkbox tick; writes fired
-  // from a timer callback well after the dialog has closed land
-  // on a "clean" event loop turn and DO propagate to the visual.
-  // The 30s auto-compact disarm path uses this same pattern and
-  // clears its checkbox reliably. Fires regardless of outcome
-  // (Cancel / X-close / Clear Everything) - in the Clear
-  // Everything path it redundantly chases the inline clear later
-  // in this function, which is harmless.
-  setTimeout(() => {
-    void clearCheckboxSettingAllScopes("clearAllData");
-  }, 1000);
+  // Clear the checkbox back to unchecked on every exit path. The
+  // underlying config value lands correctly; VS Code's Settings UI
+  // may not repaint the visible row in place on dismissal paths
+  // that originate from its own tick-origin handler (known VS Code
+  // rendering bug - scrolling the setting off-screen and back
+  // forces a repaint and shows the correct state). We write the
+  // state correctly and accept the stale paint.
+  await clearCheckboxSettingAllScopes("clearAllData");
 
-  if (confirm !== "Clear Everything") {
-    // Cancelled or X-closed. The deferred clear above handles the
-    // checkbox visual - nothing to do here.
-    return;
-  }
+  if (confirm !== "Clear Everything") return;
 
   // CRITICAL: before wiping ~/.wat321/, make absolutely sure
   // ~/.claude/settings.json is not stuck at the experimental
@@ -191,7 +180,6 @@ async function performClear(): Promise<void> {
   }
 
   if (healResult === "io-error") {
-    await clearCheckboxSettingAllScopes("clearAllData");
     await vscode.window.showErrorMessage(
       "WAT321 could not write to ~/.claude/settings.json while trying to heal a stuck CLAUDE_AUTOCOMPACT_PCT_OVERRIDE. Reset aborted so we do not wipe ~/.wat321/ while settings are still at \"1\". Check that the file is not locked or read-only, then run Reset WAT321 again.",
       { modal: true }
@@ -215,7 +203,6 @@ async function performClear(): Promise<void> {
     updateSettingAllScopes("experimental.forceClaudeAutoCompact", undefined),
     updateSettingAllScopes("displayMode", undefined),
     updateSettingAllScopes("statusBarPriority", undefined),
-    clearCheckboxSettingAllScopes("clearAllData"),
     // Restore any WAT321 status bar items the user hid via right-click.
     // Narrowly scoped to our six known widget ids - see STATUS_BAR_ITEM_IDS.
     resetStatusBarItemVisibility(),
