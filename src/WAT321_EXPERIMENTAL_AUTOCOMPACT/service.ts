@@ -447,61 +447,46 @@ export class ExperimentalAutoCompactService {
     this.disarm("user-cancel");
   }
 
-  /** Flip the experimental checkbox off. Uses `config.inspect()` to
-   * find exactly which scope(s) currently hold a user-set value and
-   * clears each one by writing `undefined`, plus writes an explicit
-   * `false` at Global as a belt-and-braces guarantee that the
-   * Settings UI refreshes the checkbox visual.
-   *
-   * Prior approaches (blanket `undefined` at all scopes, or
-   * explicit `false` at Global + `undefined` elsewhere) could leave
-   * the checkbox visually stuck at checked in some VS Code builds
-   * when the user toggled the setting from a non-default scope or
-   * when the Settings UI's internal cache missed the change event.
-   * Inspect-first targeting closes both holes: we know which scope
-   * the value lives at, we clear that exact scope, and we overwrite
-   * Global with an explicit false for good measure. */
+  /** Flip the experimental checkbox off so the Settings UI visibly
+   * re-renders as unchecked. Uses `config.inspect()` to find the
+   * exact scope(s) where the user's `true` lives, then writes an
+   * explicit `false` at each of those scopes sequentially.
+   * Sequential awaits matter: parallel writes at the same key can
+   * race and leave VS Code's internal state in a stale shape that
+   * does not re-render the checkbox visual. The value is `false`,
+   * not `undefined`, because Settings UI checkbox re-renders
+   * reliably pick up a concrete boolean change but can silently
+   * drop a remove-user-value change. */
   private async resetSetting(): Promise<void> {
     const config = vscode.workspace.getConfiguration("wat321");
     const inspect = config.inspect<boolean>(SETTING_KEY);
 
     const safeUpdate = async (
-      value: boolean | undefined,
       scope: vscode.ConfigurationTarget
     ): Promise<void> => {
       try {
-        await config.update(SETTING_KEY, value, scope);
+        await config.update(SETTING_KEY, false, scope);
       } catch {
         // Scope applicable but update rejected (read-only, etc.).
       }
     };
 
-    const writes: Promise<void>[] = [];
-
-    // Clear the exact scope(s) where a user-set value currently
-    // lives. inspect() returns undefined for scopes without a
-    // user-set value, so we skip no-op writes entirely.
+    let hit = false;
     if (inspect?.globalValue !== undefined) {
-      writes.push(safeUpdate(undefined, vscode.ConfigurationTarget.Global));
+      await safeUpdate(vscode.ConfigurationTarget.Global);
+      hit = true;
     }
     if (inspect?.workspaceValue !== undefined) {
-      writes.push(safeUpdate(undefined, vscode.ConfigurationTarget.Workspace));
+      await safeUpdate(vscode.ConfigurationTarget.Workspace);
+      hit = true;
     }
     if (inspect?.workspaceFolderValue !== undefined) {
-      writes.push(
-        safeUpdate(undefined, vscode.ConfigurationTarget.WorkspaceFolder)
-      );
+      await safeUpdate(vscode.ConfigurationTarget.WorkspaceFolder);
+      hit = true;
     }
-
-    // Belt-and-braces: also write an explicit `false` at Global.
-    // Forces the Settings UI to refresh even if the inspect-based
-    // undefined write above was a no-op (rare, but possible when
-    // the user toggled the checkbox extremely quickly before the
-    // first write landed). A duplicate write at Global is
-    // harmless - VS Code deduplicates identical values.
-    writes.push(safeUpdate(false, vscode.ConfigurationTarget.Global));
-
-    await Promise.all(writes);
+    if (!hit) {
+      await safeUpdate(vscode.ConfigurationTarget.Global);
+    }
   }
 
   private schedulePoll(): void {

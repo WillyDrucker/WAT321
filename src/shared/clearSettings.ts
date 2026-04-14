@@ -50,45 +50,50 @@ async function updateSettingAllScopes(
   await updateConfigKeyAllScopes(config, key, value);
 }
 
-/** Clear a checkbox-style `wat321.*` setting in a way that reliably
- * refreshes the Settings UI visual. Uses `config.inspect()` to find
- * exactly which scope(s) currently hold a user-set value, clears
- * each one, then writes an explicit `false` at Global as a
- * belt-and-braces refresh nudge. This is the same pattern the
- * experimental auto-compact service uses for its own checkbox -
- * blanket writes at every scope were leaving the visual stuck at
- * checked on some VS Code builds. Pulled into a shared helper so
- * the Reset WAT321 cancel path and the experimental service both
- * behave the same way. */
+/** Clear a checkbox-style `wat321.*` setting so the Settings UI
+ * visibly re-renders the checkbox as unchecked. Uses
+ * `config.inspect()` to find the exact scope(s) where the user's
+ * `true` lives, then writes an explicit `false` at each of those
+ * scopes sequentially. Sequential awaits matter: parallel writes
+ * at the same key can race and leave VS Code's internal state in
+ * a stale shape that does not re-render the checkbox visual. The
+ * value is `false`, not `undefined`, because Settings UI checkbox
+ * re-renders reliably pick up a concrete boolean change but can
+ * silently drop a remove-user-value change. */
 async function clearCheckboxSettingAllScopes(key: string): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
   const inspect = config.inspect<boolean>(key);
 
   const safeUpdate = async (
-    value: boolean | undefined,
     scope: vscode.ConfigurationTarget
   ): Promise<void> => {
     try {
-      await config.update(key, value, scope);
+      await config.update(key, false, scope);
     } catch {
       // Scope applicable but update rejected (read-only, etc.).
     }
   };
 
-  const writes: Promise<void>[] = [];
+  let hit = false;
   if (inspect?.globalValue !== undefined) {
-    writes.push(safeUpdate(undefined, vscode.ConfigurationTarget.Global));
+    await safeUpdate(vscode.ConfigurationTarget.Global);
+    hit = true;
   }
   if (inspect?.workspaceValue !== undefined) {
-    writes.push(safeUpdate(undefined, vscode.ConfigurationTarget.Workspace));
+    await safeUpdate(vscode.ConfigurationTarget.Workspace);
+    hit = true;
   }
   if (inspect?.workspaceFolderValue !== undefined) {
-    writes.push(
-      safeUpdate(undefined, vscode.ConfigurationTarget.WorkspaceFolder)
-    );
+    await safeUpdate(vscode.ConfigurationTarget.WorkspaceFolder);
+    hit = true;
   }
-  writes.push(safeUpdate(false, vscode.ConfigurationTarget.Global));
-  await Promise.all(writes);
+  // Fallback: nothing was set at any scope (shouldn't happen if the
+  // user just ticked the box, but covers Settings UI caches and
+  // edge cases where inspect lags behind the UI). Force-write at
+  // Global so the visual refresh still fires.
+  if (!hit) {
+    await safeUpdate(vscode.ConfigurationTarget.Global);
+  }
 }
 
 /** Same three-scope update pattern as `updateSettingAllScopes`, but
