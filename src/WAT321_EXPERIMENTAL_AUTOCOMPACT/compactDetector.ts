@@ -109,11 +109,18 @@ export interface TailHistoryOutcome {
   /** Count of `"isCompactSummary":true` markers in the tail window. */
   markerCount: number;
   /** File `mtime` in ms since epoch, or 0 if the file could not be
-   * stat'd. Callers compute age at check time as
-   * `Date.now() - mtimeMs` so a cached outcome would age forward
-   * naturally (the preflight gate never caches, so this is purely
-   * for clarity). */
+   * stat'd. Retained for diagnostics; the recent-compact gate keys
+   * off `newestMarkerTimestampMs` instead because file mtime
+   * advances on every transcript write and would false-positive
+   * any time an old marker was still inside the tail window. */
   mtimeMs: number;
+  /** Wall-clock timestamp (ms since epoch) parsed from the JSONL
+   * `timestamp` field of the line containing the *newest* compact
+   * marker in the tail window. Zero when no marker was found OR
+   * when the marker's containing line could not be parsed for any
+   * reason. The recent-compact gate uses this directly so it
+   * measures the age of the actual compact event, not the file. */
+  newestMarkerTimestampMs: number;
   /** Classification of the last parseable JSONL entry. */
   lastEntryKind: LastEntryKind;
   /** True if any IO error occurred. Gates treat this as "unknown"
@@ -173,6 +180,7 @@ export function scanTailForCompactHistory(path: string): TailHistoryOutcome {
   const empty: TailHistoryOutcome = {
     markerCount: 0,
     mtimeMs: 0,
+    newestMarkerTimestampMs: 0,
     lastEntryKind: "unknown",
     ioError: false,
   };
@@ -206,20 +214,81 @@ export function scanTailForCompactHistory(path: string): TailHistoryOutcome {
 
     const slice = bytesRead === toRead ? buf : buf.subarray(0, bytesRead);
 
+    // Walk the tail and remember every marker hit so the LAST
+    // (highest byte position) one can be timestamped after the
+    // walk. Counting markers and locating the newest is one pass.
     let markerCount = 0;
+    let newestMarkerOffset = -1;
     let searchFrom = 0;
     while (searchFrom <= slice.length - COMPACT_MARKER.length) {
       const hit = slice.indexOf(COMPACT_MARKER, searchFrom);
       if (hit < 0) break;
       markerCount += 1;
+      newestMarkerOffset = hit;
       searchFrom = hit + COMPACT_MARKER.length;
     }
 
-    const lastEntryKind = classifyLastEntry(slice.toString("utf8"));
-    return { markerCount, mtimeMs, lastEntryKind, ioError: false };
+    const text = slice.toString("utf8");
+    const lastEntryKind = classifyLastEntry(text);
+    const newestMarkerTimestampMs =
+      newestMarkerOffset >= 0
+        ? extractTimestampForOffset(slice, newestMarkerOffset)
+        : 0;
+
+    return {
+      markerCount,
+      mtimeMs,
+      newestMarkerTimestampMs,
+      lastEntryKind,
+      ioError: false,
+    };
   } catch {
     return { ...empty, ioError: true };
   } finally {
     closeSync(fd);
   }
+}
+
+/** Given the byte offset of a compact marker inside a tail buffer,
+ * locate the JSONL line that contains it, parse it, and return the
+ * `timestamp` field as ms since epoch. Returns 0 on any failure
+ * mode (line straddles the buffer start, JSON parse fails, no
+ * timestamp field, unparseable timestamp). The recent-compact gate
+ * treats 0 as "no usable signal" and biases toward allowing arming
+ * rather than blocking - the cooldown gate is the loop backstop. */
+function extractTimestampForOffset(
+  slice: Buffer,
+  markerOffset: number
+): number {
+  // Find the start of this line by scanning backward to the
+  // preceding newline (or buffer start). If the line straddles the
+  // buffer start the JSON will be incomplete and parse will fail -
+  // that is fine, we return 0 and let the gate bias toward allow.
+  let lineStart = markerOffset;
+  while (lineStart > 0 && slice[lineStart - 1] !== 0x0a /* \n */) {
+    lineStart -= 1;
+  }
+
+  // Find the end of the line by scanning forward to the next newline
+  // (or buffer end).
+  let lineEnd = markerOffset;
+  while (lineEnd < slice.length && slice[lineEnd] !== 0x0a) {
+    lineEnd += 1;
+  }
+
+  const lineText = slice.subarray(lineStart, lineEnd).toString("utf8").trim();
+  if (!lineText) return 0;
+
+  let entry: Record<string, unknown>;
+  try {
+    entry = JSON.parse(lineText);
+  } catch {
+    return 0;
+  }
+
+  const ts = entry.timestamp;
+  if (typeof ts !== "string") return 0;
+
+  const parsed = Date.parse(ts);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

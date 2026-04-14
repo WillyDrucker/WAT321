@@ -88,13 +88,16 @@ export function determineArmBlocker(input: PreflightInput): ArmBlocker | null {
     return "claude-busy";
   }
 
-  // recent-compact: the most recent marker, if any, was written
-  // within the recent-compact window. This is the loop backstop -
-  // even if the context fraction gate passes, two compacts in
-  // quick succession are refused.
-  const age = Date.now() - tail.mtimeMs;
-  if (tail.markerCount > 0 && age < RECENT_COMPACT_WINDOW_MS) {
-    return "recent-compact";
+  // recent-compact: the newest compact marker in the tail window
+  // was written within the recent-compact window. Keyed off the
+  // marker's own JSONL timestamp, NOT the file mtime - file mtime
+  // advances on every transcript write and would false-positive
+  // any time an old marker was still inside the 256 KB tail. If
+  // the timestamp could not be extracted (zero), bias toward
+  // allow; the cooldown gate is the loop backstop.
+  if (tail.newestMarkerTimestampMs > 0) {
+    const markerAge = Date.now() - tail.newestMarkerTimestampMs;
+    if (markerAge < RECENT_COMPACT_WINDOW_MS) return "recent-compact";
   }
 
   return null;
