@@ -14,7 +14,6 @@ import {
 
 const POLL_INTERVAL = 5_000;
 const FALLBACK_SCAN_INTERVAL = 51_000;
-const STALE_TIMEOUT = 60_000;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const EXTENDED_MODELS = ["claude-opus-4-6", "claude-sonnet-4-6"];
 
@@ -40,7 +39,6 @@ export class ClaudeSessionTokenService {
   private cachedSessionTitlePath = "";
   private cachedAutoCompactPct: number | null = null;
   private cachedAutoCompactTime = 0;
-  private lastOkTime = 0;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath.replace(/\\/g, "/");
@@ -83,7 +81,6 @@ export class ClaudeSessionTokenService {
   private setState(s: WidgetState): void {
     if (this.disposed) return;
     this.state = s;
-    if (s.status === "ok") this.lastOkTime = Date.now();
     for (const fn of this.listeners) fn(s);
   }
 
@@ -110,7 +107,6 @@ export class ClaudeSessionTokenService {
         prev.source === source &&
         prev.lastActiveAt === lastActiveAt
       ) {
-        this.lastOkTime = Date.now();
         return;
       }
     }
@@ -164,10 +160,20 @@ export class ClaudeSessionTokenService {
       this.lastLastKnownScan = now;
     }
     if (!this.cachedLastKnown) return null;
+    // Use the transcript's recorded cwd for the label when present.
+    // This is the difference between showing "WAT321" for a session
+    // that actually came from another project (the global fallback
+    // returned a transcript from outside the current workspace) and
+    // correctly showing that other project's basename. Falls back to
+    // the current workspace path only when the transcript file had
+    // no parseable `cwd` field, which keeps the old behavior on
+    // malformed or empty transcripts.
+    const cwdForLabel =
+      this.cachedLastKnown.cwd || this.workspacePath;
     return {
       transcriptPath: this.cachedLastKnown.path,
       sessionId: this.cachedLastKnown.sessionId,
-      cwdForLabel: this.workspacePath,
+      cwdForLabel,
       source: "lastKnown",
     };
   }
@@ -190,7 +196,14 @@ export class ClaudeSessionTokenService {
     const now = Date.now();
     const resolved = this.resolveTranscript(home, sessionsDir, now);
     if (!resolved) {
-      if (hasGoodData && now - this.lastOkTime < STALE_TIMEOUT) return;
+      // Never degrade "ok" back to "no-session" once we have good data.
+      // Matches the Codex session token service behavior: the most
+      // recent transcript is always shown until a better one appears.
+      // Without this the widget would blank out mid-session whenever
+      // a poll transiently failed to resolve, which is exactly how
+      // the user was seeing "Claude -" with "No active Claude session"
+      // on startup before the cross-project fallback landed.
+      if (hasGoodData) return;
       this.setState({ status: "no-session" });
       return;
     }
@@ -198,7 +211,9 @@ export class ClaudeSessionTokenService {
     const { transcriptPath, sessionId, cwdForLabel, source } = resolved;
 
     if (!existsSync(transcriptPath)) {
-      if (hasGoodData && now - this.lastOkTime < STALE_TIMEOUT) return;
+      // Same never-degrade rule for a transcript that briefly vanishes
+      // (filesystem hiccup, transcript rename mid-session, etc.).
+      if (hasGoodData) return;
       this.setState({ status: "waiting" });
       return;
     }

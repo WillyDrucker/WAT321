@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -56,6 +56,7 @@
           "wat321.experimental.forceClaudeAutoCompact": {
             "type": "boolean",
             "default": false,
+            "scope": "application",
             "order": 2,
             "markdownDescription": "**Experimental.** Arms Claude's Auto-Compact for your next message prompt to Claude. Triggers Auto-Compact on next prompt. Disarms after 30 seconds of no activity. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed. A confirmation dialog will appear before arming. *Useful for long sessions when performance degrades.*"
           }
@@ -104,6 +105,7 @@
           "wat321.clearAllData": {
             "type": "boolean",
             "default": false,
+            "scope": "application",
             "order": 99,
             "markdownDescription": "**Reset WAT321** - Restore WAT321 to its default state and clear its saved local data. This resets all WAT321 settings and clears anything WAT321 has stored locally, so everything rebuilds cleanly on the next refresh. If any WAT321 tool appears unresponsive, this will reset every tool to a known-good state. A confirmation dialog will appear before anything is changed."
           }

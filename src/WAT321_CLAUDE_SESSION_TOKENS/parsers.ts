@@ -55,6 +55,39 @@ export function parseLastUsage(tail: string): LastUsage | null {
 }
 
 /**
+ * Read the originating cwd out of a transcript's first few lines.
+ * Claude transcripts include a `cwd` field on every entry, so the
+ * very first parseable line is enough. Returns "" when the file
+ * cannot be read or no `cwd` field is found.
+ *
+ * Used by the cross-project "last known" fallback so the widget can
+ * label a transcript from another project with that project's
+ * actual basename, instead of misleadingly labeling it with the
+ * current workspace's basename.
+ */
+export function parseCwd(path: string): string {
+  const head = readHead(path);
+  if (!head) return "";
+
+  const lines = head.trimEnd().split("\n");
+  for (let i = 0; i < lines.length && i < 20; i++) {
+    const line = lines[i];
+    if (!line) continue;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const cwd = entry.cwd;
+    if (typeof cwd === "string" && cwd.length > 0) return cwd;
+  }
+  return "";
+}
+
+/**
  * Read the first user turn out of a transcript to use as the session
  * title. Only the first ~8KB of the file is read (via `readHead`) and
  * at most 20 JSON lines are scanned. Supports both `content: string`

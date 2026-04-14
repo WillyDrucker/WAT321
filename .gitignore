@@ -4,3 +4,5 @@ out/
 AIDOCS/
 WDDOCS/
 ARCHIVE/
+.env
+.env.*
