@@ -447,21 +447,23 @@ export class ExperimentalAutoCompactService {
     this.disarm("user-cancel");
   }
 
-  /** Flip the experimental checkbox off. Writes an explicit `false`
-   * at Global scope so the Settings UI reliably re-renders the
-   * checkbox as unchecked, then clears any override at Workspace
-   * and WorkspaceFolder scopes so a workspace-level `true` left
-   * over from a `.vscode/settings.json` cannot keep the effective
-   * value stuck. Previously we wrote `undefined` at all three
-   * scopes, which should have been equivalent, but some VS Code
-   * versions silently fail to re-render the Settings UI checkbox
-   * when a user-set value is cleared to default rather than
-   * overwritten to an explicit value. Explicit `false` at Global
-   * guarantees the Settings UI refreshes. */
+  /** Flip the experimental checkbox off. Uses `config.inspect()` to
+   * find exactly which scope(s) currently hold a user-set value and
+   * clears each one by writing `undefined`, plus writes an explicit
+   * `false` at Global as a belt-and-braces guarantee that the
+   * Settings UI refreshes the checkbox visual.
+   *
+   * Prior approaches (blanket `undefined` at all scopes, or
+   * explicit `false` at Global + `undefined` elsewhere) could leave
+   * the checkbox visually stuck at checked in some VS Code builds
+   * when the user toggled the setting from a non-default scope or
+   * when the Settings UI's internal cache missed the change event.
+   * Inspect-first targeting closes both holes: we know which scope
+   * the value lives at, we clear that exact scope, and we overwrite
+   * Global with an explicit false for good measure. */
   private async resetSetting(): Promise<void> {
     const config = vscode.workspace.getConfiguration("wat321");
-    const hasWorkspace =
-      (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+    const inspect = config.inspect<boolean>(SETTING_KEY);
 
     const safeUpdate = async (
       value: boolean | undefined,
@@ -474,15 +476,31 @@ export class ExperimentalAutoCompactService {
       }
     };
 
-    const writes: Promise<void>[] = [
-      safeUpdate(false, vscode.ConfigurationTarget.Global),
-    ];
-    if (hasWorkspace) {
+    const writes: Promise<void>[] = [];
+
+    // Clear the exact scope(s) where a user-set value currently
+    // lives. inspect() returns undefined for scopes without a
+    // user-set value, so we skip no-op writes entirely.
+    if (inspect?.globalValue !== undefined) {
+      writes.push(safeUpdate(undefined, vscode.ConfigurationTarget.Global));
+    }
+    if (inspect?.workspaceValue !== undefined) {
+      writes.push(safeUpdate(undefined, vscode.ConfigurationTarget.Workspace));
+    }
+    if (inspect?.workspaceFolderValue !== undefined) {
       writes.push(
-        safeUpdate(undefined, vscode.ConfigurationTarget.Workspace),
         safeUpdate(undefined, vscode.ConfigurationTarget.WorkspaceFolder)
       );
     }
+
+    // Belt-and-braces: also write an explicit `false` at Global.
+    // Forces the Settings UI to refresh even if the inspect-based
+    // undefined write above was a no-op (rare, but possible when
+    // the user toggled the checkbox extremely quickly before the
+    // first write landed). A duplicate write at Global is
+    // harmless - VS Code deduplicates identical values.
+    writes.push(safeUpdate(false, vscode.ConfigurationTarget.Global));
+
     await Promise.all(writes);
   }
 
