@@ -5,6 +5,11 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.18] - 2026-04-14
+
+### Fixed
+- **Packaging hardening, no behavior change.** Local environment files (`.env`, `.env.*`) are now excluded from the packaged extension so a developer's local credentials cannot end up bundled inside the `.vsix`. If you are upgrading from 1.0.17, every WAT321 feature behaves the same as before - this release exists purely to ship the cleaner package.
+
 ## [1.0.17] - 2026-04-14
 
 ### Fixed
