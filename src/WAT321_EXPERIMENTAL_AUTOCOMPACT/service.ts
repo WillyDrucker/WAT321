@@ -394,9 +394,11 @@ export class ExperimentalAutoCompactService {
       vscode.window.showInformationMessage(
         "Claude Auto-Compact disarmed. Timed out after 30 seconds."
       );
+    } else if (reason === "user-cancel") {
+      vscode.window.showInformationMessage(
+        "Claude Auto-Compact Disarmed. Cancelled."
+      );
     }
-    // user-cancel is silent - the user clicked the checkbox or the
-    // armed widget and already knows what they did.
   }
 
   /** Create and show the red `! ARMED` status bar item. Idempotent:
@@ -427,7 +429,9 @@ export class ExperimentalAutoCompactService {
     const tooltip = new vscode.MarkdownString();
     tooltip.isTrusted = false;
     tooltip.supportThemeIcons = true;
-    tooltip.appendMarkdown("\u2757 Claude Auto-Compact - Armed\n\n**Click to disarm.**");
+    tooltip.appendMarkdown(
+      "\u2757 Claude Auto-Compact - Armed\n\nYour Claude session will Auto-Compact on next prompt.\n\n**Click to disarm.**"
+    );
     item.tooltip = tooltip;
     item.command = CANCEL_COMMAND_ID;
     item.show();
