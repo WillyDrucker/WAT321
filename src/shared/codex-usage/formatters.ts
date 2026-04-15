@@ -1,4 +1,6 @@
-const FILLED = "\uD83D\uDFE9";
+/** Green square emoji, the default fill character for Codex progress
+ * bars. U+1F7E9 LARGE GREEN SQUARE. */
+const FILLED_GREEN = "\uD83D\uDFE9";
 const EMPTY = "\u2B1B";
 
 export function getRemainingPct(usedPct: number): number {
@@ -6,11 +8,20 @@ export function getRemainingPct(usedPct: number): number {
   return Math.max(0, 100 - clamped);
 }
 
-export function makeBar(usedPct: number, width: number = 10): string {
+/** Build an emoji progress bar of `width` cells, filled proportional
+ * to `getRemainingPct(usedPct)`. Defaults to green squares. Callers
+ * can override the fill character (for example with a heatmap band
+ * color from `src/shared/ui/heatmap.ts`) without needing a separate
+ * formatter. */
+export function makeBar(
+  usedPct: number,
+  width: number = 10,
+  filledChar: string = FILLED_GREEN
+): string {
   const remaining = getRemainingPct(usedPct);
   const filled = Math.round((remaining / 100) * width);
   const empty = width - filled;
-  return FILLED.repeat(filled) + EMPTY.repeat(empty);
+  return filledChar.repeat(filled) + EMPTY.repeat(empty);
 }
 
 export function formatPlanLabel(planType: string): string {
