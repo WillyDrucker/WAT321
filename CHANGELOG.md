@@ -5,15 +5,24 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.20] - unreleased
+## [1.0.20] - 2026-04-15
 
 ### Added
 
+- **The Claude and Codex usage widgets now resume on their own when the provider recovers.** Previously, if Anthropic or OpenAI went down and returned a long `Retry-After` header, your widget would sit "Offline" for up to 45 minutes and there was nothing you could do about it. Now each usage service watches your active session's transcript file; if you are actively using Claude or Codex when the API comes back up, the widget wakes itself within about two minutes. No clicks, no reload, no waiting out the full park. The new constants live in `src/shared/polling/constants.ts`.
+- **Parked widget tooltips now explain why.** When your usage widget is parked in "Offline", the tooltip now surfaces the server's 429 reason (like "HTTP 429 Too Many Requests (possible API outage)") and, if there is a live incident on the provider's public status page, a line reading "Anthropic status: Partial System Outage" or similar. Lazy and cached - the status page is only read from the tooltip render path and at most once per five minutes. Silent on any fetch failure.
+- **Reset WAT321 now also clears accumulated rate-limit backoff state.** If you ever find yourself escalated to the longer retry cadence during a bad outage and want to try a fresh attempt without waiting it out, the Reset command will zero the counter. Gating still applies - the reset does not force an immediate fetch, it just gives the next gate check a clean slate.
+
 ### Changed
 
-### Fixed
+- **Usage widgets cap any server `Retry-After` at fifteen minutes.** Nothing against the provider's own guidance, but when their edge returns a value in the 40+ minute range during a recovery, honoring it literally strands the widget long after the API is actually back up. The cap gives us the same "back off, do not hammer" behavior without leaving you stranded. Lives alongside the other polling constants.
+- **Sustained outages now escalate retry spacing progressively.** On a fresh park, the widget is responsive - it tries to wake within about two minutes of activity. If that attempt fails, the next one waits five minutes. Then ten. Then fifteen, at which point it effectively stops trying to wake and lets the normal park timer handle retries. A single successful fetch resets the ladder so short outages still get the full responsive behavior. Driven by `KICKSTART_ESCALATION_MS`.
+- **Codex session token polling is now staggered one second off Claude.** Both providers used to poll local transcripts on the same tick. Now Codex is on a 6-second cadence and Claude stays at 5, so two active providers never `stat` the same tick. No user-visible effect, just slightly kinder to the filesystem.
+- **Codebase split into focused modules, no behavior change.** The experimental Force Auto-Compact service had its armed status bar item peeled off into its own file, and the Reset WAT321 flow had its workspace `.vscode/settings.json` heal split into an `applicationScopeHeal` module. Both are internal splits for readability; the product surface is unchanged.
 
 ### Removed
+
+- **Click-to-wake affordance on parked usage widgets.** The earlier "click to resume polling" path on the rate-limited widget was only meaningful when WAT321 was guessing at a wait time. Now that recovery is fully automatic via the activity kickstart, no widget state is clickable. The surface area is smaller and the UX is consistent with the rest of WAT321's passive-recovery posture.
 
 ## [1.0.19] - 2026-04-15
 
