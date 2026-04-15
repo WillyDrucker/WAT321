@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
@@ -8,8 +8,9 @@ import {
   writeInstallSnapshotBytes,
 } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/backups";
 import { healStuckOverride, type HealResult } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/heal";
+import { healStaleApplicationScopeKeys } from "./applicationScopeHeal";
 
-const STAMP_DIR = join(homedir(), ".wat321");
+const WAT321_DIR = join(homedir(), ".wat321");
 
 /** Every status bar item id we create via `window.createStatusBarItem`.
  * VS Code (1.63+) stores per-item user-hidden state in `settings.json`
@@ -151,7 +152,15 @@ async function resetStatusBarItemVisibility(): Promise<void> {
   );
 }
 
-async function performClear(): Promise<void> {
+/** Optional hook fired after the user confirms Reset WAT321 and
+ * after the stuck-override heal runs, but before any setting writes
+ * or disk wipes. Used to clear in-memory state on running services
+ * that `rmSync(~/.wat321/)` cannot reach - currently the kickstart
+ * escalation counters on both usage services. Never blocks the
+ * reset flow; failures in the callback are not awaited. */
+type OnResetCallback = () => void;
+
+async function performClear(onReset?: OnResetCallback): Promise<void> {
   // Clear the checkbox back to unchecked at every scope BEFORE
   // showing the confirmation toast. This is the surest way to keep
   // the trigger reliable: a stale `true` at any scope (e.g. left
@@ -197,6 +206,21 @@ async function performClear(): Promise<void> {
     return;
   }
 
+  // In-memory reset hook: clears kickstart escalation counters on
+  // running services so a user trapped in a sustained outage gets
+  // the responsive fresh-park cadence back immediately. Runs after
+  // the stuck-override heal (so any hard-fail aborts before this)
+  // and before the setting writes below (so no user-visible churn
+  // overlaps). Gating is preserved - the hook only zeroes the
+  // counter and shrinks the poll interval; it does not force a
+  // fetch. Never awaited; handler errors do not block reset.
+  try {
+    onReset?.();
+  } catch {
+    // Silent - reset flow must not fail because an in-memory hook
+    // threw.
+  }
+
   // Reset all settings to defaults. Must clear at every scope
   // (Global / Workspace / WorkspaceFolder) because `config.get()`
   // returns the merged effective value and a workspace-level
@@ -239,8 +263,8 @@ async function performClear(): Promise<void> {
   // recursive remove covers everything WAT321 has ever written. The
   // force-auto-compact sentinel (if any) was already processed above.
   try {
-    if (existsSync(STAMP_DIR)) {
-      rmSync(STAMP_DIR, { recursive: true, force: true });
+    if (existsSync(WAT321_DIR)) {
+      rmSync(WAT321_DIR, { recursive: true, force: true });
     }
   } catch {
     // best-effort
@@ -259,112 +283,9 @@ async function performClear(): Promise<void> {
   );
 }
 
-/** Keys that must never live at workspace scope because they are
- * action triggers (click to arm / click to reset) rather than
- * persistent preferences. When any of these is stuck at workspace
- * scope, the change handler's `config.get()` reads the merged
- * effective value and workspace silently overrides user, so clicking
- * the checkbox in user settings never fires. Every key in this list
- * is also declared as `"scope": "application"` in package.json so
- * that new writes cannot land at workspace scope going forward - the
- * heal below is for early-adopter workspaces that still physically
- * have the key in their `.vscode/settings.json` from before the
- * scope tightening. */
-const APPLICATION_SCOPE_KEYS = [
-  "wat321.clearAllData",
-  "wat321.experimental.forceClaudeAutoCompact",
-] as const;
-
-/** Surgically strip a set of `wat321.*` keys from a single
- * settings.json file. Uses a conservative line-level regex per key
- * that matches the key at the start of its own line (optional
- * leading whitespace), any bool literal, and an optional trailing
- * comma. Preserves JSONC comments and every other key untouched
- * because we only delete the matching line. Atomic write via
- * tmp+rename so a crash mid-write cannot corrupt the file. Silent
- * no-op on missing file, IO error, or if no matching key is
- * present. */
-function stripApplicationScopeKeysFromFile(path: string): void {
-  if (!existsSync(path)) return;
-  let content: string;
-  try {
-    content = readFileSync(path, "utf8");
-  } catch {
-    return;
-  }
-  if (!APPLICATION_SCOPE_KEYS.some((k) => content.includes(k))) return;
-
-  let next = content;
-  for (const key of APPLICATION_SCOPE_KEYS) {
-    // Escape any regex metachars in the key so `.` matches literally.
-    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // Match the whole line, including its line terminator, so removing
-    // it leaves surrounding formatting intact.
-    const lineRegex = new RegExp(
-      `^[ \\t]*"${escaped}"[ \\t]*:[ \\t]*(?:true|false)[ \\t]*,?[ \\t]*\\r?\\n`,
-      "gm"
-    );
-    next = next.replace(lineRegex, "");
-  }
-  if (next === content) return;
-
-  // Fix up a trailing comma that used to separate one of our keys
-  // from the closing brace: `, \n}` -> `\n}`. Safe at the end of an
-  // object literal. Runs after all strips so the final shape is
-  // always valid JSONC.
-  next = next.replace(/,(\s*})/g, "$1");
-
-  try {
-    const tmp = `${path}.wat321-heal.tmp`;
-    writeFileSync(tmp, next, "utf8");
-    // Atomic rename; on Windows this overwrites the target.
-    renameSync(tmp, path);
-  } catch {
-    // best-effort
-  }
-}
-
-/** Heal any stale application-scope key left behind by an older
- * WAT321 build (before these settings were tightened to
- * `scope: application`) or by a crashed prior run. Two-pronged:
- *
- *   1. User-scope cleanup via the normal config API. For an
- *      application-scoped setting VS Code will accept a Global write
- *      and silently ignore Workspace/WorkspaceFolder writes; either
- *      way this drops any lingering user-level value back to the
- *      schema default.
- *
- *   2. Direct file surgery on every open workspace folder's
- *      `.vscode/settings.json`. Necessary because VS Code now refuses
- *      to modify application-scoped keys at workspace scope through
- *      the API, which would otherwise leave `"wat321.clearAllData":
- *      false` (or the experimental checkbox) physically present in
- *      the file forever. A stuck workspace value of either true or
- *      false breaks the change handler for these checkboxes
- *      (workspace overrides user during merge, so the handler's
- *      `config.get()` never sees the global transition).
- *
- * Fire-and-forget on activation. Never throws; every IO path is
- * guarded. Scoped narrowly to the keys in `APPLICATION_SCOPE_KEYS` -
- * we never touch any other setting in the file. */
-function healStaleApplicationScopeKeys(): void {
-  void clearCheckboxSetting("clearAllData").catch(() => {
-    // best-effort - never block activation
-  });
-  void clearCheckboxSetting("experimental.forceClaudeAutoCompact").catch(() => {
-    // best-effort - never block activation
-  });
-
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) return;
-  for (const folder of folders) {
-    const settingsPath = join(folder.uri.fsPath, ".vscode", "settings.json");
-    stripApplicationScopeKeysFromFile(settingsPath);
-  }
-}
-
 export function registerClearSettingsCommand(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  onReset?: OnResetCallback
 ): void {
   // Heal any stale application-scope keys left behind by an older
   // build or a crashed prior run. Also scrubs the physical
@@ -375,7 +296,7 @@ export function registerClearSettingsCommand(
 
   // Command palette entry
   context.subscriptions.push(
-    vscode.commands.registerCommand("wat321.clearAllSettings", () => performClear())
+    vscode.commands.registerCommand("wat321.clearAllSettings", () => performClear(onReset))
   );
 
   // Settings page checkbox trigger. performClear clears the
@@ -388,7 +309,7 @@ export function registerClearSettingsCommand(
         const checked = vscode.workspace
           .getConfiguration("wat321")
           .get<boolean>("clearAllData", false);
-        if (checked) performClear();
+        if (checked) performClear(onReset);
       }
     })
   );
