@@ -2,7 +2,7 @@
 
 ### *Does manually refreshing AI usage limits give you anxiety?*
 
-<img src="images/screenshots/AI_USAGE_LIMITS.png" width="340">
+<img src="images/screenshots/AI_USAGE_LIMITS.png" alt="AI usage limits" width="50%">
 
 ## Now you can live in fear in real-time!
 
@@ -14,12 +14,13 @@ WAT321 ships with **six read-only widgets** - three for Claude, three for Codex 
 
 One opt-in **Experimental** setting is also available in the Claude section - see below.
 
-- 4 updated usage limits progress bars
+- 4 usage limit progress bars (Claude + Codex, 5-hour and weekly)
 - 2 real-time session token status bars
-- Hover tooltips for breakdown - limits remaining, compact status, etc.
-- Auto-Compact feature (Experimental) - triggers built-in auto-compaction for higher quality compacts compared to `/compact`
-- "Epic Handshake" in development - enables automatic crosstalk between Claude and Codex for epic results (Kick off Claude/Codex as a true <s>sub</s>agent on steroids)
-- Available on the VS Marketplace and Open VSX Registry or direct download
+- Heatmap for progress bars - colors warn as limits approach
+- Hover tooltips with the detailed breakdown
+- Force Auto-Compact (Experimental, opt-in) for higher-quality compacts than `/compact`
+- "Epic Handshake" in development - enables automatic crosstalk between Claude and Codex for epic results (Kick off Claude/Codex as a true ~~sub~~agent on steroids)
+- Available on the VS Marketplace, Open VSX Registry, and as a direct `.vsix` download
 
 ---
 
@@ -29,48 +30,35 @@ One opt-in **Experimental** setting is also available in the Claude section - se
 
 Live progress bars showing your 5-hour session utilization and weekly limits. Simple hover for information breakdown.
 
-<img src="images/screenshots/CLAUDE_USAGE_TOOLTIP_HOVER.png" width="250">
-
-![Claude usage bars](images/screenshots/CLAUDE_USAGE.png)
+<p>
+<img src="images/screenshots/CLAUDE_USAGE_TOOLTIP_HOVER.png" alt="Claude usage tooltip" width="190"><br>
+<img src="images/screenshots/CLAUDE_USAGE.png" alt="Claude usage bars" width="549">
+</p>
 
 ### Claude Session Tokens
 
 Tracks your active Claude Code session's context window usage against the auto-compact ceiling. See how much room you have before compaction kicks in.
 
-<img src="images/screenshots/CLAUDE_SESSION_TOKENS.png" width="250">
+![Claude session tokens](images/screenshots/CLAUDE_SESSION_TOKENS.png)
 
 ### Codex Usage
 
 Same concept, **green** bars for Codex. Shows **remaining** capacity - the bars deplete as you use more.
 
-<img src="images/screenshots/CODEX_USAGE_TOOLTIP_HOVER.png" width="250">
-
-![Codex usage bars](images/screenshots/CODEX_USAGE.png)
+<p>
+<img src="images/screenshots/CODEX_USAGE_TOOLTIP_HOVER.png" alt="Codex usage tooltip" width="208"><br>
+<img src="images/screenshots/CODEX_USAGE.png" alt="Codex usage bars" width="560">
+</p>
 
 ### Codex Session Tokens
 
 Monitors your Codex session's context window fill level. Same layout as Claude session tokens.
 
-<img src="images/screenshots/CODEX_SESSION_TOKENS.png" width="250">
+![Codex session tokens](images/screenshots/CODEX_SESSION_TOKENS.png)
 
 ### Force Claude Auto-Compact *(experimental, off by default)*
 
-An **experimental** checkbox in the Claude settings section. Arms Claude's Auto-Compact for your next message prompt to Claude. Triggers Auto-Compact on next prompt. Disarms after 30 seconds of no activity. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed. A confirmation dialog will appear before arming. *Useful for long sessions when performance degrades.*
-
----
-
-## Display Modes
-
-WAT321 supports four display densities. Search **"wat321"** in **Settings** and pick the one that fits how crowded you like your status bar.
-
-- **Auto** (default) - automatically picks Full when only one provider is active, Compact when both are active
-- **Full** - 10-block progress bars with all details
-- **Compact** - 5-block progress bars, session tokens show text only
-- **Minimal** - text-only, usage bars move to tooltips on hover
-
-<img src="images/screenshots/DISPLAY_MODE_SETTINGS.png" width="300">
-
-![Compact Mode](images/screenshots/COMPACT_MODE.png)
+An **experimental** checkbox in the Claude settings section. Arms Claude's built-in Auto-Compact so it triggers on your next message prompt. Disarms after 30 seconds of no activity or can be cancelled. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside of `~/.wat321/`. Your Claude settings are backed up automatically. *Useful for long sessions when performance degrades.*
 
 ---
 
@@ -94,19 +82,36 @@ For VS Code forks and derivatives that use Open VSX instead of the proprietary M
 3. Reload window
 
 **Where to find the files:**
+- **VS Marketplace** - https://marketplace.visualstudio.com/publishers/WillyDrucker
+- **Open VSX Registry** - https://open-vsx.org/extension/WillyDrucker/wat321
 - **.vsix downloads** - every release is attached to its [GitHub Release](https://github.com/WillyDrucker/WAT321/releases) as a downloadable asset
-- **Open VSX listing** - *(coming soon - link to be added once the extension is published to Open VSX)*
 
 ---
 
 ## Provider Toggles
 
-Both Claude and Codex widgets are enabled by default. If a provider CLI is not installed, its widgets stay hidden automatically, so you never end up with "Not Connected" clutter. If you want to turn one provider off yourself:
+Both Claude and Codex widgets are enabled by default. If a provider CLI is not installed, its widgets stay hidden automatically. If you want to turn one provider off yourself:
 
 1. **File > Preferences > Settings** (`Ctrl+,` / `Cmd+,`) and search for **"wat321"**
 2. Uncheck **Enable Claude** or **Enable Codex** - widgets disappear immediately, no reload needed
 
-<img src="images/screenshots/CODEX_WAT321_SETTINGS.png" width="350">
+<p>
+<img src="images/screenshots/ENABLE_CLAUDE_SETTINGS.png" alt="Enable Claude setting" width="684"><br>
+<img src="images/screenshots/ENABLE_CODEX_SETTINGS.png" alt="Enable Codex setting" width="684">
+</p>
+
+## Display Modes
+
+WAT321 supports four display densities. Search **"wat321"** in **Settings** and pick the one that fits how crowded you like your status bar.
+
+- **Auto** (default) - automatically picks Full when only one provider is active, Compact when both are active
+- **Full** - 10-block progress bars with all details
+- **Compact** - 5-block progress bars, session tokens show text only
+- **Minimal** - text-only, usage bars move to tooltips on hover
+
+<p><img src="images/screenshots/DISPLAY_MODE_SETTINGS.png" alt="Display mode settings" width="320"></p>
+
+<img src="images/screenshots/COMPACT_MODE_HEATMAP.png" alt="Compact Mode" width="768">
 
 ## Customize Visible Widgets
 
@@ -114,7 +119,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 
 ![Status bar button](images/screenshots/STATUS_BAR_BUTTON.png)
 
-<img src="images/screenshots/STATUS_BAR_TOGGLE_MENU.png" width="250">
+<img src="images/screenshots/STATUS_BAR_TOGGLE_MENU.png" alt="Status bar toggle menu" width="246">
 
 ---
 
@@ -122,7 +127,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 
 ### The six read-only widgets (the default core)
 - **Claude Usage** and **Codex Usage** poll their respective APIs on a safe interval (~2 minutes) with built-in rate-limit protection
-- **Session Tokens** (both providers) read local transcript files - no API calls, no network access
+- **Session Tokens** (both providers) read local session files (transcripts plus the CLI's own settings / model metadata) - no API calls, no network access
 - All six core widgets are **strictly read-only** - they never modify Claude, Codex, or user config files. Everything they write is a disposable cache inside WAT321's own folder
 - **Hidden when a provider isn't set up yet** - if Claude or Codex isn't installed on your machine, those widgets stay out of the way. They appear automatically as soon as the provider is ready, no reload or restart needed
 - Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
@@ -132,7 +137,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 
 ## What It Doesn't Do
 
-- **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage. *The experimental Force Claude Auto-Compact setting is the one exception and is off by default.*
+- **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local session files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage. *The experimental Force Claude Auto-Compact setting is the one exception and is off by default.*
 - **Does not store, transmit, or modify your credentials.** Anything WAT321 saves locally is disposable and can be cleared at any time from the settings page.
 - **Does not interfere with Claude Code, Codex CLI, or any other extension.**
 - **The six core widgets never modify user files.** They only read. The experimental Force Claude Auto-Compact setting is the single exception, described above.
@@ -149,26 +154,27 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 | Provider | Plan | Status |
 |----------|------|--------|
 | Claude | Max (5x / 10x / 20x) | Supported - plan tier detected automatically |
-| Claude | Pro | Supported - usage data works, plan label not shown |
-| Claude | Free | Supported - usage data works, plan label not shown |
-| Claude | Team / Enterprise | Unknown - untested with the usage API |
+| Claude | Pro / Free | Supported - usage data works, plan label not shown |
+| Claude | Team / Enterprise | Untested - see Known Issues |
 | Codex | Plus / Pro / Team | Supported |
-
-API-only Anthropic accounts without CLI OAuth credentials will see Claude widgets stay hidden until CLI credentials are set up.
-
-## Rate Limits
-
-Both Claude and Codex usage APIs have rate limits. WAT321 polls conservatively to stay well within safe thresholds. However, **repeatedly reinstalling or reloading the extension in quick succession can trigger a temporary rate-limit lockout**.
-
-If a lockout occurs, the status bar will show "Offline" and the tooltip will display a countdown timer. The extension will automatically reconnect when the lockout expires - no action needed.
 
 ## Additional Settings
 
-- **Status Bar Priority** - Adjust widget ordering if they overlap with other extensions (requires window reload).
+- **Enable Heatmap** - Colors progress bars as you approach your limits. On by default. Turn off for plain solid bars.
+- **Status Bar Priority** - Adjust widget ordering if WAT321 overlaps with other extensions in the status bar. Requires window reload.
 
 ## Reset WAT321
 
-Need a clean slate? Open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Reset All Settings**, or check the **Reset WAT321** box at the bottom of the WAT321 settings page. That restores WAT321 to its defaults and clears its saved local data. If any WAT321 tool ever appears unresponsive, this also resets every tool back to a known-good state. No restart needed.
+Need a clean slate? Open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **WAT321: Reset WAT321**, or check the **Reset WAT321** box at the bottom of the WAT321 settings page. This restores WAT321 to its defaults and clears everything it has stored locally. If any WAT321 tool appears unresponsive, this will reset all to a known-good state. A confirmation dialog will appear before resetting.
+
+## Known Issues
+
+A few rough edges that are worth knowing about. None of them need any action on your part - they either self-heal or are waiting on upstream fixes.
+
+- **Your Claude Max plan tier can look stale.** If you recently upgraded (for example from Max 5x to Max 20x), the Claude tooltip may keep showing the old tier for a while. The tier comes straight from Anthropic's usage endpoint and appears to refresh on the billing cycle rather than immediately after an upgrade. Your actual limits are still correct - it's only the label that lags. Nothing to reset on our side.
+- **If you ever see "Offline" with a countdown, just wait it out.** The usage API occasionally throttles briefly (upstream server-side backoff, brief outages). WAT321 detects it, shows a countdown in the tooltip, and reconnects itself when the window expires.
+- **API-only Anthropic accounts stay hidden.** Claude widgets need CLI OAuth credentials at `~/.claude/.credentials.json`. If you only use the Anthropic API without the Claude Code CLI, the Claude widgets stay hidden until those credentials exist.
+- **Team and Enterprise Claude plans are untested.** Everything should still work, but we haven't been able to verify it against those plans. If you're on one and something looks off, please open an issue.
 
 ## Issues & Feedback
 

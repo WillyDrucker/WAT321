@@ -11,7 +11,7 @@ VS Code extension providing real-time AI usage status bar widgets (Claude + Code
 ## Two-Tier Tool Model
 WAT321 has two distinct tool categories with different trust contracts:
 
-**Read-only core (locked)** - the 6 existing widgets: Claude usage 5h/weekly, Codex usage 5h/weekly, Claude session tokens, Codex session tokens. These never modify user files. Only writes are disposable caches, claims, and stamps in `~/.wat321/`. This guarantee does not change.
+**Read-only core (locked)** - the 6 existing widgets: Claude usage 5h/weekly, Codex usage 5h/weekly, Claude session tokens, Codex session tokens. These never modify user files. Only writes are disposable caches, claims, and snapshots in `~/.wat321/`. This guarantee does not change.
 
 **Experimental settings (opt-in)** - settings that may write outside `~/.wat321/` (currently only `wat321.experimental.forceClaudeAutoCompact`, which writes `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in `~/.claude/settings.json` through the service in `src/WAT321_EXPERIMENTAL_AUTOCOMPACT/`). These default to `false`, live under an **Experimental** label in settings, and route every write through the same four-tier sentinel + backup ring + install snapshot + default heal chain so any crash mid-arm self-heals on the next VS Code start.
 
@@ -42,4 +42,5 @@ WAT321 has two distinct tool categories with different trust contracts:
 - **Branch = version = changelog** - always in sync
 - Debug via F5 - Extension Development Host
 - Use `/wat321-publish` for the full release flow
+- README screenshots follow a retina-sharp pattern (file resolution is 2x the CSS display width). See **README screenshots** in `AIDOCS/WD_WAT321_MEMORY_EXTENDED.md` before adding or replacing any image
 - Naming conventions, status bar label specs, tooltip formatters, and file-layout reference live in `AIDOCS/WD_WAT321_MEMORY_EXTENDED.md` - do not re-duplicate here
