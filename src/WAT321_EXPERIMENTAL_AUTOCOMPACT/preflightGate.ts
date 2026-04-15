@@ -10,9 +10,9 @@ import type { ActiveContextInfo, ArmBlocker } from "./types";
  * arming is safe, or a specific `ArmBlocker` reason otherwise.
  *
  * The gate set is deliberately small compared to the v1.0.14 widget:
- * no passive availability resolver, no click-to-repair affordance,
- * no loop-detection watcher. Each blocker fires once at tick time
- * and the user gets a single error toast explaining what to fix.
+ * no passive availability resolver, no state, no cooldowns, no
+ * loop-detection watcher. Each blocker fires once at tick time and
+ * the user gets a single error toast explaining what to fix.
  *
  * Ordering matters. Cheapest / least IO-heavy checks run first so
  * the common "nothing is wrong" path is fast and the slow tail scan
