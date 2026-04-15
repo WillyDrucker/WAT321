@@ -12,9 +12,9 @@ export interface CodexResolvedSession {
   sessionId: string;
   label: string; // folder name from cwd
   sessionTitle: string; // thread_name or first user message
-  contextUsed: number; // last_token_usage.input_tokens
+  contextUsed: number; // last_token_usage.total_tokens (matches Codex native hover)
   contextWindowSize: number; // effective model context window from token_count
-  autoCompactTokens: number; // actual Codex auto-compact ceiling for display
+  autoCompactTokens: number; // effective context window ceiling (matches Codex native hover); actual compact trigger is ~90/95 of this
   lastActiveAt: number; // ms - rollout file mtime (display metadata only)
 }
 
