@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
-import { getRemainingPct, makeBar } from "../shared/codex-usage/formatters";
+import { getRemainingPct } from "../shared/codex-usage/formatters";
 import { buildTooltip } from "../shared/codex-usage/tooltipBuilder";
 import type {
   ServiceState,
   StatusBarWidget,
 } from "../shared/codex-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
+import { getCodexTextColor, renderCodexBar } from "../shared/ui/heatmap";
 import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
 import { renderUsageNonOkState } from "../shared/ui/usageNonOkRenderer";
 
@@ -36,19 +37,21 @@ export class CodexUsage5hrWidget implements StatusBarWidget {
     const usedPct = state.data.rate_limit?.primary_window?.used_percent ?? 0;
     const remainingPct = getRemainingPct(usedPct);
     const mode = getDisplayMode();
+
     if (mode === "minimal") {
-      this.item.text = `Codex (5h): ${remainingPct}%`;
+      this.item.text = `Codex 5h [${remainingPct}%]`;
     } else if (mode === "compact") {
-      this.item.text = `Codex (5h) ${makeBar(usedPct, 5)} ${remainingPct}%`;
+      this.item.text = `Codex (5h) ${renderCodexBar(usedPct, 5)} ${remainingPct}%`;
     } else {
       // Full view keeps the long "5 hour" form for space-rich layouts
-      this.item.text = `Codex (5 hour) ${makeBar(usedPct)} ${remainingPct}%`;
+      this.item.text = `Codex (5 hour) ${renderCodexBar(usedPct, 10)} ${remainingPct}%`;
     }
     this.item.tooltip = buildTooltip(state.data);
-    this.item.color =
-      remainingPct <= 10
-        ? new vscode.ThemeColor("statusBarItem.warningForeground")
-        : undefined;
+    // Single source of truth for Codex widget text color. The helper
+    // handles heatmap-on/off, solo-vs-dual provider, the minimal
+    // brand marker, and the severity signal in non-green bands.
+    this.item.color = getCodexTextColor(mode, usedPct);
+    this.item.backgroundColor = undefined;
     this.item.show();
   }
 

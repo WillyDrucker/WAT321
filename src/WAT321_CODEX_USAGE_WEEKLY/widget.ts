@@ -1,12 +1,14 @@
 import * as vscode from "vscode";
-import { getRemainingPct, makeBar } from "../shared/codex-usage/formatters";
+import { getRemainingPct } from "../shared/codex-usage/formatters";
 import { buildTooltip } from "../shared/codex-usage/tooltipBuilder";
 import type {
   ServiceState,
   StatusBarWidget,
 } from "../shared/codex-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
+import { getCodexTextColor, renderCodexBar } from "../shared/ui/heatmap";
 import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
+import { renderWeeklyUsageNonOkState } from "../shared/ui/usageNonOkRenderer";
 
 export class CodexUsageWeeklyWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -24,44 +26,29 @@ export class CodexUsageWeeklyWidget implements StatusBarWidget {
   }
 
   update(state: ServiceState): void {
-    switch (state.status) {
-      case "loading":
-        this.item.text = "Codex weekly $(loading~spin)";
-        this.item.tooltip = "Fetching Codex usage data...";
-        this.item.color = undefined;
-        this.item.show();
-        break;
+    const handled = renderWeeklyUsageNonOkState(this.item, state, {
+      loadingText: "Codex weekly $(loading~spin)",
+      loadingTooltip: "Fetching Codex usage data...",
+    });
+    if (handled) return;
 
-      case "not-connected":
-      case "no-auth":
-      case "token-expired":
-      case "rate-limited":
-      case "offline":
-      case "error":
-        this.item.hide();
-        break;
+    // ok branch
+    const usedPct =
+      state.data.rate_limit?.secondary_window?.used_percent ?? 0;
+    const remainingPct = getRemainingPct(usedPct);
+    const mode = getDisplayMode();
 
-      case "ok": {
-        const usedPct =
-          state.data.rate_limit?.secondary_window?.used_percent ?? 0;
-        const remainingPct = getRemainingPct(usedPct);
-        const mode = getDisplayMode();
-        if (mode === "minimal") {
-          this.item.text = `Codex weekly: ${remainingPct}%`;
-        } else if (mode === "compact") {
-          this.item.text = `Codex weekly ${makeBar(usedPct, 5)} ${remainingPct}%`;
-        } else {
-          this.item.text = `Codex weekly ${makeBar(usedPct)} ${remainingPct}%`;
-        }
-        this.item.tooltip = buildTooltip(state.data);
-        this.item.color =
-          remainingPct <= 10
-            ? new vscode.ThemeColor("statusBarItem.warningForeground")
-            : undefined;
-        this.item.show();
-        break;
-      }
+    if (mode === "minimal") {
+      this.item.text = `Codex weekly [${remainingPct}%]`;
+    } else if (mode === "compact") {
+      this.item.text = `Codex weekly ${renderCodexBar(usedPct, 5)} ${remainingPct}%`;
+    } else {
+      this.item.text = `Codex weekly ${renderCodexBar(usedPct, 10)} ${remainingPct}%`;
     }
+    this.item.tooltip = buildTooltip(state.data);
+    this.item.color = getCodexTextColor(mode, usedPct);
+    this.item.backgroundColor = undefined;
+    this.item.show();
   }
 
   dispose(): void {
