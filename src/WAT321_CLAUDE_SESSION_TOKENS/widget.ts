@@ -4,9 +4,9 @@ import { formatTokens, formatPct } from "../shared/ui/tokenFormatters";
 import { buildSessionTokenTooltip } from "../shared/ui/sessionTokenTooltip";
 import { ClaudeSessionTokenService } from "./service";
 import { getDisplayMode } from "../shared/displayMode";
+import { getSessionTokenColor } from "../shared/ui/heatmap";
+import { prefixForMode } from "../shared/ui/sessionTokenPrefix";
 import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
-
-const THOUGHT = "\u{1F4AD}"; // U+1F4AD THOUGHT BALLOON
 
 export class ClaudeSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -18,7 +18,7 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
       getWidgetPriority(WIDGET_SLOT.claudeSessionTokens)
     );
     this.item.name = "WAT321: Claude Session Tokens";
-    this.item.text = `${THOUGHT} Claude -`;
+    this.item.text = `${prefixForMode()} Claude -`;
     this.item.tooltip = "No active Claude session";
     // First state delivered by subscribe() decides visibility.
   }
@@ -32,7 +32,7 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
 
       case "no-session":
       case "waiting":
-        this.item.text = `${THOUGHT} Claude -`;
+        this.item.text = `${prefixForMode()} Claude -`;
         this.item.tooltip = "No active Claude session";
         this.item.color = undefined;
         this.item.show();
@@ -49,16 +49,14 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
             : 0;
 
         const mode = getDisplayMode();
+        const prefix = prefixForMode();
         if (mode === "minimal" || mode === "compact") {
-          this.item.text = `${THOUGHT} Claude ${formatTokens(session.contextUsed)} ${formatPct(pctOfCeiling)}`;
+          this.item.text = `${prefix} Claude ${formatTokens(session.contextUsed)} ${formatPct(pctOfCeiling)}`;
         } else {
-          this.item.text = `${THOUGHT} Claude ${formatTokens(session.contextUsed)} / ${formatTokens(ceilingTokens)} ${formatPct(pctOfCeiling)}`;
+          this.item.text = `${prefix} Claude ${formatTokens(session.contextUsed)} / ${formatTokens(ceilingTokens)} ${formatPct(pctOfCeiling)}`;
         }
 
-        this.item.color =
-          pctOfCeiling >= 90
-            ? new vscode.ThemeColor("statusBarItem.warningForeground")
-            : undefined;
+        this.item.color = getSessionTokenColor(pctOfCeiling);
 
         this.item.tooltip = buildSessionTokenTooltip({
           provider: "Claude",
