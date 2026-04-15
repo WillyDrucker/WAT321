@@ -1,13 +1,21 @@
 import type * as vscode from "vscode";
+import {
+  getCachedStatus,
+  getProviderOwner,
+  type Provider,
+  refreshIfStale,
+} from "../statusPoller";
 import type { ServiceState } from "../types";
 
 /**
  * Shared renderer for the non-OK states of the Claude and Codex
  * usage widgets. Both widgets had identical six-branch switches
  * (loading / not-connected / no-auth / token-expired / rate-limited /
- * offline / error) where only the provider name and the wake command
- * id varied. This helper consolidates the rendering so each widget
- * keeps only its own `ok` branch.
+ * offline / error) where only the provider name varied. This helper
+ * consolidates the rendering so each widget keeps only its own `ok`
+ * branch. No state is ever clickable - recovery from the rate-limited
+ * park is fully automatic via the activity-driven kickstart wired in
+ * `bootstrap.ts`.
  *
  * Returns `true` if the state was rendered. Returns `false` for the
  * `ok` branch so the caller knows to fall through to its own
@@ -17,13 +25,13 @@ import type { ServiceState } from "../types";
 export interface UsageNonOkOptions {
   /** Display name for error states ("Claude" or "Codex"). */
   providerName: string;
+  /** Provider key for status-page lookups. Matches the
+   * `statusPoller` module's Provider union. */
+  providerKey: Provider;
   /** Full text shown in the loading state, including any spinner
    * codicon. Varies because the 5h widget uses "(5hr)" / "(5 hour)"
    * label forms its caller has chosen. */
   loadingText: string;
-  /** Command id to wire on the click-to-wake affordance during a
-   * fallback rate-limit (only fires when `source === "fallback"`). */
-  wakeCommand: string;
 }
 
 export function renderUsageNonOkState<TData>(
@@ -31,8 +39,9 @@ export function renderUsageNonOkState<TData>(
   state: ServiceState<TData>,
   opts: UsageNonOkOptions
 ): state is Exclude<ServiceState<TData>, { status: "ok" }> {
-  // Default: no click affordance. Only the rate-limited-fallback
-  // branch re-enables it as click-to-wake.
+  // No click affordance on any non-ok state. Recovery from a
+  // rate-limit park is fully automatic via the activity-driven
+  // kickstart wired in `bootstrap.ts`.
   item.command = undefined;
 
   switch (state.status) {
@@ -68,22 +77,36 @@ export function renderUsageNonOkState<TData>(
         0,
         Math.ceil((state.retryAfterMs - elapsed) / 60_000)
       );
-      // Click-to-wake: only when WAT321 is using its own 15-minute
-      // fallback guess (no Retry-After header from the server). A
-      // server-directed backoff stays hover-only - we never override
-      // a wait the server explicitly asked for.
-      if (state.source === "fallback") {
-        item.tooltip =
-          remaining > 0
-            ? `Temporarily paused. Reconnecting in up to ${remaining} minute${remaining !== 1 ? "s" : ""}. Click to resume polling now.`
-            : "Reconnecting...";
-        item.command = opts.wakeCommand;
-      } else {
-        item.tooltip =
-          remaining > 0
-            ? `Temporarily paused. Reconnecting in ${remaining} minute${remaining !== 1 ? "s" : ""}...`
-            : "Reconnecting...";
+      const pausedLine =
+        remaining > 0
+          ? `Temporarily paused. Reconnecting in up to ${remaining} minute${remaining !== 1 ? "s" : ""}...`
+          : "Reconnecting...";
+      // Kick a lazy refresh of the provider's public status page.
+      // TTL-gated so the actual network call fires at most once per
+      // 5 min per window; the countdown ticker's 1-second re-paint
+      // picks up a fresh entry on the next tick without explicit
+      // rebroadcast plumbing. Silent if the fetch fails.
+      refreshIfStale(opts.providerKey);
+      const status = getCachedStatus(opts.providerKey);
+      // Tooltip order (per design):
+      //   1. Anthropic / OpenAI status line (only when an incident
+      //      is live - `indicator !== "none"`)
+      //   2. API server message (when present on the state)
+      //   3. Temporarily paused / reconnecting countdown line
+      // Status and server message are additive context; the paused
+      // line is the original tooltip and stays at the bottom as the
+      // primary action summary.
+      const lines: string[] = [];
+      if (status && status.indicator !== "none") {
+        lines.push(
+          `${getProviderOwner(opts.providerKey)} status: ${status.description}`
+        );
       }
+      if (state.serverMessage) {
+        lines.push(`API: ${state.serverMessage}`);
+      }
+      lines.push(pausedLine);
+      item.tooltip = lines.join("\n");
       item.color = undefined;
       item.show();
       return true;

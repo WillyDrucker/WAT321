@@ -15,12 +15,12 @@ export type ServiceState<TData> =
       status: "rate-limited";
       retryAfterMs: number;
       rateLimitedAt: number;
-      /** Distinguishes a server-directed backoff (Retry-After header
-       * present) from our own hardcoded 15-minute fallback. The widget
-       * exposes a click-to-wake affordance ONLY when source is
-       * "fallback" - we never override a wait the server explicitly
-       * asked for. */
-      source: "fallback" | "server";
+      /** Optional friendlier reason string extracted from the
+       * server's 429 response body (Anthropic returns a JSON error
+       * shape; Codex returns plain text). Displayed as an extra
+       * line in the rate-limited tooltip when present. Absent if
+       * the body was unparseable or empty. */
+      serverMessage?: string;
     }
   | { status: "offline"; message: string }
   | { status: "error"; message: string }

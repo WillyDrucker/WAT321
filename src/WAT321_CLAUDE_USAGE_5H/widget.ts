@@ -28,8 +28,8 @@ export class ClaudeUsage5hrWidget implements StatusBarWidget {
   update(state: ServiceState): void {
     const handled = renderUsageNonOkState(this.item, state, {
       providerName: "Claude",
+      providerKey: "claude",
       loadingText: "Claude (5hr) $(loading~spin)",
-      wakeCommand: "wat321.wakeClaudeUsage",
     });
     if (handled) return;
 
