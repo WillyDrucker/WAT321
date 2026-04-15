@@ -13,7 +13,11 @@ import {
 import { findLatestRollout, getSessionTitle } from "./rolloutDiscovery";
 import { resolveAutoCompactTokens } from "./autoCompactLimit";
 
-const POLL_INTERVAL = 5_000;
+// Staggered 1 s off the Claude session token poll (5_000) so two
+// concurrent providers do not stat on the same tick. The 30 s
+// kickstart activity window still contains multiple Codex polls, so
+// the stagger is free from the usage-service's perspective.
+const POLL_INTERVAL = 6_000;
 const SESSION_SCAN_INTERVAL = 51_000;
 
 type Listener = (state: CodexTokenWidgetState) => void;
@@ -63,6 +67,15 @@ export class CodexSessionTokenService {
 
   rebroadcast(): void {
     for (const fn of this.listeners) fn(this.state);
+  }
+
+  /** Most recent active-rollout mtime in ms, or null if no session
+   * has been resolved. Mirror of the Claude side - consumed by the
+   * Codex usage service as the activity signal that gates the
+   * kickstart out of the rate-limited park. */
+  getLastActivityMs(): number | null {
+    if (this.state.status !== "ok") return null;
+    return this.state.session.lastActiveAt;
   }
 
   dispose(): void {

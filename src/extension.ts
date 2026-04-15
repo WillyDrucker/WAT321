@@ -9,7 +9,6 @@ import {
   type ActiveGroups,
 } from "./bootstrap";
 import { registerClearSettingsCommand } from "./shared/clearSettings";
-import { registerWakeCommands } from "./shared/wakeCommands";
 import { registerCancelExperimentalAutoCompactCommand } from "./WAT321_EXPERIMENTAL_AUTOCOMPACT/service";
 
 /**
@@ -49,14 +48,19 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // --- Command palette ---
-  registerClearSettingsCommand(context);
-  // Internal click-to-wake commands for the usage widgets. NOT listed
-  // in package.json contributes.commands, so they never appear in the
-  // palette - they exist only as status bar click targets when the
-  // widget is in the 15-minute fallback state.
-  registerWakeCommands(context, groups);
+  // Pass a hook that clears the kickstart escalation ladder on both
+  // running usage services when the user runs Reset WAT321. The
+  // disk wipe in clearSettings cannot reach in-memory service state,
+  // so the hook is how a user trapped in a sustained outage can
+  // manually get back to the responsive fresh-park cadence. Gating
+  // is preserved - the hook only zeroes counters and shrinks the
+  // poll interval, never forces an immediate fetch.
+  registerClearSettingsCommand(context, () => {
+    groups.claude?.usageService.resetKickstartEscalation();
+    groups.codex?.usageService.resetKickstartEscalation();
+  });
   // Internal click-to-disarm command for the experimental Force Claude
-  // Auto-Compact armed status bar item. Also not listed in
+  // Auto-Compact armed status bar item. Not listed in
   // contributes.commands - the only surface is the armed widget click.
   registerCancelExperimentalAutoCompactCommand(
     context,

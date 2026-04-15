@@ -4,6 +4,7 @@ out/
 AIDOCS/
 WDDOCS/
 ARCHIVE/
+.vscode/
 .env
 .env.*
 README_PREVIEW.html

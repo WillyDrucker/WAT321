@@ -129,7 +129,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - **Claude Usage** and **Codex Usage** poll their respective APIs on a safe interval (~2 minutes) with built-in rate-limit protection
 - **Session Tokens** (both providers) read local session files (transcripts plus the CLI's own settings / model metadata) - no API calls, no network access
 - All six core widgets are **strictly read-only** - they never modify Claude, Codex, or user config files. Everything they write is a disposable cache inside WAT321's own folder
-- **Hidden when a provider isn't set up yet** - if Claude or Codex isn't installed on your machine, those widgets stay out of the way. They appear automatically as soon as the provider is ready, no reload or restart needed
+- **Hidden when a provider isn't set up yet** - if Claude or Codex isn't installed on your machine, those widgets stay out of the way. They appear automatically as soon as the provider is ready
 - Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
 
 ### The experimental setting

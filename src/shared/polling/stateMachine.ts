@@ -30,10 +30,16 @@ export function statesEqual<TData>(
     return JSON.stringify(a.data) === JSON.stringify(b.data);
   }
   if (a.status === "rate-limited" && b.status === "rate-limited") {
+    // `serverMessage` is part of the tooltip's user-visible content,
+    // so two rate-limited states with different messages must not
+    // dedupe. Every current park path stamps a fresh `rateLimitedAt`
+    // so this rarely fires in practice, but comparing it closes the
+    // gap for any future path that reuses the same timestamp while
+    // changing only the friendly message.
     return (
       a.rateLimitedAt === b.rateLimitedAt &&
       a.retryAfterMs === b.retryAfterMs &&
-      a.source === b.source
+      a.serverMessage === b.serverMessage
     );
   }
   return true;

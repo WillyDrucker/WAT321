@@ -6,9 +6,9 @@ import {
   writeAutoCompactOverride,
 } from "../shared/claudeSettings";
 import { clearCheckboxSetting } from "../shared/clearSettings";
-import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
 import type { ClaudeSessionTokenService } from "../WAT321_CLAUDE_SESSION_TOKENS/service";
 import type { WidgetState as ClaudeTokenWidgetState } from "../WAT321_CLAUDE_SESSION_TOKENS/types";
+import { ArmedStatusBarItem, CANCEL_COMMAND_ID } from "./armedStatusBarItem";
 import {
   ARMED_OVERRIDE_VALUE,
   maybeCaptureInstallSnapshot,
@@ -71,12 +71,6 @@ const COOLDOWN_MS = 30_000;
 /** Poll cadence while armed. */
 const POLL_INTERVAL_MS = 2_000;
 
-/** Red exclamation glyph on the armed status bar item. Unicode
- * U+2757 HEAVY EXCLAMATION MARK renders as its own red emoji
- * regardless of theme. Paired with the `errorBackground` theme
- * color below so the whole item reads as a red error banner. */
-const RED_EXCLAIM = "\u2757";
-
 type DisarmReason = "user-cancel" | "compact-detected" | "timeout";
 
 export class ExperimentalAutoCompactService {
@@ -86,7 +80,7 @@ export class ExperimentalAutoCompactService {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private configListener: vscode.Disposable | null = null;
   private tokenListener: ((state: ClaudeTokenWidgetState) => void) | null = null;
-  private armedItem: vscode.StatusBarItem | null = null;
+  private armedItem = new ArmedStatusBarItem();
   private disposed = false;
   /** Cached live context snapshot from the Claude session token
    * service. Drives the preflight gate's context-fraction and
@@ -185,10 +179,7 @@ export class ExperimentalAutoCompactService {
       this.tokenService.unsubscribe(this.tokenListener);
       this.tokenListener = null;
     }
-    if (this.armedItem) {
-      this.armedItem.dispose();
-      this.armedItem = null;
-    }
+    this.armedItem.dispose();
   }
 
   /** Translate a Claude session token state update into the live
@@ -344,7 +335,7 @@ export class ExperimentalAutoCompactService {
 
     this.armedSentinel = sentinel;
     this.armedScanOffset = baselineSize;
-    this.showArmedItem();
+    this.armedItem.show();
 
     vscode.window.showInformationMessage(
       "Claude Auto-Compact armed. Next prompt will trigger Auto-Compact."
@@ -373,7 +364,7 @@ export class ExperimentalAutoCompactService {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
-    this.disposeArmedItem();
+    this.armedItem.dispose();
 
     if (reason === "compact-detected" || reason === "timeout") {
       this.cooldownUntil = Date.now() + COOLDOWN_MS;
@@ -398,51 +389,8 @@ export class ExperimentalAutoCompactService {
     }
   }
 
-  /** Create and show the red `! ARMED` status bar item. Idempotent:
-   * calling twice in a row is a no-op. Tooltip is a MarkdownString
-   * so the leading exclaim can render red via the emoji glyph and
-   * the `Click to disarm.` line can render in bold. `isTrusted`
-   * stays false - the tooltip contains no commands. */
-  private showArmedItem(): void {
-    if (this.armedItem) return;
-    const item = vscode.window.createStatusBarItem(
-      "wat321.claudeAutoCompactArmed",
-      vscode.StatusBarAlignment.Right,
-      getWidgetPriority(WIDGET_SLOT.claudeAutoCompactArmed)
-    );
-    item.name = "WAT321: Claude Auto-Compact (Armed)";
-    item.text = `${RED_EXCLAIM} ARMED`;
-    // VS Code's StatusBarItem API only honors "prominent" theme
-    // colors for foreground (statusBarItem.errorForeground,
-    // warningForeground, prominentForeground). On default themes
-    // statusBarItem.errorForeground is WHITE (intended to contrast
-    // with errorBackground) which is why "ARMED" rendered white
-    // in the previous pass. Setting both color and backgroundColor
-    // gives the sanctioned VS Code "error" look: dark-red banner
-    // background with contrasting white text, plus the red emoji
-    // prefix that renders its own color on top of both.
-    item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
-    item.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
-    const tooltip = new vscode.MarkdownString();
-    tooltip.isTrusted = false;
-    tooltip.supportThemeIcons = true;
-    tooltip.appendMarkdown(
-      "\u2757 Claude Auto-Compact - Armed\n\nYour Claude session will Auto-Compact on next prompt.\n\n**Click to disarm.**"
-    );
-    item.tooltip = tooltip;
-    item.command = CANCEL_COMMAND_ID;
-    item.show();
-    this.armedItem = item;
-  }
-
-  private disposeArmedItem(): void {
-    if (!this.armedItem) return;
-    this.armedItem.dispose();
-    this.armedItem = null;
-  }
-
   /** Command handler for the armed status bar item's click. Wired
-   * in `registerCancelCommand` below. */
+   * in `registerCancelExperimentalAutoCompactCommand` below. */
   cancelFromWidget(): void {
     if (!this.armedSentinel) return;
     this.disarm("user-cancel");
@@ -469,7 +417,7 @@ export class ExperimentalAutoCompactService {
     // Reset WAT321 already cleaned up).
     if (!existsSync(SENTINEL_PATH)) {
       this.armedSentinel = null;
-      this.disposeArmedItem();
+      this.armedItem.dispose();
       void clearCheckboxSetting(SETTING_KEY);
       return;
     }
@@ -500,16 +448,12 @@ export class ExperimentalAutoCompactService {
   }
 }
 
-/** Internal command id for the armed status bar item's click
- * target. NOT listed in `package.json contributes.commands` so it
- * never appears in the palette - it exists only as a click target
- * on the armed widget. */
-export const CANCEL_COMMAND_ID = "wat321.cancelExperimentalAutoCompact";
-
 /** Register the click-to-disarm command for the armed status bar
  * item. Called once during top-level `activate()` with a resolver
  * that returns the currently-active service instance (or null when
- * the Claude provider group is not active). */
+ * the Claude provider group is not active). The command id itself
+ * lives in `armedStatusBarItem.ts` alongside the widget surface
+ * that wires it. */
 export function registerCancelExperimentalAutoCompactCommand(
   context: vscode.ExtensionContext,
   getActiveService: () => ExperimentalAutoCompactService | null

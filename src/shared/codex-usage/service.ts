@@ -8,12 +8,15 @@ import {
   CACHE_FRESHNESS_OK_MS,
   CLAIM_TTL_MS,
   ERROR_ABSORPTION_THRESHOLD,
+  KICKSTART_ACTIVITY_WINDOW_MS,
+  KICKSTART_ESCALATION_MS,
   POLL_INTERVAL_MS,
   RATE_LIMIT_BACKOFF_MS,
 } from "../polling/constants";
 import { CountdownTicker } from "../polling/countdownTicker";
 import { DiscoveryPoller } from "../polling/discovery";
 import {
+  extractServerMessage,
   isNetworkError,
   parseRetryAfterMs,
 } from "../polling/errorClassification";
@@ -28,9 +31,9 @@ import { computeStartupDelay } from "../polling/startupDelay";
 import type { CodexUsageResponse, ServiceState } from "./types";
 
 const AUTH_DIR = join(homedir(), ".codex");
-const STAMP_DIR = join(homedir(), ".wat321");
-const CACHE_FILE = join(STAMP_DIR, "codex-usage.cache.json");
-const CLAIM_FILE = join(STAMP_DIR, "codex-usage.claim");
+const WAT321_DIR = join(homedir(), ".wat321");
+const CACHE_FILE = join(WAT321_DIR, "codex-usage.cache.json");
+const CLAIM_FILE = join(WAT321_DIR, "codex-usage.claim");
 const AUTH_FILE = join(AUTH_DIR, "auth.json");
 const USAGE_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage";
 const NO_CACHE_RETRY_MS = 10_000;
@@ -55,18 +58,32 @@ export class CodexUsageSharedService {
 
   private listeners = new Set<Listener>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Pending one-shot timers (startup delay + no-cache retry). Cleared
+   * synchronously in `dispose()` so disposed services never fire stale
+   * callbacks. See claude-usage/service.ts for the full rationale. */
+  private pendingTimers = new Set<ReturnType<typeof setTimeout>>();
   private discoveryPoller: DiscoveryPoller | null = null;
   private abortController: AbortController | null = null;
   private inFlight = false;
   private disposed = false;
   private consecutiveRateLimits = 0;
-  /** Non-zero only after a user-initiated `wake()` out of the
-   * 15-minute fallback. While > 0, a 429 response decrements this
-   * counter and keeps polling at the normal cadence instead of
-   * parking back in rate-limited. Reset to 0 on any successful
-   * fetch or non-429 error. */
-  private postWakeStrikesRemaining = 0;
   private consecutiveErrors = 0;
+  /** Non-zero only after an activity-driven `wake()` out of the
+   * rate-limited park. While > 0, a 429 response decrements this
+   * counter and keeps polling at the normal cadence instead of
+   * immediately re-parking. When it hits 0, we return to rate-limited.
+   * Reset to 0 on any successful fetch or non-429 error. */
+  private postWakeStrikesRemaining = 0;
+  /** Kickstart escalation counter - mirror of the Claude service.
+   * Indexes into `KICKSTART_ESCALATION_MS` to pick the minimum
+   * park time before the next kickstart is eligible. Bumps each
+   * time a kickstart round fails; resets to 0 on any successful
+   * fetch. */
+  private consecutiveFailedKickstarts = 0;
+  /** Optional callback returning the most recent active-rollout mtime
+   * observed by the Codex session token service. Used to gate the
+   * activity-driven kickstart out of `rate-limited`. */
+  private getActivityMs: (() => number | null) | null = null;
 
   private coordinator = new Coordinator<ServiceState>(
     CACHE_FILE,
@@ -110,19 +127,48 @@ export class CodexUsageSharedService {
     for (const listener of this.listeners) listener(this.state);
   }
 
-  /** Click-to-wake from the 15-minute fallback rate-limited state.
-   * Only valid when currently parked in `rate-limited` with
-   * `source === "fallback"`. See claude-usage/service.ts for full
-   * rationale. */
-  wake(): void {
+  /** Inject an activity callback that returns the most recent
+   * active-rollout mtime from the Codex session token service. Wired
+   * in `bootstrap.ts` after both services are constructed. */
+  setActivityProbe(probe: () => number | null): void {
+    this.getActivityMs = probe;
+  }
+
+  /** Manual user-driven recovery lever - mirror of the Claude
+   * service. Called from the Reset WAT321 command to clear the
+   * kickstart escalation ladder without forcing an immediate fetch.
+   * See claude-usage/service.ts for full rationale. */
+  resetKickstartEscalation(): void {
+    if (this.disposed) return;
+    this.consecutiveFailedKickstarts = 0;
+    if (this.state.status === "rate-limited") {
+      this.setPollInterval(POLL_INTERVAL_MS);
+    }
+  }
+
+  /** Activity-driven wake out of the rate-limited park. See the
+   * Claude usage service for full rationale - mirror semantics. */
+  private wake(): void {
     if (this.disposed) return;
     if (this.state.status !== "rate-limited") return;
-    if (this.state.source !== "fallback") return;
     this.consecutiveRateLimits = 0;
     this.postWakeStrikesRemaining = 3;
     this.countdown.stop();
     this.setState({ status: "loading" });
     this.setPollInterval(POLL_INTERVAL_MS);
+  }
+
+  private shouldKickstart(now: number): boolean {
+    if (this.state.status !== "rate-limited") return false;
+    const step = Math.min(
+      this.consecutiveFailedKickstarts,
+      KICKSTART_ESCALATION_MS.length - 1
+    );
+    const minPark = KICKSTART_ESCALATION_MS[step];
+    if (now - this.state.rateLimitedAt < minPark) return false;
+    const activityMs = this.getActivityMs?.() ?? null;
+    if (activityMs === null) return false;
+    return now - activityMs <= KICKSTART_ACTIVITY_WINDOW_MS;
   }
 
   dispose(): void {
@@ -131,6 +177,8 @@ export class CodexUsageSharedService {
       clearInterval(this.timer);
       this.timer = null;
     }
+    for (const handle of this.pendingTimers) clearTimeout(handle);
+    this.pendingTimers.clear();
     this.discoveryPoller?.dispose();
     this.discoveryPoller = null;
     this.countdown.stop();
@@ -150,11 +198,13 @@ export class CodexUsageSharedService {
   private startPolling(): void {
     this.discoveryPoller?.stop();
     const delay = computeStartupDelay(this.coordinator);
-    setTimeout(() => {
+    const handle = setTimeout(() => {
+      this.pendingTimers.delete(handle);
       if (this.disposed) return;
       this.refresh();
       this.timer = setInterval(() => this.refresh(), POLL_INTERVAL_MS);
     }, delay);
+    this.pendingTimers.add(handle);
   }
 
   private setState(state: ServiceState): void {
@@ -186,6 +236,11 @@ export class CodexUsageSharedService {
       return;
     }
 
+    // Activity-driven kickstart - see claude-usage/service.ts.
+    if (this.shouldKickstart(Date.now())) {
+      this.wake();
+    }
+
     const cache = this.coordinator.readCache();
     if (cache && this.coordinator.isFresh(cache)) {
       this.setState(cache.state);
@@ -202,10 +257,12 @@ export class CodexUsageSharedService {
       if (cache) {
         this.setState(cache.state);
       } else {
-        setTimeout(() => {
+        const handle = setTimeout(() => {
+          this.pendingTimers.delete(handle);
           if (this.disposed) return;
           this.refresh();
         }, NO_CACHE_RETRY_MS);
+        this.pendingTimers.add(handle);
       }
       return;
     }
@@ -246,6 +303,7 @@ export class CodexUsageSharedService {
       }
       this.consecutiveRateLimits = 0;
       this.consecutiveErrors = 0;
+      this.consecutiveFailedKickstarts = 0;
     } catch (error: unknown) {
       this.handleFetchError(error);
     } finally {
@@ -262,9 +320,6 @@ export class CodexUsageSharedService {
       this.consecutiveRateLimits++;
       this.consecutiveErrors = 0;
 
-      // Post-wake probation: user clicked to exit the 15-min fallback,
-      // so the next few 429s are absorbed rather than triggering an
-      // immediate re-park. Keep polling at the normal cadence.
       if (this.postWakeStrikesRemaining > 0) {
         this.postWakeStrikesRemaining--;
         if (this.postWakeStrikesRemaining > 0) {
@@ -272,17 +327,18 @@ export class CodexUsageSharedService {
           this.setState({ status: "loading" });
           return;
         }
-        // Final strike exhausted - fall through to normal park logic.
+        // Kickstart round failed - escalate. See claude-usage.
+        this.consecutiveFailedKickstarts = Math.min(
+          this.consecutiveFailedKickstarts + 1,
+          KICKSTART_ESCALATION_MS.length - 1
+        );
       }
 
-      const retryAfterMs =
+      const rawRetryAfterMs =
         error instanceof HttpError && error.retryAfterMs
           ? error.retryAfterMs
           : RATE_LIMIT_BACKOFF_MS;
-      const source: "fallback" | "server" =
-        error instanceof HttpError && error.retryAfterMs
-          ? "server"
-          : "fallback";
+      const retryAfterMs = Math.min(rawRetryAfterMs, RATE_LIMIT_BACKOFF_MS);
       if (this.consecutiveRateLimits === 1) {
         this.setPollInterval(retryAfterMs);
       }
@@ -290,7 +346,7 @@ export class CodexUsageSharedService {
         status: "rate-limited",
         retryAfterMs,
         rateLimitedAt: Date.now(),
-        source,
+        serverMessage: extractServerMessage(error),
       };
       this.setState(newState);
       this.coordinator.writeCache(newState);

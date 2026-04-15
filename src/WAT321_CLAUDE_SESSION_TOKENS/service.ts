@@ -63,6 +63,17 @@ export class ClaudeSessionTokenService {
     return this.lastFilePath || null;
   }
 
+  /** Most recent active-transcript mtime in ms, or null if no
+   * session has been resolved. Consumed by the Claude usage service
+   * as the activity signal that gates the kickstart out of the
+   * rate-limited park - if this returns a fresh value, we know
+   * Claude is serving the user right now and any rate-limit wait
+   * we are sitting on is stale. */
+  getLastActivityMs(): number | null {
+    if (this.state.status !== "ok") return null;
+    return this.state.session.lastActiveAt;
+  }
+
   rebroadcast(): void {
     this.cachedAutoCompactPct = null;
     this.lastFileSize = 0;

@@ -28,8 +28,8 @@ export class CodexUsage5hrWidget implements StatusBarWidget {
   update(state: ServiceState): void {
     const handled = renderUsageNonOkState(this.item, state, {
       providerName: "Codex",
+      providerKey: "codex",
       loadingText: "Codex (5 hour) $(loading~spin)",
-      wakeCommand: "wat321.wakeCodexUsage",
     });
     if (handled) return;
 

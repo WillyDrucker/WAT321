@@ -8,12 +8,15 @@ import {
   CACHE_FRESHNESS_OK_MS,
   CLAIM_TTL_MS,
   ERROR_ABSORPTION_THRESHOLD,
+  KICKSTART_ACTIVITY_WINDOW_MS,
+  KICKSTART_ESCALATION_MS,
   POLL_INTERVAL_MS,
   RATE_LIMIT_BACKOFF_MS,
 } from "../polling/constants";
 import { CountdownTicker } from "../polling/countdownTicker";
 import { DiscoveryPoller } from "../polling/discovery";
 import {
+  extractServerMessage,
   isNetworkError,
   parseRetryAfterMs,
 } from "../polling/errorClassification";
@@ -28,9 +31,9 @@ import { computeStartupDelay } from "../polling/startupDelay";
 import type { ServiceState, UsageResponse } from "./types";
 
 const AUTH_DIR = join(homedir(), ".claude");
-const STAMP_DIR = join(homedir(), ".wat321");
-const CACHE_FILE = join(STAMP_DIR, "claude-usage.cache.json");
-const CLAIM_FILE = join(STAMP_DIR, "claude-usage.claim");
+const WAT321_DIR = join(homedir(), ".wat321");
+const CACHE_FILE = join(WAT321_DIR, "claude-usage.cache.json");
+const CLAIM_FILE = join(WAT321_DIR, "claude-usage.claim");
 const CREDENTIALS_FILE = join(AUTH_DIR, ".credentials.json");
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const NO_CACHE_RETRY_MS = 10_000;
@@ -49,19 +52,37 @@ export class ClaudeUsageSharedService {
 
   private listeners = new Set<Listener>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Pending one-shot timers (startup delay + no-cache retry). Both
+   * can legitimately be in flight when `dispose()` runs - e.g. the
+   * provider is disabled before the startup delay fires, or between
+   * a losing claim race and the 10-second retry. Tracking them as a
+   * set lets `dispose()` cancel every pending tick synchronously so
+   * disposed services never fire stale callbacks. */
+  private pendingTimers = new Set<ReturnType<typeof setTimeout>>();
   private discoveryPoller: DiscoveryPoller | null = null;
   private abortController: AbortController | null = null;
   private inFlight = false;
   private disposed = false;
   private consecutiveRateLimits = 0;
   private consecutiveErrors = 0;
-  /** Non-zero only after a user-initiated `wake()` out of the
-   * 15-minute fallback. While > 0, a 429 response decrements this
+  /** Non-zero only after an activity-driven `wake()` out of the
+   * rate-limited park. While > 0, a 429 response decrements this
    * counter and keeps polling at the normal cadence instead of
-   * parking back in rate-limited. When it hits 0, we return to the
-   * fallback state. Reset to 0 on any successful fetch or any
-   * non-429 error path. */
+   * immediately re-parking. When it hits 0, we return to rate-limited.
+   * Reset to 0 on any successful fetch or non-429 error. */
   private postWakeStrikesRemaining = 0;
+  /** Count of kickstart rounds that failed (all post-wake strikes
+   * exhausted without a successful fetch) against the current
+   * outage. Indexes into `KICKSTART_ESCALATION_MS` to pick the
+   * minimum park time before the next kickstart is eligible, so
+   * progressive friction is applied when the server keeps 429'ing
+   * us. Resets to 0 on any successful fetch. */
+  private consecutiveFailedKickstarts = 0;
+  /** Optional callback returning the most recent active-transcript
+   * mtime observed by the Claude session token service. Used to gate
+   * the activity-driven kickstart out of `rate-limited`. Returns
+   * `null` when no live session has been resolved yet. */
+  private getActivityMs: (() => number | null) | null = null;
 
   private coordinator = new Coordinator<ServiceState>(
     CACHE_FILE,
@@ -107,26 +128,66 @@ export class ClaudeUsageSharedService {
     for (const listener of this.listeners) listener(this.state);
   }
 
-  /** Click-to-wake from the 15-minute fallback rate-limited state.
-   * Only valid when currently parked in `rate-limited` with
-   * `source === "fallback"` - we never override a server-directed
-   * wait (`source === "server"`). Does NOT force an immediate
-   * fetch: transitions state to `loading`, resets the poll interval
-   * to the normal `POLL_INTERVAL_MS` cadence, and lets the next
-   * poll fire on that schedule. Arms a 3-strike post-wake counter
-   * so the next three 429s stay on normal cadence instead of
-   * immediately snapping back to the 15-minute fallback. A
-   * successful fetch during the wake window clears the counter
-   * and restores normal operation. */
-  wake(): void {
+  /** Inject an activity callback that returns the most recent active-
+   * transcript mtime from the Claude session token service. Wired in
+   * `bootstrap.ts` after both services are constructed. Safe to call
+   * before or after `start()`. */
+  setActivityProbe(probe: () => number | null): void {
+    this.getActivityMs = probe;
+  }
+
+  /** Manual user-driven recovery lever. Called from the Reset WAT321
+   * command to clear the kickstart escalation ladder so a user
+   * trapped in a sustained outage can get back to the responsive
+   * fresh-park cadence without waiting for the natural success path
+   * to reset the counter. Gating is preserved - this does NOT force
+   * an immediate fetch and does NOT skip `shouldKickstart`. It only
+   * zeroes the counter and, if we are currently parked on a long
+   * interval from a 429, shrinks the interval back to the normal
+   * poll cadence so the next gate check fires within ~2 min instead
+   * of up to 15 min away. If there is no active Claude session when
+   * that check runs, nothing will fire and the widget stays parked. */
+  resetKickstartEscalation(): void {
+    if (this.disposed) return;
+    this.consecutiveFailedKickstarts = 0;
+    if (this.state.status === "rate-limited") {
+      this.setPollInterval(POLL_INTERVAL_MS);
+    }
+  }
+
+  /** Activity-driven wake out of the rate-limited park. Transitions
+   * state to `loading`, resets the poll interval to the normal cadence,
+   * and arms a 3-strike post-wake counter so the next few 429s stay
+   * on the normal cadence instead of immediately snapping back to the
+   * rate-limited park. A successful fetch clears the counter. */
+  private wake(): void {
     if (this.disposed) return;
     if (this.state.status !== "rate-limited") return;
-    if (this.state.source !== "fallback") return;
     this.consecutiveRateLimits = 0;
     this.postWakeStrikesRemaining = 3;
     this.countdown.stop();
     this.setState({ status: "loading" });
     this.setPollInterval(POLL_INTERVAL_MS);
+  }
+
+  /** Returns true if we are parked in `rate-limited`, the park has
+   * lasted at least the current escalation step's minimum, and the
+   * active Claude transcript was written within the activity window.
+   * Minimum park time escalates via `KICKSTART_ESCALATION_MS` based
+   * on `consecutiveFailedKickstarts` so a sustained outage
+   * progressively relaxes kickstart cadence instead of hammering
+   * the server once every ~21 minutes forever. */
+  private shouldKickstart(now: number): boolean {
+    if (this.state.status !== "rate-limited") return false;
+    const step = Math.min(
+      this.consecutiveFailedKickstarts,
+      KICKSTART_ESCALATION_MS.length - 1
+    );
+    const minPark = KICKSTART_ESCALATION_MS[step];
+    if (now - this.state.rateLimitedAt < minPark) return false;
+    const activityMs = this.getActivityMs?.() ?? null;
+    if (activityMs === null) return false;
+    return now - activityMs <= KICKSTART_ACTIVITY_WINDOW_MS;
   }
 
   dispose(): void {
@@ -135,6 +196,8 @@ export class ClaudeUsageSharedService {
       clearInterval(this.timer);
       this.timer = null;
     }
+    for (const handle of this.pendingTimers) clearTimeout(handle);
+    this.pendingTimers.clear();
     this.discoveryPoller?.dispose();
     this.discoveryPoller = null;
     this.countdown.stop();
@@ -154,11 +217,13 @@ export class ClaudeUsageSharedService {
   private startPolling(): void {
     this.discoveryPoller?.stop();
     const delay = computeStartupDelay(this.coordinator);
-    setTimeout(() => {
+    const handle = setTimeout(() => {
+      this.pendingTimers.delete(handle);
       if (this.disposed) return;
       this.refresh();
       this.timer = setInterval(() => this.refresh(), POLL_INTERVAL_MS);
     }, delay);
+    this.pendingTimers.add(handle);
   }
 
   private setState(state: ServiceState): void {
@@ -190,6 +255,15 @@ export class ClaudeUsageSharedService {
       return;
     }
 
+    // Activity-driven kickstart: if we are parked in rate-limited and
+    // the Claude session token service is reporting fresh transcript
+    // activity, fall through to a real fetch. Live activity is
+    // ground-truth evidence the API is serving the user right now,
+    // so any lockout we are sitting on is stale by definition.
+    if (this.shouldKickstart(Date.now())) {
+      this.wake();
+    }
+
     // Cache-first: read shared cache. If fresh, use it and skip API.
     const cache = this.coordinator.readCache();
     if (cache && this.coordinator.isFresh(cache)) {
@@ -211,10 +285,12 @@ export class ClaudeUsageSharedService {
       } else {
         // No cache yet - schedule a quick retry to pick up the other
         // instance's result once it writes (claim TTL is 30s max).
-        setTimeout(() => {
+        const handle = setTimeout(() => {
+          this.pendingTimers.delete(handle);
           if (this.disposed) return;
           this.refresh();
         }, NO_CACHE_RETRY_MS);
+        this.pendingTimers.add(handle);
       }
       return;
     }
@@ -256,6 +332,10 @@ export class ClaudeUsageSharedService {
       }
       this.consecutiveRateLimits = 0;
       this.consecutiveErrors = 0;
+      // Successful fetch clears the kickstart escalation ladder -
+      // the outage is over, next park starts from the responsive
+      // fresh-park step again.
+      this.consecutiveFailedKickstarts = 0;
     } catch (error: unknown) {
       this.handleFetchError(error);
     } finally {
@@ -268,24 +348,17 @@ export class ClaudeUsageSharedService {
     const message = error instanceof Error ? error.message : String(error);
     const statusCode = error instanceof HttpError ? error.statusCode : null;
 
-    // Rate limits always surface immediately and get written to shared cache.
-    // Honor the server's Retry-After header when present; otherwise fall
-    // back to the hardcoded 15-minute window. No consecutive-429 cap and
-    // no escape-hatch command - WAT321 stays passive and lets Anthropic's
-    // server-sent Retry-After drive the cadence until the lockout clears
-    // naturally. The one exception is the post-wake window: if the user
-    // clicked the 15-minute fallback widget to wake it, we allow up to
-    // 3 consecutive 429s at the normal poll cadence before returning to
-    // the rate-limited state. This lets a user correct our conservative
-    // guess without immediately snapping back to sleep on the first
-    // transient 429.
+    // Rate limits surface immediately and get written to shared cache.
+    // Server `Retry-After` is honored but capped at our own fallback so
+    // an absurd value from a flailing edge during an outage cannot strand
+    // the widget for longer than we would have waited anyway. The
+    // post-wake probation absorbs the next few 429s after an
+    // activity-driven kickstart so a single transient 429 immediately
+    // after a kickstart does not snap us back to sleep.
     if (statusCode === 429) {
       this.consecutiveRateLimits++;
       this.consecutiveErrors = 0;
 
-      // Post-wake probation: user clicked to exit the 15-min fallback,
-      // so the next few 429s are absorbed rather than triggering an
-      // immediate re-park. Keep polling at the normal cadence.
       if (this.postWakeStrikesRemaining > 0) {
         this.postWakeStrikesRemaining--;
         if (this.postWakeStrikesRemaining > 0) {
@@ -293,19 +366,21 @@ export class ClaudeUsageSharedService {
           this.setState({ status: "loading" });
           return;
         }
-        // Final strike exhausted - fall through to normal park
-        // logic. The state below will show the 15-min fallback again
-        // and the widget re-enables click-to-wake.
+        // Final strike exhausted - the kickstart round failed.
+        // Bump the escalation counter (clamped to the last step)
+        // so the next eligible kickstart is pushed progressively
+        // further out. Resets to 0 on any successful fetch.
+        this.consecutiveFailedKickstarts = Math.min(
+          this.consecutiveFailedKickstarts + 1,
+          KICKSTART_ESCALATION_MS.length - 1
+        );
       }
 
-      const retryAfterMs =
+      const rawRetryAfterMs =
         error instanceof HttpError && error.retryAfterMs
           ? error.retryAfterMs
           : RATE_LIMIT_BACKOFF_MS;
-      const source: "fallback" | "server" =
-        error instanceof HttpError && error.retryAfterMs
-          ? "server"
-          : "fallback";
+      const retryAfterMs = Math.min(rawRetryAfterMs, RATE_LIMIT_BACKOFF_MS);
       if (this.consecutiveRateLimits === 1) {
         this.setPollInterval(retryAfterMs);
       }
@@ -313,7 +388,7 @@ export class ClaudeUsageSharedService {
         status: "rate-limited",
         retryAfterMs,
         rateLimitedAt: Date.now(),
-        source,
+        serverMessage: extractServerMessage(error),
       };
       this.setState(newState);
       this.coordinator.writeCache(newState);

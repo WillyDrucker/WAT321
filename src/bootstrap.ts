@@ -23,7 +23,8 @@ import { ExperimentalAutoCompactService } from "./WAT321_EXPERIMENTAL_AUTOCOMPAC
 interface ProviderService {
   dispose(): void;
   rebroadcast(): void;
-  wake(): void;
+  setActivityProbe(probe: () => number | null): void;
+  resetKickstartEscalation(): void;
   subscribe(listener: (state: { status: string }) => void): void;
   unsubscribe(listener: (state: { status: string }) => void): void;
 }
@@ -91,6 +92,13 @@ export function activateClaude(groups: ActiveGroups): ClaudeProviderGroup {
   const usageService = new ClaudeUsageSharedService();
   const tokenService = new ClaudeSessionTokenService(workspacePath());
 
+  // Activity-driven kickstart: the usage service polls this on every
+  // refresh, and a fresh transcript mtime trips a wake out of the
+  // rate-limited park. Live activity is ground-truth evidence Anthropic
+  // is serving the user right now, so any lockout we are sitting on is
+  // stale by definition.
+  usageService.setActivityProbe(() => tokenService.getLastActivityMs());
+
   const disposables: vscode.Disposable[] = [
     ...activateUsageWidget(usageService, new ClaudeUsage5hrWidget()),
     ...activateUsageWidget(usageService, new ClaudeUsageWeeklyWidget()),
@@ -113,6 +121,8 @@ export function activateClaude(groups: ActiveGroups): ClaudeProviderGroup {
 export function activateCodex(groups: ActiveGroups): CodexProviderGroup {
   const codexService = new CodexUsageSharedService();
   const tokenService = new CodexSessionTokenService(workspacePath());
+
+  codexService.setActivityProbe(() => tokenService.getLastActivityMs());
 
   const disposables: vscode.Disposable[] = [
     ...activateUsageWidget(codexService, new CodexUsage5hrWidget()),
