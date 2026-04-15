@@ -1,12 +1,13 @@
 import * as vscode from "vscode";
-import { makeBar } from "../shared/claude-usage/formatters";
 import { buildTooltip } from "../shared/claude-usage/tooltipBuilder";
 import type {
   ServiceState,
   StatusBarWidget,
 } from "../shared/claude-usage/types";
 import { getDisplayMode } from "../shared/displayMode";
+import { getClaudeTextColor, renderClaudeBar } from "../shared/ui/heatmap";
 import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
+import { renderWeeklyUsageNonOkState } from "../shared/ui/usageNonOkRenderer";
 
 export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -24,42 +25,30 @@ export class ClaudeUsageWeeklyWidget implements StatusBarWidget {
   }
 
   update(state: ServiceState): void {
-    switch (state.status) {
-      case "loading":
-        this.item.text = "Claude weekly $(loading~spin)";
-        this.item.tooltip = "Fetching Claude usage data...";
-        this.item.color = undefined;
-        this.item.show();
-        break;
+    const handled = renderWeeklyUsageNonOkState(this.item, state, {
+      loadingText: "Claude weekly $(loading~spin)",
+      loadingTooltip: "Fetching Claude usage data...",
+    });
+    if (handled) return;
 
-      case "not-connected":
-      case "no-auth":
-      case "token-expired":
-      case "rate-limited":
-      case "offline":
-      case "error":
-        this.item.hide();
-        break;
+    // ok branch
+    const pct = state.data.seven_day?.utilization ?? 0;
+    const mode = getDisplayMode();
 
-      case "ok": {
-        const pct = state.data.seven_day?.utilization ?? 0;
-        const mode = getDisplayMode();
-        if (mode === "minimal") {
-          this.item.text = `Claude weekly: ${pct}%`;
-        } else if (mode === "compact") {
-          this.item.text = `Claude weekly ${makeBar(pct, 5)} ${pct}%`;
-        } else {
-          this.item.text = `Claude weekly ${makeBar(pct)} ${pct}%`;
-        }
-        this.item.tooltip = buildTooltip(state.data);
-        this.item.color =
-          pct >= 90
-            ? new vscode.ThemeColor("statusBarItem.warningForeground")
-            : undefined;
-        this.item.show();
-        break;
-      }
+    // `renderClaudeBar` is the single source of truth for Claude
+    // bar rendering - heatmap on/off dispatch happens inside the
+    // helper so the widget and tooltip both stay in sync.
+    if (mode === "minimal") {
+      this.item.text = `Claude weekly [${pct}%]`;
+    } else if (mode === "compact") {
+      this.item.text = `Claude weekly ${renderClaudeBar(pct, 5)} ${pct}%`;
+    } else {
+      this.item.text = `Claude weekly ${renderClaudeBar(pct, 10)} ${pct}%`;
     }
+    this.item.tooltip = buildTooltip(state.data);
+    this.item.color = getClaudeTextColor(mode);
+    this.item.backgroundColor = undefined;
+    this.item.show();
   }
 
   dispose(): void {

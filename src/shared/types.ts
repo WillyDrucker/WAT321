@@ -2,9 +2,9 @@ import * as vscode from "vscode";
 
 /**
  * Generic service state machine for anything that polls an external source
- * and can end up in loading / not-connected / authed / rate-limited / error
- * states. The success payload is provider-specific (TData); everything else
- * is shared.
+ * and can end up in loading / not-connected / no-auth / token-expired /
+ * rate-limited / offline / error / ok states. The success payload is
+ * provider-specific (TData); everything else is shared.
  */
 export type ServiceState<TData> =
   | { status: "loading" }

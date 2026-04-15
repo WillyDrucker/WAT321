@@ -9,6 +9,7 @@ export interface LastUsage {
   inputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
+  outputTokens: number;
   modelId: string;
 }
 
@@ -48,6 +49,8 @@ export function parseLastUsage(tail: string): LastUsage | null {
         typeof usage.cache_read_input_tokens === "number"
           ? usage.cache_read_input_tokens
           : 0,
+      outputTokens:
+        typeof usage.output_tokens === "number" ? usage.output_tokens : 0,
       modelId: (msg.model as string) || (entry.model as string) || "",
     };
   }
@@ -66,11 +69,17 @@ export function parseLastUsage(tail: string): LastUsage | null {
  * current workspace's basename.
  */
 export function parseCwd(path: string): string {
-  const head = readHead(path);
+  // Read a larger head than the default 8KB. Claude Code transcripts
+  // often start with a few small control events (permission-mode,
+  // model-switch, etc.) that do not carry `cwd`, and the first user
+  // turn that does carry `cwd` can land past the 8KB mark on files
+  // with long early messages. 32KB is enough to always reach the
+  // first user turn without being expensive.
+  const head = readHead(path, 32_768);
   if (!head) return "";
 
   const lines = head.trimEnd().split("\n");
-  for (let i = 0; i < lines.length && i < 20; i++) {
+  for (let i = 0; i < lines.length && i < 40; i++) {
     const line = lines[i];
     if (!line) continue;
 

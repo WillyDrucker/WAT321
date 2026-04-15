@@ -103,7 +103,15 @@ function handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
   }
 
   // Re-render all widgets immediately when display settings change.
-  if (e.affectsConfiguration("wat321.displayMode")) {
+  // `displayMode` changes the bar width and the minimal-vs-full
+  // layout, and `enableHeatmap` changes the bar coloring and the
+  // minimal-view brand text color for both providers. Either needs
+  // an immediate refresh so the user sees the change without
+  // waiting for the next natural service poll.
+  if (
+    e.affectsConfiguration("wat321.displayMode") ||
+    e.affectsConfiguration("wat321.enableHeatmap")
+  ) {
     rebroadcastAll(groups);
   }
 }

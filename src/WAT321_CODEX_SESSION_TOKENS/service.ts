@@ -227,7 +227,7 @@ export class CodexSessionTokenService {
       sessionId,
       this.cachedCwd ? basename(this.cachedCwd) : "Codex",
       this.cachedSessionTitle,
-      usage.inputTokens,
+      usage.tokens,
       usage.contextWindowSize,
       this.cachedAutoCompactTokens,
       rolloutMtime

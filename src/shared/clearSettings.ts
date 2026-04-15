@@ -205,14 +205,15 @@ async function performClear(): Promise<void> {
   // or via `.vscode/settings.json` would otherwise see Reset
   // appear to work (setting disappears from the Global view) but
   // the workspace copy silently re-activates the tool on the next
-  // extension start. All six keys reset in parallel since they
-  // target independent config paths.
+  // extension start. All keys reset in parallel since they target
+  // independent config paths.
   await Promise.all([
     updateSettingAllScopes("enableClaude", undefined),
     updateSettingAllScopes("enableCodex", undefined),
     updateSettingAllScopes("experimental.forceClaudeAutoCompact", undefined),
     updateSettingAllScopes("displayMode", undefined),
     updateSettingAllScopes("statusBarPriority", undefined),
+    updateSettingAllScopes("enableHeatmap", undefined),
     // Restore any WAT321 status bar items the user hid via right-click.
     // Narrowly scoped to our six known widget ids - see STATUS_BAR_ITEM_IDS.
     resetStatusBarItemVisibility(),

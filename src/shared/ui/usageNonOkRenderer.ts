@@ -107,3 +107,41 @@ export function renderUsageNonOkState<TData>(
       return false;
   }
 }
+
+/** Shared renderer for the non-OK states of the Claude and Codex
+ * weekly usage widgets. Weekly intentionally hides on every error
+ * state (not-connected / no-auth / token-expired / rate-limited /
+ * offline / error) because the matching 5h widget already surfaces
+ * those conditions - duplicating the pill on both rows would be
+ * visual clutter. Only the `loading` branch is visible, so the body
+ * is much shorter than `renderUsageNonOkState`.
+ *
+ * Returns `true` if the state was handled. Returns `false` for the
+ * `ok` branch so the caller falls through to its own provider-
+ * specific success rendering. */
+export function renderWeeklyUsageNonOkState<TData>(
+  item: vscode.StatusBarItem,
+  state: ServiceState<TData>,
+  opts: { loadingText: string; loadingTooltip: string }
+): state is Exclude<ServiceState<TData>, { status: "ok" }> {
+  switch (state.status) {
+    case "loading":
+      item.text = opts.loadingText;
+      item.tooltip = opts.loadingTooltip;
+      item.color = undefined;
+      item.show();
+      return true;
+
+    case "not-connected":
+    case "no-auth":
+    case "token-expired":
+    case "rate-limited":
+    case "offline":
+    case "error":
+      item.hide();
+      return true;
+
+    case "ok":
+      return false;
+  }
+}

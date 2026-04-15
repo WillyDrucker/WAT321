@@ -138,7 +138,7 @@ export function formatArmBlockerMessage(
       return `Claude Auto-Compact is in a short cooldown period. Wait ${remaining} second${remaining !== 1 ? "s" : ""} before arming again.`;
     }
     case "settings-stuck":
-      return "Your Claude auto-compact override is already set to 1 from a prior session. Run WAT321: Reset All Settings to unstick it.";
+      return "Your Claude auto-compact override is already set to 1 from a prior session. Run WAT321: Reset WAT321 to unstick it.";
     case "io-error":
       return "WAT321 lost access to ~/.claude/settings.json. Try again in a moment.";
   }

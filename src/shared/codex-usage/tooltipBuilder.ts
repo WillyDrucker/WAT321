@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
 import type { CodexUsageResponse } from "./types";
-import { makeBar, formatPlanLabel, getRemainingPct } from "./formatters";
+import { formatPlanLabel, getRemainingPct } from "./formatters";
 import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
 import { getDisplayMode } from "../displayMode";
+import { renderCodexBar } from "../ui/heatmap";
 
 export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   const sPct = usage.rate_limit?.primary_window?.used_percent ?? 0;
@@ -27,16 +28,22 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   }
 
   if (mode === "minimal") {
+    // Minimal tooltip shows emoji-style progress bars to match the
+    // full-mode widget rendering. `renderCodexBar` is the shared
+    // entry point used by both the status bar widgets and this
+    // tooltip, so the band-based heatmap rules (including the
+    // minimum-one-red-cell guarantee and the full-red override at
+    // 0% remaining) apply uniformly.
     const md = new vscode.MarkdownString();
     md.isTrusted = false;
     md.supportHtml = false;
     md.appendMarkdown(`**Codex usage limits** ${planLabel}\n\n`);
     md.appendMarkdown(`**5 hour usage limit** ${sRemaining}% remaining  \n`);
-    md.appendMarkdown(`${makeBar(sPct)}  \n`);
-    md.appendMarkdown(`⧗ ${sReset}\n\n`);
+    md.appendMarkdown(`${renderCodexBar(sPct, 10)}  \n`);
+    md.appendMarkdown(`\u{29D7} ${sReset}\n\n`);
     md.appendMarkdown(`**Weekly usage limit** ${wRemaining}% remaining  \n`);
-    md.appendMarkdown(`${makeBar(wPct)}  \n`);
-    md.appendMarkdown(`⧗ ${wReset}\n\n`);
+    md.appendMarkdown(`${renderCodexBar(wPct, 10)}  \n`);
+    md.appendMarkdown(`\u{29D7} ${wReset}\n\n`);
     if (creditsText) md.appendMarkdown(`${creditsText}\n\n`);
     md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
     return md;
@@ -53,7 +60,7 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     : "";
 
   const md = new vscode.MarkdownString();
-  md.isTrusted = true;
+  md.isTrusted = false;
   md.supportHtml = true;
   md.appendMarkdown(`
 <div style="min-width:280px;">
@@ -70,7 +77,7 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
 <div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
 <div style="width:${Math.min(sRemaining, 100)}%;height:100%;border-radius:4px;background:${sBarColor};"></div>
 </div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ ${sReset}</div>
+<div style="font-size:10px;opacity:0.6;margin-top:3px;">\u{29D7} ${sReset}</div>
 </div>
 
 <hr style="border:none;border-top:1px solid rgba(255,255,255,0.12);margin:8px 0;">
@@ -83,7 +90,7 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
 <div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
 <div style="width:${Math.min(wRemaining, 100)}%;height:100%;border-radius:4px;background:${wBarColor};"></div>
 </div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">⧗ ${wReset}</div>
+<div style="font-size:10px;opacity:0.6;margin-top:3px;">\u{29D7} ${wReset}</div>
 </div>
 
 ${creditsLine}

@@ -4,9 +4,9 @@ import { CodexSessionTokenService } from "./service";
 import { formatPct, formatTokens } from "../shared/ui/tokenFormatters";
 import { buildSessionTokenTooltip } from "../shared/ui/sessionTokenTooltip";
 import { getDisplayMode } from "../shared/displayMode";
+import { getSessionTokenColor } from "../shared/ui/heatmap";
+import { prefixForMode } from "../shared/ui/sessionTokenPrefix";
 import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
-
-const THOUGHT = "\u{1F4AD}";
 
 export class CodexSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -18,7 +18,7 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
       getWidgetPriority(WIDGET_SLOT.codexSessionTokens)
     );
     this.item.name = "WAT321: Codex Session Tokens";
-    this.item.text = `${THOUGHT} Codex -`;
+    this.item.text = `${prefixForMode()} Codex -`;
     this.item.tooltip = "No active Codex session";
     // First state delivered by subscribe() decides visibility.
   }
@@ -32,7 +32,7 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 
       case "no-session":
       case "waiting":
-        this.item.text = `${THOUGHT} Codex -`;
+        this.item.text = `${prefixForMode()} Codex -`;
         this.item.tooltip = "No active Codex session";
         this.item.color = undefined;
         this.item.show();
@@ -40,23 +40,37 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 
       case "ok": {
         const { session } = state;
-        const usedPct = session.autoCompactTokens > 0
-          ? Math.min(100, Math.round((session.contextUsed / session.autoCompactTokens) * 100))
+        // Match Codex native's `percent_of_context_window_remaining`
+        // from codex-rs/protocol/src/protocol.rs which subtracts a
+        // 12,000-token baseline (`prompts, tools and space to call
+        // compact`) from both numerator and denominator. Normalizes
+        // the percentage so a fresh session starts near 0% used
+        // rather than ~5% from the baseline overhead, and matches
+        // the number shown in Codex's own hover byte-for-byte.
+        const BASELINE_TOKENS = 12_000;
+        const effectiveCeiling = session.autoCompactTokens - BASELINE_TOKENS;
+        const effectiveUsed = Math.max(0, session.contextUsed - BASELINE_TOKENS);
+        const usedPct = effectiveCeiling > 0
+          ? Math.min(100, Math.round((effectiveUsed / effectiveCeiling) * 100))
           : 0;
 
         const mode = getDisplayMode();
+        const prefix = prefixForMode();
         if (mode === "minimal" || mode === "compact") {
-          this.item.text = `${THOUGHT} Codex ${formatTokens(session.contextUsed)} ${formatPct(usedPct)}`;
+          this.item.text = `${prefix} Codex ${formatTokens(session.contextUsed)} ${formatPct(usedPct)}`;
         } else {
           this.item.text =
-            `${THOUGHT} Codex ${formatTokens(session.contextUsed)} / ` +
+            `${prefix} Codex ${formatTokens(session.contextUsed)} / ` +
             `${formatTokens(session.autoCompactTokens)} ${formatPct(usedPct)}`;
         }
 
-        this.item.color =
-          usedPct >= 90
-            ? new vscode.ThemeColor("statusBarItem.warningForeground")
-            : undefined;
+        // Codex ceiling is the effective context window (258k for
+        // gpt-5.x). Under the baseline-normalized formula above,
+        // actual compact (244,800 tokens) reads as ~94% on the
+        // display. 85 / 90 keeps the warn rungs close to the compact
+        // point - yellow lands ~11k before compact (2-4 turns of
+        // runway) while still leaving a visible white stage.
+        this.item.color = getSessionTokenColor(usedPct, 85, 90);
 
         this.item.tooltip = buildSessionTokenTooltip({
           provider: "Codex",

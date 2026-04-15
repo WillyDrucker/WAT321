@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -12,6 +12,7 @@
   "bugs": {
     "url": "https://github.com/WillyDrucker/WAT321/issues"
   },
+  "license": "MIT",
   "keywords": [
     "claude",
     "codex",
@@ -39,7 +40,7 @@
     "commands": [
       {
         "command": "wat321.clearAllSettings",
-        "title": "WAT321: Reset All Settings"
+        "title": "WAT321: Reset WAT321"
       }
     ],
     "configuration": [
@@ -51,14 +52,14 @@
             "type": "boolean",
             "default": true,
             "order": 1,
-            "markdownDescription": "Enable Claude Usage and Claude Session Token widgets. Widgets are hidden automatically if Claude CLI is not installed. Changes apply immediately."
+            "markdownDescription": "Enable Claude widgets (usage bars and session tokens). Hidden automatically if the Claude CLI is not installed."
           },
           "wat321.experimental.forceClaudeAutoCompact": {
             "type": "boolean",
             "default": false,
             "scope": "application",
             "order": 2,
-            "markdownDescription": "**Experimental.** Arms Claude's Auto-Compact for your next message prompt to Claude. Triggers Auto-Compact on next prompt. Disarms after 30 seconds of no activity. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside `~/.wat321/`. Your Claude settings are backed up automatically each time the tool is armed. A confirmation dialog will appear before arming. *Useful for long sessions when performance degrades.*"
+            "markdownDescription": "**Experimental.** Arms Claude's built-in Auto-Compact so it triggers on your next message prompt. Disarms after 30 seconds of no activity or can be cancelled. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside of `~/.wat321/`. Your Claude settings are backed up automatically. *Useful for long sessions when performance degrades.*"
           }
         }
       },
@@ -70,7 +71,7 @@
             "type": "boolean",
             "default": true,
             "order": 1,
-            "markdownDescription": "Enable Codex Usage and Codex Session Token widgets. Widgets are hidden automatically if Codex CLI is not installed. Changes apply immediately."
+            "markdownDescription": "Enable Codex widgets (usage bars and session tokens). Hidden automatically if the Codex CLI is not installed."
           }
         }
       },
@@ -89,12 +90,12 @@
             ],
             "enumDescriptions": [
               "Automatic - Full when only one provider is active, Compact when both are active",
-              "Full progress bars (10 blocks) with all details",
-              "Compact progress bars (5 blocks) for usage, text-only for session tokens",
-              "Text-only view, progress bars remain in tooltips on hover"
+              "Full progress bars (10 blocks)",
+              "Compact progress bars (5 blocks), slim session tokens",
+              "Text-only status bar, progress bars move to tooltips on hover"
             ],
             "order": 1,
-            "markdownDescription": "Status bar display density. Auto adjusts based on how many providers are active. Changes apply immediately."
+            "markdownDescription": "Status bar display density. Auto adjusts based on how many providers are active."
           },
           "wat321.statusBarPriority": {
             "type": "number",
@@ -102,12 +103,18 @@
             "order": 2,
             "markdownDescription": "Base priority for WAT321 status bar items. Higher values appear further left. Adjust if widgets overlap with other extensions. *Requires window reload.*"
           },
+          "wat321.enableHeatmap": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "Enable heatmap colors on the usage progress bar. The bars gradually shift through warning colors as you get closer to your limits so tight sessions stand out at a glance."
+          },
           "wat321.clearAllData": {
             "type": "boolean",
             "default": false,
             "scope": "application",
             "order": 99,
-            "markdownDescription": "**Reset WAT321** - Restore WAT321 to its default state and clear its saved local data. This resets all WAT321 settings and clears anything WAT321 has stored locally, so everything rebuilds cleanly on the next refresh. If any WAT321 tool appears unresponsive, this will reset every tool to a known-good state. A confirmation dialog will appear before anything is changed."
+            "markdownDescription": "**Reset WAT321** - Restore WAT321 to its defaults and clear everything it has stored locally. If any WAT321 tool appears unresponsive, this will reset all to a known-good state. A confirmation dialog will appear before resetting."
           }
         }
       }

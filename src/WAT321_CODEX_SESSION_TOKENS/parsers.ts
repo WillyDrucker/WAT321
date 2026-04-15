@@ -10,14 +10,19 @@ import { readHead } from "../shared/fs/fileReaders";
  */
 
 export interface LastTokenCount {
-  inputTokens: number;
+  /** Tokens currently in the context window for the last completed
+   * turn. Sourced from `last_token_usage.total_tokens` in the Codex
+   * rollout's `token_count` event, matching what Codex's own TUI
+   * displays via `TokenUsage::tokens_in_context_window` upstream. */
+  tokens: number;
   contextWindowSize: number;
 }
 
 const DEFAULT_CODEX_CONTEXT_WINDOW = 258_400;
 
 /** Scan the tail (up to the last 200 lines) for the most recent
- * `token_count` event. Returns `last_token_usage.input_tokens` and the
+ * `token_count` event. Returns `last_token_usage.total_tokens` (with
+ * a fallback to `input_tokens` for older rollout formats) and the
  * `model_context_window` reported on that event. */
 export function parseLastTokenCount(tail: string): LastTokenCount | null {
   const lines = tail.trimEnd().split("\n");
@@ -39,10 +44,27 @@ export function parseLastTokenCount(tail: string): LastTokenCount | null {
     if (!info) continue;
 
     const lastUsage = info.last_token_usage as Record<string, unknown> | undefined;
-    if (!lastUsage || typeof lastUsage.input_tokens !== "number") continue;
+    if (!lastUsage) continue;
+
+    // Codex's own TUI displays `total_tokens` (not `input_tokens`)
+    // via `TokenUsage::tokens_in_context_window()` in
+    // `codex-rs/protocol/src/protocol.rs`. `total_tokens` includes
+    // input + output for the last turn, so it reflects the full
+    // context-window footprint of that turn. Using `input_tokens`
+    // alone undercounts by ~500-1000 tokens per turn (the output
+    // component) and the gap compounds over a long session. Fall
+    // back to `input_tokens` only when `total_tokens` is missing,
+    // which should not happen on any current Codex version.
+    const tokens =
+      typeof lastUsage.total_tokens === "number"
+        ? lastUsage.total_tokens
+        : typeof lastUsage.input_tokens === "number"
+          ? lastUsage.input_tokens
+          : null;
+    if (tokens === null) continue;
 
     return {
-      inputTokens: lastUsage.input_tokens,
+      tokens,
       contextWindowSize:
         typeof info.model_context_window === "number"
           ? info.model_context_window

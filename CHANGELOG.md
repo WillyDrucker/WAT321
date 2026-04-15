@@ -5,6 +5,33 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.19] - 2026-04-15
+
+### Added
+
+- **Heatmap colors on the usage progress bars.** Bars now gradually shift through warning colors as you get closer to your limits, so a tight session stands out at a glance instead of looking the same as a fresh one. On by default; turn it off in settings if you prefer plain bars. The new toggle is `wat321.enableHeatmap`.
+- **Known Issues section in the README.** A short, friendly list of rough edges that are worth knowing about - things like a stale Max plan tier label after an upgrade or what to do when you see "Offline" with a countdown. None of them need any action on your part; they either self-heal or are waiting on upstream fixes.
+
+### Changed
+
+- **Codex session tokens now match Codex's own native hover byte-for-byte.** The widget previously read a different denominator than Codex's built-in display (245k vs 258k) and counted slightly fewer tokens per turn than Codex did. After research into the upstream Codex source, your widget now uses the same effective context window, the same `total_tokens` field, and the same baseline-normalized percentage formula Codex uses internally. If you cross-check the two displays they will agree.
+- **Claude session tokens count the full per-turn footprint.** Previously the widget summed input plus cached input but skipped the output tokens for each turn. The displayed value is corrected; the visual change is below the rounding threshold so most reads look identical, but the underlying number is now accurate.
+- **Auto-Compact wording in the session token tooltips matches what each provider actually does.** Claude shows `Auto-Compact at {ceiling}` because Claude's compact fires exactly at that point. Codex shows `Auto-Compact ~{value}` because Codex's effective context window is the displayed ceiling but the actual compact fires a bit earlier.
+- **Reset WAT321 now also restores Enable Heatmap to its default.** The new heatmap toggle was missing from the reset list, so toggling it off and running Reset would not flip it back on. Fixed in `src/shared/clearSettings.ts`.
+- **Command palette entry renamed from "WAT321: Reset All Settings" to "WAT321: Reset WAT321"** so it matches the settings checkbox label and the rest of the docs. The internal command id is unchanged.
+- **Settings descriptions tightened across the board.** Shorter sentences, less boilerplate, and the Minimal display mode description is corrected to say progress bars *move* to tooltips on hover instead of *remain* in tooltips.
+- **Cross-project fallback label for the Claude session token widget is now correct.** When you have no Claude transcript in the current workspace and WAT321 falls back to your globally most-recent session, the widget now shows that other project's name instead of the current workspace name. The earlier limit could miss the `cwd` field on transcripts that started with many control events; `parseCwd` in `src/WAT321_CLAUDE_SESSION_TOKENS/parsers.ts` now scans further into the file.
+- **README screenshots redone at retina-sharp resolution.** Every screenshot is now sized so it renders 1:1 with device pixels on a 4k display, removing the soft or upscaled look you may have noticed if you read the README on a high-DPI monitor.
+
+### Fixed
+
+- **Session token color now actually applies a color.** Both session token widgets previously fell through to the default theme foreground when they tried to highlight near-compact sessions, because VS Code only renders the warning foreground theme token when paired with a matching warning background. The widgets now use explicit hex values instead, so the warning is visible on every theme.
+- **License field added to `package.json`.** The `LICENSE` file and README both said MIT but the package metadata had no declaration. Would have failed strict marketplace validation.
+
+### Removed
+
+- **No more "Not Connected" prose in the README.** The Provider Toggles section used to mention an old UX label state that no longer exists. Cleaner wording, no behavior change.
+
 ## [1.0.18] - 2026-04-14
 
 ### Fixed
