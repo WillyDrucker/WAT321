@@ -294,7 +294,7 @@ export class ExperimentalAutoCompactService {
     const originalOverride = read.value;
     if (originalOverride === ARMED_OVERRIDE_VALUE) {
       vscode.window.showWarningMessage(
-        "Your Claude auto-compact override is already set to 1. WAT321 will heal this on the next VS Code start. Run WAT321: Reset All Settings if you need to unstick it now."
+        "Your Claude auto-compact override is already set to 1. WAT321 will heal this on the next VS Code start. Run WAT321: Reset WAT321 if you need to unstick it now."
       );
       void clearCheckboxSetting(SETTING_KEY);
       return;
@@ -361,7 +361,7 @@ export class ExperimentalAutoCompactService {
       const target = safeRestoreValue(sentinel.originalOverride);
       if (!writeAutoCompactOverride(target)) {
         vscode.window.showErrorMessage(
-          "WAT321 could not restore your Claude settings. Run WAT321: Reset All Settings to unstick."
+          "WAT321 could not restore your Claude settings. Run WAT321: Reset WAT321 to unstick."
         );
         return;
       }
