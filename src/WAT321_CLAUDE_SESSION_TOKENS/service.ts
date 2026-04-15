@@ -288,8 +288,19 @@ export class ClaudeSessionTokenService {
       ? 1_000_000
       : DEFAULT_CONTEXT_WINDOW;
 
+    // Include output_tokens in the footprint. Previous turns' output
+    // already lives inside cache_read_input_tokens once the caching
+    // layer has folded them into the conversation prefix - we only
+    // add the CURRENT turn's output here, so this is not a
+    // double-count. Symmetric with the Codex fix earlier in v1.0.19
+    // that switched to `last_token_usage.total_tokens` for the same
+    // reason: output counts against the context window and skipping
+    // it undercounted by 500-4000 tokens per turn.
     const contextUsed =
-      usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
+      usage.inputTokens +
+      usage.cacheCreationTokens +
+      usage.cacheReadTokens +
+      usage.outputTokens;
 
     this.setOkState(
       sessionId,
