@@ -22,5 +22,8 @@ export const SETTING = {
   displayMode: "displayMode",
   statusBarPriority: "statusBarPriority",
   enableHeatmap: "enableHeatmap",
+  notificationsMode: "notifications.mode",
+  notificationsClaude: "notifications.claude",
+  notificationsCodex: "notifications.codex",
   clearAllData: "clearAllData",
 } as const;
