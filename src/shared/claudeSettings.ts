@@ -14,22 +14,19 @@ import { join } from "node:path";
 export const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
 
 /**
- * Claude's auto-compact default threshold, as a percentage. Used when
- * the user has no `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` set, AND as the
- * failsafe target when the experimental Force Claude Auto-Compact heal
- * path finds a stuck override with no trustworthy sentinel to restore
- * from.
+ * Claude's auto-compact default threshold, as a percentage. Used by
+ * the session token widget when no `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
+ * is set. A model-aware fallback is tracked in issue #38.
  *
  * Claude's real default is approximately
  *   fullWindow - min(systemReserve, 20000) - 13000 tokens
- * which works out to ~83-86% for 200k models and ~96.7% for 1M models.
- * 85 is a single fallback that is approximately correct for 200k
- * models. A model-aware fallback is tracked in issue #38.
+ * which works out to ~83% for 200k models and ~97% for 1M models.
+ * 85 is a single display-only fallback that is approximately correct
+ * for 200k models. It is NOT used as a restore target - the heal
+ * path restores to `null` (key deletion) so Claude falls back to
+ * its own built-in formula, which is always correct.
  */
 export const DEFAULT_CLAUDE_AUTOCOMPACT_PCT = 85;
-
-/** String form, used when writing to settings.json. */
-export const DEFAULT_CLAUDE_AUTOCOMPACT_PCT_STR = "85";
 
 /**
  * Discriminated result for `readAutoCompactOverride`. Distinguishes

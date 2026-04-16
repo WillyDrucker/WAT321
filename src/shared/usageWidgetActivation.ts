@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 
 /**
  * Generic activator for the read-only usage widgets. Each provider
@@ -23,7 +23,7 @@ interface UpdatableWidget<S> extends vscode.Disposable {
   update(state: S): void;
 }
 
-export function activateUsageWidget<S>(
+export function activateWidget<S>(
   service: SubscribableService<S>,
   widget: UpdatableWidget<S>
 ): vscode.Disposable[] {

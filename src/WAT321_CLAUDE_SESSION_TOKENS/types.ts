@@ -6,7 +6,6 @@ export interface SessionEntry {
   sessionId: string;
   cwd: string;
   startedAt: number;
-  kind: string;
   entrypoint: string;
 }
 

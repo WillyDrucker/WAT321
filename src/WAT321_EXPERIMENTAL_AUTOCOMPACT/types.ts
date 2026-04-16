@@ -49,4 +49,4 @@ export type ArmBlocker =
   | "recent-compact"
   | "cooldown"
   | "settings-stuck"
-  | "io-error";
+  | "settings-io-error";

@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import type { WidgetState, StatusBarWidget } from "./types";
 import { formatTokens, formatPct } from "../shared/ui/tokenFormatters";
 import { buildSessionTokenTooltip } from "../shared/ui/sessionTokenTooltip";
-import { ClaudeSessionTokenService } from "./service";
 import { getDisplayMode } from "../shared/displayMode";
 import { getSessionTokenColor } from "../shared/ui/heatmap";
 import { prefixForMode } from "../shared/ui/sessionTokenPrefix";
@@ -76,14 +75,4 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
   dispose(): void {
     this.item.dispose();
   }
-}
-
-export function activateClaudeTokenWidget(
-  service: ClaudeSessionTokenService
-): vscode.Disposable[] {
-  const widget = new ClaudeSessionTokensWidget();
-  const listener = (state: WidgetState) => widget.update(state);
-  service.subscribe(listener);
-
-  return [widget, { dispose: () => service.unsubscribe(listener) }];
 }

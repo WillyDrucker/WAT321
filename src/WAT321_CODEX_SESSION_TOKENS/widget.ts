@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { CodexTokenWidgetState, StatusBarWidget } from "./types";
-import { CodexSessionTokenService } from "./service";
+import { CODEX_BASELINE_TOKENS } from "./autoCompactLimit";
 import { formatPct, formatTokens } from "../shared/ui/tokenFormatters";
 import { buildSessionTokenTooltip } from "../shared/ui/sessionTokenTooltip";
 import { getDisplayMode } from "../shared/displayMode";
@@ -47,9 +47,8 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
         // the percentage so a fresh session starts near 0% used
         // rather than ~5% from the baseline overhead, and matches
         // the number shown in Codex's own hover byte-for-byte.
-        const BASELINE_TOKENS = 12_000;
-        const effectiveCeiling = session.autoCompactTokens - BASELINE_TOKENS;
-        const effectiveUsed = Math.max(0, session.contextUsed - BASELINE_TOKENS);
+        const effectiveCeiling = session.autoCompactTokens - CODEX_BASELINE_TOKENS;
+        const effectiveUsed = Math.max(0, session.contextUsed - CODEX_BASELINE_TOKENS);
         const usedPct = effectiveCeiling > 0
           ? Math.min(100, Math.round((effectiveUsed / effectiveCeiling) * 100))
           : 0;
@@ -78,6 +77,7 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
           label: session.label,
           contextUsed: session.contextUsed,
           ceiling: session.autoCompactTokens,
+          baselineTokens: CODEX_BASELINE_TOKENS,
         });
         this.item.show();
         break;
@@ -88,14 +88,4 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
   dispose(): void {
     this.item.dispose();
   }
-}
-
-export function activateCodexTokenWidget(
-  service: CodexSessionTokenService
-): vscode.Disposable[] {
-  const widget = new CodexSessionTokensWidget();
-  const listener = (state: CodexTokenWidgetState) => widget.update(state);
-  service.subscribe(listener);
-
-  return [widget, { dispose: () => service.unsubscribe(listener) }];
 }

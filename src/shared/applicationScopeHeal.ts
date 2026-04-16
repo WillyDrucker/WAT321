@@ -1,7 +1,11 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { clearCheckboxSetting } from "./clearSettings";
+import {
+  clearCheckboxSetting,
+  SETTING_KEY_CLEAR_ALL,
+  SETTING_KEY_FORCE_AUTOCOMPACT,
+} from "./clearSettings";
 
 /**
  * Healing for `wat321.*` settings that must never live at workspace
@@ -37,8 +41,8 @@ import { clearCheckboxSetting } from "./clearSettings";
  * early-adopter workspaces that still physically have the key in
  * their `.vscode/settings.json` from before the scope tightening. */
 const APPLICATION_SCOPE_KEYS = [
-  "wat321.clearAllData",
-  "wat321.experimental.forceClaudeAutoCompact",
+  `wat321.${SETTING_KEY_CLEAR_ALL}`,
+  `wat321.${SETTING_KEY_FORCE_AUTOCOMPACT}`,
 ] as const;
 
 /** Surgically strip a set of `wat321.*` keys from a single
@@ -97,10 +101,10 @@ function stripApplicationScopeKeysFromFile(path: string): void {
  * narrowly to the keys in `APPLICATION_SCOPE_KEYS` - we never touch
  * any other setting in the file. */
 export function healStaleApplicationScopeKeys(): void {
-  void clearCheckboxSetting("clearAllData").catch(() => {
+  void clearCheckboxSetting(SETTING_KEY_CLEAR_ALL).catch(() => {
     // best-effort - never block activation
   });
-  void clearCheckboxSetting("experimental.forceClaudeAutoCompact").catch(() => {
+  void clearCheckboxSetting(SETTING_KEY_FORCE_AUTOCOMPACT).catch(() => {
     // best-effort - never block activation
   });
 

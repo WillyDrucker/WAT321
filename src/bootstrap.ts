@@ -2,13 +2,13 @@ import * as vscode from "vscode";
 import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
 import { providerState } from "./shared/displayMode";
-import { activateUsageWidget } from "./shared/usageWidgetActivation";
+import { activateWidget } from "./shared/usageWidgetActivation";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
-import { activateClaudeTokenWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
+import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
 import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
 import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/widget";
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
-import { activateCodexTokenWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
+import { CodexSessionTokensWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 import { CodexUsage5hrWidget } from "./WAT321_CODEX_USAGE_5H/widget";
 import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/widget";
 import { ExperimentalAutoCompactService } from "./WAT321_EXPERIMENTAL_AUTOCOMPACT/service";
@@ -100,9 +100,9 @@ export function activateClaude(groups: ActiveGroups): ClaudeProviderGroup {
   usageService.setActivityProbe(() => tokenService.getLastActivityMs());
 
   const disposables: vscode.Disposable[] = [
-    ...activateUsageWidget(usageService, new ClaudeUsage5hrWidget()),
-    ...activateUsageWidget(usageService, new ClaudeUsageWeeklyWidget()),
-    ...activateClaudeTokenWidget(tokenService),
+    ...activateWidget(usageService, new ClaudeUsage5hrWidget()),
+    ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
+    ...activateWidget(tokenService, new ClaudeSessionTokensWidget()),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
@@ -125,9 +125,9 @@ export function activateCodex(groups: ActiveGroups): CodexProviderGroup {
   codexService.setActivityProbe(() => tokenService.getLastActivityMs());
 
   const disposables: vscode.Disposable[] = [
-    ...activateUsageWidget(codexService, new CodexUsage5hrWidget()),
-    ...activateUsageWidget(codexService, new CodexUsageWeeklyWidget()),
-    ...activateCodexTokenWidget(tokenService),
+    ...activateWidget(codexService, new CodexUsage5hrWidget()),
+    ...activateWidget(codexService, new CodexUsageWeeklyWidget()),
+    ...activateWidget(tokenService, new CodexSessionTokensWidget()),
     { dispose: () => codexService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];

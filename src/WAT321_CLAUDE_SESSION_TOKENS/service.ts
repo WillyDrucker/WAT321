@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import type { StateListener } from "../shared/types";
 import type { WidgetState } from "./types";
 import { readTail } from "../shared/fs/fileReaders";
 import { getProjectKey } from "../shared/fs/pathUtils";
@@ -17,7 +18,7 @@ const FALLBACK_SCAN_INTERVAL = 51_000;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 const EXTENDED_MODELS = ["claude-opus-4-6", "claude-sonnet-4-6"];
 
-type Listener = (state: WidgetState) => void;
+type Listener = StateListener<WidgetState>;
 
 export class ClaudeSessionTokenService {
   // Initial state reflects Claude CLI presence so the first subscriber
@@ -149,18 +150,31 @@ export class ClaudeSessionTokenService {
     const live = findActiveSession(sessionsDir, this.workspacePath);
     if (live) {
       const projectKey = getProjectKey(live.cwd);
-      return {
-        transcriptPath: join(
-          home,
-          ".claude",
-          "projects",
-          projectKey,
-          `${live.sessionId}.jsonl`
-        ),
-        sessionId: live.sessionId,
-        cwdForLabel: live.cwd,
-        source: "live",
-      };
+      const transcriptPath = join(
+        home,
+        ".claude",
+        "projects",
+        projectKey,
+        `${live.sessionId}.jsonl`
+      );
+      // Verify the transcript actually exists on disk before
+      // committing to the live branch. A stale `~/.claude/sessions/`
+      // entry (left behind by Claude Code after a prior session, or
+      // created by the VS Code extension before the user has sent
+      // a first prompt) can point at a transcript that was never
+      // written. Without this check, poll() locks into "waiting"
+      // and the widget goes blank even though `findLastKnownTranscript`
+      // would have had a perfectly good fallback - the very bug where
+      // opening VS Code twice without launching Claude drops the
+      // widget to "Claude -" on the second open.
+      if (existsSync(transcriptPath)) {
+        return {
+          transcriptPath,
+          sessionId: live.sessionId,
+          cwdForLabel: live.cwd,
+          source: "live",
+        };
+      }
     }
 
     if (

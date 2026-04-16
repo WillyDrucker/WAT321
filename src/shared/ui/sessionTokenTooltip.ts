@@ -21,6 +21,10 @@ export interface SessionTokenTooltipInput {
   label: string;
   contextUsed: number;
   ceiling: number;
+  /** Tokens subtracted from both numerator and denominator before
+   * computing the percentage. Codex passes `CODEX_BASELINE_TOKENS`
+   * (12,000); Claude passes 0. */
+  baselineTokens?: number;
   /** Present on a `lastKnown` session, absent on a live session.
    * When present, the tooltip adds a "Last active: X ago" line so
    * the user knows they are looking at a snapshot. */
@@ -30,18 +34,10 @@ export interface SessionTokenTooltipInput {
 export function buildSessionTokenTooltip(
   input: SessionTokenTooltipInput
 ): vscode.MarkdownString {
-  const { provider, sessionTitle, label, contextUsed, ceiling, lastActiveAt } =
+  const { provider, sessionTitle, label, contextUsed, ceiling, baselineTokens = 0, lastActiveAt } =
     input;
 
-  // Codex's own TUI applies a 12,000-token baseline offset to both
-  // numerator and denominator when computing the percentage (see
-  // `TokenUsage::percent_of_context_window_remaining` in
-  // `codex-rs/protocol/src/protocol.rs`). Mirror that here so the
-  // tooltip's percentage matches Codex native exactly, and so it
-  // stays aligned with the widget's own baseline-normalized usedPct.
-  // Claude passes baseline=0, making this a no-op for the Claude
-  // tooltip.
-  const BASELINE_TOKENS = provider === "Codex" ? 12_000 : 0;
+  const BASELINE_TOKENS = baselineTokens;
   const effectiveCeiling = Math.max(0, ceiling - BASELINE_TOKENS);
   const effectiveUsed = Math.max(0, contextUsed - BASELINE_TOKENS);
   const pctUsed =

@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import type { StateListener } from "../shared/types";
 import type { CodexTokenWidgetState } from "./types";
 import { readHead, readTail } from "../shared/fs/fileReaders";
 import {
@@ -20,7 +21,7 @@ import { resolveAutoCompactTokens } from "./autoCompactLimit";
 const POLL_INTERVAL = 6_000;
 const SESSION_SCAN_INTERVAL = 51_000;
 
-type Listener = (state: CodexTokenWidgetState) => void;
+type Listener = StateListener<CodexTokenWidgetState>;
 
 export class CodexSessionTokenService {
   // Initial state reflects Codex CLI presence so widgets stay hidden on

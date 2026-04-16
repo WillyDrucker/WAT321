@@ -51,12 +51,16 @@ import { providerState, type DisplayMode } from "../displayMode";
  * clean transitions without fill-count bumping.
  */
 
+/** Large blue square emoji. U+1F7E6 LARGE BLUE SQUARE. */
+const SQUARE_BLUE = "\uD83D\uDFE6";
 /** Large green square emoji. U+1F7E9 LARGE GREEN SQUARE. */
 const SQUARE_GREEN = "\uD83D\uDFE9";
 /** Large yellow square emoji. U+1F7E8 LARGE YELLOW SQUARE. */
 const SQUARE_YELLOW = "\uD83D\uDFE8";
 /** Large red square emoji. U+1F7E5 LARGE RED SQUARE. */
 const SQUARE_RED = "\uD83D\uDFE5";
+/** Large black square emoji. U+2B1B BLACK LARGE SQUARE. */
+const SQUARE_BLACK = "\u2B1B";
 
 export type HeatmapBand = "green" | "yellow" | "red";
 
@@ -152,15 +156,6 @@ export function buildCodexHeatmapBar(
   const empty = width - filled;
   return fillChar.repeat(filled) + SQUARE_BLACK.repeat(empty);
 }
-
-/** Large blue square emoji. U+1F7E6 LARGE BLUE SQUARE. The default
- * fill character for Claude progress bars. Inlined here so the
- * Claude rolling heatmap doesn't need to reach into
- * claude-usage/formatters. */
-const SQUARE_BLUE = "\uD83D\uDFE6";
-/** Large black square emoji. U+2B1B BLACK LARGE SQUARE. The empty-
- * cell character for both provider bars. */
-const SQUARE_BLACK = "\u2B1B";
 
 /** Usage percentage at which the yellow band becomes active. Constant
  * across all bar widths. Cell 6 lights up exactly at this threshold

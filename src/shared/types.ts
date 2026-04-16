@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 
 /**
  * Generic service state machine for anything that polls an external source
@@ -25,6 +25,9 @@ export type ServiceState<TData> =
   | { status: "offline"; message: string }
   | { status: "error"; message: string }
   | { status: "ok"; data: TData; fetchedAt: number };
+
+/** Generic listener callback for service state changes. */
+export type StateListener<TState> = (state: TState) => void;
 
 /**
  * Status bar widget contract. All widgets accept a state value and render
