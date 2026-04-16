@@ -1,39 +1,15 @@
 import { httpGetJson } from "./polling/httpClient";
 
 /**
- * Lazy poller for the public Statuspage.io JSON feeds that Anthropic
- * and OpenAI publish. Consumed by `usageNonOkRenderer.ts` to append
- * a one-line status summary to the `rate-limited` tooltip when the
- * provider is reporting a live incident, so a user looking at a
- * parked widget can immediately tell the cause is upstream and not
- * WAT321.
+ * Lazy poller for public Statuspage.io JSON feeds (Anthropic +
+ * OpenAI). Appends a status line to the rate-limited tooltip so
+ * the user can tell if the cause is upstream.
  *
- * Design notes:
- *
- * - **Lazy refresh, not a timer.** There is no `setInterval` here.
- *   `refreshIfStale()` is called from the tooltip render path; the
- *   cache TTL gates it so the actual network call fires at most
- *   once per `CACHE_TTL_MS` per provider per VS Code window. The
- *   countdown ticker's 1-second rate-limited re-paint picks up a
- *   freshly fetched entry on the next tick without any explicit
- *   rebroadcast plumbing.
- *
- * - **Silent on failure.** Every error path collapses to "leave the
- *   cache as-is and return whatever we have (possibly null)." A
- *   status endpoint that is itself down during an outage must not
- *   surface a second error about the error.
- *
- * - **In-memory only.** No disk cache, no cross-window coordination.
- *   The payload is ~200 bytes, the cadence is one fetch per 5
- *   minutes per window, and cross-window duplication is cheap.
- *   Skipping the Coordinator pattern keeps this module small.
- *
- * - **First net-new outbound endpoint.** Every prior WAT321 network
- *   call hit the provider's own usage API. This one hits the
- *   provider's own public status page, which is still an
- *   Anthropic/OpenAI-owned property, still read-only, still unauth'd,
- *   and still has zero user data leaving the machine. Documented
- *   here so future readers know the boundary moved.
+ * - Lazy refresh from the tooltip render path, TTL-gated to at
+ *   most one fetch per `CACHE_TTL_MS` per provider per window.
+ * - Silent on failure: returns cached data or null.
+ * - In-memory only, no disk cache or cross-window coordination.
+ * - Read-only, unauthenticated, zero user data leaves the machine.
  */
 
 export type Provider = "claude" | "codex";
@@ -55,9 +31,7 @@ interface CachedStatus {
   fetchedAt: number;
 }
 
-/** Anthropic moved their status page from `status.anthropic.com` to
- * `status.claude.com` in early 2026. The old host 302s to the new
- * one; we point directly at the new one to skip the redirect. */
+/** Public Statuspage.io JSON feed URLs per provider. */
 const STATUS_URLS: Readonly<Record<Provider, string>> = {
   claude: "https://status.claude.com/api/v2/status.json",
   codex: "https://status.openai.com/api/v2/status.json",

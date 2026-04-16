@@ -4,51 +4,24 @@ import {
   getRemainingPct,
   makeBar as makeCodexBarDefault,
 } from "../codex-usage/formatters";
-import { providerState, type DisplayMode } from "../displayMode";
+import { SETTING } from "../../engine/settingsKeys";
+import { isProviderActive, type DisplayMode } from "../displayMode";
 
 /**
- * Heatmap coloring for WAT321 usage progress bars.
+ * Heatmap coloring for WAT321 usage progress bars. Two models:
  *
- * Responsibilities are split by provider because each has a different
- * shape of bar that needs a different model:
+ *   - **Codex (band-based):** single color for the filled portion,
+ *     shifts green -> yellow -> red as remaining capacity drops.
+ *   - **Claude (rolling):** per-cell coloring. Cells past 55% turn
+ *     yellow, past 85% turn red. Yellow demotes to blue in red phase.
  *
- *   - **Codex** tracks "remaining" capacity. Its bar fills right to
- *     left (more black cells appear from the right as capacity drops).
- *     A single-band heatmap works naturally here: pick a band color
- *     from the current remaining pct and apply it to the whole filled
- *     portion. `bandFromRemaining` + `fillCharForBand` +
- *     `buildCodexHeatmapBar` handle Codex.
+ * Gated on `wat321.enableHeatmap` (default on). `renderClaudeBar` and
+ * `renderCodexBar` are the dispatch points for all rendering surfaces.
  *
- *   - **Claude** tracks "used" utilization. Its bar fills left to
- *     right, so a single-band approach would produce a dominant red
- *     strip once usage gets high. Instead Claude uses a position-
- *     aware rolling model: cells past the 55% mark turn yellow, cells
- *     past the 85% mark turn red, and the yellow band demotes back to
- *     blue on entering red so the user focuses on the red portion.
- *     `buildClaudeHeatmapBar` handles Claude.
- *
- * Both providers are gated on the shared `wat321.enableHeatmap`
- * toggle (default on). `renderClaudeBar` and `renderCodexBar` are
- * the single dispatch points - they check `isHeatmapEnabled()` and
- * return the heatmap variant or the plain default bar. Status bar
- * widgets and tooltip builders all call through these helpers so
- * the setting flip propagates to every surface in a single frame.
- *
- * Thresholds and colors are modeled on the live ChatGPT Codex usage
- * dashboard at https://chatgpt.com/codex/settings/usage. A page
- * snapshot saved directly from the live site confirmed two color
- * anchor points on the Codex side:
- *
- *   - `bg-[#22c55e]` when the user had 100% remaining (green, Tailwind
- *     green-500)
- *   - `bg-[#f87171]` when the user had  23% remaining (red,  Tailwind
- *     red-400)
- *
- * The yellow boundary for Codex (50% remaining) is inferred - we
- * didn't capture a snapshot with a window in yellow territory. The
- * Claude 55/85 thresholds are chosen to align exactly with the
- * natural cell crossovers of the 10-wide and 5-wide bars, giving
- * clean transitions without fill-count bumping.
+ * Color thresholds: Codex bands (25/50) sourced from the ChatGPT
+ * usage dashboard (Tailwind green-500 / red-400). Claude thresholds
+ * (55/85) align with natural cell crossovers in 10-wide and 5-wide
+ * bars.
  */
 
 /** Large blue square emoji. U+1F7E6 LARGE BLUE SQUARE. */
@@ -73,7 +46,7 @@ export type HeatmapBand = "green" | "yellow" | "red";
 export function isHeatmapEnabled(): boolean {
   return vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>("enableHeatmap", true);
+    .get<boolean>(SETTING.enableHeatmap, true);
 }
 
 /** Classify a Codex "remaining" percentage (100 = full, 0 = depleted)
@@ -317,16 +290,13 @@ export function getSessionTokenColor(
  * against. Every other combination returns `undefined`, which
  * falls back to the theme's default status bar foreground.
  *
- * The old `pct >= 90` warningForeground rule was dropped with this
- * rewrite: the rolling Claude heatmap bar now carries severity on
- * its own (red cells past the 85% threshold), and mixing that with
- * a warning-colored text created redundant signaling. May revisit
- * if we need a non-heatmap severity signal later. */
+ * No warning-colored text is applied because the rolling heatmap
+ * bar carries severity on its own (red cells past 85%). */
 export function getClaudeTextColor(
   mode: DisplayMode
 ): string | undefined {
   if (!isHeatmapEnabled()) return undefined;
-  if (!providerState.codexActive) return undefined;
+  if (!isProviderActive("codex")) return undefined;
   if (mode === "minimal") return "#2977d6";
   return undefined;
 }
@@ -345,7 +315,7 @@ export function getCodexTextColor(
   usedPct: number
 ): string | undefined {
   if (!isHeatmapEnabled()) return undefined;
-  if (!providerState.claudeActive) return undefined;
+  if (!isProviderActive("claude")) return undefined;
   if (mode === "minimal") return "#22c55e";
   // Compact / full: brand green only when the bar is no longer in
   // the green band - the text then serves as a severity signal.
