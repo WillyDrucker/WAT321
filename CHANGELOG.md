@@ -5,6 +5,17 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-04-16
+
+### Changed
+
+- **Notification default is now System Notifications instead of Auto.** Previously the default mode switched between system toasts (when tabbed away) and in-app notifications (when focused). The new default always uses system notifications so you get the native Windows toast with sound regardless of focus state. You can still switch to Auto, In-App, or Off from the Notifications section in Settings.
+
+### Fixed
+
+- **Force Auto-Compact no longer chains multiple compacts in a row.** Arming the experimental auto-compact and sending a prompt could trigger 4-5 consecutive compacts before the tool could intervene, requiring a manual breakout. The override now uses a calculated threshold just below your current context level instead of the old blanket "compact at 1%", so exactly one compact fires and the post-compact context falls safely below the threshold. Prompt detection also switches from 2-second polling to instant file-system events, restoring your settings within milliseconds of your prompt landing.
+- **Notifications no longer fire between tool calls.** If Claude was using tools during a response, you would get a notification toast on every tool call and tool result instead of just the final answer. The notification bridge now classifies the last transcript entry and only fires when the turn is actually complete - a final assistant message with no pending tool calls.
+
 ## [1.1.1] - 2026-04-16
 
 ### Added

@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, watch, type FSWatcher } from "node:fs";
 import * as vscode from "vscode";
 import {
   readAutoCompactOverride,
@@ -11,7 +11,6 @@ import type { ClaudeSessionTokenService } from "../WAT321_CLAUDE_SESSION_TOKENS/
 import type { WidgetState as ClaudeTokenWidgetState } from "../WAT321_CLAUDE_SESSION_TOKENS/types";
 import { ArmedStatusBarItem, CANCEL_COMMAND_ID } from "./armedStatusBarItem";
 import { ARMED_OVERRIDE_VALUE } from "./constants";
-import { scanForCompactMarker } from "./compactDetector";
 import { healStuckOverride, safeRestoreValue, type HealResult } from "./heal";
 import {
   determineArmBlocker,
@@ -39,21 +38,24 @@ import type {
  *   - Clicking the red `! ARMED` status bar item disarms the same
  *     way as unticking.
  *
- *   - On compact detection or timeout, the service disarms,
- *     restores the override, disposes the armed status bar item,
- *     and unticks the box. If no prompt was observed, each path
- *     shows its own information toast. Once a prompt lands in the
- *     transcript, the widget hides silently and the timeout
- *     extends to 3 minutes to allow long compacts to finish.
+ *   - The moment a prompt lands in the transcript, the override is
+ *     restored immediately and the service fully disarms (sentinel
+ *     cleanup, cooldown, checkbox untick). Claude reads the override
+ *     at prompt time and commits to its compact decision; restoring
+ *     afterward does not undo the compact but prevents any loop.
+ *     The calculated threshold (currentPct - 5) is the primary loop
+ *     prevention; the instant restore is belt-and-suspenders.
  *
  * Safety contracts:
  *   - Sentinel records the user's original override (custom string
  *     or `null` for "key absent"). On disarm or heal, sentinel
  *     value is restored; if sentinel is missing, the key is deleted
  *     so Claude falls back to its own built-in default formula.
- *     The armed value `"1"` is poison-checked and never restored.
+ *     The legacy armed value `"1"` is poison-checked and never
+ *     restored.
  *   - `healStuckOverride()` on startup unsticks any override left
- *     stuck by a crash.
+ *     stuck by a crash (checks both legacy "1" and the sentinel's
+ *     recorded dynamic armed value).
  *   - On activation, the setting is force-reset to `false` so a
  *     `true` value left across a VS Code restart never auto-arms.
  *   - `dispose()` runs a synchronous best-effort restore before
@@ -68,37 +70,16 @@ const FULL_SETTING_PATH = `wat321.${SETTING_KEY}`;
  * user never types, we time out and disarm loudly. */
 const ARM_WINDOW_MS = 30_000;
 
-/** Extended window after a prompt has been observed in the transcript.
- * A real compact can take well over the initial 30 s window to finish,
- * especially on long sessions, so once we see the user's prompt land
- * we wait up to three minutes for the compact marker before giving up.
- * If the marker never arrives we still restore settings - this is the
- * backstop, not the happy path. */
-const ARM_WINDOW_MS_POST_PROMPT = 180_000;
-
 /** Post-disarm cooldown during which re-arming is refused. */
 const COOLDOWN_MS = 30_000;
 
-/** Poll cadence while armed. */
-const POLL_INTERVAL_MS = 2_000;
-
-type DisarmReason = "user-cancel" | "compact-detected" | "timeout";
+type DisarmReason = "user-cancel" | "prompt-detected" | "timeout";
 
 export class ExperimentalAutoCompactService {
   private armedSentinel: ExperimentalAutoCompactSentinel | null = null;
-  private armedScanOffset = 0;
-  /** Set to true the first poll after arming where we observe the
-   * transcript file grow past its baseline size. Marks "the user's
-   * next prompt has landed in the transcript", which is the signal
-   * that the user's intent has been captured and Claude has committed
-   * to whatever compact decision it is going to make for this turn.
-   * We silently hide the !ARMED widget at that moment (no toast) and
-   * extend the compact-wait window to `ARM_WINDOW_MS_POST_PROMPT` so
-   * a long compact still finishes cleanly. Reset to false on every
-   * fresh arm and on every disarm. */
-  private promptObserved = false;
   private cooldownUntil = 0;
-  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private transcriptWatcher: FSWatcher | null = null;
   private configListener: vscode.Disposable | null = null;
   private tokenListener: ((state: ClaudeTokenWidgetState) => void) | null = null;
   private armedItem = new ArmedStatusBarItem();
@@ -112,7 +93,7 @@ export class ExperimentalAutoCompactService {
   constructor(private tokenService: ClaudeSessionTokenService) {}
 
   start(): void {
-    // Startup failsafe: heal any override stuck at "1" from a prior
+    // Startup failsafe: heal any override stuck from a prior
     // session, before wiring up any listeners.
     let healResult: HealResult = "not-stuck";
     try {
@@ -184,9 +165,10 @@ export class ExperimentalAutoCompactService {
       this.armedSentinel = null;
     }
 
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = null;
+    this.closeTranscriptWatcher();
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
     }
     if (this.configListener) {
       this.configListener.dispose();
@@ -227,6 +209,7 @@ export class ExperimentalAutoCompactService {
       contextUsed: session.contextUsed,
       ceiling,
       fraction: session.contextUsed / ceiling,
+      contextWindowSize: session.contextWindowSize,
     };
   }
 
@@ -308,6 +291,17 @@ export class ExperimentalAutoCompactService {
       return;
     }
 
+    // Calculate an override percentage just below the current context
+    // usage so exactly one compact fires. Claude checks this threshold
+    // on each compact iteration - if we wrote "1" (compact at 1% of
+    // window), every post-compact context still exceeds 1% and Claude
+    // chains 4-5 compacts in rapid succession. By setting the threshold
+    // to (currentPct - 5), the first compact fires (current > threshold)
+    // but the post-compact context (typically 30-50% of original) falls
+    // well below the threshold, stopping the loop cold.
+    const currentPct = (ctx.contextUsed / ctx.contextWindowSize) * 100;
+    const armOverride = String(Math.max(1, Math.floor(currentPct) - 5));
+
     let baselineSize = 0;
     try {
       baselineSize = statSync(ctx.transcriptPath).size;
@@ -323,7 +317,7 @@ export class ExperimentalAutoCompactService {
       version: 1,
       settingsPath: SETTINGS_PATH,
       originalOverride,
-      armedOverride: ARMED_OVERRIDE_VALUE,
+      armedOverride: armOverride,
       watchTranscriptPath: ctx.transcriptPath,
       baselineSize,
       armedAt: Date.now(),
@@ -337,7 +331,7 @@ export class ExperimentalAutoCompactService {
       return;
     }
 
-    if (!writeAutoCompactOverride(ARMED_OVERRIDE_VALUE)) {
+    if (!writeAutoCompactOverride(armOverride)) {
       deleteSentinel();
       vscode.window.showWarningMessage(
         "WAT321 could not update ~/.claude/settings.json. Check that the file is not locked or read-only, then try again."
@@ -347,15 +341,68 @@ export class ExperimentalAutoCompactService {
     }
 
     this.armedSentinel = sentinel;
-    this.armedScanOffset = baselineSize;
-    this.promptObserved = false;
     this.armedItem.show();
 
     vscode.window.showInformationMessage(
       "Claude Auto-Compact armed. Next prompt will trigger Auto-Compact."
     );
 
-    this.schedulePoll();
+    this.startTranscriptWatch();
+    this.startTimeout();
+  }
+
+  /** Watch the transcript file for growth. The moment the file grows
+   * past its baseline size, the user's prompt has landed - Claude has
+   * already read the override and committed to its compact decision.
+   * Restore the override immediately and fully disarm. `fs.watch`
+   * fires within milliseconds on all major platforms (Windows
+   * ReadDirectoryChangesW, Linux inotify, macOS FSEvents). */
+  private startTranscriptWatch(): void {
+    const sentinel = this.armedSentinel;
+    if (!sentinel) return;
+
+    try {
+      this.transcriptWatcher = watch(
+        sentinel.watchTranscriptPath,
+        { persistent: false },
+        () => {
+          // Guard: already disarmed or prompt already handled.
+          if (!this.armedSentinel) return;
+
+          try {
+            const size = statSync(sentinel.watchTranscriptPath).size;
+            if (size <= sentinel.baselineSize) return;
+          } catch {
+            return; // File mid-write, wait for next event
+          }
+
+          // Prompt landed. Restore override and fully disarm.
+          this.disarm("prompt-detected");
+        }
+      );
+    } catch {
+      // fs.watch failed to start (permissions, unsupported FS).
+      // The timeout backstop at ARM_WINDOW_MS will still disarm.
+    }
+  }
+
+  private startTimeout(): void {
+    this.timeoutTimer = setTimeout(() => {
+      this.timeoutTimer = null;
+      if (this.disposed || !this.armedSentinel) return;
+      this.disarm("timeout");
+    }, ARM_WINDOW_MS);
+  }
+
+  private closeTranscriptWatcher(): void {
+    if (this.transcriptWatcher) {
+      try {
+        this.transcriptWatcher.close();
+      } catch {
+        // best-effort
+      }
+      this.transcriptWatcher = null;
+    }
   }
 
   private disarm(reason: DisarmReason): void {
@@ -373,16 +420,15 @@ export class ExperimentalAutoCompactService {
       deleteSentinel();
     }
 
-    const wasPromptObserved = this.promptObserved;
     this.armedSentinel = null;
-    this.promptObserved = false;
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = null;
+    this.closeTranscriptWatcher();
+    if (this.timeoutTimer) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
     }
     this.armedItem.dispose();
 
-    if (reason === "compact-detected" || reason === "timeout") {
+    if (reason === "prompt-detected" || reason === "timeout") {
       this.cooldownUntil = Date.now() + COOLDOWN_MS;
     }
 
@@ -390,17 +436,11 @@ export class ExperimentalAutoCompactService {
     // config listener short-circuits because armedSentinel is null.
     void clearCheckboxSetting(SETTING_KEY);
 
-    // Once the user's prompt has landed we clean up silently - the
-    // user already saw the compact either fire or not fire on their
-    // end and a second toast telling them about it is noise. The
-    // !ARMED widget was already hidden at prompt-observation time.
-    if (wasPromptObserved) return;
+    // Prompt-detected disarm is silent - the user sees the compact
+    // happen (or not) in their Claude session.
+    if (reason === "prompt-detected") return;
 
-    if (reason === "compact-detected") {
-      vscode.window.showInformationMessage(
-        "Auto-compact fired. Your Claude settings have been restored."
-      );
-    } else if (reason === "timeout") {
+    if (reason === "timeout") {
       vscode.window.showInformationMessage(
         "Claude Auto-Compact disarmed. No prompt detected within 30 seconds."
       );
@@ -416,71 +456,6 @@ export class ExperimentalAutoCompactService {
   cancelFromWidget(): void {
     if (!this.armedSentinel) return;
     this.disarm("user-cancel");
-  }
-
-  private schedulePoll(): void {
-    if (this.disposed || !this.armedSentinel) return;
-    if (this.pollTimer) clearTimeout(this.pollTimer);
-    this.pollTimer = setTimeout(() => {
-      this.pollTimer = null;
-      if (this.disposed) return;
-      this.poll();
-      if (!this.disposed && this.armedSentinel && this.pollTimer === null) {
-        this.schedulePoll();
-      }
-    }, POLL_INTERVAL_MS);
-  }
-
-  private poll(): void {
-    if (!this.armedSentinel) return;
-    const sentinel = this.armedSentinel;
-
-    // External disarm: sentinel file gone (another VS Code window or
-    // Reset WAT321 already cleaned up).
-    if (!existsSync(SENTINEL_PATH)) {
-      this.armedSentinel = null;
-      this.armedItem.dispose();
-      void clearCheckboxSetting(SETTING_KEY);
-      return;
-    }
-
-    // Timeout failsafe: restore even if compact never fired.
-    // Extended window once a prompt has already been observed so a
-    // long compact has time to actually land its summary marker.
-    const windowLimit = this.promptObserved
-      ? ARM_WINDOW_MS_POST_PROMPT
-      : ARM_WINDOW_MS;
-    if (Date.now() - sentinel.armedAt > windowLimit) {
-      this.disarm("timeout");
-      return;
-    }
-
-    try {
-      const size = statSync(sentinel.watchTranscriptPath).size;
-      // Prompt observation: the transcript only grows when a new turn
-      // is written, so any growth past the baseline means the user's
-      // prompt has landed. Silently hide the !ARMED widget on the
-      // first such poll. Settings stay armed; we keep polling for
-      // the compact marker under the extended timeout.
-      if (!this.promptObserved && size > sentinel.baselineSize) {
-        this.promptObserved = true;
-        this.armedItem.dispose();
-      }
-      const outcome = scanForCompactMarker(
-        sentinel.watchTranscriptPath,
-        this.armedScanOffset,
-        size
-      );
-      this.armedScanOffset = outcome.nextOffset;
-      if (outcome.found) {
-        this.disarm("compact-detected");
-      }
-    } catch {
-      // Transcript may have been replaced mid-compact.
-      if (!existsSync(sentinel.watchTranscriptPath)) {
-        this.disarm("compact-detected");
-      }
-    }
   }
 }
 

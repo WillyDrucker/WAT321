@@ -36,7 +36,7 @@ function getConfig(): vscode.WorkspaceConfiguration {
 }
 
 function getMode(): string {
-  return getConfig().get<string>(SETTING.notificationsMode, "Auto");
+  return getConfig().get<string>(SETTING.notificationsMode, "System Notifications");
 }
 
 /** True when the mode is anything other than Off. Used by the

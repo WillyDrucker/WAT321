@@ -20,14 +20,14 @@ import { registerCancelExperimentalAutoCompactCommand } from "./WAT321_EXPERIMEN
  */
 
 let ctx: EngineContext | null = null;
-let lastNotificationMode = "Auto";
+let lastNotificationMode = "System Notifications";
 
 export function activate(context: vscode.ExtensionContext) {
   ctx = createEngineContext();
   context.subscriptions.push(...registerProviders(ctx));
 
   const config = vscode.workspace.getConfiguration("wat321");
-  lastNotificationMode = config.get<string>(SETTING.notificationsMode, "Auto");
+  lastNotificationMode = config.get<string>(SETTING.notificationsMode, "System Notifications");
 
   // --- Initial activation based on current settings ---
   if (config.get<boolean>(SETTING.enableClaude, true)) {
@@ -145,7 +145,7 @@ function handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
   // defaults so the user doesn't have to manually re-check after
   // turning notifications back on.
   if (e.affectsConfiguration(`wat321.${SETTING.notificationsMode}`)) {
-    const mode = config.get<string>(SETTING.notificationsMode, "Auto");
+    const mode = config.get<string>(SETTING.notificationsMode, "System Notifications");
     if (mode === "Off") {
       lastNotificationMode = "Off";
       safeUpdate(config, SETTING.notificationsClaude, false);

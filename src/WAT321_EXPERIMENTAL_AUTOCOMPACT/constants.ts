@@ -8,7 +8,15 @@
  * original override (string for custom values, null for "key absent")
  * and the disarm/heal paths either restore that value or delete the
  * key. No hardcoded percentage is ever written.
+ *
+ * The armed override value is now calculated dynamically per arm
+ * (currentPct - 5) so exactly one compact fires. `ARMED_OVERRIDE_VALUE`
+ * below is retained for legacy heal detection: any override stuck at
+ * "1" from a pre-v1.1.2 crash is still caught and restored on startup.
  */
 
-/** The override value WAT321 writes while armed. */
+/** Legacy armed value. Pre-v1.1.2 wrote this literal to settings.json.
+ * Still used by the heal and preflight paths to detect stuck overrides
+ * from older versions. The active arm path now calculates a dynamic
+ * value instead - see `arm()` in `service.ts`. */
 export const ARMED_OVERRIDE_VALUE = "1";

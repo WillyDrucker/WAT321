@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -81,7 +81,7 @@
         "properties": {
           "wat321.notifications.mode": {
             "type": "string",
-            "default": "Auto",
+            "default": "System Notifications",
             "enum": [
               "Off",
               "Auto",

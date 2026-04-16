@@ -38,6 +38,9 @@ export interface ActiveContextInfo {
   ceiling: number;
   /** `contextUsed / ceiling` for the `below-threshold` gate. */
   fraction: number;
+  /** Full context window size in tokens. Used to calculate the
+   * armed override percentage so exactly one compact fires. */
+  contextWindowSize: number;
 }
 
 /** Reasons the preflight gate may refuse an arm request. Each maps
