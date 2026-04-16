@@ -1,14 +1,13 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
- * Shared reader/writer for `~/.claude/settings.json` `env` overrides.
- * Two WAT321 features touch this file:
- *   - Claude session token widget (read-only, displays the override)
- *   - Experimental Force Claude Auto-Compact (read + atomic write, arm/restore cycle)
- * Both route through this module to keep exactly one definition of
- * the file path, one parser, one atomic writer, and one default value.
+ * Shared reader for `~/.claude/settings.json` `env` overrides.
+ * The Claude session token widget reads the auto-compact override
+ * to display the current threshold in the tooltip. All access is
+ * read-only. One definition of the file path, one parser, one
+ * default-value formula.
  */
 
 export const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
@@ -36,12 +35,9 @@ export function computeDefaultAutoCompactPct(contextWindowSize: number): number 
 /**
  * Discriminated result for `readAutoCompactOverride`. Distinguishes
  * "file absent" and "file unreadable" from "file read OK but key
- * absent" so safety-critical callers (the experimental auto-compact
- * heal + arm paths) can refuse to make assumptions on an IO error.
- * The lossy
- * `readAutoCompactOverrideRaw` wrapper below collapses everything to
- * `string | null` for the session token widget, which only needs the
- * display value.
+ * absent". The lossy `readAutoCompactOverrideRaw` wrapper below
+ * collapses everything to `string | null` for the session token
+ * widget, which only needs the display value.
  */
 export type OverrideReadResult =
   | { kind: "missing" }
@@ -97,30 +93,3 @@ export function readAutoCompactPct(contextWindowSize: number): number {
   return computeDefaultAutoCompactPct(contextWindowSize);
 }
 
-/**
- * Atomic `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` writer. `target === null`
- * deletes the key entirely (user had no override originally).
- * tmp+rename so a crash mid-write cannot truncate the file.
- *
- * Returns `true` on success, `false` on any IO error. This is the
- * only writer WAT321 ever uses against `~/.claude/settings.json`.
- */
-export function writeAutoCompactOverride(target: string | null): boolean {
-  try {
-    const raw = readFileSync(SETTINGS_PATH, "utf8");
-    const settings = JSON.parse(raw) as Record<string, unknown>;
-    const env = (settings.env as Record<string, unknown>) || {};
-    if (target === null) {
-      delete env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE;
-    } else {
-      env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = target;
-    }
-    settings.env = env;
-    const tmp = `${SETTINGS_PATH}.wat321.tmp`;
-    writeFileSync(tmp, JSON.stringify(settings, null, 2), "utf8");
-    renameSync(tmp, SETTINGS_PATH);
-    return true;
-  } catch {
-    return false;
-  }
-}

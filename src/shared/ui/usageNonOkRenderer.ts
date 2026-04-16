@@ -1,11 +1,11 @@
 import type * as vscode from "vscode";
+import type { ProviderKey } from "../../engine/contracts";
 import {
   getCachedStatus,
   getProviderOwner,
-  type Provider,
   refreshIfStale,
-} from "../statusPoller";
-import type { ServiceState } from "../types";
+} from "../incidentStatusPoller";
+import type { ServiceState } from "../serviceTypes";
 
 /**
  * Shared renderer for the non-OK states of the Claude and Codex
@@ -25,9 +25,8 @@ import type { ServiceState } from "../types";
 export interface UsageNonOkOptions {
   /** Display name for error states ("Claude" or "Codex"). */
   providerName: string;
-  /** Provider key for status-page lookups. Matches the
-   * `statusPoller` module's Provider union. */
-  providerKey: Provider;
+  /** Provider key for incident status-page lookups. */
+  providerKey: ProviderKey;
   /** Full text shown in the loading state, including any spinner
    * codicon. Varies because the 5h widget uses "(5hr)" / "(5 hour)"
    * label forms its caller has chosen. */
@@ -83,7 +82,7 @@ export function renderUsageNonOkState<TData>(
           : "Reconnecting...";
       // Kick a lazy refresh of the provider's public status page.
       // TTL-gated so the actual network call fires at most once per
-      // 5 min per window; the countdown ticker's 1-second re-paint
+      // 5 min per window; the countdown ticker's 60-second re-paint
       // picks up a fresh entry on the next tick without explicit
       // rebroadcast plumbing. Silent if the fetch fails.
       refreshIfStale(opts.providerKey);

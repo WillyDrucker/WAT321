@@ -1,4 +1,4 @@
-import { getDisplayMode } from "../displayMode";
+import { getDisplayMode } from "../../engine/displayMode";
 
 /** Thought balloon glyph used as the session-token widget prefix in
  * compact and full display modes. U+1F4AD THOUGHT BALLOON. */

@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { WidgetState } from "./types";
+import type { ResolvedSession, WidgetState } from "./types";
 import { readTail } from "../shared/fs/fileReaders";
 import { getProjectKey } from "../shared/fs/pathUtils";
 import { readAutoCompactPct } from "../shared/claudeSettings";
@@ -14,7 +14,11 @@ import {
   type LastKnownTranscript,
 } from "./transcriptDiscovery";
 
-const POLL_INTERVAL = 5_000;
+/** Fallback poll cadence. fs.watch in the base class handles
+ * instant transcript-change detection; this interval serves only
+ * as a safety net for session discovery and any missed watcher
+ * events. 15s keeps discovery responsive without wasting cycles. */
+const POLL_INTERVAL = 15_000;
 const FALLBACK_SCAN_INTERVAL = 51_000;
 
 export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetState> {
@@ -40,47 +44,8 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     super.rebroadcast();
   }
 
-  private setOkState(
-    sessionId: string,
-    label: string,
-    sessionTitle: string,
-    modelId: string,
-    contextUsed: number,
-    contextWindowSize: number,
-    autoCompactPct: number,
-    source: "live" | "lastKnown",
-    lastActiveAt: number
-  ): void {
-    if (this.state.status === "ok") {
-      const prev = this.state.session;
-      if (
-        prev.sessionId === sessionId &&
-        prev.label === label &&
-        prev.sessionTitle === sessionTitle &&
-        prev.modelId === modelId &&
-        prev.contextUsed === contextUsed &&
-        prev.contextWindowSize === contextWindowSize &&
-        prev.autoCompactPct === autoCompactPct &&
-        prev.source === source &&
-        prev.lastActiveAt === lastActiveAt
-      ) {
-        return;
-      }
-    }
-    this.setState({
-      status: "ok",
-      session: {
-        sessionId,
-        label,
-        sessionTitle,
-        modelId,
-        contextUsed,
-        contextWindowSize,
-        autoCompactPct,
-        source,
-        lastActiveAt,
-      },
-    });
+  private emitOk(session: ResolvedSession): void {
+    this.setOkStateIfChanged(session, (s) => ({ status: "ok" as const, session: s }));
   }
 
   private resolveTranscript(
@@ -181,17 +146,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       if (this.state.status === "ok") {
         const prev = this.state.session;
         if (prev.source !== source) {
-          this.setOkState(
-            prev.sessionId,
-            prev.label,
-            prev.sessionTitle,
-            prev.modelId,
-            prev.contextUsed,
-            prev.contextWindowSize,
-            prev.autoCompactPct,
-            source,
-            mtime
-          );
+          this.emitOk({ ...prev, source, lastActiveAt: mtime });
         }
       }
       return;
@@ -234,16 +189,16 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       usage.cacheReadTokens +
       usage.outputTokens;
 
-    this.setOkState(
+    this.emitOk({
       sessionId,
-      basename(cwdForLabel),
-      this.cachedSessionTitle,
-      usage.modelId,
+      label: basename(cwdForLabel),
+      sessionTitle: this.cachedSessionTitle,
+      modelId: usage.modelId,
       contextUsed,
       contextWindowSize,
-      this.cachedAutoCompactPct,
+      autoCompactPct: this.cachedAutoCompactPct,
       source,
-      mtime
-    );
+      lastActiveAt: mtime,
+    });
   }
 }

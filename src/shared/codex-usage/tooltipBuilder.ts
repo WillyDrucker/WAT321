@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
-import type { CodexUsageResponse } from "./types";
-import { formatPlanLabel, getRemainingPct } from "./formatters";
-import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
-import { getDisplayMode } from "../displayMode";
+import { getDisplayMode } from "../../engine/displayMode";
 import { renderCodexBar } from "../ui/heatmap";
+import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
+import { formatPlanLabel, getRemainingPct } from "./formatters";
+import type { CodexUsageResponse } from "./types";
 
 export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   const sPct = usage.rate_limit?.primary_window?.used_percent ?? 0;

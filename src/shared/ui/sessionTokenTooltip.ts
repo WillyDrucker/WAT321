@@ -45,9 +45,8 @@ export function buildSessionTokenTooltip(
   const { provider, sessionTitle, label, modelId, contextUsed, contextWindowSize, ceiling, baselineTokens = 0, lastActiveAt } =
     input;
 
-  const BASELINE_TOKENS = baselineTokens;
-  const effectiveCeiling = Math.max(0, ceiling - BASELINE_TOKENS);
-  const effectiveUsed = Math.max(0, contextUsed - BASELINE_TOKENS);
+  const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
+  const effectiveUsed = Math.max(0, contextUsed - baselineTokens);
   const pctUsed =
     effectiveCeiling > 0
       ? Math.min(100, Math.round((effectiveUsed / effectiveCeiling) * 100))

@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -53,13 +53,6 @@
             "default": true,
             "order": 1,
             "markdownDescription": "Enable Claude widgets (usage bars and session tokens). Hidden automatically if the Claude CLI is not installed."
-          },
-          "wat321.experimental.forceClaudeAutoCompact": {
-            "type": "boolean",
-            "default": false,
-            "scope": "application",
-            "order": 2,
-            "markdownDescription": "**Experimental.** Arms Claude's built-in Auto-Compact so it triggers on your next message prompt. Disarms automatically once your prompt lands, or after 30 seconds if no prompt is sent. Can also be cancelled manually. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside of `~/.wat321/`. Your Claude settings are restored automatically. *Useful for long sessions when performance degrades.*"
           }
         }
       },

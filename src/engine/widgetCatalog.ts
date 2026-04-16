@@ -17,15 +17,14 @@ const DEFAULT_BASE_PRIORITY = 1001;
 
 /** All registered widget descriptors. Order determines default
  * left-to-right status bar position (slot 0 = leftmost). */
-const WIDGETS: readonly WidgetDescriptor[] = [
+const WIDGETS = [
   { id: "wat321.session",               name: "Claude Usage (5hr)",           provider: "claude", slot: 0 },
   { id: "wat321.weekly",                name: "Claude Usage (Weekly)",        provider: "claude", slot: 1 },
   { id: "wat321.codexSession",          name: "Codex Usage (5 hour)",         provider: "codex",  slot: 2 },
   { id: "wat321.codexWeekly",           name: "Codex Usage (Weekly)",         provider: "codex",  slot: 3 },
-  { id: "wat321.claudeAutoCompactArmed",name: "Claude Auto-Compact (Armed)",  provider: "engine", slot: 4 },
-  { id: "wat321.sessionTokens",         name: "Claude Session Tokens",        provider: "claude", slot: 5 },
-  { id: "wat321.codexSessionTokens",    name: "Codex Session Tokens",         provider: "codex",  slot: 6 },
-];
+  { id: "wat321.sessionTokens",         name: "Claude Session Tokens",        provider: "claude", slot: 4 },
+  { id: "wat321.codexSessionTokens",    name: "Codex Session Tokens",         provider: "codex",  slot: 5 },
+] as const satisfies readonly WidgetDescriptor[];
 
 /** Every widget ID registered in the catalog. Used by Reset WAT321
  * to restore right-click "Hide" decisions. */
@@ -56,9 +55,8 @@ export const WIDGET_SLOT = {
   claudeUsageWeekly: 1,
   codexUsage5H: 2,
   codexUsageWeekly: 3,
-  claudeAutoCompactArmed: 4,
-  claudeSessionTokens: 5,
-  codexSessionTokens: 6,
+  claudeSessionTokens: 4,
+  codexSessionTokens: 5,
 } as const;
 
 /** Derived reverse map: slot number -> widget ID. Built from

@@ -1,7 +1,8 @@
 import { getRemainingPct } from "../shared/codex-usage/formatters";
 import { buildTooltip } from "../shared/codex-usage/tooltipBuilder";
 import type { CodexUsageResponse } from "../shared/codex-usage/types";
-import { getCodexTextColor, renderCodexBar } from "../shared/ui/heatmap";
+import { renderCodexBar } from "../shared/ui/heatmap";
+import { getCodexTextColor } from "../shared/ui/textColors";
 import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidget";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 

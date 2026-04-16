@@ -2,8 +2,8 @@ import { existsSync, rmSync } from "node:fs";
 import * as vscode from "vscode";
 import { SETTING, WAT321_DIR } from "../engine/settingsKeys";
 import { getAllWidgetIds } from "../engine/widgetCatalog";
-import { healStuckOverride, type HealResult } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/heal";
-import { healStaleApplicationScopeKeys } from "./applicationScopeHeal";
+import { healStaleApplicationScopeKeys } from "./workspaceScopeHeal";
+import { runRetirementHeal } from "./retirementHeal";
 
 /** Update a single wat321.* setting at every applicable configuration
  * scope. Necessary because `config.get()` returns the merged effective
@@ -35,10 +35,8 @@ async function updateSettingAllScopes(
  * the underlying config state at `false` across Global /
  * Workspace / WorkspaceFolder.
  *
- * Exported because the experimental auto-compact service clears
- * its own checkbox through this helper too, keeping both the
- * Reset WAT321 flow and the experimental disarm paths on the
- * exact same clearing shape.
+ * Exported for any action-trigger checkbox that needs clearing
+ * across all scopes.
  *
  * Note: the Settings UI does not always repaint the visible
  * checkbox row in place after a config.update originating from
@@ -153,24 +151,6 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
 
   if (confirm !== "Clear Everything") return;
 
-  // CRITICAL: heal any stuck auto-compact override ("1") before
-  // wiping ~/.wat321/. Reads settings.json directly, restores the
-  // sentinel value or deletes the key. Must ALWAYS unstick the user.
-  let healResult: HealResult = "not-stuck";
-  try {
-    healResult = healStuckOverride();
-  } catch {
-    healResult = "io-error";
-  }
-
-  if (healResult === "io-error") {
-    await vscode.window.showErrorMessage(
-      "WAT321 could not write to ~/.claude/settings.json while trying to heal a stuck CLAUDE_AUTOCOMPACT_PCT_OVERRIDE. Reset aborted so we do not wipe ~/.wat321/ while settings are still at \"1\". Check that the file is not locked or read-only, then run Reset WAT321 again.",
-      { modal: true }
-    );
-    return;
-  }
-
   // In-memory reset hook: clears kickstart escalation counters on
   // running services so a user trapped in a sustained outage gets
   // the responsive fresh-park cadence back immediately. Runs after
@@ -186,6 +166,11 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     // threw.
   }
 
+  // Temporary: clean up retired auto-compact artifacts. Must run
+  // before rmSync(~/.wat321/) so the sentinel file is still readable
+  // for guided restoration of ~/.claude/settings.json.
+  runRetirementHeal();
+
   // Reset all settings to defaults. Must clear at every scope
   // (Global / Workspace / WorkspaceFolder) because `config.get()`
   // returns the merged effective value and a workspace-level
@@ -199,7 +184,6 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
   await Promise.all([
     updateSettingAllScopes(SETTING.enableClaude, undefined),
     updateSettingAllScopes(SETTING.enableCodex, undefined),
-    updateSettingAllScopes(SETTING.experimentalAutoCompact, undefined),
     updateSettingAllScopes(SETTING.displayMode, undefined),
     updateSettingAllScopes(SETTING.statusBarPriority, undefined),
     updateSettingAllScopes(SETTING.enableHeatmap, undefined),
@@ -212,8 +196,7 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
   // Remove the entire ~/.wat321/ folder. This catches the active shared
   // caches and claim files, plus any deprecated artifacts from earlier
   // versions. One recursive remove covers everything WAT321 has ever
-  // written. The force-auto-compact sentinel (if any) was already
-  // healed above.
+  // written.
   try {
     if (existsSync(WAT321_DIR)) {
       rmSync(WAT321_DIR, { recursive: true, force: true });

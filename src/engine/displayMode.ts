@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { SETTING } from "../engine/settingsKeys";
+import { SETTING } from "./settingsKeys";
 
 export type DisplayMode = "full" | "compact" | "minimal";
 export type RawDisplayMode = DisplayMode | "auto";
@@ -27,23 +27,23 @@ export function resolveDisplayMode(activeProviderCount: number): DisplayMode {
  * driven deactivation. Read by heatmap.ts for dual-provider
  * brand-color rules and by `getDisplayMode()` to resolve Auto
  * into Compact (2+ active) or Full (0-1 active). */
-const _providerActive: Record<string, boolean> = {};
-let _activeProviderCount = 0;
+const providerActiveFlags: Record<string, boolean> = {};
+let activeProviderCount = 0;
 
 /** Called by extension.ts after any provider activation change. */
 export function setProviderActive(key: string, active: boolean): void {
-  _providerActive[key] = active;
-  _activeProviderCount = Object.values(_providerActive).filter(Boolean).length;
+  providerActiveFlags[key] = active;
+  activeProviderCount = Object.values(providerActiveFlags).filter(Boolean).length;
 }
 
 /** Is a specific provider currently active? Used by heatmap text
  * color helpers to decide whether a brand marker is needed. */
 export function isProviderActive(key: string): boolean {
-  return _providerActive[key] ?? false;
+  return providerActiveFlags[key] ?? false;
 }
 
 /** Convenience for widgets - resolves display mode using the
  * current active provider count. */
 export function getDisplayMode(): DisplayMode {
-  return resolveDisplayMode(_activeProviderCount);
+  return resolveDisplayMode(activeProviderCount);
 }

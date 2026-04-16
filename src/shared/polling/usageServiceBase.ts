@@ -1,14 +1,12 @@
 import { existsSync } from "node:fs";
 
-import { Coordinator } from "../coordinator";
-import type { ServiceState, StateListener } from "../types";
+import type { ServiceState, StateListener } from "../serviceTypes";
+import { Coordinator } from "../cacheCoordinator";
 import {
   AUTH_ERROR_CODES,
   CACHE_FRESHNESS_OK_MS,
   CLAIM_TTL_MS,
   ERROR_ABSORPTION_THRESHOLD,
-  KICKSTART_ACTIVITY_WINDOW_MS,
-  KICKSTART_ESCALATION_MS,
   POLL_INTERVAL_MS,
   RATE_LIMIT_BACKOFF_MS,
 } from "./constants";
@@ -26,6 +24,7 @@ import {
   resolveStateFreshness,
   statesEqual,
 } from "./stateMachine";
+import { KickstartGate } from "./kickstartGate";
 import { computeStartupDelay } from "./startupDelay";
 
 const NO_CACHE_RETRY_MS = 10_000;
@@ -62,13 +61,10 @@ export abstract class UsageServiceBase<TResponse> {
   private disposed = false;
   private consecutiveRateLimits = 0;
   private consecutiveErrors = 0;
-  private postWakeStrikesRemaining = 0;
-  private consecutiveFailedKickstarts = 0;
-  private getActivityMs: (() => number | null) | null = null;
 
-  private coordinator: Coordinator<ServiceState<TResponse>>;
-
-  private countdown: CountdownTicker;
+  private readonly kickstart = new KickstartGate();
+  private readonly coordinator: Coordinator<ServiceState<TResponse>>;
+  private readonly countdown: CountdownTicker;
 
   constructor(private readonly config: UsageServiceConfig) {
     this.state = existsSync(config.authDir)
@@ -86,6 +82,17 @@ export abstract class UsageServiceBase<TResponse> {
 
     this.countdown = new CountdownTicker(
       () => {
+        // Check kickstart on every countdown tick (60s) so the
+        // activity-driven recovery path is not gated on the extended
+        // rate-limited poll interval. Without this, kickstart can only
+        // fire inside refresh(), which runs at retryAfterMs (up to
+        // 901s). The countdown tick is the perfect hook: it only runs
+        // during rate-limited state and is already on a 60s cadence.
+        if (this.state.status === "rate-limited" && this.kickstart.shouldKickstart(Date.now(), this.state.rateLimitedAt)) {
+          this.wake();
+          void this.refresh();
+          return;
+        }
         for (const listener of this.listeners) listener(this.state);
       },
       () => this.state.status === "rate-limited"
@@ -128,12 +135,12 @@ export abstract class UsageServiceBase<TResponse> {
   }
 
   setActivityProbe(probe: () => number | null): void {
-    this.getActivityMs = probe;
+    this.kickstart.setActivityProbe(probe);
   }
 
   resetKickstartEscalation(): void {
     if (this.disposed) return;
-    this.consecutiveFailedKickstarts = 0;
+    this.kickstart.reset();
     if (this.state.status === "rate-limited") {
       this.setPollInterval(POLL_INTERVAL_MS);
     }
@@ -158,23 +165,10 @@ export abstract class UsageServiceBase<TResponse> {
     if (this.disposed) return;
     if (this.state.status !== "rate-limited") return;
     this.consecutiveRateLimits = 0;
-    this.postWakeStrikesRemaining = 3;
+    this.kickstart.onWake();
     this.countdown.stop();
     this.setState({ status: "loading" });
     this.setPollInterval(POLL_INTERVAL_MS);
-  }
-
-  private shouldKickstart(now: number): boolean {
-    if (this.state.status !== "rate-limited") return false;
-    const step = Math.min(
-      this.consecutiveFailedKickstarts,
-      KICKSTART_ESCALATION_MS.length - 1
-    );
-    const minPark = KICKSTART_ESCALATION_MS[step];
-    if (now - this.state.rateLimitedAt < minPark) return false;
-    const activityMs = this.getActivityMs?.() ?? null;
-    if (activityMs === null) return false;
-    return now - activityMs <= KICKSTART_ACTIVITY_WINDOW_MS;
   }
 
   private startDiscovery(): void {
@@ -225,7 +219,7 @@ export abstract class UsageServiceBase<TResponse> {
       return;
     }
 
-    if (this.shouldKickstart(Date.now())) {
+    if (this.state.status === "rate-limited" && this.kickstart.shouldKickstart(Date.now(), this.state.rateLimitedAt)) {
       this.wake();
     }
 
@@ -285,13 +279,13 @@ export abstract class UsageServiceBase<TResponse> {
       this.coordinator.writeCache(newState);
       this.countdown.stop();
 
-      this.postWakeStrikesRemaining = 0;
+      this.kickstart.clearStrikes();
       if (this.consecutiveRateLimits > 0) {
         this.setPollInterval(POLL_INTERVAL_MS);
       }
       this.consecutiveRateLimits = 0;
       this.consecutiveErrors = 0;
-      this.consecutiveFailedKickstarts = 0;
+      this.kickstart.reset();
     } catch (error: unknown) {
       this.handleFetchError(error);
     } finally {
@@ -331,17 +325,11 @@ export abstract class UsageServiceBase<TResponse> {
       this.consecutiveRateLimits++;
       this.consecutiveErrors = 0;
 
-      if (this.postWakeStrikesRemaining > 0) {
-        this.postWakeStrikesRemaining--;
-        if (this.postWakeStrikesRemaining > 0) {
-          this.setPollInterval(POLL_INTERVAL_MS);
-          this.setState({ status: "loading" });
-          return;
-        }
-        this.consecutiveFailedKickstarts = Math.min(
-          this.consecutiveFailedKickstarts + 1,
-          KICKSTART_ESCALATION_MS.length - 1
-        );
+      if (this.kickstart.consumeStrike()) {
+        // Strikes remain - keep retrying at normal cadence.
+        this.setPollInterval(POLL_INTERVAL_MS);
+        this.setState({ status: "loading" });
+        return;
       }
 
       const rawRetryAfterMs =

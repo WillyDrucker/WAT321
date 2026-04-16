@@ -1,24 +1,24 @@
 import * as vscode from "vscode";
-import type { EngineContext } from "./engine/engineContext";
 import type { ProviderGroup, ProviderKey, Subscribable } from "./engine/contracts";
+import { setProviderActive } from "./engine/displayMode";
+import type { EngineContext } from "./engine/engineContext";
 import { SETTING } from "./engine/settingsKeys";
 import { isNotificationsEnabled, subscribeToNotifications } from "./engine/toastNotifier";
-import { readTail } from "./shared/fs/fileReaders";
+import { classifyLastEntry } from "./shared/transcriptClassifier";
 import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
-import { setProviderActive } from "./shared/displayMode";
+import { readTail } from "./shared/fs/fileReaders";
 import { activateWidget } from "./shared/usageWidgetActivation";
-import { classifyLastEntry, parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
+import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
 import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
 import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
 import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/widget";
-import { parseLastAssistantText as parseCodexAssistantText } from "./WAT321_CODEX_SESSION_TOKENS/parsers";
+import { isCodexTurnComplete, parseLastAssistantText as parseCodexAssistantText } from "./WAT321_CODEX_SESSION_TOKENS/parsers";
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { CodexSessionTokensWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 import { CodexUsage5hrWidget } from "./WAT321_CODEX_USAGE_5H/widget";
 import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/widget";
-import { ExperimentalAutoCompactService } from "./WAT321_EXPERIMENTAL_AUTOCOMPACT/service";
 
 /**
  * Provider registration and activation factories. Each provider
@@ -27,16 +27,7 @@ import { ExperimentalAutoCompactService } from "./WAT321_EXPERIMENTAL_AUTOCOMPAC
  * this file handles provider-specific wiring.
  */
 
-/** Experimental auto-compact state, managed alongside the engine
- * but not a provider itself - it depends on Claude's token service. */
-export interface ExperimentalAutoCompactGroup {
-  disposables: vscode.Disposable[];
-  service: ExperimentalAutoCompactService;
-}
-
-let experimentalAutoCompact: ExperimentalAutoCompactGroup | null = null;
-
-function workspacePath(): string {
+function getWorkspacePath(): string {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
 }
 
@@ -104,11 +95,15 @@ interface SessionResponseSource {
 /** Claude turn-completion classifier for the notification bridge.
  * Returns true only when the last transcript entry is a final
  * assistant message (text-only, no pending tool_use blocks). Suppresses
- * mid-tool-call notifications that would otherwise spam the user on
- * every contextUsed change during a multi-step response. */
+ * mid-tool-call notifications and post-response transcript writes
+ * (system entries, compact markers, summaries) that would otherwise
+ * fire duplicate notifications when they change contextUsed. The
+ * `unknown` classification (non-user/non-assistant entry types like
+ * system or summary) is deliberately excluded so those entries never
+ * trigger a notification. */
 function isClaudeTurnComplete(tail: string): boolean {
   const kind = classifyLastEntry(tail);
-  return kind === "assistant-done" || kind === "unknown";
+  return kind === "assistant-done";
 }
 
 function watchSessionResponse(
@@ -124,9 +119,16 @@ function watchSessionResponse(
     const session = (state as { status: "ok"; session: SessionResponseFields }).session;
     if (session.contextUsed === prevContextUsed) return;
     const isFirstRead = prevContextUsed === -1;
+    const isIncrease = session.contextUsed > prevContextUsed;
+    // Always update the baseline so post-compaction resets don't
+    // leave prevContextUsed stranded at a pre-compaction value.
     prevContextUsed = session.contextUsed;
     // Skip the initial state delivery - only fire on actual changes.
     if (isFirstRead) return;
+    // Only fire on contextUsed increases. Decreases happen after
+    // auto-compact (the summary has fewer tokens) and should not
+    // produce a duplicate notification for the same response.
+    if (!isIncrease) return;
 
     // Read the transcript tail for both turn-completion gating and
     // response preview extraction.
@@ -178,7 +180,7 @@ export function registerProviders(ctx: EngineContext): vscode.Disposable[] {
 
 function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
   const usageService = new ClaudeUsageSharedService();
-  const tokenService = new ClaudeSessionTokenService(workspacePath());
+  const tokenService = new ClaudeSessionTokenService(getWorkspacePath());
 
   usageService.setActivityProbe(() => tokenService.getLastActivityMs());
 
@@ -200,7 +202,7 @@ function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
 
 function buildCodexGroup(ctx: EngineContext): ProviderGroup {
   const usageService = new CodexUsageSharedService();
-  const tokenService = new CodexSessionTokenService(workspacePath());
+  const tokenService = new CodexSessionTokenService(getWorkspacePath());
 
   usageService.setActivityProbe(() => tokenService.getLastActivityMs());
 
@@ -209,7 +211,7 @@ function buildCodexGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
     ...activateWidget(tokenService, new CodexSessionTokensWidget()),
     watchProviderAvailability("codex", usageService, ctx),
-    watchSessionResponse("codex", tokenService, parseCodexAssistantText, null, ctx),
+    watchSessionResponse("codex", tokenService, parseCodexAssistantText, isCodexTurnComplete, ctx),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
@@ -220,31 +222,3 @@ function buildCodexGroup(ctx: EngineContext): ProviderGroup {
   return { disposables, usageService, tokenService };
 }
 
-/** Activate experimental auto-compact if Claude is active. */
-export function activateExperimentalAutoCompact(
-  ctx: EngineContext
-): ExperimentalAutoCompactGroup | null {
-  const claude = ctx.providers.getGroup("claude");
-  if (!claude) return null;
-  const service = new ExperimentalAutoCompactService(
-    claude.tokenService as ClaudeSessionTokenService
-  );
-  service.start();
-  experimentalAutoCompact = {
-    disposables: [{ dispose: () => service.dispose() }],
-    service,
-  };
-  return experimentalAutoCompact;
-}
-
-/** Deactivate experimental auto-compact. */
-export function deactivateExperimentalAutoCompact(): void {
-  if (!experimentalAutoCompact) return;
-  for (const d of experimentalAutoCompact.disposables) d.dispose();
-  experimentalAutoCompact = null;
-}
-
-/** Get the active experimental auto-compact service, if any. */
-export function getExperimentalAutoCompactService(): ExperimentalAutoCompactService | null {
-  return experimentalAutoCompact?.service ?? null;
-}

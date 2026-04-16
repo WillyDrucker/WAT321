@@ -1,4 +1,4 @@
-import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/types";
+import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/serviceTypes";
 
 /** Entry from ~/.codex/session_index.jsonl */
 export interface CodexSessionIndex {

@@ -1,6 +1,7 @@
 import { buildTooltip } from "../shared/claude-usage/tooltipBuilder";
 import type { UsageResponse } from "../shared/claude-usage/types";
-import { getClaudeTextColor, renderClaudeBar } from "../shared/ui/heatmap";
+import { renderClaudeBar } from "../shared/ui/heatmap";
+import { getClaudeTextColor } from "../shared/ui/textColors";
 import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidget";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 
