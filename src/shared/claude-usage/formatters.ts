@@ -1,7 +1,8 @@
+import { makeProgressBar } from "../ui/progressBar";
+
 /** Blue square emoji, the default fill character for Claude progress
  * bars. U+1F7E6 LARGE BLUE SQUARE. */
 const FILLED_BLUE = "\uD83D\uDFE6";
-const EMPTY = "\u2B1B";
 
 /** Build an emoji progress bar of `width` cells, filled proportional
  * to `pct`. Defaults to blue squares. Callers can override the fill
@@ -12,10 +13,7 @@ export function makeBar(
   width: number = 10,
   filledChar: string = FILLED_BLUE
 ): string {
-  const clamped = Math.max(0, Math.min(100, pct));
-  const filled = Math.round((clamped / 100) * width);
-  const empty = width - filled;
-  return filledChar.repeat(filled) + EMPTY.repeat(empty);
+  return makeProgressBar(pct, width, filledChar);
 }
 
 export function getMaxLabel(

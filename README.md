@@ -17,6 +17,7 @@ One opt-in **Experimental** setting is also available in the Claude section - se
 - 4 usage limit progress bars (Claude + Codex, 5-hour and weekly)
 - 2 real-time session token status bars
 - Heatmap for progress bars - colors warn as limits approach
+- System notifications when a response finishes - never miss a reply while tabbed away
 - Hover tooltips with the detailed breakdown
 - Force Auto-Compact (Experimental, opt-in) for higher-quality compacts than `/compact`
 - "Epic Handshake" in development - enables automatic crosstalk between Claude and Codex for epic results (Kick off Claude/Codex as a true ~~sub~~agent on steroids)
@@ -55,6 +56,12 @@ Same concept, **green** bars for Codex. Shows **remaining** capacity - the bars 
 Monitors your Codex session's context window fill level. Same layout as Claude session tokens.
 
 ![Codex session tokens](images/screenshots/CODEX_SESSION_TOKENS.png)
+
+### Notifications
+
+Get notified when Claude or Codex finishes a response. Works on Windows, Linux, and macOS.
+
+<img src="images/screenshots/NOTIFICATION_TOAST.png" alt="Notification toast" width="364">
 
 ### Force Claude Auto-Compact *(experimental, off by default)*
 
@@ -131,6 +138,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - All six core widgets are **strictly read-only** - they never modify Claude, Codex, or user config files. Everything they write is a disposable cache inside WAT321's own folder
 - **Hidden when a provider isn't set up yet** - if Claude or Codex isn't installed on your machine, those widgets stay out of the way. They appear automatically as soon as the provider is ready
 - Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
+- **Notifications enabled by default** - system notifications fire when Claude or Codex finishes a response. Configurable per-provider with Off / Auto / System / In-App modes in the Notifications settings section
 
 ### The experimental setting
 - **Force Claude Auto-Compact** touches one setting in `~/.claude/settings.json` to trigger Claude's built-in auto-compact, then restores the original value automatically. Default off, lives under an **Experimental** label in the Claude settings section
@@ -140,11 +148,11 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local session files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage. *The experimental Force Claude Auto-Compact setting is the one exception and is off by default.*
 - **Does not store, transmit, or modify your credentials.** Anything WAT321 saves locally is disposable and can be cleared at any time from the settings page.
 - **Does not interfere with Claude Code, Codex CLI, or any other extension.**
-- **The six core widgets never modify user files.** They only read. The experimental Force Claude Auto-Compact setting is the single exception, described above.
+- **The core widgets and tools never modify user files.** They only read. The experimental Force Claude Auto-Compact setting is the single exception, described above.
 
 ## Requirements
 
-- VS Code 1.85.0 or later
+- VS Code 1.100.0 or later
 - Claude widgets need an active Claude account with CLI credentials (`~/.claude/.credentials.json`)
 - Codex widgets need Codex CLI credentials (`~/.codex/auth.json`)
 - Session token widgets need an active session in the respective CLI tool
@@ -160,6 +168,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 
 ## Additional Settings
 
+- **Notifications** - System notifications when a response completes. On by default. Choose Off, Auto, System Notifications, or In-App. Filter by provider.
 - **Enable Heatmap** - Colors progress bars as you approach your limits. On by default. Turn off for plain solid bars.
 - **Status Bar Priority** - Adjust widget ordering if WAT321 overlaps with other extensions in the status bar. Requires window reload.
 

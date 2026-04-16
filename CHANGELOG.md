@@ -5,6 +5,19 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-04-16
+
+### Added
+
+- **You now get notified when Claude or Codex finishes a response.** A system notification pops up with the session name and a preview of the reply so you know which session finished and what it said. On Windows you get a native toast with the default notification sound. On macOS and Linux, notifications show inside the editor. Enabled by default in Auto mode - system notifications when you've tabbed away, in-app when you're already looking at the editor. You can switch to System Notifications (always), In-App (always), or Off from the new Notifications section in Settings. Each provider can be toggled independently.
+
+### Changed
+
+- **Notifications route through the core engine instead of being wired directly.** Session token services no longer know about notifications at all. A new `session.responseComplete` event on the EventHub handles all the routing, so the notification system is fully pluggable.
+- **Progress bars across all widgets now share a single builder.** Claude, Codex, and session token bars all delegate to one shared function. Each keeps its own color and display style.
+- **Clearer variable names in session token services.** `lastFilePath` is now `cachedTranscriptPath`, `lastFileSize` is now `cachedTranscriptSize`, and `lastLastKnownScan` is now `lastFallbackScan`. No behavior change.
+- **Codex parser function renamed for clarity.** `parseFirstUserMessage` in the Codex parser is now `extractFirstUserMessage` to make it obvious it takes pre-read content, not a file path (the Claude version still reads the file itself).
+
 ## [1.1.0] - 2026-04-16
 
 ### Added

@@ -1,7 +1,8 @@
+import { makeProgressBar } from "../ui/progressBar";
+
 /** Green square emoji, the default fill character for Codex progress
  * bars. U+1F7E9 LARGE GREEN SQUARE. */
 const FILLED_GREEN = "\uD83D\uDFE9";
-const EMPTY = "\u2B1B";
 
 export function getRemainingPct(usedPct: number): number {
   const clamped = Math.max(0, Math.min(100, usedPct));
@@ -18,10 +19,7 @@ export function makeBar(
   width: number = 10,
   filledChar: string = FILLED_GREEN
 ): string {
-  const remaining = getRemainingPct(usedPct);
-  const filled = Math.round((remaining / 100) * width);
-  const empty = width - filled;
-  return filledChar.repeat(filled) + EMPTY.repeat(empty);
+  return makeProgressBar(getRemainingPct(usedPct), width, filledChar);
 }
 
 export function formatPlanLabel(planType: string): string {

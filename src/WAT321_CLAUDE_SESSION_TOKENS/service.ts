@@ -19,7 +19,7 @@ const FALLBACK_SCAN_INTERVAL = 51_000;
 
 export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetState> {
   private cachedLastKnown: LastKnownTranscript | null = null;
-  private lastLastKnownScan = 0;
+  private lastFallbackScan = 0;
   private cachedSessionTitle: string | null = null;
   private cachedSessionTitlePath = "";
   private cachedAutoCompactPct: number | null = null;
@@ -33,11 +33,6 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
         : { status: "not-installed" },
       POLL_INTERVAL
     );
-  }
-
-  /** Current transcript file path, or null if no session resolved yet. */
-  getActiveTranscriptPath(): string | null {
-    return this.lastFilePath || null;
   }
 
   rebroadcast(): void {
@@ -119,11 +114,11 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     }
 
     if (
-      now - this.lastLastKnownScan >= FALLBACK_SCAN_INTERVAL ||
+      now - this.lastFallbackScan >= FALLBACK_SCAN_INTERVAL ||
       !this.cachedLastKnown
     ) {
       this.cachedLastKnown = findLastKnownTranscript(this.workspacePath);
-      this.lastLastKnownScan = now;
+      this.lastFallbackScan = now;
     }
     if (!this.cachedLastKnown) return null;
     const cwdForLabel =
@@ -166,9 +161,9 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       return;
     }
 
-    if (transcriptPath !== this.lastFilePath) {
-      this.lastFileSize = 0;
-      this.lastFilePath = transcriptPath;
+    if (transcriptPath !== this.cachedTranscriptPath) {
+      this.cachedTranscriptSize = 0;
+      this.cachedTranscriptPath = transcriptPath;
       this.cachedSessionTitle = null;
     }
 
@@ -182,7 +177,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       return;
     }
 
-    if (size === this.lastFileSize && this.hasGoodData) {
+    if (size === this.cachedTranscriptSize && this.hasGoodData) {
       if (this.state.status === "ok") {
         const prev = this.state.session;
         if (prev.source !== source) {
@@ -201,7 +196,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       }
       return;
     }
-    this.lastFileSize = size;
+    this.cachedTranscriptSize = size;
 
     const tail = readTail(transcriptPath);
     if (!tail) {

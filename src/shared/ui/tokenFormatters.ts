@@ -1,5 +1,7 @@
-const FILLED = "\uD83D\uDFE8"; // Yellow square
-const EMPTY = "\u2B1B"; // Black square
+import { makeProgressBar } from "./progressBar";
+
+/** Yellow square emoji for session token bars. */
+const FILLED_YELLOW = "\uD83D\uDFE8";
 const BAR_WIDTH = 10;
 
 /** Format token count as compact string: 1234 -> "1k", 150000 -> "150k", 1000000 -> "1M" */
@@ -22,8 +24,5 @@ export function formatPct(pct: number): string {
 
 /** Yellow/black block bar for session token context display */
 export function makeTokenBar(pct: number, width: number = BAR_WIDTH): string {
-  const clamped = Math.max(0, Math.min(100, pct));
-  const filled = Math.round((clamped / 100) * width);
-  const empty = width - filled;
-  return FILLED.repeat(filled) + EMPTY.repeat(empty);
+  return makeProgressBar(pct, width, FILLED_YELLOW);
 }

@@ -16,13 +16,23 @@ import type { ProviderKey } from "./contracts";
  */
 
 /** Every event the engine can emit. Add new events here as the
- * engine grows. Handlers receive the exact payload type. */
+ * engine grows. Handlers receive the exact payload type.
+ *
+ * Provider lifecycle events are emitted but have no subscribers
+ * yet - they exist as extensibility points for future consumers
+ * (logging, UI badges, status indicators). */
 export interface AppEvents {
   "provider.activated": { provider: ProviderKey };
   "provider.deactivated": { provider: ProviderKey };
   "provider.connected": { provider: ProviderKey };
   "provider.disconnected": { provider: ProviderKey };
-  "provider.rateLimited": { provider: ProviderKey; message?: string };
+  "session.responseComplete": {
+    provider: ProviderKey;
+    displayName: string;
+    label: string;
+    sessionTitle: string;
+    responsePreview: string;
+  };
   "engine.reset": Record<string, never>;
 }
 

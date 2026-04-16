@@ -203,6 +203,9 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes(SETTING.displayMode, undefined),
     updateSettingAllScopes(SETTING.statusBarPriority, undefined),
     updateSettingAllScopes(SETTING.enableHeatmap, undefined),
+    updateSettingAllScopes(SETTING.notificationsMode, undefined),
+    updateSettingAllScopes(SETTING.notificationsClaude, undefined),
+    updateSettingAllScopes(SETTING.notificationsCodex, undefined),
     resetStatusBarItemVisibility(),
   ]);
 

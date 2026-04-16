@@ -2,14 +2,18 @@ import * as vscode from "vscode";
 import type { EngineContext } from "./engine/engineContext";
 import type { ProviderGroup, ProviderKey, Subscribable } from "./engine/contracts";
 import { SETTING } from "./engine/settingsKeys";
+import { isNotificationsEnabled, subscribeToNotifications } from "./engine/toastNotifier";
+import { readTail } from "./shared/fs/fileReaders";
 import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
 import { setProviderActive } from "./shared/displayMode";
 import { activateWidget } from "./shared/usageWidgetActivation";
+import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
 import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
 import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
 import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/widget";
+import { parseLastAssistantText as parseCodexAssistantText } from "./WAT321_CODEX_SESSION_TOKENS/parsers";
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { CodexSessionTokensWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 import { CodexUsage5hrWidget } from "./WAT321_CODEX_USAGE_5H/widget";
@@ -71,9 +75,71 @@ function watchProviderAvailability(
   return { dispose: () => usageService.unsubscribe(listener) };
 }
 
-/** Register both providers with the engine. Call once from
- * extension.ts activate(). */
-export function registerProviders(ctx: EngineContext): void {
+/** Watch a session token service for context-usage changes and
+ * emit `session.responseComplete` on the EventHub. The bridge
+ * owns response preview parsing - services stay notification-
+ * unaware. Only reads the transcript tail when contextUsed
+ * actually changes AND notifications are enabled. */
+// Narrow types for the session response bridge. Defined here
+// rather than in contracts.ts because they're specific to the
+// notification wiring - services don't need to know about them.
+interface SessionResponseFields {
+  contextUsed: number;
+  label: string;
+  sessionTitle: string;
+}
+
+type SessionResponseState =
+  | { status: "ok"; session: SessionResponseFields }
+  | { status: string };
+
+interface SessionResponseSource {
+  subscribe(listener: (state: SessionResponseState) => void): void;
+  unsubscribe(listener: (state: SessionResponseState) => void): void;
+  getActiveTranscriptPath(): string | null;
+}
+
+function watchSessionResponse(
+  key: ProviderKey,
+  tokenService: SessionResponseSource,
+  parseAssistantText: (tail: string) => string,
+  ctx: EngineContext
+): vscode.Disposable {
+  let prevContextUsed = -1;
+  const listener = (state: SessionResponseState) => {
+    if (state.status !== "ok") return;
+    const session = (state as { status: "ok"; session: SessionResponseFields }).session;
+    if (session.contextUsed === prevContextUsed) return;
+    const isFirstRead = prevContextUsed === -1;
+    prevContextUsed = session.contextUsed;
+    // Skip the initial state delivery - only fire on actual changes.
+    if (isFirstRead) return;
+
+    let responsePreview = "";
+    if (isNotificationsEnabled()) {
+      const path = tokenService.getActiveTranscriptPath();
+      if (path) {
+        const tail = readTail(path);
+        if (tail) responsePreview = parseAssistantText(tail);
+      }
+    }
+
+    ctx.events.emit("session.responseComplete", {
+      provider: key,
+      displayName: ctx.providers.getDescriptor(key)?.displayName ?? key,
+      label: session.label,
+      sessionTitle: session.sessionTitle,
+      responsePreview,
+    });
+  };
+  tokenService.subscribe(listener);
+  return { dispose: () => tokenService.unsubscribe(listener) };
+}
+
+/** Register both providers with the engine and subscribe
+ * engine-level event consumers. Call once from extension.ts
+ * activate(). Returns disposables for the extension context. */
+export function registerProviders(ctx: EngineContext): vscode.Disposable[] {
   ctx.providers.register(
     { key: "claude", displayName: "Claude", settingKey: SETTING.enableClaude },
     () => buildClaudeGroup(ctx)
@@ -82,6 +148,10 @@ export function registerProviders(ctx: EngineContext): void {
     { key: "codex", displayName: "Codex", settingKey: SETTING.enableCodex },
     () => buildCodexGroup(ctx)
   );
+
+  return [
+    subscribeToNotifications(ctx.events),
+  ];
 }
 
 function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
@@ -95,6 +165,7 @@ function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
     ...activateWidget(tokenService, new ClaudeSessionTokensWidget()),
     watchProviderAvailability("claude", usageService, ctx),
+    watchSessionResponse("claude", tokenService, parseClaudeAssistantText, ctx),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
@@ -116,6 +187,7 @@ function buildCodexGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
     ...activateWidget(tokenService, new CodexSessionTokensWidget()),
     watchProviderAvailability("codex", usageService, ctx),
+    watchSessionResponse("codex", tokenService, parseCodexAssistantText, ctx),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
