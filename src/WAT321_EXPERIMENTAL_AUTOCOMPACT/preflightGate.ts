@@ -5,8 +5,9 @@ import type { ActiveContextInfo, ArmBlocker } from "./types";
 
 /**
  * Preflight gate for the experimental Force Claude Auto-Compact.
- * Pure one-shot check fired once at arm-request time - no caching,
- * no state, no cooldowns, no background polls. Returns `null` if
+ * Pure one-shot check fired once at arm-request time - no persistent
+ * state of its own, no background polls. Cooldown is passed in as
+ * input from the service. Returns `null` if
  * arming is safe, or a specific `ArmBlocker` reason otherwise.
  *
  * The gate set is deliberately small compared to the v1.0.14 widget:
@@ -62,7 +63,7 @@ export function determineArmBlocker(input: PreflightInput): ArmBlocker | null {
   // "key is genuinely not set" so a locked file cannot masquerade as
   // a clean state.
   const read = readAutoCompactOverride();
-  if (read.kind === "io-error") return "io-error";
+  if (read.kind === "io-error") return "settings-io-error";
   if (read.kind === "present" && read.value === ARMED_OVERRIDE_VALUE) {
     return "settings-stuck";
   }
@@ -139,7 +140,7 @@ export function formatArmBlockerMessage(
     }
     case "settings-stuck":
       return "Your Claude auto-compact override is already set to 1 from a prior session. Run WAT321: Reset WAT321 to unstick it.";
-    case "io-error":
+    case "settings-io-error":
       return "WAT321 lost access to ~/.claude/settings.json. Try again in a moment.";
   }
 }

@@ -27,6 +27,12 @@ import { join } from "node:path";
  * (so no further math is needed on the fallback path).
  */
 
+/** Codex subtracts this baseline from both numerator and denominator
+ * when computing `percent_of_context_window_remaining` (see
+ * `codex-rs/protocol/src/protocol.rs`). Accounts for prompts, tools,
+ * and space to call compact. Shared by the widget and tooltip. */
+export const CODEX_BASELINE_TOKENS = 12_000;
+
 const DEFAULT_CODEX_EFFECTIVE_CONTEXT_PCT = 95;
 
 export function resolveAutoCompactTokens(
