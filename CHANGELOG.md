@@ -5,15 +5,23 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.3] - unreleased
-
-### Added
+## [1.1.3] - 2026-04-16
 
 ### Changed
 
+- **Codex notifications now show the actual response text instead of a generic "response complete".** The response parser now recognizes all known Codex rollout event shapes so the toast body matches what you see in the terminal. Codex also gets the same turn-completion gating that Claude already had, so you only get notified on actual finished responses instead of mid-tool-call bookkeeping
+
+- **Codebase reorganized into focused modules, no behavior change.** File renames for clarity (`resetSettings`, `workspaceScopeHeal`, `transcriptClassifier`), the kickstart state machine extracted into its own module, text color helpers split from the heatmap file, and the session token widgets now use the same thin-descriptor pattern as the usage widgets. The extension works identically - this is housekeeping that makes future changes safer
+
 ### Fixed
 
+- **You no longer get a duplicate notification 30-60 seconds after Claude finishes a response.** Post-response transcript writes (auto-compact summaries, system entries) were being treated as new responses. The notification bridge now only fires on context increases and only when the last transcript entry is a genuine assistant message
+
+- **Codex session tokens now pick up mid-session model switches immediately.** If you use `/model` to change models during a Codex session, the widget and tooltip used to keep showing the old model name and ceiling until you started a new session. The model is now resolved from the most recent turn on every poll
+
 ### Removed
+
+- **Force Auto-Compact experimental setting removed.** Claude Code now handles auto-compact natively across all supported context sizes. A temporary cleanup runs on startup to restore any `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` left by prior versions
 
 ## [1.1.2] - 2026-04-16
 
