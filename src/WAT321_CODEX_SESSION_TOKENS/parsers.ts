@@ -129,7 +129,7 @@ export function parseModelSlug(rolloutPath: string): string | null {
 
 /** First user message text, used as the widget's session title when
  * `session_index.jsonl` has no `thread_name` for this session. */
-export function parseFirstUserMessage(headContent: string): string {
+export function extractFirstUserMessage(headContent: string): string {
   const lines = headContent.trimEnd().split("\n");
   for (let i = 0; i < lines.length && i < 30; i++) {
     const line = lines[i];
@@ -148,6 +148,52 @@ export function parseFirstUserMessage(headContent: string): string {
     if (payload.type === "user_message") {
       const msg = payload.message;
       if (typeof msg === "string") return msg.trim();
+    }
+  }
+  return "";
+}
+
+/** Extract the text content from the most recent assistant message in
+ * the tail. Codex uses `event_msg` with `payload.type: "agent_message"`
+ * for final answers. Returns "" if none found. */
+export function parseLastAssistantText(tail: string): string {
+  const lines = tail.trimEnd().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (entry.type === "event_msg") {
+      const payload = entry.payload as Record<string, unknown> | undefined;
+      if (payload?.type === "agent_message") {
+        const msg = payload.message;
+        if (typeof msg === "string" && msg.length > 0) return msg;
+      }
+    }
+
+    if (entry.type === "response_item") {
+      const payload = entry.payload as Record<string, unknown> | undefined;
+      if (payload?.type === "message" && payload.role === "assistant") {
+        const content = payload.content;
+        if (Array.isArray(content)) {
+          for (const part of content) {
+            if (
+              typeof part === "object" &&
+              part !== null &&
+              (part as Record<string, unknown>).type === "output_text"
+            ) {
+              const text = (part as Record<string, unknown>).text;
+              if (typeof text === "string" && text.length > 0) return text;
+            }
+          }
+        }
+      }
     }
   }
   return "";

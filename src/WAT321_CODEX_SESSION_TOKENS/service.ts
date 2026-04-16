@@ -7,7 +7,7 @@ import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBa
 import {
   extractSessionId,
   parseCwd,
-  parseFirstUserMessage,
+  extractFirstUserMessage,
   parseLastTokenCount,
   parseModelSlug,
 } from "./parsers";
@@ -108,9 +108,9 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       return;
     }
 
-    if (this.cachedRolloutPath !== this.lastFilePath) {
-      this.lastFileSize = 0;
-      this.lastFilePath = this.cachedRolloutPath;
+    if (this.cachedRolloutPath !== this.cachedTranscriptPath) {
+      this.cachedTranscriptSize = 0;
+      this.cachedTranscriptPath = this.cachedRolloutPath;
       this.cachedSessionTitle = null;
       this.cachedCwd = null;
       this.cachedModelSlug = null;
@@ -120,8 +120,8 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     let rolloutMtime: number;
     try {
       const st = statSync(this.cachedRolloutPath);
-      if (st.size === this.lastFileSize && this.hasGoodData) return;
-      this.lastFileSize = st.size;
+      if (st.size === this.cachedTranscriptSize && this.hasGoodData) return;
+      this.cachedTranscriptSize = st.size;
       rolloutMtime = st.mtimeMs;
     } catch {
       return;
@@ -147,7 +147,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       let title = getSessionTitle(codexDir, sessionId);
       if (!title) {
         const head = readHead(this.cachedRolloutPath, 32_768);
-        if (head) title = parseFirstUserMessage(head);
+        if (head) title = extractFirstUserMessage(head);
       }
       this.cachedSessionTitle = title;
       this.cachedSessionTitleId = sessionId;

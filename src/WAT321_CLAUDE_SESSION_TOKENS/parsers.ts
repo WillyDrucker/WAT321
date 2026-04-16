@@ -5,6 +5,26 @@ import { readHead } from "../shared/fs/fileReaders";
  * is append-only JSON-lines with one entry per turn/event.
  */
 
+/** Extract text from a Claude message content field. Handles both
+ * `content: "string"` and `content: [{type: "text", text: "..."}]`
+ * forms used in Claude transcripts. */
+function extractTextContent(content: unknown): string | null {
+  if (typeof content === "string" && content.length > 0) return content;
+  if (Array.isArray(content)) {
+    for (const part of content) {
+      if (
+        typeof part === "object" &&
+        part !== null &&
+        (part as Record<string, unknown>).type === "text"
+      ) {
+        const text = (part as Record<string, unknown>).text;
+        if (typeof text === "string" && text.length > 0) return text;
+      }
+    }
+  }
+  return null;
+}
+
 export interface LastUsage {
   inputTokens: number;
   cacheCreationTokens: number;
@@ -55,6 +75,34 @@ export function parseLastUsage(tail: string): LastUsage | null {
     };
   }
   return null;
+}
+
+/**
+ * Extract the text content from the most recent assistant turn in
+ * the tail. Used for toast notification previews. Returns "" if no
+ * assistant message with text content is found.
+ */
+export function parseLastAssistantText(tail: string): string {
+  const lines = tail.trimEnd().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (entry.type !== "assistant") continue;
+    const msg = entry.message as Record<string, unknown> | undefined;
+    if (!msg) continue;
+
+    const text = extractTextContent(msg.content);
+    if (text) return text;
+  }
+  return "";
 }
 
 /**
@@ -122,19 +170,8 @@ export function parseFirstUserMessage(path: string): string {
     const msg = entry.message as Record<string, unknown> | undefined;
     if (!msg) continue;
 
-    const contentField = msg.content;
-    if (typeof contentField === "string") return contentField;
-    if (Array.isArray(contentField)) {
-      for (const part of contentField) {
-        if (
-          typeof part === "object" &&
-          part !== null &&
-          (part as Record<string, unknown>).type === "text"
-        ) {
-          return ((part as Record<string, unknown>).text as string) || "";
-        }
-      }
-    }
+    const text = extractTextContent(msg.content);
+    if (text !== null) return text;
   }
   return "";
 }
