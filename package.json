@@ -76,8 +76,44 @@
         }
       },
       {
-        "title": "General",
+        "title": "Notifications",
         "order": 3,
+        "properties": {
+          "wat321.notifications.mode": {
+            "type": "string",
+            "default": "Auto",
+            "enum": [
+              "Off",
+              "Auto",
+              "System Notifications",
+              "In-App"
+            ],
+            "enumDescriptions": [
+              "No notifications",
+              "System notifications when your editor is unfocused, in-app when focused",
+              "Always use system notifications (native on Windows, in-app elsewhere)",
+              "Always use the in-app notification bar inside your editor"
+            ],
+            "order": 1,
+            "markdownDescription": "Notify you when Claude or Codex finishes a response."
+          },
+          "wat321.notifications.claude": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "markdownDescription": "Show notifications for Claude sessions. Requires Claude to be enabled."
+          },
+          "wat321.notifications.codex": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "Show notifications for Codex sessions. Requires Codex to be enabled."
+          }
+        }
+      },
+      {
+        "title": "General",
+        "order": 4,
         "properties": {
           "wat321.displayMode": {
             "type": "string",
