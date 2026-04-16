@@ -64,7 +64,20 @@ export function healStuckOverride(): HealResult {
   if (readResult.kind === "missing") return "no-settings";
   if (readResult.kind === "io-error") return "io-error";
 
-  if (readResult.value !== ARMED_OVERRIDE_VALUE) {
+  // Read sentinel first - needed for both stuck detection and restore.
+  const sentinel = readSentinel();
+
+  // Stuck detection: the override matches either the legacy armed
+  // value ("1") or the sentinel's recorded dynamic armed value.
+  // Legacy "1" is always treated as stuck because no user would
+  // intentionally set their auto-compact threshold to 1%. Dynamic
+  // values (e.g. "78") are only treated as stuck when a sentinel
+  // confirms WAT321 wrote them.
+  const isLegacyStuck = readResult.value === ARMED_OVERRIDE_VALUE;
+  const isDynamicStuck =
+    sentinel !== null && readResult.value === sentinel.armedOverride;
+
+  if (!isLegacyStuck && !isDynamicStuck) {
     deleteSentinel();
     return "not-stuck";
   }
@@ -72,7 +85,6 @@ export function healStuckOverride(): HealResult {
   let target: string | null = null;
   let source: "sentinel" | "default" = "default";
 
-  const sentinel = readSentinel();
   if (sentinel) {
     const candidate =
       sentinel.originalOverride === undefined ? null : sentinel.originalOverride;
