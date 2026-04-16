@@ -12,14 +12,11 @@ Claude and Codex usage bars built right into your IDE.
 
 WAT321 ships with **six read-only widgets** - three for Claude, three for Codex - all enabled out of the box. They only read your existing CLI files and poll a safe stats endpoint; they never modify anything.
 
-One opt-in **Experimental** setting is also available in the Claude section - see below.
-
 - 4 usage limit progress bars (Claude + Codex, 5-hour and weekly)
 - 2 real-time session token status bars
 - Heatmap for progress bars - colors warn as limits approach
 - System notifications when a response finishes - never miss a reply while tabbed away
 - Hover tooltips with the detailed breakdown
-- Force Auto-Compact (Experimental, opt-in) for higher-quality compacts than `/compact`
 - "Epic Handshake" in development - enables automatic crosstalk between Claude and Codex for epic results (Kick off Claude/Codex as a true ~~sub~~agent on steroids)
 - Available on the VS Marketplace, Open VSX Registry, and as a direct `.vsix` download
 
@@ -62,10 +59,6 @@ Monitors your Codex session's context window fill level. Same layout as Claude s
 Get notified when Claude or Codex finishes a response. Works on Windows, Linux, and macOS.
 
 <img src="images/screenshots/NOTIFICATION_TOAST.png" alt="Notification toast" width="364">
-
-### Force Claude Auto-Compact *(experimental, off by default)*
-
-An **experimental** checkbox in the Claude settings section. Arms Claude's built-in Auto-Compact so it triggers on your next message prompt. Disarms after 30 seconds of no activity or can be cancelled. Produces a higher-quality compaction result than the manual `/compact` command, preserving tool results and reasoning. This is the only WAT321 tool that writes outside of `~/.wat321/`. Your Claude settings are backed up automatically. *Useful for long sessions when performance degrades.*
 
 ---
 
@@ -140,15 +133,12 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - Settings changes (enable/disable, display mode) take effect immediately - no window reload needed
 - **Notifications enabled by default** - system notifications fire when Claude or Codex finishes a response. Configurable per-provider with Off / Auto / System / In-App modes in the Notifications settings section
 
-### The experimental setting
-- **Force Claude Auto-Compact** touches one setting in `~/.claude/settings.json` to trigger Claude's built-in auto-compact, then restores the original value automatically. Default off, lives under an **Experimental** label in the Claude settings section
-
 ## What It Doesn't Do
 
-- **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local session files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage. *The experimental Force Claude Auto-Compact setting is the one exception and is off by default.*
+- **Will not affect your usage limits.** Usage widgets poll a read-only stats endpoint on a safe interval. Session token widgets only read local session files - no API calls, no network access. Nothing WAT321 does counts toward your Claude or Codex usage.
 - **Does not store, transmit, or modify your credentials.** Anything WAT321 saves locally is disposable and can be cleared at any time from the settings page.
 - **Does not interfere with Claude Code, Codex CLI, or any other extension.**
-- **The core widgets and tools never modify user files.** They only read. The experimental Force Claude Auto-Compact setting is the single exception, described above.
+- **Never modifies user files.** All widgets are strictly read-only. Everything WAT321 writes is a disposable cache inside its own `~/.wat321/` folder.
 
 ## Requirements
 
