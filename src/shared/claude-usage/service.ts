@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { WAT321_DIR } from "../../engine/settingsKeys";
 import { UsageServiceBase } from "../polling/usageServiceBase";
 import type { UsageResponse } from "./types";
 
 const AUTH_DIR = join(homedir(), ".claude");
-const WAT321_DIR = join(homedir(), ".wat321");
 const CREDENTIALS_FILE = join(AUTH_DIR, ".credentials.json");
 
 export class ClaudeUsageSharedService extends UsageServiceBase<UsageResponse> {

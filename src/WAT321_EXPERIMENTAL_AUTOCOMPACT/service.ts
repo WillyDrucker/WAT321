@@ -5,11 +5,12 @@ import {
   SETTINGS_PATH,
   writeAutoCompactOverride,
 } from "../shared/claudeSettings";
-import { clearCheckboxSetting, SETTING_KEY_FORCE_AUTOCOMPACT } from "../shared/clearSettings";
+import { clearCheckboxSetting } from "../shared/clearSettings";
+import { SETTING } from "../engine/settingsKeys";
 import type { ClaudeSessionTokenService } from "../WAT321_CLAUDE_SESSION_TOKENS/service";
 import type { WidgetState as ClaudeTokenWidgetState } from "../WAT321_CLAUDE_SESSION_TOKENS/types";
 import { ArmedStatusBarItem, CANCEL_COMMAND_ID } from "./armedStatusBarItem";
-import { ARMED_OVERRIDE_VALUE } from "./backups";
+import { ARMED_OVERRIDE_VALUE } from "./constants";
 import { scanForCompactMarker } from "./compactDetector";
 import { healStuckOverride, safeRestoreValue, type HealResult } from "./heal";
 import {
@@ -52,7 +53,7 @@ import type {
  *     so Claude falls back to its own built-in default formula.
  *     The armed value `"1"` is poison-checked and never restored.
  *   - `healStuckOverride()` on startup unsticks any override left
- *     stuck by a crash in a previous session.
+ *     stuck by a crash.
  *   - On activation, the setting is force-reset to `false` so a
  *     `true` value left across a VS Code restart never auto-arms.
  *   - `dispose()` runs a synchronous best-effort restore before
@@ -60,7 +61,7 @@ import type {
  *     still unsticks the override.
  */
 
-const SETTING_KEY = SETTING_KEY_FORCE_AUTOCOMPACT;
+const SETTING_KEY = SETTING.experimentalAutoCompact;
 const FULL_SETTING_PATH = `wat321.${SETTING_KEY}`;
 
 /** Window in which the tool waits for a prompt after arming. If the

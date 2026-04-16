@@ -6,8 +6,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { WAT321_DIR } from "../engine/settingsKeys";
 import type { ExperimentalAutoCompactSentinel } from "./types";
 
 /**
@@ -19,8 +19,7 @@ import type { ExperimentalAutoCompactSentinel } from "./types";
  */
 
 export const SENTINEL_PATH = join(
-  homedir(),
-  ".wat321",
+  WAT321_DIR,
   "claude-force-auto-compact-sentinel.json"
 );
 
@@ -40,7 +39,7 @@ export function writeSentinel(
   sentinel: ExperimentalAutoCompactSentinel
 ): boolean {
   try {
-    mkdirSync(join(homedir(), ".wat321"), { recursive: true });
+    mkdirSync(WAT321_DIR, { recursive: true });
     const tmp = `${SENTINEL_PATH}.tmp`;
     writeFileSync(tmp, JSON.stringify(sentinel, null, 2), "utf8");
     renameSync(tmp, SENTINEL_PATH);

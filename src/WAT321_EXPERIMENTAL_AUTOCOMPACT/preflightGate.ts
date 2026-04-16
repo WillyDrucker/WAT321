@@ -1,5 +1,5 @@
 import { readAutoCompactOverride } from "../shared/claudeSettings";
-import { ARMED_OVERRIDE_VALUE } from "./backups";
+import { ARMED_OVERRIDE_VALUE } from "./constants";
 import { scanTailForCompactHistory } from "./compactDetector";
 import type { ActiveContextInfo, ArmBlocker } from "./types";
 
@@ -10,10 +10,8 @@ import type { ActiveContextInfo, ArmBlocker } from "./types";
  * input from the service. Returns `null` if
  * arming is safe, or a specific `ArmBlocker` reason otherwise.
  *
- * The gate set is deliberately small compared to the v1.0.14 widget:
- * no passive availability resolver, no state, no cooldowns, no
- * loop-detection watcher. Each blocker fires once at tick time and
- * the user gets a single error toast explaining what to fix.
+ * Each blocker fires once at tick time and the user gets a single
+ * error toast explaining what to fix.
  *
  * Ordering matters. Cheapest / least IO-heavy checks run first so
  * the common "nothing is wrong" path is fast and the slow tail scan
@@ -81,7 +79,7 @@ export function determineArmBlocker(input: PreflightInput): ArmBlocker | null {
   // is currently running, so a stale tail cannot freeze us here.
   // A long-running tool call whose transcript mtime is minutes
   // old is exactly the scenario we MUST block - it was slipping
-  // through the old 60s window gate.
+  // through a time-window gate.
   if (
     tail.lastEntryKind === "user" ||
     tail.lastEntryKind === "assistant-pending"
