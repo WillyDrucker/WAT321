@@ -5,15 +5,18 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.21] - unreleased
-
-### Added
+## [1.0.21] - 2026-04-15
 
 ### Changed
 
+- **Force Auto-Compact now silently clears once your prompt lands.** Previously the red `! ARMED` indicator stayed visible while Claude was auto-compacting, and then timed out with a "disarmed" toast even though the compact ran successfully. Now the indicator hides the moment your prompt is detected in the transcript, the wait window extends to three minutes so long compacts finish cleanly, and there are no toasts after your prompt lands. If you never type a prompt, the original 30-second timeout still fires with its usual notification.
+- **Your Claude settings are now restored by deleting the override key, not by writing a replacement value.** We confirmed that removing `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` entirely returns Claude to its own built-in default formula. The old four-tier backup chain (sentinel, 3-slot backup ring, install snapshot, hardcoded "85") is replaced by a simpler two-tier chain: restore the sentinel's recorded value, or delete the key. WAT321 never writes a percentage to your settings during restore - only your exact original value or key removal.
+- **Claude and Codex usage services now share a single state machine.** The polling lifecycle (discovery, caching, rate-limit parking, kickstart escalation, error absorption, dispose) previously existed as two near-identical 450-line files. Both providers now extend one shared base class, eliminating about 400 lines of duplicated code and guaranteeing the two providers can never drift on critical rate-limit or recovery behavior.
+- **Codebase polish from a full 58-file manual audit.** Shared `StateListener<T>` type replaces four duplicate listener declarations. Widget activation consolidated into a single `activateWidget` helper. `CODEX_BASELINE_TOKENS` is now one constant instead of two. Setting keys for action-trigger checkboxes are centralized. Heatmap emoji declarations reordered for readability. Dead `SessionEntry.kind` field removed.
+
 ### Fixed
 
-### Removed
+- **Claude session tokens no longer go blank on the second VS Code open.** If you opened VS Code without a live Claude session, closed it, and opened again, the widget would show "Claude -" permanently. A stale entry in `~/.claude/sessions/` was pointing at a transcript that was never written, and the widget locked into a "waiting" state instead of falling through to your last known session. The widget now verifies the transcript exists before committing to it.
 
 ## [1.0.20] - 2026-04-15
 
