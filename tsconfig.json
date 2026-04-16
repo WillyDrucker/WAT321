@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "module": "commonjs",
+    "moduleResolution": "bundler", // TS 6.0 deprecated "node"; "bundler" with commonjs output is valid
     "target": "ES2022",
     "outDir": "out",
     "rootDir": "src",
