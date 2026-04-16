@@ -5,15 +5,11 @@ import {
   SETTINGS_PATH,
   writeAutoCompactOverride,
 } from "../shared/claudeSettings";
-import { clearCheckboxSetting } from "../shared/clearSettings";
+import { clearCheckboxSetting, SETTING_KEY_FORCE_AUTOCOMPACT } from "../shared/clearSettings";
 import type { ClaudeSessionTokenService } from "../WAT321_CLAUDE_SESSION_TOKENS/service";
 import type { WidgetState as ClaudeTokenWidgetState } from "../WAT321_CLAUDE_SESSION_TOKENS/types";
 import { ArmedStatusBarItem, CANCEL_COMMAND_ID } from "./armedStatusBarItem";
-import {
-  ARMED_OVERRIDE_VALUE,
-  maybeCaptureInstallSnapshot,
-  rotateArmBackup,
-} from "./backups";
+import { ARMED_OVERRIDE_VALUE } from "./backups";
 import { scanForCompactMarker } from "./compactDetector";
 import { healStuckOverride, safeRestoreValue, type HealResult } from "./heal";
 import {
@@ -42,14 +38,19 @@ import type {
  *   - Clicking the red `! ARMED` status bar item disarms the same
  *     way as unticking.
  *
- *   - On compact detection or 30s timeout, the service disarms,
+ *   - On compact detection or timeout, the service disarms,
  *     restores the override, disposes the armed status bar item,
- *     and unticks the box, each with its own information toast.
+ *     and unticks the box. If no prompt was observed, each path
+ *     shows its own information toast. Once a prompt lands in the
+ *     transcript, the widget hides silently and the timeout
+ *     extends to 3 minutes to allow long compacts to finish.
  *
  * Safety contracts:
- *   - Sentinel + 3-slot arm backup ring + install snapshot +
- *     hardcoded `"85"` form a four-tier restore precedence chain,
- *     poison-checked at every tier against the armed value `"1"`.
+ *   - Sentinel records the user's original override (custom string
+ *     or `null` for "key absent"). On disarm or heal, sentinel
+ *     value is restored; if sentinel is missing, the key is deleted
+ *     so Claude falls back to its own built-in default formula.
+ *     The armed value `"1"` is poison-checked and never restored.
  *   - `healStuckOverride()` on startup unsticks any override left
  *     stuck by a crash in a previous session.
  *   - On activation, the setting is force-reset to `false` so a
@@ -59,11 +60,20 @@ import type {
  *     still unsticks the override.
  */
 
-const SETTING_KEY = "experimental.forceClaudeAutoCompact";
+const SETTING_KEY = SETTING_KEY_FORCE_AUTOCOMPACT;
 const FULL_SETTING_PATH = `wat321.${SETTING_KEY}`;
 
-/** Window in which the tool waits for a compact marker after arming. */
+/** Window in which the tool waits for a prompt after arming. If the
+ * user never types, we time out and disarm loudly. */
 const ARM_WINDOW_MS = 30_000;
+
+/** Extended window after a prompt has been observed in the transcript.
+ * A real compact can take well over the initial 30 s window to finish,
+ * especially on long sessions, so once we see the user's prompt land
+ * we wait up to three minutes for the compact marker before giving up.
+ * If the marker never arrives we still restore settings - this is the
+ * backstop, not the happy path. */
+const ARM_WINDOW_MS_POST_PROMPT = 180_000;
 
 /** Post-disarm cooldown during which re-arming is refused. */
 const COOLDOWN_MS = 30_000;
@@ -76,6 +86,16 @@ type DisarmReason = "user-cancel" | "compact-detected" | "timeout";
 export class ExperimentalAutoCompactService {
   private armedSentinel: ExperimentalAutoCompactSentinel | null = null;
   private armedScanOffset = 0;
+  /** Set to true the first poll after arming where we observe the
+   * transcript file grow past its baseline size. Marks "the user's
+   * next prompt has landed in the transcript", which is the signal
+   * that the user's intent has been captured and Claude has committed
+   * to whatever compact decision it is going to make for this turn.
+   * We silently hide the !ARMED widget at that moment (no toast) and
+   * extend the compact-wait window to `ARM_WINDOW_MS_POST_PROMPT` so
+   * a long compact still finishes cleanly. Reset to false on every
+   * fresh arm and on every disarm. */
+  private promptObserved = false;
   private cooldownUntil = 0;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private configListener: vscode.Disposable | null = null;
@@ -101,16 +121,12 @@ export class ExperimentalAutoCompactService {
     }
     if (
       healResult === "restored-from-sentinel" ||
-      healResult === "restored-from-arm-backup" ||
-      healResult === "restored-from-install-snapshot" ||
       healResult === "restored-to-default"
     ) {
       vscode.window.showInformationMessage(
         "WAT321 restored your Claude auto-compact setting from a previous session."
       );
     }
-
-    maybeCaptureInstallSnapshot();
 
     // Force the setting to false on activate regardless of its prior
     // state. A `true` value left across restart would otherwise run
@@ -236,7 +252,7 @@ export class ExperimentalAutoCompactService {
     // on the notification returns undefined, which we treat the
     // same as explicit Cancel (un-tick the checkbox and bail).
     const choice = await vscode.window.showInformationMessage(
-      "Arm Claude Auto-Compact for your next message to Claude? Your next prompt will trigger Claude's built-in auto-compact. Disarms after 30 seconds of no activity.",
+      "Arm Claude Auto-Compact for your next message to Claude? Your next prompt will trigger Claude's built-in auto-compact. Disarms automatically once your prompt lands, or after 30 seconds if no prompt is sent.",
       "Arm Auto-Compact",
       "Cancel"
     );
@@ -302,10 +318,6 @@ export class ExperimentalAutoCompactService {
       return;
     }
 
-    // Rotate backup ring BEFORE sentinel so even a sentinel-write
-    // failure leaves the user's original value on disk.
-    rotateArmBackup(originalOverride);
-
     const sentinel: ExperimentalAutoCompactSentinel = {
       version: 1,
       settingsPath: SETTINGS_PATH,
@@ -335,6 +347,7 @@ export class ExperimentalAutoCompactService {
 
     this.armedSentinel = sentinel;
     this.armedScanOffset = baselineSize;
+    this.promptObserved = false;
     this.armedItem.show();
 
     vscode.window.showInformationMessage(
@@ -359,7 +372,9 @@ export class ExperimentalAutoCompactService {
       deleteSentinel();
     }
 
+    const wasPromptObserved = this.promptObserved;
     this.armedSentinel = null;
+    this.promptObserved = false;
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
@@ -374,13 +389,19 @@ export class ExperimentalAutoCompactService {
     // config listener short-circuits because armedSentinel is null.
     void clearCheckboxSetting(SETTING_KEY);
 
+    // Once the user's prompt has landed we clean up silently - the
+    // user already saw the compact either fire or not fire on their
+    // end and a second toast telling them about it is noise. The
+    // !ARMED widget was already hidden at prompt-observation time.
+    if (wasPromptObserved) return;
+
     if (reason === "compact-detected") {
       vscode.window.showInformationMessage(
         "Auto-compact fired. Your Claude settings have been restored."
       );
     } else if (reason === "timeout") {
       vscode.window.showInformationMessage(
-        "Claude Auto-Compact disarmed. Timed out after 30 seconds."
+        "Claude Auto-Compact disarmed. No prompt detected within 30 seconds."
       );
     } else if (reason === "user-cancel") {
       vscode.window.showInformationMessage(
@@ -423,13 +444,27 @@ export class ExperimentalAutoCompactService {
     }
 
     // Timeout failsafe: restore even if compact never fired.
-    if (Date.now() - sentinel.armedAt > ARM_WINDOW_MS) {
+    // Extended window once a prompt has already been observed so a
+    // long compact has time to actually land its summary marker.
+    const windowLimit = this.promptObserved
+      ? ARM_WINDOW_MS_POST_PROMPT
+      : ARM_WINDOW_MS;
+    if (Date.now() - sentinel.armedAt > windowLimit) {
       this.disarm("timeout");
       return;
     }
 
     try {
       const size = statSync(sentinel.watchTranscriptPath).size;
+      // Prompt observation: the transcript only grows when a new turn
+      // is written, so any growth past the baseline means the user's
+      // prompt has landed. Silently hide the !ARMED widget on the
+      // first such poll. Settings stay armed; we keep polling for
+      // the compact marker under the extended timeout.
+      if (!this.promptObserved && size > sentinel.baselineSize) {
+        this.promptObserved = true;
+        this.armedItem.dispose();
+      }
       const outcome = scanForCompactMarker(
         sentinel.watchTranscriptPath,
         this.armedScanOffset,
