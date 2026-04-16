@@ -5,6 +5,25 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-16
+
+### Added
+
+- **Your session token tooltips now show which model you're on and the full context window.** Hover Claude or Codex session tokens to see the model name (e.g. "Opus 4.6") and context window size (e.g. "1M context") right below the session title. The model updates live if you switch mid-session with `/model`.
+- **Hidden debug command for checking provider health.** Run `WAT321: Show Provider Health` from the command palette (type the full name) to see which providers are activated and the engine state. Useful when something looks off.
+- **Typed event system for future cross-cutting features.** The engine now emits provider lifecycle events (activated, deactivated, connected, disconnected) that future features like toast notifications can subscribe to.
+
+### Changed
+
+- **WAT321 now runs on a core engine.** Provider lifecycle, widget metadata, setting keys, and model detection are all centralized. Adding a new provider no longer requires edits across 6 files. No behavior change from the user's perspective - everything works the same, just better organized under the hood.
+- **Session token auto-compact ceiling is now model-aware.** The ceiling shown in your session token widget adapts to your model's context window size instead of showing a flat 85% for all models. On a 1M-context model like Opus 4.6, the ceiling is ~970k instead of the old 850k.
+- **All four usage widgets share a single rendering engine.** Claude and Codex usage bars (5h and weekly) now run through one config-driven widget class. Same look, same behavior, less code to maintain.
+- **TypeScript upgraded to 6.0.** The extension now builds on TypeScript 6.0.2 with modern module resolution. VS Code engine floor raised to 1.100 (December 2024).
+
+### Fixed
+
+- **Codex session tokens now refresh properly on display mode toggle.** Switching between Full, Compact, and Minimal could show stale token data for Codex because the rebroadcast path skipped a file re-read. Both providers now behave the same.
+
 ## [1.0.21] - 2026-04-15
 
 ### Changed

@@ -1,57 +1,33 @@
-import * as vscode from "vscode";
 import { getRemainingPct } from "../shared/codex-usage/formatters";
 import { buildTooltip } from "../shared/codex-usage/tooltipBuilder";
-import type {
-  ServiceState,
-  StatusBarWidget,
-} from "../shared/codex-usage/types";
-import { getDisplayMode } from "../shared/displayMode";
+import type { CodexUsageResponse } from "../shared/codex-usage/types";
 import { getCodexTextColor, renderCodexBar } from "../shared/ui/heatmap";
-import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
-import { renderWeeklyUsageNonOkState } from "../shared/ui/usageNonOkRenderer";
+import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidget";
+import { WIDGET_SLOT } from "../engine/widgetCatalog";
 
-export class CodexUsageWeeklyWidget implements StatusBarWidget {
-  private item: vscode.StatusBarItem;
+const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
+  id: "wat321.codexWeekly",
+  name: "WAT321: Codex Usage (Weekly)",
+  slot: WIDGET_SLOT.codexUsageWeekly,
+  variant: "weekly",
+  loadingText: "Codex weekly $(loading~spin)",
+  loadingTooltip: "Fetching Codex usage data...",
+  getDisplayPct: (data) => {
+    const usedPct = data.rate_limit?.secondary_window?.used_percent ?? 0;
+    return getRemainingPct(usedPct);
+  },
+  renderBar: (remainingPct, width) => renderCodexBar(100 - remainingPct, width),
+  buildTooltip: (data) => buildTooltip(data),
+  getTextColor: (mode, remainingPct) => getCodexTextColor(mode, 100 - remainingPct),
+  formatText: (mode, pct, bar5, bar10) => {
+    if (mode === "minimal") return `Codex weekly [${pct}%]`;
+    if (mode === "compact") return `Codex weekly ${bar5} ${pct}%`;
+    return `Codex weekly ${bar10} ${pct}%`;
+  },
+};
 
+export class CodexUsageWeeklyWidget extends UsageWidget<CodexUsageResponse> {
   constructor() {
-    this.item = vscode.window.createStatusBarItem(
-      "wat321.codexWeekly",
-      vscode.StatusBarAlignment.Right,
-      getWidgetPriority(WIDGET_SLOT.codexUsageWeekly)
-    );
-    this.item.name = "WAT321: Codex Usage (Weekly)";
-    this.item.text = "Codex weekly $(loading~spin)";
-    this.item.color = undefined;
-    // First state delivered by subscribe() decides visibility.
-  }
-
-  update(state: ServiceState): void {
-    const handled = renderWeeklyUsageNonOkState(this.item, state, {
-      loadingText: "Codex weekly $(loading~spin)",
-      loadingTooltip: "Fetching Codex usage data...",
-    });
-    if (handled) return;
-
-    // ok branch
-    const usedPct =
-      state.data.rate_limit?.secondary_window?.used_percent ?? 0;
-    const remainingPct = getRemainingPct(usedPct);
-    const mode = getDisplayMode();
-
-    if (mode === "minimal") {
-      this.item.text = `Codex weekly [${remainingPct}%]`;
-    } else if (mode === "compact") {
-      this.item.text = `Codex weekly ${renderCodexBar(usedPct, 5)} ${remainingPct}%`;
-    } else {
-      this.item.text = `Codex weekly ${renderCodexBar(usedPct, 10)} ${remainingPct}%`;
-    }
-    this.item.tooltip = buildTooltip(state.data);
-    this.item.color = getCodexTextColor(mode, usedPct);
-    this.item.backgroundColor = undefined;
-    this.item.show();
-  }
-
-  dispose(): void {
-    this.item.dispose();
+    super(descriptor);
   }
 }

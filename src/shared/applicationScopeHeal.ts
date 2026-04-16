@@ -1,36 +1,19 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import {
-  clearCheckboxSetting,
-  SETTING_KEY_CLEAR_ALL,
-  SETTING_KEY_FORCE_AUTOCOMPACT,
-} from "./clearSettings";
+import { SETTING } from "../engine/settingsKeys";
+import { clearCheckboxSetting } from "./clearSettings";
 
 /**
- * Healing for `wat321.*` settings that must never live at workspace
- * scope. Peeled out of `clearSettings.ts` so that file can stay
- * focused on the Reset WAT321 command orchestration and this file
- * can own the "find and strip stale workspace-scope keys" concern.
+ * Heal `wat321.*` action-trigger settings that must never live at
+ * workspace scope. A stuck workspace value blocks the checkbox
+ * change handler because workspace overrides user during merge.
  *
- * Two-pronged heal:
- *
- *   1. User-scope cleanup via the normal config API (routed through
- *      `clearCheckboxSetting` imported back from clearSettings.ts).
- *      For an application-scoped setting VS Code accepts a Global
- *      write and silently ignores Workspace / WorkspaceFolder writes;
- *      either way this drops any lingering user-level value back to
- *      the schema default.
- *
- *   2. Direct file surgery on every open workspace folder's
- *      `.vscode/settings.json`. Necessary because VS Code refuses to
- *      modify application-scoped keys at workspace scope through the
- *      API, which would otherwise leave `"wat321.clearAllData":
- *      false` (or the experimental checkbox) physically present in
- *      the file forever. A stuck workspace value of either true or
- *      false breaks the change handler for these checkboxes
- *      (workspace overrides user during merge, so the handler's
- *      `config.get()` never sees the global transition).
+ * Two-pronged:
+ *   1. Clear at user scope via the config API.
+ *   2. Surgically strip from `.vscode/settings.json` in every open
+ *      workspace folder (VS Code's API refuses to modify
+ *      application-scoped keys at workspace scope).
  */
 
 /** Keys that must never live at workspace scope because they are
@@ -41,8 +24,8 @@ import {
  * early-adopter workspaces that still physically have the key in
  * their `.vscode/settings.json` from before the scope tightening. */
 const APPLICATION_SCOPE_KEYS = [
-  `wat321.${SETTING_KEY_CLEAR_ALL}`,
-  `wat321.${SETTING_KEY_FORCE_AUTOCOMPACT}`,
+  `wat321.${SETTING.clearAllData}`,
+  `wat321.${SETTING.experimentalAutoCompact}`,
 ] as const;
 
 /** Surgically strip a set of `wat321.*` keys from a single
@@ -94,17 +77,14 @@ function stripApplicationScopeKeysFromFile(path: string): void {
   }
 }
 
-/** Heal any stale application-scope key left behind by an older
- * WAT321 build (before these settings were tightened to
- * `scope: application`) or by a crashed prior run. Fire-and-forget
- * on activation. Never throws; every IO path is guarded. Scoped
- * narrowly to the keys in `APPLICATION_SCOPE_KEYS` - we never touch
- * any other setting in the file. */
+/** Fire-and-forget heal on activation. Strips stale application-scope
+ * keys from workspace settings. Never throws. Only touches keys in
+ * `APPLICATION_SCOPE_KEYS`. */
 export function healStaleApplicationScopeKeys(): void {
-  void clearCheckboxSetting(SETTING_KEY_CLEAR_ALL).catch(() => {
+  void clearCheckboxSetting(SETTING.clearAllData).catch(() => {
     // best-effort - never block activation
   });
-  void clearCheckboxSetting(SETTING_KEY_FORCE_AUTOCOMPACT).catch(() => {
+  void clearCheckboxSetting(SETTING.experimentalAutoCompact).catch(() => {
     // best-effort - never block activation
   });
 

@@ -1,7 +1,10 @@
 import * as vscode from "vscode";
+import type { EngineContext } from "./engine/engineContext";
+import type { ProviderGroup, ProviderKey, Subscribable } from "./engine/contracts";
+import { SETTING } from "./engine/settingsKeys";
 import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
-import { providerState } from "./shared/displayMode";
+import { setProviderActive } from "./shared/displayMode";
 import { activateWidget } from "./shared/usageWidgetActivation";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
 import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
@@ -14,103 +17,87 @@ import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/widget";
 import { ExperimentalAutoCompactService } from "./WAT321_EXPERIMENTAL_AUTOCOMPACT/service";
 
 /**
- * Provider activation and teardown. Kept out of `extension.ts` so the
- * top-level entry can stay focused on the VS Code command/config
- * wiring while this file owns the "what gets wired up when a provider
- * is enabled" decisions.
+ * Provider registration and activation factories. Each provider
+ * registers itself with the engine's ProviderRegistry via a
+ * descriptor + activation function. The registry handles lifecycle;
+ * this file handles provider-specific wiring.
  */
 
-interface ProviderService {
-  dispose(): void;
-  rebroadcast(): void;
-  setActivityProbe(probe: () => number | null): void;
-  resetKickstartEscalation(): void;
-  subscribe(listener: (state: { status: string }) => void): void;
-  unsubscribe(listener: (state: { status: string }) => void): void;
-}
-
-/** Base shape shared by both provider groups. The token service is
- * left generic here so each concrete subtype can narrow it to the
- * provider's actual class, avoiding the `as unknown as` double cast
- * that the experimental-tier activator otherwise needs. */
-export interface ProviderGroup<
-  TTokenService extends { dispose(): void; rebroadcast(): void } = {
-    dispose(): void;
-    rebroadcast(): void;
-  }
-> {
-  disposables: vscode.Disposable[];
-  usageService: ProviderService;
-  tokenService: TTokenService;
-}
-
-export type ClaudeProviderGroup = ProviderGroup<ClaudeSessionTokenService>;
-export type CodexProviderGroup = ProviderGroup<CodexSessionTokenService>;
-
+/** Experimental auto-compact state, managed alongside the engine
+ * but not a provider itself - it depends on Claude's token service. */
 export interface ExperimentalAutoCompactGroup {
   disposables: vscode.Disposable[];
   service: ExperimentalAutoCompactService;
 }
 
-export interface ActiveGroups {
-  claude: ClaudeProviderGroup | null;
-  codex: CodexProviderGroup | null;
-  experimentalAutoCompact: ExperimentalAutoCompactGroup | null;
-}
+let experimentalAutoCompact: ExperimentalAutoCompactGroup | null = null;
 
 function workspacePath(): string {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
 }
 
-export function rebroadcastAll(groups: ActiveGroups): void {
-  groups.claude?.usageService.rebroadcast();
-  groups.codex?.usageService.rebroadcast();
-  groups.claude?.tokenService.rebroadcast();
-  groups.codex?.tokenService.rebroadcast();
+/** Watch a usage service's connectivity state and update the
+ * display-mode provider-active flag when it transitions between
+ * connected and not-connected. Triggers a rebroadcast on every
+ * connectivity transition so display mode and brand colors pick
+ * up the change immediately.
+ *
+ * The distinction matters: a provider whose group is activated but
+ * whose CLI is not installed reports `not-connected`. That provider
+ * must NOT count as active for Auto display mode resolution or
+ * dual-provider brand-color logic. This watcher handles organic
+ * transitions (CLI installed/uninstalled mid-session). Settings-
+ * driven deactivation is handled by extension.ts calling
+ * `setProviderActive(key, false)` directly since dispose runs
+ * before the watcher can detect the transition. */
+function watchProviderAvailability(
+  key: ProviderKey,
+  usageService: Pick<Subscribable<{ status: string }>, "subscribe" | "unsubscribe">,
+  ctx: EngineContext
+): vscode.Disposable {
+  let wasConnected = false;
+  const listener = (state: { status: string }) => {
+    const nowConnected = state.status !== "not-connected";
+    if (nowConnected === wasConnected) return;
+    wasConnected = nowConnected;
+    setProviderActive(key, nowConnected);
+    ctx.events.emit(
+      nowConnected ? "provider.connected" : "provider.disconnected",
+      { provider: key }
+    );
+    ctx.providers.rebroadcastAll();
+  };
+  usageService.subscribe(listener);
+  return { dispose: () => usageService.unsubscribe(listener) };
 }
 
-/** Sync `providerState` with a usage service state change and trigger
- * a rebroadcast when the active flag flips, so Auto display mode
- * recomputes across every widget. */
-export function updateProviderActive(
-  provider: "claude" | "codex",
-  state: { status: string },
-  groups: ActiveGroups
-): void {
-  const active = state.status !== "not-connected";
-  const prev =
-    provider === "claude"
-      ? providerState.claudeActive
-      : providerState.codexActive;
-  if (prev === active) return;
-  if (provider === "claude") providerState.claudeActive = active;
-  else providerState.codexActive = active;
-  rebroadcastAll(groups);
+/** Register both providers with the engine. Call once from
+ * extension.ts activate(). */
+export function registerProviders(ctx: EngineContext): void {
+  ctx.providers.register(
+    { key: "claude", displayName: "Claude", settingKey: SETTING.enableClaude },
+    () => buildClaudeGroup(ctx)
+  );
+  ctx.providers.register(
+    { key: "codex", displayName: "Codex", settingKey: SETTING.enableCodex },
+    () => buildCodexGroup(ctx)
+  );
 }
 
-export function activateClaude(groups: ActiveGroups): ClaudeProviderGroup {
+function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
   const usageService = new ClaudeUsageSharedService();
   const tokenService = new ClaudeSessionTokenService(workspacePath());
 
-  // Activity-driven kickstart: the usage service polls this on every
-  // refresh, and a fresh transcript mtime trips a wake out of the
-  // rate-limited park. Live activity is ground-truth evidence Anthropic
-  // is serving the user right now, so any lockout we are sitting on is
-  // stale by definition.
   usageService.setActivityProbe(() => tokenService.getLastActivityMs());
 
   const disposables: vscode.Disposable[] = [
     ...activateWidget(usageService, new ClaudeUsage5hrWidget()),
     ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
     ...activateWidget(tokenService, new ClaudeSessionTokensWidget()),
+    watchProviderAvailability("claude", usageService, ctx),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
-
-  const stateListener = (state: { status: string }) =>
-    updateProviderActive("claude", state, groups);
-  usageService.subscribe(stateListener);
-  disposables.push({ dispose: () => usageService.unsubscribe(stateListener) });
 
   usageService.start();
   tokenService.start();
@@ -118,71 +105,52 @@ export function activateClaude(groups: ActiveGroups): ClaudeProviderGroup {
   return { disposables, usageService, tokenService };
 }
 
-export function activateCodex(groups: ActiveGroups): CodexProviderGroup {
-  const codexService = new CodexUsageSharedService();
+function buildCodexGroup(ctx: EngineContext): ProviderGroup {
+  const usageService = new CodexUsageSharedService();
   const tokenService = new CodexSessionTokenService(workspacePath());
 
-  codexService.setActivityProbe(() => tokenService.getLastActivityMs());
+  usageService.setActivityProbe(() => tokenService.getLastActivityMs());
 
   const disposables: vscode.Disposable[] = [
-    ...activateWidget(codexService, new CodexUsage5hrWidget()),
-    ...activateWidget(codexService, new CodexUsageWeeklyWidget()),
+    ...activateWidget(usageService, new CodexUsage5hrWidget()),
+    ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
     ...activateWidget(tokenService, new CodexSessionTokensWidget()),
-    { dispose: () => codexService.dispose() },
+    watchProviderAvailability("codex", usageService, ctx),
+    { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
 
-  const stateListener = (state: { status: string }) =>
-    updateProviderActive("codex", state, groups);
-  codexService.subscribe(stateListener);
-  disposables.push({ dispose: () => codexService.unsubscribe(stateListener) });
-
-  codexService.start();
+  usageService.start();
   tokenService.start();
 
-  return { disposables, usageService: codexService, tokenService };
+  return { disposables, usageService, tokenService };
 }
 
-/** Dispose a provider group, reset its active flag, and rebroadcast so
- * Auto display mode recomputes across remaining widgets. Returns `null`
- * so callers can write `group = deactivateGroup(group, "claude", groups);`. */
-export function deactivateGroup(
-  group: ProviderGroup | null,
-  provider: "claude" | "codex",
-  groups: ActiveGroups
-): null {
-  if (!group) return null;
-  for (const d of group.disposables) d.dispose();
-  if (provider === "claude") providerState.claudeActive = false;
-  else providerState.codexActive = false;
-  rebroadcastAll(groups);
-  return null;
-}
-
-/** Activate the experimental Force Claude Auto-Compact service. The
- * service subscribes to the configuration change event directly - no
- * widget, no command registration, no consent prompt. Requires the
- * Claude group to be active because the service needs
- * `ClaudeSessionTokenService.getActiveTranscriptPath()` to know which
- * transcript to watch for the compact marker. */
+/** Activate experimental auto-compact if Claude is active. */
 export function activateExperimentalAutoCompact(
-  groups: ActiveGroups
+  ctx: EngineContext
 ): ExperimentalAutoCompactGroup | null {
-  if (!groups.claude) return null;
+  const claude = ctx.providers.getGroup("claude");
+  if (!claude) return null;
   const service = new ExperimentalAutoCompactService(
-    groups.claude.tokenService
+    claude.tokenService as ClaudeSessionTokenService
   );
   service.start();
-  return {
+  experimentalAutoCompact = {
     disposables: [{ dispose: () => service.dispose() }],
     service,
   };
+  return experimentalAutoCompact;
 }
 
-export function deactivateExperimentalAutoCompact(
-  group: ExperimentalAutoCompactGroup | null
-): null {
-  if (!group) return null;
-  for (const d of group.disposables) d.dispose();
-  return null;
+/** Deactivate experimental auto-compact. */
+export function deactivateExperimentalAutoCompact(): void {
+  if (!experimentalAutoCompact) return;
+  for (const d of experimentalAutoCompact.disposables) d.dispose();
+  experimentalAutoCompact = null;
+}
+
+/** Get the active experimental auto-compact service, if any. */
+export function getExperimentalAutoCompactService(): ExperimentalAutoCompactService | null {
+  return experimentalAutoCompact?.service ?? null;
 }

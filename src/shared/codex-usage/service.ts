@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { WAT321_DIR } from "../../engine/settingsKeys";
 import { UsageServiceBase } from "../polling/usageServiceBase";
 import type { CodexUsageResponse } from "./types";
 
 const AUTH_DIR = join(homedir(), ".codex");
-const WAT321_DIR = join(homedir(), ".wat321");
 const AUTH_FILE = join(AUTH_DIR, "auth.json");
 
 interface CodexAuth {

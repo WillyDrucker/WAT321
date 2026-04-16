@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.0.21",
+  "version": "1.1.0",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
   ],
   "icon": "images/icon.png",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.100.0"
   },
   "categories": [
     "Other"
@@ -128,11 +128,11 @@
     "package": "npm run build && npx vsce package"
   },
   "devDependencies": {
-    "@types/node": "^25.5.2",
-    "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^8.58.1",
-    "@typescript-eslint/parser": "^8.58.1",
+    "@types/node": "^25.6.0",
+    "@types/vscode": "^1.100.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.2",
+    "@typescript-eslint/parser": "^8.58.2",
     "eslint": "^10.2.0",
-    "typescript": "^5.7.0"
+    "typescript": "^6.0.2"
   }
 }

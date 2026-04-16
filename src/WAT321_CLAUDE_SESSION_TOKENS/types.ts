@@ -13,6 +13,7 @@ export interface ResolvedSession {
   sessionId: string;
   label: string; // folder name
   sessionTitle: string; // first user message, truncated
+  modelId: string; // e.g. "claude-opus-4-6"
   contextUsed: number; // tokens currently in context
   contextWindowSize: number; // 200k or 1M
   autoCompactPct: number; // e.g. 70

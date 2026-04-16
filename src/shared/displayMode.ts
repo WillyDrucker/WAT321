@@ -1,46 +1,49 @@
 import * as vscode from "vscode";
+import { SETTING } from "../engine/settingsKeys";
 
 export type DisplayMode = "full" | "compact" | "minimal";
 export type RawDisplayMode = DisplayMode | "auto";
 
-/**
- * Shared provider activity state. Updated by extension.ts as providers
- * come online or go offline. Read by getDisplayMode() to resolve the
- * "Auto" setting into a concrete display mode.
- *
- * A provider is considered "active" when its CLI is present and it is
- * enabled in settings - including transient states like loading, no-auth,
- * offline, or error. The only state that counts as inactive is
- * "not-connected" (CLI directory missing). This is intentional: Auto mode
- * keys off provider presence, not successful authentication, so the
- * layout does not shift every time a transient error clears.
- */
-export const providerState = {
-  claudeActive: false,
-  codexActive: false,
-};
-
 /** Read raw setting value, may return "auto". */
 export function getRawDisplayMode(): RawDisplayMode {
   const config = vscode.workspace.getConfiguration("wat321");
-  const mode = config.get<string>("displayMode", "Auto").toLowerCase();
+  const mode = config.get<string>(SETTING.displayMode, "Auto").toLowerCase();
   if (mode === "auto" || mode === "compact" || mode === "minimal") return mode;
   if (mode === "full") return "full";
   return "auto";
 }
 
-/**
- * Resolved display mode used by widgets.
- * If the setting is "Auto", returns Compact when both providers are active,
- * Full otherwise. Full/Compact/Minimal return themselves.
- */
-export function getDisplayMode(): DisplayMode {
+/** Resolve "auto" to a concrete mode given an active provider count.
+ * Exported so bootstrap's display-mode tracker can call it without
+ * needing the full getDisplayMode + registry dependency. */
+export function resolveDisplayMode(activeProviderCount: number): DisplayMode {
   const raw = getRawDisplayMode();
-  if (raw === "auto") {
-    const activeCount =
-      (providerState.claudeActive ? 1 : 0) +
-      (providerState.codexActive ? 1 : 0);
-    return activeCount >= 2 ? "compact" : "full";
-  }
-  return raw;
+  if (raw !== "auto") return raw;
+  return activeProviderCount >= 2 ? "compact" : "full";
+}
+
+/** Per-provider active flags. Updated by the engine via
+ * `setProviderActive()` on connectivity transitions and settings-
+ * driven deactivation. Read by heatmap.ts for dual-provider
+ * brand-color rules and by `getDisplayMode()` to resolve Auto
+ * into Compact (2+ active) or Full (0-1 active). */
+const _providerActive: Record<string, boolean> = {};
+let _activeProviderCount = 0;
+
+/** Called by extension.ts after any provider activation change. */
+export function setProviderActive(key: string, active: boolean): void {
+  _providerActive[key] = active;
+  _activeProviderCount = Object.values(_providerActive).filter(Boolean).length;
+}
+
+/** Is a specific provider currently active? Used by heatmap text
+ * color helpers to decide whether a brand marker is needed. */
+export function isProviderActive(key: string): boolean {
+  return _providerActive[key] ?? false;
+}
+
+/** Convenience for widgets - resolves display mode using the
+ * current active provider count. */
+export function getDisplayMode(): DisplayMode {
+  return resolveDisplayMode(_activeProviderCount);
 }

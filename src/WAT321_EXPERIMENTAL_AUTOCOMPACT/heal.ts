@@ -2,7 +2,7 @@ import {
   readAutoCompactOverride,
   writeAutoCompactOverride,
 } from "../shared/claudeSettings";
-import { ARMED_OVERRIDE_VALUE } from "./backups";
+import { ARMED_OVERRIDE_VALUE } from "./constants";
 import { deleteSentinel, readSentinel } from "./sentinel";
 
 /**

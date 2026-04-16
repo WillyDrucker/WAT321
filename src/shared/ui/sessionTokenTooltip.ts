@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { formatModelDisplayName } from "../../engine/contracts";
 import { formatPct, formatTokens, makeTokenBar } from "./tokenFormatters";
 import { formatRelativeTime } from "./relativeTime";
 
@@ -15,11 +16,18 @@ const FOLDER = "\u{1F4C1}";
 const CLAMP = "\u{1F5DC}\u{FE0F}";
 const MAX_TITLE_LEN = 38;
 
+
 export interface SessionTokenTooltipInput {
   provider: "Claude" | "Codex";
   sessionTitle: string;
   label: string;
+  /** Model slug (e.g. "claude-opus-4-6") for Claude, or model name
+   * for Codex. Displayed as a friendly name in the tooltip header. */
+  modelId?: string;
   contextUsed: number;
+  /** Full context window size (e.g. 1,000,000 for 1M models). Shown
+   * alongside the model name so the user knows the total capacity. */
+  contextWindowSize?: number;
   ceiling: number;
   /** Tokens subtracted from both numerator and denominator before
    * computing the percentage. Codex passes `CODEX_BASELINE_TOKENS`
@@ -34,7 +42,7 @@ export interface SessionTokenTooltipInput {
 export function buildSessionTokenTooltip(
   input: SessionTokenTooltipInput
 ): vscode.MarkdownString {
-  const { provider, sessionTitle, label, contextUsed, ceiling, baselineTokens = 0, lastActiveAt } =
+  const { provider, sessionTitle, label, modelId, contextUsed, contextWindowSize, ceiling, baselineTokens = 0, lastActiveAt } =
     input;
 
   const BASELINE_TOKENS = baselineTokens;
@@ -57,6 +65,13 @@ export function buildSessionTokenTooltip(
   md.appendMarkdown(`**${provider} session token context**  \n`);
   if (title) {
     md.appendMarkdown(`"${title}"  \n`);
+  }
+  if (modelId) {
+    const modelName = formatModelDisplayName(modelId);
+    const windowLabel = contextWindowSize
+      ? ` (${formatTokens(contextWindowSize)} context)`
+      : "";
+    md.appendMarkdown(`${modelName}${windowLabel}  \n`);
   }
   if (typeof lastActiveAt === "number") {
     md.appendMarkdown(`Last active: ${formatRelativeTime(lastActiveAt)}  \n`);

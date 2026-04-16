@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
+import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
 
 /**
  * Encapsulates the red "! ARMED" status bar item surfaced while the
