@@ -2,15 +2,17 @@ import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import {
-  clearArmBackupRing,
-  readInstallSnapshotBytes,
-  writeInstallSnapshotBytes,
-} from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/backups";
 import { healStuckOverride, type HealResult } from "../WAT321_EXPERIMENTAL_AUTOCOMPACT/heal";
 import { healStaleApplicationScopeKeys } from "./applicationScopeHeal";
 
 const WAT321_DIR = join(homedir(), ".wat321");
+
+/** Setting keys used by action-trigger checkboxes. Unprefixed form
+ * (used with `getConfiguration("wat321")`). Shared so the key
+ * string is defined once across service.ts, clearSettings.ts, and
+ * applicationScopeHeal.ts. */
+export const SETTING_KEY_CLEAR_ALL = "clearAllData";
+export const SETTING_KEY_FORCE_AUTOCOMPACT = "experimental.forceClaudeAutoCompact";
 
 /** Every status bar item id we create via `window.createStatusBarItem`.
  * VS Code (1.63+) stores per-item user-hidden state in `settings.json`
@@ -141,7 +143,7 @@ async function updateConfigKeyAllScopes(
  * as `workbench.statusBarItem.<id>.visible = false`. Clearing these
  * to `undefined` restores VS Code's default (visible) so a user who
  * reset WAT321 after hiding a widget gets it back. Scoped narrowly
- * to our six known widget ids - we never touch any other workbench
+ * to our WAT321 widget ids - we never touch any other workbench
  * namespace. */
 async function resetStatusBarItemVisibility(): Promise<void> {
   const config = vscode.workspace.getConfiguration("workbench");
@@ -169,7 +171,7 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
   // checkbox from re-firing the change handler. Clearing first
   // means every click leaves the box unchecked and any subsequent
   // click is guaranteed to register as a fresh transition.
-  await clearCheckboxSetting("clearAllData");
+  await clearCheckboxSetting(SETTING_KEY_CLEAR_ALL);
 
   // Non-modal bottom-right notification - keeps the confirmation in
   // VS Code's normal notification area instead of a center-screen
@@ -186,11 +188,10 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
   // ~/.claude/settings.json is not stuck at the experimental
   // Force Claude Auto-Compact armed value "1". healStuckOverride
   // inspects settings.json directly (NOT via the sentinel) so it
-  // works even if the sentinel is missing, corrupt, or self-
-  // referential. It restores to the sentinel's original value if
-  // trustworthy, or to "85" (Claude's default auto-compact
-  // threshold) as a hardcoded failsafe. This is the reset-as-
-  // failsafe guarantee: Reset WAT321 must ALWAYS unstick the user.
+  // works even if the sentinel is missing or corrupt. It restores
+  // to the sentinel's original value if trustworthy, or deletes
+  // the key entirely so Claude falls back to its own built-in
+  // default formula. Reset WAT321 must ALWAYS unstick the user.
   let healResult: HealResult = "not-stuck";
   try {
     healResult = healStuckOverride();
@@ -234,48 +235,26 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
   await Promise.all([
     updateSettingAllScopes("enableClaude", undefined),
     updateSettingAllScopes("enableCodex", undefined),
-    updateSettingAllScopes("experimental.forceClaudeAutoCompact", undefined),
+    updateSettingAllScopes(SETTING_KEY_FORCE_AUTOCOMPACT, undefined),
     updateSettingAllScopes("displayMode", undefined),
     updateSettingAllScopes("statusBarPriority", undefined),
     updateSettingAllScopes("enableHeatmap", undefined),
     // Restore any WAT321 status bar items the user hid via right-click.
-    // Narrowly scoped to our six known widget ids - see STATUS_BAR_ITEM_IDS.
+    // Narrowly scoped to our WAT321 widget ids - see STATUS_BAR_ITEM_IDS.
     resetStatusBarItemVisibility(),
   ]);
 
-  // Clear the arm backup ring explicitly (best-effort) before the
-  // recursive wipe. Ring entries are historical user values; a reset
-  // is the moment to drop them so they cannot resurrect via the heal
-  // chain on the next arm.
-  clearArmBackupRing();
-
-  // Preserve the install snapshot across the recursive wipe of
-  // ~/.wat321/. The snapshot is the "original install baseline" the
-  // user explicitly asked us to keep available as a last-resort
-  // restore source even after Reset runs. Read its raw bytes now
-  // and rewrite them after the directory is rebuilt.
-  const preservedInstallSnapshot = readInstallSnapshotBytes();
-
   // Remove the entire ~/.wat321/ folder. This catches the active shared
   // caches and claim files, plus any deprecated artifacts from earlier
-  // versions (e.g. claude-usage-last-fetch, codex-usage-last-fetch,
-  // welcome-shown) that upgraded installs may still be carrying. One
-  // recursive remove covers everything WAT321 has ever written. The
-  // force-auto-compact sentinel (if any) was already processed above.
+  // versions. One recursive remove covers everything WAT321 has ever
+  // written. The force-auto-compact sentinel (if any) was already
+  // healed above.
   try {
     if (existsSync(WAT321_DIR)) {
       rmSync(WAT321_DIR, { recursive: true, force: true });
     }
   } catch {
     // best-effort
-  }
-
-  // Rehydrate the preserved install snapshot so it survives Reset.
-  // The next start() will NOT re-capture this file (it still exists
-  // on disk), which is exactly the behavior the user asked for: the
-  // original install baseline stays stable across resets.
-  if (preservedInstallSnapshot) {
-    writeInstallSnapshotBytes(preservedInstallSnapshot);
   }
 
   vscode.window.showInformationMessage(
@@ -305,10 +284,10 @@ export function registerClearSettingsCommand(
   // UI rendering caveat.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("wat321.clearAllData")) {
+      if (e.affectsConfiguration(`wat321.${SETTING_KEY_CLEAR_ALL}`)) {
         const checked = vscode.workspace
           .getConfiguration("wat321")
-          .get<boolean>("clearAllData", false);
+          .get<boolean>(SETTING_KEY_CLEAR_ALL, false);
         if (checked) performClear(onReset);
       }
     })
