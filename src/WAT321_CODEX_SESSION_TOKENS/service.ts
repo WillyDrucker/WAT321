@@ -1,9 +1,9 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { StateListener } from "../shared/types";
 import type { CodexTokenWidgetState } from "./types";
 import { readHead, readTail } from "../shared/fs/fileReaders";
+import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import {
   extractSessionId,
   parseCwd,
@@ -14,31 +14,12 @@ import {
 import { findLatestRollout, getSessionTitle } from "./rolloutDiscovery";
 import { resolveAutoCompactTokens } from "./autoCompactLimit";
 
-// Staggered 1 s off the Claude session token poll (5_000) so two
-// concurrent providers do not stat on the same tick. The 30 s
-// kickstart activity window still contains multiple Codex polls, so
-// the stagger is free from the usage-service's perspective.
 const POLL_INTERVAL = 6_000;
 const SESSION_SCAN_INTERVAL = 51_000;
 
-type Listener = StateListener<CodexTokenWidgetState>;
-
-export class CodexSessionTokenService {
-  // Initial state reflects Codex CLI presence so widgets stay hidden on
-  // startup when the CLI is not installed (no startup flash).
-  private state: CodexTokenWidgetState = existsSync(join(homedir(), ".codex"))
-    ? { status: "no-session" }
-    : { status: "not-installed" };
-  private listeners: Set<Listener> = new Set();
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private disposed = false;
-  private workspacePath: string;
-
-  private lastFilePath = "";
-  private lastFileSize = 0;
+export class CodexSessionTokenService extends SessionTokenServiceBase<CodexTokenWidgetState> {
   private cachedRolloutPath: string | null = null;
   private lastRolloutScan = 0;
-
   private cachedSessionTitle: string | null = null;
   private cachedSessionTitleId = "";
   private cachedCwd: string | null = null;
@@ -49,56 +30,20 @@ export class CodexSessionTokenService {
   private cachedAutoCompactModel = "";
 
   constructor(workspacePath: string) {
-    this.workspacePath = workspacePath.replace(/\\/g, "/");
+    super(
+      workspacePath,
+      existsSync(join(homedir(), ".codex"))
+        ? { status: "no-session" }
+        : { status: "not-installed" },
+      POLL_INTERVAL
+    );
   }
 
-  start(): void {
-    this.poll();
-    this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
-  }
-
-  subscribe(listener: Listener): void {
-    this.listeners.add(listener);
-    listener(this.state);
-  }
-
-  unsubscribe(listener: Listener): void {
-    this.listeners.delete(listener);
-  }
-
-  rebroadcast(): void {
-    for (const fn of this.listeners) fn(this.state);
-  }
-
-  /** Most recent active-rollout mtime in ms, or null if no session
-   * has been resolved. Mirror of the Claude side - consumed by the
-   * Codex usage service as the activity signal that gates the
-   * kickstart out of the rate-limited park. */
-  getLastActivityMs(): number | null {
-    if (this.state.status !== "ok") return null;
-    return this.state.session.lastActiveAt;
-  }
-
-  dispose(): void {
-    this.disposed = true;
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-    this.listeners.clear();
-  }
-
-  private setState(s: CodexTokenWidgetState): void {
-    if (this.disposed) return;
-    this.state = s;
-    for (const fn of this.listeners) fn(s);
-  }
-
-  /** Only emit if visible values actually changed. */
   private setOkState(
     sessionId: string,
     label: string,
     sessionTitle: string,
+    modelSlug: string,
     contextUsed: number,
     contextWindowSize: number,
     autoCompactTokens: number,
@@ -110,6 +55,7 @@ export class CodexSessionTokenService {
         prev.sessionId === sessionId &&
         prev.label === label &&
         prev.sessionTitle === sessionTitle &&
+        prev.modelSlug === modelSlug &&
         prev.contextUsed === contextUsed &&
         prev.contextWindowSize === contextWindowSize &&
         prev.autoCompactTokens === autoCompactTokens &&
@@ -124,6 +70,7 @@ export class CodexSessionTokenService {
         sessionId,
         label,
         sessionTitle,
+        modelSlug,
         contextUsed,
         contextWindowSize,
         autoCompactTokens,
@@ -132,10 +79,9 @@ export class CodexSessionTokenService {
     });
   }
 
-  private poll(): void {
+  protected poll(): void {
     if (this.disposed) return;
 
-    const hasGoodData = this.state.status === "ok";
     const now = Date.now();
     const home = homedir();
     const codexDir = join(home, ".codex");
@@ -157,10 +103,7 @@ export class CodexSessionTokenService {
     }
 
     if (!this.cachedRolloutPath || !existsSync(this.cachedRolloutPath)) {
-      // Never degrade "ok" back to "no-session" once we have good data.
-      // The most recent rollout for this workspace is always shown until
-      // a better one appears.
-      if (hasGoodData) return;
+      if (this.hasGoodData) return;
       this.setState({ status: "no-session" });
       return;
     }
@@ -177,7 +120,7 @@ export class CodexSessionTokenService {
     let rolloutMtime: number;
     try {
       const st = statSync(this.cachedRolloutPath);
-      if (st.size === this.lastFileSize && hasGoodData) return;
+      if (st.size === this.lastFileSize && this.hasGoodData) return;
       this.lastFileSize = st.size;
       rolloutMtime = st.mtimeMs;
     } catch {
@@ -186,13 +129,13 @@ export class CodexSessionTokenService {
 
     const tail = readTail(this.cachedRolloutPath);
     if (!tail) {
-      if (!hasGoodData) this.setState({ status: "waiting" });
+      if (!this.hasGoodData) this.setState({ status: "waiting" });
       return;
     }
 
     const usage = parseLastTokenCount(tail);
     if (!usage) {
-      if (!hasGoodData) this.setState({ status: "waiting" });
+      if (!this.hasGoodData) this.setState({ status: "waiting" });
       return;
     }
 
@@ -241,6 +184,7 @@ export class CodexSessionTokenService {
       sessionId,
       this.cachedCwd ? basename(this.cachedCwd) : "Codex",
       this.cachedSessionTitle,
+      this.cachedModelSlug ?? "",
       usage.tokens,
       usage.contextWindowSize,
       this.cachedAutoCompactTokens,

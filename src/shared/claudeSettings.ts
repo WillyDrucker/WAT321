@@ -13,20 +13,25 @@ import { join } from "node:path";
 
 export const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
 
-/**
- * Claude's auto-compact default threshold, as a percentage. Used by
- * the session token widget when no `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
- * is set. A model-aware fallback is tracked in issue #38.
- *
- * Claude's real default is approximately
- *   fullWindow - min(systemReserve, 20000) - 13000 tokens
- * which works out to ~83% for 200k models and ~97% for 1M models.
- * 85 is a single display-only fallback that is approximately correct
- * for 200k models. It is NOT used as a restore target - the heal
- * path restores to `null` (key deletion) so Claude falls back to
- * its own built-in formula, which is always correct.
- */
-export const DEFAULT_CLAUDE_AUTOCOMPACT_PCT = 85;
+/** System reserve cap and compact margin from Claude Code's internal
+ * formula. When no `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is set, Claude
+ * computes the threshold as:
+ *   (fullWindow - min(systemReserve, SYSTEM_RESERVE_CAP)) - COMPACT_MARGIN
+ * Confirmed via binary inspection and community reports (GitHub
+ * anthropics/claude-code#31806). */
+const SYSTEM_RESERVE_CAP = 20_000;
+const COMPACT_MARGIN = 13_000;
+
+/** Compute the default auto-compact percentage for a given context
+ * window size using Claude's built-in formula. Returns the threshold
+ * as a percentage of the full window (e.g. ~83 for 200k, ~97 for 1M).
+ * Used only for display - the heal path restores to key deletion so
+ * Claude always uses its own formula at runtime. */
+export function computeDefaultAutoCompactPct(contextWindowSize: number): number {
+  if (contextWindowSize <= 0) return 85;
+  const threshold = contextWindowSize - SYSTEM_RESERVE_CAP - COMPACT_MARGIN;
+  return Math.max(1, Math.min(100, Math.round((threshold / contextWindowSize) * 100)));
+}
 
 /**
  * Discriminated result for `readAutoCompactOverride`. Distinguishes
@@ -68,7 +73,7 @@ export function readAutoCompactOverride(): OverrideReadResult {
 /** Lossy wrapper for display-only callers. Returns `null` for ANY
  * reason the override cannot be read as a string (absent file, IO
  * error, key missing). Used by the Claude session token widget for
- * display - falls back to `DEFAULT_CLAUDE_AUTOCOMPACT_PCT`. Do NOT
+ * display - falls back to the model-aware default. Do NOT
  * use from safety-critical paths - use `readAutoCompactOverride`
  * instead so you can distinguish IO error from "genuinely no
  * override set". */
@@ -78,16 +83,18 @@ export function readAutoCompactOverrideRaw(): string | null {
   return result.value;
 }
 
-/** Parse the override into a valid percentage (1-100), or fall back
- * to `DEFAULT_CLAUDE_AUTOCOMPACT_PCT`. This is what the session token
- * widget uses for display. */
-export function readAutoCompactPct(): number {
+/** Parse the override into a valid percentage (1-100), or compute
+ * the model-aware default from Claude's built-in formula. The
+ * context window size is needed for the default calculation so the
+ * widget shows ~83% for 200k models and ~97% for 1M models instead
+ * of a flat 85% for all models. */
+export function readAutoCompactPct(contextWindowSize: number): number {
   const raw = readAutoCompactOverrideRaw();
   if (raw !== null) {
     const val = parseInt(raw, 10);
     if (val >= 1 && val <= 100) return val;
   }
-  return DEFAULT_CLAUDE_AUTOCOMPACT_PCT;
+  return computeDefaultAutoCompactPct(contextWindowSize);
 }
 
 /**

@@ -6,7 +6,7 @@ import { buildSessionTokenTooltip } from "../shared/ui/sessionTokenTooltip";
 import { getDisplayMode } from "../shared/displayMode";
 import { getSessionTokenColor } from "../shared/ui/heatmap";
 import { prefixForMode } from "../shared/ui/sessionTokenPrefix";
-import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
+import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
 
 export class CodexSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -40,13 +40,9 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
 
       case "ok": {
         const { session } = state;
-        // Match Codex native's `percent_of_context_window_remaining`
-        // from codex-rs/protocol/src/protocol.rs which subtracts a
-        // 12,000-token baseline (`prompts, tools and space to call
-        // compact`) from both numerator and denominator. Normalizes
-        // the percentage so a fresh session starts near 0% used
-        // rather than ~5% from the baseline overhead, and matches
-        // the number shown in Codex's own hover byte-for-byte.
+        // Baseline normalization matches Codex native's formula:
+        // subtract CODEX_BASELINE_TOKENS from both sides so a fresh
+        // session reads near 0% instead of ~5%.
         const effectiveCeiling = session.autoCompactTokens - CODEX_BASELINE_TOKENS;
         const effectiveUsed = Math.max(0, session.contextUsed - CODEX_BASELINE_TOKENS);
         const usedPct = effectiveCeiling > 0
@@ -63,19 +59,17 @@ export class CodexSessionTokensWidget implements StatusBarWidget {
             `${formatTokens(session.autoCompactTokens)} ${formatPct(usedPct)}`;
         }
 
-        // Codex ceiling is the effective context window (258k for
-        // gpt-5.x). Under the baseline-normalized formula above,
-        // actual compact (244,800 tokens) reads as ~94% on the
-        // display. 85 / 90 keeps the warn rungs close to the compact
-        // point - yellow lands ~11k before compact (2-4 turns of
-        // runway) while still leaving a visible white stage.
+        // Warn thresholds 85/90 tuned so yellow appears ~2-4 turns
+        // before compact fires.
         this.item.color = getSessionTokenColor(usedPct, 85, 90);
 
         this.item.tooltip = buildSessionTokenTooltip({
           provider: "Codex",
           sessionTitle: session.sessionTitle,
           label: session.label,
+          modelId: session.modelSlug,
           contextUsed: session.contextUsed,
+          contextWindowSize: session.contextWindowSize,
           ceiling: session.autoCompactTokens,
           baselineTokens: CODEX_BASELINE_TOKENS,
         });

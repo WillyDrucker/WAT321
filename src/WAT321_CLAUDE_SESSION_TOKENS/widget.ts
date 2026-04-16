@@ -5,7 +5,7 @@ import { buildSessionTokenTooltip } from "../shared/ui/sessionTokenTooltip";
 import { getDisplayMode } from "../shared/displayMode";
 import { getSessionTokenColor } from "../shared/ui/heatmap";
 import { prefixForMode } from "../shared/ui/sessionTokenPrefix";
-import { getWidgetPriority, WIDGET_SLOT } from "../shared/priority";
+import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
 
 export class ClaudeSessionTokensWidget implements StatusBarWidget {
   private item: vscode.StatusBarItem;
@@ -61,7 +61,9 @@ export class ClaudeSessionTokensWidget implements StatusBarWidget {
           provider: "Claude",
           sessionTitle: session.sessionTitle,
           label: session.label,
+          modelId: session.modelId,
           contextUsed: session.contextUsed,
+          contextWindowSize: session.contextWindowSize,
           ceiling: ceilingTokens,
           lastActiveAt:
             session.source === "lastKnown" ? session.lastActiveAt : undefined,
