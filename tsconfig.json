@@ -5,6 +5,7 @@
     "outDir": "out",
     "rootDir": "src",
     "strict": true,
+    "types": ["node", "vscode"],
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true
