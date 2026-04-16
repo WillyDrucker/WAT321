@@ -4,7 +4,7 @@ import type { ProviderKey } from "./contracts";
 /**
  * Typed fire-and-forget event hub for cross-cutting concerns.
  * Providers and tools emit events; any consumer subscribes.
- * No state retention — each emission is independent.
+ * No state retention - each emission is independent.
  *
  * Type safety is enforced via the `AppEvents` interface map:
  * `emit<K>` and `on<K>` are both keyed to the same payload type,
@@ -12,7 +12,7 @@ import type { ProviderKey } from "./contracts";
  * to receive `{ provider: ProviderKey }`, never `unknown`.
  *
  * Subscribers return a `Disposable` for cleanup. The hub itself
- * is window-local — no cross-window coordination.
+ * is window-local - no cross-window coordination.
  */
 
 /** Every event the engine can emit. Add new events here as the
@@ -60,7 +60,7 @@ export class EventHub {
       try {
         (handler as Handler<AppEvents[K]>)(payload);
       } catch {
-        // Swallow — one subscriber must not break another.
+        // Swallow - one subscriber must not break another.
       }
     }
   }

@@ -8,10 +8,10 @@ import type {
  * Provider lifecycle registry. Replaces the hand-maintained
  * `ActiveGroups` struct in bootstrap.ts and the per-provider
  * activate/deactivate functions. Adding a third provider means
- * one new `register()` call — no edits across 6 files.
+ * one new `register()` call - no edits across 6 files.
  *
  * The registry owns activation state. It does NOT own services or
- * widgets — those are created by the provider-specific activation
+ * widgets - those are created by the provider-specific activation
  * function and handed to the registry as a `ProviderGroup`.
  */
 
@@ -27,7 +27,7 @@ export class ProviderRegistry {
   private providers = new Map<ProviderKey, RegisteredProvider>();
 
   /** Register a provider with its descriptor and activation
-   * factory. Does not activate — call `activate(key)` separately. */
+   * factory. Does not activate - call `activate(key)` separately. */
   register(descriptor: ProviderDescriptor, activate: ActivateFn): void {
     if (this.providers.has(descriptor.key)) {
       throw new Error(`[WAT321] Provider "${descriptor.key}" is already registered`);
@@ -68,7 +68,7 @@ export class ProviderRegistry {
   }
 
   /** Count of providers with live ProviderGroup instances. This
-   * is group activation count, not provider availability count —
+   * is group activation count, not provider availability count -
    * display mode reads from `isProviderActive()` in displayMode.ts
    * which tracks actual service connectivity. */
   activeCount(): number {

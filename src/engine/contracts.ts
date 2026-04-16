@@ -87,7 +87,7 @@ export interface Subscribable<TState> {
 
 /** Extended contract for usage services that support the
  * activity-driven kickstart and escalation reset. Session token
- * services do NOT implement these — they are the activity signal
+ * services do NOT implement these - they are the activity signal
  * source, not the consumer. */
 export interface UsageService<TState> extends Subscribable<TState> {
   start(): void;
