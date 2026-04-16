@@ -81,7 +81,7 @@
         "properties": {
           "wat321.notifications.mode": {
             "type": "string",
-            "default": "Auto",
+            "default": "System Notifications",
             "enum": [
               "Off",
               "Auto",

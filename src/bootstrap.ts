@@ -8,7 +8,7 @@ import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
 import { setProviderActive } from "./shared/displayMode";
 import { activateWidget } from "./shared/usageWidgetActivation";
-import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
+import { classifyLastEntry, parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
 import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
 import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
@@ -77,9 +77,11 @@ function watchProviderAvailability(
 
 /** Watch a session token service for context-usage changes and
  * emit `session.responseComplete` on the EventHub. The bridge
- * owns response preview parsing - services stay notification-
- * unaware. Only reads the transcript tail when contextUsed
- * actually changes AND notifications are enabled. */
+ * owns turn-completion gating and response preview parsing -
+ * services stay notification-unaware. Reads the transcript tail
+ * on every contextUsed change (for turn-completion classification)
+ * and parses the response preview only when notifications are
+ * enabled. */
 // Narrow types for the session response bridge. Defined here
 // rather than in contracts.ts because they're specific to the
 // notification wiring - services don't need to know about them.
@@ -99,10 +101,21 @@ interface SessionResponseSource {
   getActiveTranscriptPath(): string | null;
 }
 
+/** Claude turn-completion classifier for the notification bridge.
+ * Returns true only when the last transcript entry is a final
+ * assistant message (text-only, no pending tool_use blocks). Suppresses
+ * mid-tool-call notifications that would otherwise spam the user on
+ * every contextUsed change during a multi-step response. */
+function isClaudeTurnComplete(tail: string): boolean {
+  const kind = classifyLastEntry(tail);
+  return kind === "assistant-done" || kind === "unknown";
+}
+
 function watchSessionResponse(
   key: ProviderKey,
   tokenService: SessionResponseSource,
   parseAssistantText: (tail: string) => string,
+  isTurnComplete: ((tail: string) => boolean) | null,
   ctx: EngineContext
 ): vscode.Disposable {
   let prevContextUsed = -1;
@@ -115,13 +128,22 @@ function watchSessionResponse(
     // Skip the initial state delivery - only fire on actual changes.
     if (isFirstRead) return;
 
+    // Read the transcript tail for both turn-completion gating and
+    // response preview extraction.
+    const path = tokenService.getActiveTranscriptPath();
+    const tail = path ? readTail(path) : null;
+
+    // Suppress mid-turn notifications. During a multi-tool-call
+    // response, contextUsed changes on every tool call and tool
+    // result. Only fire when the turn is actually complete (the
+    // last transcript entry is a final assistant message with no
+    // pending tool_use blocks). If the tail is unreadable or no
+    // classifier is provided, bias toward firing.
+    if (isTurnComplete && tail && !isTurnComplete(tail)) return;
+
     let responsePreview = "";
-    if (isNotificationsEnabled()) {
-      const path = tokenService.getActiveTranscriptPath();
-      if (path) {
-        const tail = readTail(path);
-        if (tail) responsePreview = parseAssistantText(tail);
-      }
+    if (isNotificationsEnabled() && tail) {
+      responsePreview = parseAssistantText(tail);
     }
 
     ctx.events.emit("session.responseComplete", {
@@ -165,7 +187,7 @@ function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
     ...activateWidget(tokenService, new ClaudeSessionTokensWidget()),
     watchProviderAvailability("claude", usageService, ctx),
-    watchSessionResponse("claude", tokenService, parseClaudeAssistantText, ctx),
+    watchSessionResponse("claude", tokenService, parseClaudeAssistantText, isClaudeTurnComplete, ctx),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
@@ -187,7 +209,7 @@ function buildCodexGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
     ...activateWidget(tokenService, new CodexSessionTokensWidget()),
     watchProviderAvailability("codex", usageService, ctx),
-    watchSessionResponse("codex", tokenService, parseCodexAssistantText, ctx),
+    watchSessionResponse("codex", tokenService, parseCodexAssistantText, null, ctx),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
