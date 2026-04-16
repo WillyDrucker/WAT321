@@ -9,7 +9,7 @@ export const WAT321_DIR = join(homedir(), ".wat321");
 /**
  * Every `wat321.*` setting key in one place. Eliminates the drift
  * hazard of the same string literal appearing in service.ts,
- * clearSettings.ts, applicationScopeHeal.ts, and extension.ts.
+ * resetSettings.ts, workspaceScopeHeal.ts, and extension.ts.
  *
  * All keys are in unprefixed form (used with
  * `getConfiguration("wat321")`). For the full prefixed form
@@ -18,7 +18,6 @@ export const WAT321_DIR = join(homedir(), ".wat321");
 export const SETTING = {
   enableClaude: "enableClaude",
   enableCodex: "enableCodex",
-  experimentalAutoCompact: "experimental.forceClaudeAutoCompact",
   displayMode: "displayMode",
   statusBarPriority: "statusBarPriority",
   enableHeatmap: "enableHeatmap",
@@ -26,4 +25,4 @@ export const SETTING = {
   notificationsClaude: "notifications.claude",
   notificationsCodex: "notifications.codex",
   clearAllData: "clearAllData",
-} as const;
+} as const satisfies Record<string, string>;

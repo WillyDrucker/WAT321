@@ -94,9 +94,11 @@ export function parseCwd(rolloutPath: string): string | null {
   return null;
 }
 
-/** Scan the header for the active model slug. Checks `turn_context`
+/** Scan the header for the initial model slug. Checks `turn_context`
  * first (set on every turn after the first) and falls back to
- * `session_meta.payload.model` for freshly started sessions. */
+ * `session_meta.payload.model` for freshly started sessions. Used
+ * only as a fallback when `parseLatestModelSlug` finds nothing in
+ * the tail. */
 export function parseModelSlug(rolloutPath: string): string | null {
   const head = readHead(rolloutPath, 65_536);
   if (!head) return null;
@@ -116,6 +118,31 @@ export function parseModelSlug(rolloutPath: string): string | null {
       }
       if (
         entry.type === "session_meta" &&
+        typeof entry.payload?.model === "string"
+      ) {
+        return entry.payload.model;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** Scan the tail backwards for the most recent `turn_context` model
+ * slug. Catches mid-session `/model` switches that the header-only
+ * `parseModelSlug` would miss. Returns null if no `turn_context`
+ * is found in the tail window. */
+export function parseLatestModelSlug(tail: string): string | null {
+  const lines = tail.trimEnd().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+
+    try {
+      const entry = JSON.parse(line);
+      if (
+        entry.type === "turn_context" &&
         typeof entry.payload?.model === "string"
       ) {
         return entry.payload.model;
@@ -154,8 +181,17 @@ export function extractFirstUserMessage(headContent: string): string {
 }
 
 /** Extract the text content from the most recent assistant message in
- * the tail. Codex uses `event_msg` with `payload.type: "agent_message"`
- * for final answers. Returns "" if none found. */
+ * the tail. Walks backwards through the rollout scanning multiple
+ * Codex event shapes:
+ *
+ *   - `event_msg` with `payload.type: "agent_message"` (final answers)
+ *   - `response_item` with `payload.type: "message"`, role "assistant"
+ *     and `output_text` content parts
+ *   - `response.output_text.done` events with inline text
+ *   - `message` events with `payload.role: "assistant"` and text content
+ *
+ * Codex has evolved its rollout format across versions, so we check
+ * all known shapes. Returns "" if none found. */
 export function parseLastAssistantText(tail: string): string {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -169,34 +205,99 @@ export function parseLastAssistantText(tail: string): string {
       continue;
     }
 
-    if (entry.type === "event_msg") {
-      const payload = entry.payload as Record<string, unknown> | undefined;
-      if (payload?.type === "agent_message") {
-        const msg = payload.message;
-        if (typeof msg === "string" && msg.length > 0) return msg;
-      }
+    const payload = entry.payload as Record<string, unknown> | undefined;
+
+    // Shape 1: event_msg with agent_message payload
+    if (entry.type === "event_msg" && payload?.type === "agent_message") {
+      const msg = payload.message;
+      if (typeof msg === "string" && msg.length > 0) return msg;
     }
 
-    if (entry.type === "response_item") {
-      const payload = entry.payload as Record<string, unknown> | undefined;
-      if (payload?.type === "message" && payload.role === "assistant") {
-        const content = payload.content;
-        if (Array.isArray(content)) {
-          for (const part of content) {
-            if (
-              typeof part === "object" &&
-              part !== null &&
-              (part as Record<string, unknown>).type === "output_text"
-            ) {
-              const text = (part as Record<string, unknown>).text;
-              if (typeof text === "string" && text.length > 0) return text;
-            }
-          }
-        }
+    // Shape 2: response_item with assistant message + output_text parts
+    if (entry.type === "response_item" && payload?.type === "message" && payload.role === "assistant") {
+      const text = extractOutputText(payload.content);
+      if (text) return text;
+    }
+
+    // Shape 3: response.output_text.done with inline text
+    if (entry.type === "response.output_text.done") {
+      const text = typeof payload?.text === "string" ? payload.text
+        : typeof entry.text === "string" ? entry.text
+        : null;
+      if (text && text.length > 0) return text;
+    }
+
+    // Shape 4: message event with assistant role
+    if (entry.type === "message" && payload?.role === "assistant") {
+      const text = extractOutputText(payload.content);
+      if (text) return text;
+      // Plain string content
+      if (typeof payload.content === "string" && payload.content.length > 0) {
+        return payload.content;
       }
     }
   }
   return "";
+}
+
+/** Extract text from an `output_text` content array. Shared by
+ * multiple Codex event shapes that carry the same content structure. */
+function extractOutputText(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  for (const part of content) {
+    if (typeof part !== "object" || part === null) continue;
+    const p = part as Record<string, unknown>;
+    if (p.type === "output_text" && typeof p.text === "string" && p.text.length > 0) {
+      return p.text;
+    }
+    // Also check plain text parts
+    if (p.type === "text" && typeof p.text === "string" && p.text.length > 0) {
+      return p.text;
+    }
+  }
+  return null;
+}
+
+/** Classify whether the last entry in a Codex rollout tail represents
+ * a completed assistant turn. Used by the notification bridge to
+ * suppress mid-tool-call emissions. Returns true only when the last
+ * parseable entry is a known assistant-response event type. Returns
+ * false for tool execution events, user messages, and unknown types
+ * so that only completed responses trigger notifications. */
+export function isCodexTurnComplete(tail: string): boolean {
+  const lines = tail.trimEnd().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const payload = entry.payload as Record<string, unknown> | undefined;
+
+    // Agent message = final response
+    if (entry.type === "event_msg" && payload?.type === "agent_message") return true;
+    // Response item with assistant message = final response
+    if (entry.type === "response_item" && payload?.type === "message" && payload.role === "assistant") return true;
+    // Output text done = final response
+    if (entry.type === "response.output_text.done") return true;
+    // Message with assistant role = final response
+    if (entry.type === "message" && payload?.role === "assistant") return true;
+
+    // Token count events are bookkeeping, keep scanning
+    if (payload?.type === "token_count") continue;
+    // Turn context events are bookkeeping, keep scanning
+    if (entry.type === "turn_context") continue;
+
+    // Any other event type (tool execution, user message, etc.) means
+    // the turn is not yet complete.
+    return false;
+  }
+  return false;
 }
 
 /** Codex rollout filenames are `rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl`.

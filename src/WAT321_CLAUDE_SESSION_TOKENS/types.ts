@@ -1,4 +1,4 @@
-import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/types";
+import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/serviceTypes";
 
 /** Active session entry from ~/.claude/sessions/<pid>.json */
 export interface SessionEntry {

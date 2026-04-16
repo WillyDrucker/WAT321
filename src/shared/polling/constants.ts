@@ -87,8 +87,8 @@ export interface DiscoveryBackoffStep {
   readonly intervalMs: number;
 }
 
-export const DISCOVERY_BACKOFF: readonly DiscoveryBackoffStep[] = [
+export const DISCOVERY_BACKOFF = [
   { untilMs: 5 * 60_000, intervalMs: 60_000 },      // 0-5 min: every 60s
   { untilMs: 30 * 60_000, intervalMs: 5 * 60_000 }, // 5-30 min: every 5 min
   { untilMs: Infinity, intervalMs: 15 * 60_000 },   // 30+ min: every 15 min
-];
+] as const satisfies readonly DiscoveryBackoffStep[];

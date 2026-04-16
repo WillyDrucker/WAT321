@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { CodexTokenWidgetState } from "./types";
+import type { CodexResolvedSession, CodexTokenWidgetState } from "./types";
 import { readHead, readTail } from "../shared/fs/fileReaders";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import {
@@ -9,12 +9,17 @@ import {
   parseCwd,
   extractFirstUserMessage,
   parseLastTokenCount,
+  parseLatestModelSlug,
   parseModelSlug,
 } from "./parsers";
 import { findLatestRollout, getSessionTitle } from "./rolloutDiscovery";
 import { resolveAutoCompactTokens } from "./autoCompactLimit";
 
-const POLL_INTERVAL = 6_000;
+/** Fallback poll cadence. fs.watch in the base class handles
+ * instant transcript-change detection; this interval serves only
+ * as a safety net for session discovery and any missed watcher
+ * events. 15s keeps discovery responsive without wasting cycles. */
+const POLL_INTERVAL = 15_000;
 const SESSION_SCAN_INTERVAL = 51_000;
 
 export class CodexSessionTokenService extends SessionTokenServiceBase<CodexTokenWidgetState> {
@@ -25,7 +30,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private cachedCwd: string | null = null;
   private cachedCwdPath = "";
   private cachedModelSlug: string | null = null;
-  private cachedModelPath = "";
   private cachedAutoCompactTokens: number | null = null;
   private cachedAutoCompactModel = "";
 
@@ -39,44 +43,8 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     );
   }
 
-  private setOkState(
-    sessionId: string,
-    label: string,
-    sessionTitle: string,
-    modelSlug: string,
-    contextUsed: number,
-    contextWindowSize: number,
-    autoCompactTokens: number,
-    lastActiveAt: number
-  ): void {
-    if (this.state.status === "ok") {
-      const prev = this.state.session;
-      if (
-        prev.sessionId === sessionId &&
-        prev.label === label &&
-        prev.sessionTitle === sessionTitle &&
-        prev.modelSlug === modelSlug &&
-        prev.contextUsed === contextUsed &&
-        prev.contextWindowSize === contextWindowSize &&
-        prev.autoCompactTokens === autoCompactTokens &&
-        prev.lastActiveAt === lastActiveAt
-      ) {
-        return;
-      }
-    }
-    this.setState({
-      status: "ok",
-      session: {
-        sessionId,
-        label,
-        sessionTitle,
-        modelSlug,
-        contextUsed,
-        contextWindowSize,
-        autoCompactTokens,
-        lastActiveAt,
-      },
-    });
+  private emitOk(session: CodexResolvedSession): void {
+    this.setOkStateIfChanged(session, (s) => ({ status: "ok" as const, session: s }));
   }
 
   protected poll(): void {
@@ -161,12 +129,17 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       this.cachedCwdPath = this.cachedRolloutPath;
     }
 
-    if (
-      this.cachedModelSlug === null ||
-      this.cachedModelPath !== this.cachedRolloutPath
-    ) {
-      this.cachedModelSlug = parseModelSlug(this.cachedRolloutPath);
-      this.cachedModelPath = this.cachedRolloutPath;
+    // Resolve model from the tail on every file-growth poll so a
+    // mid-session /model switch is picked up immediately. Fall back
+    // to the header parser for fresh sessions that don't yet have a
+    // turn_context in the tail window.
+    const latestModel = parseLatestModelSlug(tail);
+    const resolvedModel =
+      latestModel ?? this.cachedModelSlug ?? parseModelSlug(this.cachedRolloutPath);
+    if (resolvedModel !== this.cachedModelSlug) {
+      this.cachedModelSlug = resolvedModel;
+      // Model changed - invalidate ceiling cache so it recomputes.
+      this.cachedAutoCompactTokens = null;
     }
 
     if (
@@ -180,15 +153,15 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       this.cachedAutoCompactModel = this.cachedModelSlug ?? "";
     }
 
-    this.setOkState(
+    this.emitOk({
       sessionId,
-      this.cachedCwd ? basename(this.cachedCwd) : "Codex",
-      this.cachedSessionTitle,
-      this.cachedModelSlug ?? "",
-      usage.tokens,
-      usage.contextWindowSize,
-      this.cachedAutoCompactTokens,
-      rolloutMtime
-    );
+      label: this.cachedCwd ? basename(this.cachedCwd) : "Codex",
+      sessionTitle: this.cachedSessionTitle,
+      modelSlug: this.cachedModelSlug ?? "",
+      contextUsed: usage.tokens,
+      contextWindowSize: usage.contextWindowSize,
+      autoCompactTokens: this.cachedAutoCompactTokens,
+      lastActiveAt: rolloutMtime,
+    });
   }
 }

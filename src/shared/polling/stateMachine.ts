@@ -1,4 +1,4 @@
-import type { ServiceState } from "../types";
+import type { ServiceState } from "../serviceTypes";
 import { CACHE_FRESHNESS_ERROR_MS, CACHE_FRESHNESS_OK_MS } from "./constants";
 
 /**

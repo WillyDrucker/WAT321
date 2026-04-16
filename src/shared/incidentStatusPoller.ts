@@ -1,3 +1,4 @@
+import type { ProviderKey } from "../engine/contracts";
 import { httpGetJson } from "./polling/httpClient";
 
 /**
@@ -11,8 +12,6 @@ import { httpGetJson } from "./polling/httpClient";
  * - In-memory only, no disk cache or cross-window coordination.
  * - Read-only, unauthenticated, zero user data leaves the machine.
  */
-
-export type Provider = "claude" | "codex";
 
 export type StatusIndicator =
   | "none"
@@ -32,7 +31,7 @@ interface CachedStatus {
 }
 
 /** Public Statuspage.io JSON feed URLs per provider. */
-const STATUS_URLS: Readonly<Record<Provider, string>> = {
+const STATUS_URLS: Readonly<Record<ProviderKey, string>> = {
   claude: "https://status.claude.com/api/v2/status.json",
   codex: "https://status.openai.com/api/v2/status.json",
 };
@@ -40,7 +39,7 @@ const STATUS_URLS: Readonly<Record<Provider, string>> = {
 /** Human-readable provider-owner name for tooltip rendering. Codex
  * is OpenAI's product, so the tooltip reads "OpenAI status: ..." not
  * "Codex status: ..." to match what the status page itself says. */
-const PROVIDER_OWNER: Readonly<Record<Provider, string>> = {
+const PROVIDER_OWNER: Readonly<Record<ProviderKey, string>> = {
   claude: "Anthropic",
   codex: "OpenAI",
 };
@@ -55,8 +54,8 @@ const CACHE_TTL_MS = 300_000;
  * symptom we want to bail on rather than wait out. */
 const STATUS_FETCH_TIMEOUT_MS = 5_000;
 
-const cache = new Map<Provider, CachedStatus>();
-const inFlight = new Set<Provider>();
+const cache = new Map<ProviderKey, CachedStatus>();
+const inFlight = new Set<ProviderKey>();
 
 /** Synchronous accessor for the most recently fetched status.
  * Returns `null` when no fetch has succeeded yet. Callers should
@@ -64,7 +63,7 @@ const inFlight = new Set<Provider>();
  * because the status page describes that state as "All Systems
  * Operational" and surfacing that every time the widget parks would
  * be noise. */
-export function getCachedStatus(provider: Provider): StatusSummary | null {
+export function getCachedStatus(provider: ProviderKey): StatusSummary | null {
   return cache.get(provider)?.summary ?? null;
 }
 
@@ -72,7 +71,7 @@ export function getCachedStatus(provider: Provider): StatusSummary | null {
  * fresh, or when a fetch for the same provider is already in
  * flight. Never throws; every error path is swallowed so callers
  * can invoke this from render paths without try/catch scaffolding. */
-export function refreshIfStale(provider: Provider): void {
+export function refreshIfStale(provider: ProviderKey): void {
   const cached = cache.get(provider);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return;
   if (inFlight.has(provider)) return;
@@ -105,7 +104,7 @@ export function refreshIfStale(provider: Provider): void {
 }
 
 /** Friendly owner label for display ("Anthropic" / "OpenAI"). */
-export function getProviderOwner(provider: Provider): string {
+export function getProviderOwner(provider: ProviderKey): string {
   return PROVIDER_OWNER[provider];
 }
 

@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
-import type { UsageResponse } from "./types";
-import { getMaxLabel } from "./formatters";
-import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
-import { getDisplayMode } from "../displayMode";
+import { getDisplayMode } from "../../engine/displayMode";
 import { renderClaudeBar } from "../ui/heatmap";
+import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
+import { getMaxLabel } from "./formatters";
+import type { UsageResponse } from "./types";
 
 function isoToMs(iso: string | undefined): number | null {
   if (!iso) return null;

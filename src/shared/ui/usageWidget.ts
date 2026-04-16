@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import type { ServiceState as GenericServiceState } from "../types";
-import { getDisplayMode } from "../displayMode";
+import { getDisplayMode } from "../../engine/displayMode";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
+import type { ServiceState as GenericServiceState } from "../serviceTypes";
 import {
   renderUsageNonOkState,
   renderWeeklyUsageNonOkState,

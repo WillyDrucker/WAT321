@@ -2,7 +2,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
-import { clearCheckboxSetting } from "./clearSettings";
+import { clearCheckboxSetting } from "./resetSettings";
 
 /**
  * Heal `wat321.*` action-trigger settings that must never live at
@@ -17,15 +17,14 @@ import { clearCheckboxSetting } from "./clearSettings";
  */
 
 /** Keys that must never live at workspace scope because they are
- * action triggers (click to arm / click to reset) rather than
- * persistent preferences. Every key here is also declared as
- * `"scope": "application"` in package.json so that new writes cannot
- * land at workspace scope going forward; the heal below is for
- * early-adopter workspaces that still physically have the key in
- * their `.vscode/settings.json` from before the scope tightening. */
+ * action triggers (click to reset) rather than persistent preferences.
+ * Every key here is also declared as `"scope": "application"` in
+ * package.json so that new writes cannot land at workspace scope
+ * going forward; the heal below is for early-adopter workspaces that
+ * still physically have the key in their `.vscode/settings.json`
+ * from before the scope tightening. */
 const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.clearAllData}`,
-  `wat321.${SETTING.experimentalAutoCompact}`,
 ] as const;
 
 /** Surgically strip a set of `wat321.*` keys from a single
@@ -82,9 +81,6 @@ function stripApplicationScopeKeysFromFile(path: string): void {
  * `APPLICATION_SCOPE_KEYS`. */
 export function healStaleApplicationScopeKeys(): void {
   void clearCheckboxSetting(SETTING.clearAllData).catch(() => {
-    // best-effort - never block activation
-  });
-  void clearCheckboxSetting(SETTING.experimentalAutoCompact).catch(() => {
     // best-effort - never block activation
   });
 

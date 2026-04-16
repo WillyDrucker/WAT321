@@ -1,7 +1,7 @@
 import type {
   ServiceState as GenericServiceState,
   StatusBarWidget as GenericStatusBarWidget,
-} from "../types";
+} from "../serviceTypes";
 
 export interface CodexUsageResponse {
   plan_type: string;
