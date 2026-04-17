@@ -258,12 +258,13 @@ function extractOutputText(content: unknown): string | null {
   return null;
 }
 
-/** Classify whether the last entry in a Codex rollout tail represents
- * a completed assistant turn. Used by the notification bridge to
- * suppress mid-tool-call emissions. Returns true only when the last
- * parseable entry is a known assistant-response event type. Returns
- * false for tool execution events, user messages, and unknown types
- * so that only completed responses trigger notifications. */
+/** Classify whether the last meaningful entry in a Codex rollout
+ * tail represents a completed assistant turn. Walks backwards,
+ * skipping bookkeeping events, and returns true when it finds a
+ * known assistant-response event. Returns false only for known
+ * mid-turn events (user messages, tool execution). Unrecognized
+ * event types are skipped rather than rejected so new Codex event
+ * types don't silently suppress notifications. */
 export function isCodexTurnComplete(tail: string): boolean {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -278,26 +279,26 @@ export function isCodexTurnComplete(tail: string): boolean {
     }
 
     const payload = entry.payload as Record<string, unknown> | undefined;
+    const ptype = payload?.type as string | undefined;
 
-    // Agent message = final response
-    if (entry.type === "event_msg" && payload?.type === "agent_message") return true;
-    // Response item with assistant message = final response
-    if (entry.type === "response_item" && payload?.type === "message" && payload.role === "assistant") return true;
-    // Output text done = final response
+    // Known assistant-response events = turn complete
+    if (entry.type === "event_msg" && ptype === "agent_message") return true;
+    if (entry.type === "response_item" && ptype === "message" && payload?.role === "assistant") return true;
     if (entry.type === "response.output_text.done") return true;
-    // Message with assistant role = final response
     if (entry.type === "message" && payload?.role === "assistant") return true;
 
-    // Token count events are bookkeeping, keep scanning
-    if (payload?.type === "token_count") continue;
-    // Turn context events are bookkeeping, keep scanning
-    if (entry.type === "turn_context") continue;
+    // Known mid-turn events = turn NOT complete, stop scanning
+    if (ptype === "user_message") return false;
+    if (ptype === "tool_call" || ptype === "function_call") return false;
+    if (entry.type === "response_item" && ptype === "function_call") return false;
 
-    // Any other event type (tool execution, user message, etc.) means
-    // the turn is not yet complete.
-    return false;
+    // Everything else (token_count, turn_context, reasoning,
+    // exec_output, task events, etc.) is bookkeeping - skip and
+    // keep scanning backwards for a definitive event.
   }
-  return false;
+  // No definitive event found in the tail. Bias toward firing so
+  // a notification is not silently lost.
+  return true;
 }
 
 /** Codex rollout filenames are `rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl`.
