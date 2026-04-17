@@ -5,15 +5,16 @@ import { getNotificationDiagnostics } from "./toastNotifier";
 import { getAppUserModelID } from "./windowsToastProcess";
 
 /**
- * Hidden debug command. Registered internally with no `contributes`
- * entry in package.json so it does not appear in the palette by
- * default. Invocable via `code --command wat321.showProviderHealth`
- * or by typing the id in the palette.
+ * Diagnostic command exposed in the palette as
+ * `WAT321: Show Provider Health`. Opens a read-only output panel
+ * summarizing the current state of every provider and recent
+ * delivery decisions.
  *
  * Surfaces:
  *   - Provider lifecycle (registered / activated / connected)
  *   - Usage service state + kickstart escalation + rate-limit park
  *   - Active transcript paths per provider
+ *   - Windows host AUMID diagnostics
  *   - Recent provider transitions (ring buffer)
  *   - Recent notification deliveries (ring buffer)
  *

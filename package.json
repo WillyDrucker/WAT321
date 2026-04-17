@@ -41,6 +41,10 @@
       {
         "command": "wat321.clearAllSettings",
         "title": "WAT321: Reset WAT321"
+      },
+      {
+        "command": "wat321.showProviderHealth",
+        "title": "WAT321: Show Provider Health"
       }
     ],
     "configuration": [
