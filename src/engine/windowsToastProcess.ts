@@ -39,6 +39,27 @@ let discoveredAumid = "";
 let stdoutBuffer = "";
 let proc: ChildProcess | null = null;
 
+/** Repeated bootstrap crashes (powershell.exe missing, WinRT load
+ * failure, AV blocking spawn) should stop burning CPU respawning
+ * forever. After `MAX_BOOTSTRAP_FAILURES` consecutive failures with
+ * no successful AUMID echo, park the warm loader for
+ * `BOOTSTRAP_COOLDOWN_MS`. The counter resets on any successful
+ * bootstrap, so transient blips (AV finishing a scan) recover
+ * automatically. During cooldown `showToast` returns false and the
+ * caller records `system-failed` in the diagnostic ring buffer. */
+const MAX_BOOTSTRAP_FAILURES = 5;
+const BOOTSTRAP_COOLDOWN_MS = 5 * 60_000;
+let bootstrapFailures = 0;
+let cooldownUntil = 0;
+
+function recordBootstrapFailure(): void {
+  bootstrapFailures++;
+  if (bootstrapFailures >= MAX_BOOTSTRAP_FAILURES) {
+    cooldownUntil = Date.now() + BOOTSTRAP_COOLDOWN_MS;
+    bootstrapFailures = 0;
+  }
+}
+
 /** Set the host app name used at warm-process bootstrap for
  * `Get-StartApps` matching. Call from `extension.ts activate()` with
  * `vscode.env.appName`. Idempotent; takes effect on the next warm-
@@ -131,11 +152,21 @@ function onStdoutChunk(chunk: Buffer): void {
   stdoutBuffer = "";
   if (firstLine.startsWith("AUMID:")) {
     discoveredAumid = firstLine.slice("AUMID:".length).trim();
+    // Bootstrap completed successfully - reset the failure streak
+    // so transient issues (AV scan, momentary spawn hiccup) clear
+    // automatically on the next good spawn.
+    bootstrapFailures = 0;
   }
 }
 
 function ensureProcess(): ChildProcess | null {
   if (proc && !proc.killed && proc.stdin?.writable) return proc;
+
+  // Circuit breaker: if bootstrap has failed repeatedly, skip spawn
+  // until the cooldown expires. Prevents a permanently broken
+  // powershell.exe (missing, blocked, or crashing on load) from
+  // triggering a spawn on every notification call.
+  if (Date.now() < cooldownUntil) return null;
 
   if (proc) {
     try { proc.kill(); } catch { /* best-effort */ }
@@ -161,9 +192,25 @@ function ensureProcess(): ChildProcess | null {
     });
 
     proc.on("error", () => {
+      recordBootstrapFailure();
       proc = null;
     });
     proc.on("exit", () => {
+      // Only count exits that happen before the AUMID echo as
+      // bootstrap failures. Post-bootstrap exits (e.g. user logout,
+      // OS process reaper) are not "powershell is broken" signals
+      // and should let the next call respawn cleanly without
+      // burning through the failure budget.
+      if (!discoveredAumid) recordBootstrapFailure();
+      proc = null;
+    });
+    // Async EPIPE on the stdin stream (pipe closed between our
+    // writable check and the write) surfaces as a stream 'error'
+    // event. Without a listener Node promotes it to an uncaught
+    // exception and takes down the extension host. Handler matches
+    // the ChildProcess-level recovery: null out proc so the next
+    // showToast respawns.
+    proc.stdin?.on("error", () => {
       proc = null;
     });
 
@@ -176,6 +223,7 @@ function ensureProcess(): ChildProcess | null {
     // spawn per notification.
     return proc;
   } catch {
+    recordBootstrapFailure();
     proc = null;
     return null;
   }
