@@ -6,8 +6,8 @@ import type { EngineContext } from "./engine/engineContext";
 import { createEngineContext } from "./engine/engineContext";
 import { registerHealthCommand } from "./engine/healthCommand";
 import { SETTING } from "./engine/settingsKeys";
+import { dispose as disposeToastProcess } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
-import { runRetirementHeal } from "./shared/retirementHeal";
 
 /**
  * Top-level entry point. Creates the engine context, registers
@@ -20,7 +20,6 @@ let lastNotificationMode = "System Notifications";
 
 export function activate(context: vscode.ExtensionContext) {
   ctx = createEngineContext();
-  runRetirementHeal(); // Temporary: clean up retired auto-compact artifacts
   context.subscriptions.push(...registerProviders(ctx));
 
   const config = vscode.workspace.getConfiguration("wat321");
@@ -43,12 +42,14 @@ export function activate(context: vscode.ExtensionContext) {
   // --- Command palette ---
   registerClearSettingsCommand(context, () => {
     ctx?.providers.resetAllKickstartEscalation();
+    ctx?.providers.resetAllTokenServices();
     ctx?.events.emit("engine.reset", {});
   });
   registerHealthCommand(context, () => ctx);
 }
 
 export function deactivate() {
+  disposeToastProcess();
   if (!ctx) return;
   ctx.providers.disposeAll();
   ctx.events.clear();

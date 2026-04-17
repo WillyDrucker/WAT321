@@ -95,6 +95,14 @@ export class ProviderRegistry {
     }
   }
 
+  /** Reset all active session token services to their idle state.
+   * Called by Reset WAT321 so widgets go blank immediately. */
+  resetAllTokenServices(): void {
+    for (const entry of this.providers.values()) {
+      entry.group?.tokenService.reset();
+    }
+  }
+
   /** Dispose all active providers. Called from extension
    * `deactivate()`. */
   disposeAll(): void {

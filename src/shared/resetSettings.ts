@@ -3,7 +3,6 @@ import * as vscode from "vscode";
 import { SETTING, WAT321_DIR } from "../engine/settingsKeys";
 import { getAllWidgetIds } from "../engine/widgetCatalog";
 import { healStaleApplicationScopeKeys } from "./workspaceScopeHeal";
-import { runRetirementHeal } from "./retirementHeal";
 
 /** Update a single wat321.* setting at every applicable configuration
  * scope. Necessary because `config.get()` returns the merged effective
@@ -165,11 +164,6 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     // Silent - reset flow must not fail because an in-memory hook
     // threw.
   }
-
-  // Temporary: clean up retired auto-compact artifacts. Must run
-  // before rmSync(~/.wat321/) so the sentinel file is still readable
-  // for guided restoration of ~/.claude/settings.json.
-  runRetirementHeal();
 
   // Reset all settings to defaults. Must clear at every scope
   // (Global / Workspace / WorkspaceFolder) because `config.get()`
