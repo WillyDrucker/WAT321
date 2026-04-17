@@ -2,12 +2,13 @@ import * as vscode from "vscode";
 import type { ProviderGroup, ProviderKey, Subscribable } from "./engine/contracts";
 import { setProviderActive } from "./engine/displayMode";
 import type { EngineContext } from "./engine/engineContext";
+import { bridgeSessionResponse } from "./engine/sessionResponseBridge";
 import { SETTING } from "./engine/settingsKeys";
 import { isNotificationsEnabled, subscribeToNotifications } from "./engine/toastNotifier";
-import { classifyLastEntry } from "./shared/transcriptClassifier";
 import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
 import { readTail } from "./shared/fs/fileReaders";
+import { classifyLastEntry } from "./shared/transcriptClassifier";
 import { activateWidget } from "./shared/usageWidgetActivation";
 import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
@@ -31,20 +32,16 @@ function getWorkspacePath(): string {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
 }
 
-/** Watch a usage service's connectivity state and update the
- * display-mode provider-active flag when it transitions between
- * connected and not-connected. Triggers a rebroadcast on every
- * connectivity transition so display mode and brand colors pick
- * up the change immediately.
+/** Bridge usage-service connectivity to the display-mode flag.
  *
- * The distinction matters: a provider whose group is activated but
- * whose CLI is not installed reports `not-connected`. That provider
- * must NOT count as active for Auto display mode resolution or
- * dual-provider brand-color logic. This watcher handles organic
- * transitions (CLI installed/uninstalled mid-session). Settings-
- * driven deactivation is handled by extension.ts calling
- * `setProviderActive(key, false)` directly since dispose runs
- * before the watcher can detect the transition. */
+ * The distinction between lifecycle and connectivity matters: a
+ * provider whose group is activated but whose CLI is not installed
+ * reports `not-connected`. That provider must NOT count as active
+ * for Auto display mode resolution or dual-provider brand-color
+ * logic. This watcher handles organic transitions (CLI installed /
+ * uninstalled mid-session). Settings-driven deactivation is handled
+ * by extension.ts calling `setProviderActive(key, false)` directly
+ * because dispose runs before the watcher can detect it. */
 function watchProviderAvailability(
   key: ProviderKey,
   usageService: Pick<Subscribable<{ status: string }>, "subscribe" | "unsubscribe">,
@@ -66,103 +63,16 @@ function watchProviderAvailability(
   return { dispose: () => usageService.unsubscribe(listener) };
 }
 
-/** Watch a session token service for context-usage changes and
- * emit `session.responseComplete` on the EventHub. The bridge
- * owns turn-completion gating and response preview parsing -
- * services stay notification-unaware. Reads the transcript tail
- * on every contextUsed change (for turn-completion classification)
- * and parses the response preview only when notifications are
- * enabled. */
-// Narrow types for the session response bridge. Defined here
-// rather than in contracts.ts because they're specific to the
-// notification wiring - services don't need to know about them.
-interface SessionResponseFields {
-  contextUsed: number;
-  label: string;
-  sessionTitle: string;
-}
-
-type SessionResponseState =
-  | { status: "ok"; session: SessionResponseFields }
-  | { status: string };
-
-interface SessionResponseSource {
-  subscribe(listener: (state: SessionResponseState) => void): void;
-  unsubscribe(listener: (state: SessionResponseState) => void): void;
-  getActiveTranscriptPath(): string | null;
-}
-
-/** Claude turn-completion classifier for the notification bridge.
- * Returns true only when the last transcript entry is a final
- * assistant message (text-only, no pending tool_use blocks). Suppresses
- * mid-tool-call notifications and post-response transcript writes
- * (system entries, compact markers, summaries) that would otherwise
- * fire duplicate notifications when they change contextUsed. The
- * `unknown` classification (non-user/non-assistant entry types like
- * system or summary) is deliberately excluded so those entries never
- * trigger a notification. */
+/** Claude turn-completion classifier. Only `assistant-done` fires a
+ * notification - `unknown` (system / summary / compact markers) and
+ * `assistant-pending` (tool_use in flight) are suppressed so mid-turn
+ * writes and post-response bookkeeping do not duplicate notifications. */
 function isClaudeTurnComplete(tail: string): boolean {
-  const kind = classifyLastEntry(tail);
-  return kind === "assistant-done";
+  return classifyLastEntry(tail) === "assistant-done";
 }
 
-function watchSessionResponse(
-  key: ProviderKey,
-  tokenService: SessionResponseSource,
-  parseAssistantText: (tail: string) => string,
-  isTurnComplete: ((tail: string) => boolean) | null,
-  ctx: EngineContext
-): vscode.Disposable {
-  let prevContextUsed = -1;
-  const listener = (state: SessionResponseState) => {
-    if (state.status !== "ok") return;
-    const session = (state as { status: "ok"; session: SessionResponseFields }).session;
-    if (session.contextUsed === prevContextUsed) return;
-    const isFirstRead = prevContextUsed === -1;
-    const isIncrease = session.contextUsed > prevContextUsed;
-    // Always update the baseline so post-compaction resets don't
-    // leave prevContextUsed stranded at a pre-compaction value.
-    prevContextUsed = session.contextUsed;
-    // Skip the initial state delivery - only fire on actual changes.
-    if (isFirstRead) return;
-    // Only fire on contextUsed increases. Decreases happen after
-    // auto-compact (the summary has fewer tokens) and should not
-    // produce a duplicate notification for the same response.
-    if (!isIncrease) return;
-
-    // Read the transcript tail for both turn-completion gating and
-    // response preview extraction.
-    const path = tokenService.getActiveTranscriptPath();
-    const tail = path ? readTail(path) : null;
-
-    // Suppress mid-turn notifications. During a multi-tool-call
-    // response, contextUsed changes on every tool call and tool
-    // result. Only fire when the turn is actually complete (the
-    // last transcript entry is a final assistant message with no
-    // pending tool_use blocks). If the tail is unreadable or no
-    // classifier is provided, bias toward firing.
-    if (isTurnComplete && tail && !isTurnComplete(tail)) return;
-
-    let responsePreview = "";
-    if (isNotificationsEnabled() && tail) {
-      responsePreview = parseAssistantText(tail);
-    }
-
-    ctx.events.emit("session.responseComplete", {
-      provider: key,
-      displayName: ctx.providers.getDescriptor(key)?.displayName ?? key,
-      label: session.label,
-      sessionTitle: session.sessionTitle,
-      responsePreview,
-    });
-  };
-  tokenService.subscribe(listener);
-  return { dispose: () => tokenService.unsubscribe(listener) };
-}
-
-/** Register both providers with the engine and subscribe
- * engine-level event consumers. Call once from extension.ts
- * activate(). Returns disposables for the extension context. */
+/** Register both providers with the engine and subscribe engine-level
+ * event consumers. Call once from extension.ts activate(). */
 export function registerProviders(ctx: EngineContext): vscode.Disposable[] {
   ctx.providers.register(
     { key: "claude", displayName: "Claude", settingKey: SETTING.enableClaude },
@@ -189,7 +99,16 @@ function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
     ...activateWidget(tokenService, new ClaudeSessionTokensWidget()),
     watchProviderAvailability("claude", usageService, ctx),
-    watchSessionResponse("claude", tokenService, parseClaudeAssistantText, isClaudeTurnComplete, ctx),
+    bridgeSessionResponse({
+      provider: "claude",
+      displayName: ctx.providers.getDescriptor("claude")?.displayName ?? "Claude",
+      tokenService,
+      readTail,
+      parseAssistantText: parseClaudeAssistantText,
+      isTurnComplete: isClaudeTurnComplete,
+      shouldParsePreview: isNotificationsEnabled,
+      events: ctx.events,
+    }),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
@@ -211,7 +130,16 @@ function buildCodexGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
     ...activateWidget(tokenService, new CodexSessionTokensWidget()),
     watchProviderAvailability("codex", usageService, ctx),
-    watchSessionResponse("codex", tokenService, parseCodexAssistantText, isCodexTurnComplete, ctx),
+    bridgeSessionResponse({
+      provider: "codex",
+      displayName: ctx.providers.getDescriptor("codex")?.displayName ?? "Codex",
+      tokenService,
+      readTail,
+      parseAssistantText: parseCodexAssistantText,
+      isTurnComplete: isCodexTurnComplete,
+      shouldParsePreview: isNotificationsEnabled,
+      events: ctx.events,
+    }),
     { dispose: () => usageService.dispose() },
     { dispose: () => tokenService.dispose() },
   ];
@@ -221,4 +149,3 @@ function buildCodexGroup(ctx: EngineContext): ProviderGroup {
 
   return { disposables, usageService, tokenService };
 }
-
