@@ -77,12 +77,35 @@ export function formatModelDisplayName(modelId: string): string {
 /** Minimal contract for a service that emits typed state to
  * subscribers. Both usage services and session token services
  * satisfy this. The engine wires widgets to services through
- * this interface without knowing the concrete service class. */
+ * this interface without knowing the concrete service class.
+ *
+ * `getState()` returns the current state snapshot without side
+ * effects. Used by the health command for on-demand diagnostics
+ * and by callers who need state at a specific moment rather than
+ * waiting for the next emission. */
 export interface Subscribable<TState> {
   subscribe(listener: (state: TState) => void): void;
   unsubscribe(listener: (state: TState) => void): void;
   rebroadcast(): void;
+  getState(): TState;
   dispose(): void;
+}
+
+/** Diagnostic snapshot from a usage service. Consumed by the health
+ * command. Never drives behavior - display only. */
+export interface UsageServiceDiagnostics {
+  /** Count of consecutive failed kickstart rounds. Zero means the
+   * gate is at its most responsive setting. */
+  consecutiveFailedKickstarts: number;
+  /** Strikes remaining in the current post-wake window. Zero means
+   * the next 429 re-parks instead of retrying. */
+  postWakeStrikesRemaining: number;
+  /** Most recent rate-limit park timestamp, or null if not currently
+   * parked. */
+  rateLimitedAt: number | null;
+  /** Server-supplied retry-after in ms for the current park, or
+   * null. */
+  retryAfterMs: number | null;
 }
 
 /** Extended contract for usage services that support the
@@ -93,6 +116,7 @@ export interface UsageService<TState> extends Subscribable<TState> {
   start(): void;
   setActivityProbe(probe: () => number | null): void;
   resetKickstartEscalation(): void;
+  getDiagnostics(): UsageServiceDiagnostics;
 }
 
 /** Contract for session token services that expose the activity
@@ -100,6 +124,14 @@ export interface UsageService<TState> extends Subscribable<TState> {
 export interface SessionTokenService<TState> extends Subscribable<TState> {
   start(): void;
   getLastActivityMs(): number | null;
+  /** Current transcript / rollout path, or null if no session has
+   * been resolved. Used by the notification bridge to read the
+   * response preview and by the health command for diagnostics. */
+  getActiveTranscriptPath(): string | null;
+  /** Clear all cached session state and drop to the idle state.
+   * Called by Reset WAT321 so the widget goes blank immediately
+   * instead of re-discovering old transcripts on the next poll. */
+  reset(): void;
 }
 
 /** Static descriptor for a provider. Passed to the registry at

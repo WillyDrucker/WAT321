@@ -5,6 +5,30 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-04-16
+
+### Added
+
+- **New-process instant discovery.** Both Claude and Codex now notice a fresh CLI session the moment it appears on disk instead of waiting for the next scan. The session token widgets light up instantly when you open a new terminal.
+- **Warm Windows toast process.** System notifications on Windows now fire near-instantly. The underlying PowerShell process is spawned once, stays warm, and handles every subsequent toast without cold-start delay.
+- **Health command shows real diagnostics.** The hidden `WAT321: Show Provider Health` command (invoked from the palette) now reports each provider's live state, rate-limit park countdown, active transcript paths, recent lifecycle transitions, and the last 20 notification delivery decisions. Useful when something looks off and you want to know why without reopening an issue.
+
+### Changed
+
+- **System Notifications mode is now literal.** If you set the notification mode to System Notifications, you'll get exactly that - no silent fall-through to in-app delivery when a stale workspace override is present. A one-time scope heal on startup also strips any stuck workspace-level value so the mode you see in Settings is the mode you get.
+- **Windows toast failures fall back to in-app.** If the Windows toast path can't deliver (process died, stdin closed), you'll see an in-app notification instead of a silent drop. The event will not be lost.
+- **Notification and per-provider toggles are now user-scoped.** They can't be silently overridden by a workspace `.vscode/settings.json` anymore, which is the root cause of the "why am I seeing random notifications?" problem.
+- **Reset now clears session token widgets immediately.** Previously the widgets would keep showing the last known session until the next poll re-discovered it. Reset now wipes in-memory state across the board.
+
+### Fixed
+
+- **Codex session token notifications now fire reliably.** Previously an unrecognized Codex event shape at the tail of a rollout could silently suppress the toast. The classifier now skips unknown events and keeps scanning, so notifications only get suppressed on genuine mid-turn events.
+
+### Removed
+
+- **Experimental auto-compact cleanup code removed.** The temporary migration path for the v1.1.3-retired Force Auto-Compact has been taken out now that the window has closed. WAT321 once again strictly honors "no writes outside `~/.wat321/`".
+- **Dead `isReady()` export** on the Windows toast module (internal cleanup, no behavior change).
+
 ## [1.1.3] - 2026-04-16
 
 ### Changed

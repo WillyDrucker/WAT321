@@ -134,6 +134,23 @@ export abstract class UsageServiceBase<TResponse> {
     for (const listener of this.listeners) listener(this.state);
   }
 
+  /** Current state snapshot. Used by the health command. */
+  getState(): ServiceState<TResponse> {
+    return this.state;
+  }
+
+  /** Diagnostic snapshot for the health command. Display only. */
+  getDiagnostics(): import("../../engine/contracts").UsageServiceDiagnostics {
+    const kick = this.kickstart.getDiagnostics();
+    const rateLimitedState = this.state.status === "rate-limited" ? this.state : null;
+    return {
+      consecutiveFailedKickstarts: kick.consecutiveFailedKickstarts,
+      postWakeStrikesRemaining: kick.postWakeStrikesRemaining,
+      rateLimitedAt: rateLimitedState?.rateLimitedAt ?? null,
+      retryAfterMs: rateLimitedState?.retryAfterMs ?? null,
+    };
+  }
+
   setActivityProbe(probe: () => number | null): void {
     this.kickstart.setActivityProbe(probe);
   }

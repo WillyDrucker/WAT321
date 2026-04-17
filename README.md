@@ -17,7 +17,6 @@ WAT321 ships with **six read-only widgets** - three for Claude, three for Codex 
 - Heatmap for progress bars - colors warn as limits approach
 - System notifications when a response finishes - never miss a reply while tabbed away
 - Hover tooltips with the detailed breakdown
-- "Epic Handshake" in development - enables automatic crosstalk between Claude and Codex for epic results (Kick off Claude/Codex as a true ~~sub~~agent on steroids)
 - Available on the VS Marketplace, Open VSX Registry, and as a direct `.vsix` download
 
 ---

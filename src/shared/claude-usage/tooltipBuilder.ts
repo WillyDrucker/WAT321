@@ -2,8 +2,16 @@ import * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
 import { renderClaudeBar } from "../ui/heatmap";
 import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
+import { buildUsageTooltipHtml } from "../ui/usageTooltipHtml";
 import { getMaxLabel } from "./formatters";
 import type { UsageResponse } from "./types";
+
+/** Claude full-mode bar color ramp (used-percent based). */
+function claudeBarColor(usedPct: number): string {
+  if (usedPct >= 80) return "#ef4444";
+  if (usedPct >= 50) return "#f59e0b";
+  return "#3b82f6";
+}
 
 function isoToMs(iso: string | undefined): number | null {
   if (!iso) return null;
@@ -19,13 +27,10 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
   const wResetMs = isoToMs(usage.seven_day?.resets_at);
   const wReset = wResetMs !== null ? formatWeeklyReset(wResetMs) : "Resets unknown";
   const planLabel = getMaxLabel(usage.extra_usage);
-  const mode = getDisplayMode();
 
-  if (mode === "minimal") {
-    // Minimal tooltip shows emoji-style progress bars to match the
-    // full-mode widget rendering. `renderClaudeBar` is the shared
-    // entry point used by both the status bar widgets and this
-    // tooltip, so heatmap/plain behavior stays in sync automatically.
+  if (getDisplayMode() === "minimal") {
+    // Minimal tooltip uses emoji bars so heatmap rules stay uniform
+    // with the status bar surface.
     const md = new vscode.MarkdownString();
     md.isTrusted = false;
     md.supportHtml = false;
@@ -40,47 +45,24 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
     return md;
   }
 
-  const sBarColor =
-    sPct >= 80 ? "#ef4444" : sPct >= 50 ? "#f59e0b" : "#3b82f6";
-  const wBarColor =
-    wPct >= 80 ? "#ef4444" : wPct >= 50 ? "#f59e0b" : "#3b82f6";
-
-  const md = new vscode.MarkdownString();
-  md.isTrusted = false;
-  md.supportHtml = true;
-  md.appendMarkdown(`
-<div style="min-width:280px;">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-<strong style="font-size:12px;">Claude usage limits</strong>
-<span style="font-size:11px;opacity:0.7;">${planLabel}</span>
-</div>
-
-<div style="margin-bottom:4px;">
-<div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-<strong style="font-size:11px;">Current session (5hr)</strong>
-<span style="font-size:11px;">${sPct}% used</span>
-</div>
-<div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
-<div style="width:${Math.min(sPct, 100)}%;height:100%;border-radius:4px;background:${sBarColor};"></div>
-</div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">\u{29D7} ${sReset}</div>
-</div>
-
-<hr style="border:none;border-top:1px solid rgba(255,255,255,0.12);margin:8px 0;">
-
-<div>
-<div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-<strong style="font-size:11px;">Weekly limits</strong>
-<span style="font-size:11px;">${wPct}% used</span>
-</div>
-<div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
-<div style="width:${Math.min(wPct, 100)}%;height:100%;border-radius:4px;background:${wBarColor};"></div>
-</div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">\u{29D7} ${wReset}</div>
-</div>
-
-<div style="font-size:9px;opacity:0.4;margin-top:8px;">Updated ${new Date().toLocaleTimeString()}</div>
-</div>
-`);
-  return md;
+  return buildUsageTooltipHtml({
+    heading: "Claude usage limits",
+    planLabel,
+    rows: [
+      {
+        title: "Current session (5hr)",
+        valueLabel: `${sPct}% used`,
+        barFillPct: sPct,
+        barColor: claudeBarColor(sPct),
+        resetLine: sReset,
+      },
+      {
+        title: "Weekly limits",
+        valueLabel: `${wPct}% used`,
+        barFillPct: wPct,
+        barColor: claudeBarColor(wPct),
+        resetLine: wReset,
+      },
+    ],
+  });
 }

@@ -72,4 +72,12 @@ export class KickstartGate {
     this.consecutiveFailedKickstarts = 0;
     this.postWakeStrikesRemaining = 0;
   }
+
+  /** Diagnostic snapshot for the health command. Display only. */
+  getDiagnostics(): { consecutiveFailedKickstarts: number; postWakeStrikesRemaining: number } {
+    return {
+      consecutiveFailedKickstarts: this.consecutiveFailedKickstarts,
+      postWakeStrikesRemaining: this.postWakeStrikesRemaining,
+    };
+  }
 }
