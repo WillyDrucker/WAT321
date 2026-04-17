@@ -20,8 +20,9 @@ import { showToast as showWindowsToast } from "./windowsToastProcess";
  *
  * Delivery paths:
  *   - Windows: warm PowerShell / WinRT toast via `windowsToastProcess`.
- *     Requires a registered AppUserModelID; set at activation from
- *     `vscode.env.uriScheme`.
+ *     Requires a registered AppUserModelID. Resolved in-process by
+ *     the warm PowerShell bootstrap via `Get-StartApps` keyed on
+ *     `vscode.env.appName` that extension.ts hands in at activation.
  *   - macOS: `osascript -e 'display notification ...'` (preinstalled,
  *     routes through Notification Center).
  *   - Linux: `notify-send` via libnotify (available on most GNOME /
