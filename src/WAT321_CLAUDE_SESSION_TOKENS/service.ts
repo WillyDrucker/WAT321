@@ -193,7 +193,12 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       if (this.state.status === "ok") {
         const prev = this.state.session;
         if (prev.source !== source) {
-          this.emitOk({ ...prev, source, lastActiveAt: mtime });
+          // Re-emit with the CURRENT resolved pid. Spreading prev
+          // alone would preserve a stale live pid after a live ->
+          // lastKnown transition, or miss the fresh pid on
+          // lastKnown -> live. pid comes from the outer destructure
+          // and is undefined for lastKnown by design.
+          this.emitOk({ ...prev, source, lastActiveAt: mtime, pid });
         }
       }
       return;
