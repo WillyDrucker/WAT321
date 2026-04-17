@@ -4,8 +4,9 @@ import { basename, join } from "node:path";
 import type { ResolvedSession, WidgetState } from "./types";
 import { readTail } from "../shared/fs/fileReaders";
 import { getProjectKey } from "../shared/fs/pathUtils";
-import { readAutoCompactPct } from "../shared/claudeSettings";
+import { readAutoCompactPct, SETTINGS_PATH } from "../shared/claudeSettings";
 import { resolveContextWindow } from "../engine/contracts";
+import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import { parseFirstUserMessage, parseLastUsage } from "./parsers";
 import {
@@ -29,6 +30,22 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
   private cachedAutoCompactPct: number | null = null;
   private cachedAutoCompactTime = 0;
 
+  /** Watches ~/.claude/sessions/ for new/removed CLI process files.
+   * Triggers an immediate poll so new sessions are detected instantly
+   * instead of waiting for the 51s fallback scan. */
+  private readonly sessionsWatcher = new PathWatcher(() => {
+    this.lastFallbackScan = 0;
+    this.triggerPoll();
+  });
+
+  /** Watches ~/.claude/settings.json for auto-compact threshold
+   * changes. Invalidates the cached threshold so the tooltip
+   * updates immediately. */
+  private readonly settingsWatcher = new PathWatcher(() => {
+    this.cachedAutoCompactPct = null;
+    this.triggerPoll();
+  });
+
   constructor(workspacePath: string) {
     super(
       workspacePath,
@@ -42,6 +59,28 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
   rebroadcast(): void {
     this.cachedAutoCompactPct = null;
     super.rebroadcast();
+  }
+
+  reset(): void {
+    this.cachedLastKnown = null;
+    this.lastFallbackScan = 0;
+    this.cachedSessionTitle = null;
+    this.cachedSessionTitlePath = "";
+    this.cachedAutoCompactPct = null;
+    this.cachedAutoCompactTime = 0;
+    this.sessionsWatcher.close();
+    this.settingsWatcher.close();
+    super.reset();
+  }
+
+  dispose(): void {
+    this.sessionsWatcher.close();
+    this.settingsWatcher.close();
+    super.dispose();
+  }
+
+  protected getIdleState(): WidgetState {
+    return { status: "no-session" };
   }
 
   private emitOk(session: ResolvedSession): void {
@@ -104,11 +143,16 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     const sessionsDir = join(claudeDir, "sessions");
 
     if (!existsSync(claudeDir)) {
+      this.sessionsWatcher.close();
+      this.settingsWatcher.close();
       if (this.state.status !== "not-installed") {
         this.setState({ status: "not-installed" });
       }
       return;
     }
+
+    this.sessionsWatcher.sync(sessionsDir);
+    this.settingsWatcher.sync(SETTINGS_PATH);
 
     const now = Date.now();
     const resolved = this.resolveTranscript(home, sessionsDir, now);

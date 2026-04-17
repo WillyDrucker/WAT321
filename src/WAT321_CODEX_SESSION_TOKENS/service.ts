@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { CodexResolvedSession, CodexTokenWidgetState } from "./types";
 import { readHead, readTail } from "../shared/fs/fileReaders";
+import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import {
   extractSessionId,
@@ -25,6 +26,14 @@ const SESSION_SCAN_INTERVAL = 51_000;
 export class CodexSessionTokenService extends SessionTokenServiceBase<CodexTokenWidgetState> {
   private cachedRolloutPath: string | null = null;
   private lastRolloutScan = 0;
+
+  /** Watches ~/.codex/sessions/ for new rollout files. Recursive
+   * on Windows/macOS to catch date-sharded subdirs; falls back to
+   * the 51s poll on Linux where recursive watch is unsupported. */
+  private readonly sessionsWatcher = new PathWatcher(() => {
+    this.lastRolloutScan = 0;
+    this.triggerPoll();
+  }, 100, true);
   private cachedSessionTitle: string | null = null;
   private cachedSessionTitleId = "";
   private cachedCwd: string | null = null;
@@ -43,6 +52,29 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     );
   }
 
+  reset(): void {
+    this.cachedRolloutPath = null;
+    this.lastRolloutScan = 0;
+    this.cachedSessionTitle = null;
+    this.cachedSessionTitleId = "";
+    this.cachedCwd = null;
+    this.cachedCwdPath = "";
+    this.cachedModelSlug = null;
+    this.cachedAutoCompactTokens = null;
+    this.cachedAutoCompactModel = "";
+    this.sessionsWatcher.close();
+    super.reset();
+  }
+
+  dispose(): void {
+    this.sessionsWatcher.close();
+    super.dispose();
+  }
+
+  protected getIdleState(): CodexTokenWidgetState {
+    return { status: "no-session" };
+  }
+
   private emitOk(session: CodexResolvedSession): void {
     this.setOkStateIfChanged(session, (s) => ({ status: "ok" as const, session: s }));
   }
@@ -55,11 +87,14 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     const codexDir = join(home, ".codex");
 
     if (!existsSync(codexDir)) {
+      this.sessionsWatcher.close();
       if (this.state.status !== "not-installed") {
         this.setState({ status: "not-installed" });
       }
       return;
     }
+
+    this.sessionsWatcher.sync(join(codexDir, "sessions"));
 
     if (
       now - this.lastRolloutScan >= SESSION_SCAN_INTERVAL ||
