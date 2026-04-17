@@ -8,15 +8,15 @@ import { makeBar as makeCodexBarDefault } from "../codex-usage/formatters";
  *
  *   - **Codex (band-based):** single color for the filled portion,
  *     shifts green -> yellow -> red as remaining capacity drops.
- *   - **Claude (rolling):** per-cell coloring. Cells past 55% turn
+ *   - **Claude (rolling):** per-cell coloring. Cells past 70% turn
  *     yellow, past 85% turn red. Yellow demotes to blue in red phase.
  *
  * Gated on `wat321.enableHeatmap` (default on). `renderClaudeBar` and
  * `renderCodexBar` are the dispatch points for all rendering surfaces.
  *
- * Color thresholds: Codex bands (25/50) sourced from the ChatGPT
+ * Color thresholds: Codex bands (25/40) sourced from the ChatGPT
  * usage dashboard (Tailwind green-500 / red-400). Claude thresholds
- * (55/85) align with natural cell crossovers in 10-wide and 5-wide
+ * (70/85) align with natural cell crossovers in 10-wide and 5-wide
  * bars.
  */
 
@@ -51,13 +51,13 @@ export function isHeatmapEnabled(): boolean {
  * `wat321.enableHeatmap` happens one level up in `renderCodexBar`;
  * this classifier is always safe to call.
  *
- *   remaining > 50%      -> green  (plenty of room)
- *   remaining 25%-50%    -> yellow (more than half consumed)
+ *   remaining > 40%      -> green  (plenty of room)
+ *   remaining 25%-40%    -> yellow (past 60% used)
  *   remaining <= 25%     -> red    (approaching depletion)
  */
 export function bandFromRemaining(remainingPct: number): HeatmapBand {
   if (remainingPct <= 25) return "red";
-  if (remainingPct <= 50) return "yellow";
+  if (remainingPct <= 40) return "yellow";
   return "green";
 }
 
@@ -106,10 +106,10 @@ export function buildCodexHeatmapBar(
   const clamped = Math.max(0, Math.min(100, usedPct));
   const remainingPct = Math.max(0, 100 - clamped);
 
-  // Fully depleted override: every cell red so "maxed out" is
-  // unmistakable regardless of the right-to-left fill metaphor.
+  // Fully depleted: all black. The bar represents remaining capacity
+  // so an empty bar correctly communicates "nothing left."
   if (remainingPct <= 0) {
-    return SQUARE_RED.repeat(width);
+    return SQUARE_BLACK.repeat(width);
   }
 
   const band = bandFromRemaining(remainingPct);
@@ -117,7 +117,7 @@ export function buildCodexHeatmapBar(
 
   let filled = Math.round((remainingPct / 100) * width);
   // Minimum-one-cell guarantee when in the red band so the visual
-  // never lies by going empty at very low remaining.
+  // shows "almost depleted" instead of going empty at 1-4%.
   if (band === "red" && filled < 1) {
     filled = 1;
   }
@@ -127,10 +127,9 @@ export function buildCodexHeatmapBar(
 }
 
 /** Usage percentage at which the yellow band becomes active. Constant
- * across all bar widths. Cell 6 lights up exactly at this threshold
- * in a 10-wide bar; in a 5-wide bar cell 3 is already lit from pct=50
- * and upgrades in place from blue to yellow. */
-const CLAUDE_YELLOW_THRESHOLD = 55;
+ * across all bar widths. Cell 7 lights up at this threshold in a
+ * 10-wide bar; in a 5-wide bar cell 4 lights up at the same point. */
+const CLAUDE_YELLOW_THRESHOLD = 70;
 /** Usage percentage at which the red band becomes active. Constant
  * across all bar widths. Cell 9 lights up exactly at this threshold
  * in a 10-wide bar; in a 5-wide bar cell 4 is already lit from pct=70
@@ -144,7 +143,7 @@ const CLAUDE_RED_THRESHOLD = 85;
  * whole filled portion, the Claude heatmap is position-aware: cells
  * past a configurable position are colored, cells below stay blue.
  * The active phase (blue / yellow / red) is driven by constant
- * percent thresholds (55 and 85) that don't depend on width, and the
+ * percent thresholds (70 and 85) that don't depend on width, and the
  * "first colored cell" position is derived from the fill count at
  * those thresholds. This keeps the model aligned with the natural
  * cell crossovers of the default progress bar in both 10-wide and
@@ -152,8 +151,8 @@ const CLAUDE_RED_THRESHOLD = 85;
  *
  * Rules (usedPct is the Claude utilization percentage, 0-100):
  *
- *   usedPct  <  55       blue phase   all filled cells blue
- *   55 <= usedPct <  85  yellow phase cells from firstYellowCell up
+ *   usedPct  <  70       blue phase   all filled cells blue
+ *   70 <= usedPct <  85  yellow phase cells from firstYellowCell up
  *                                     to the current fill are yellow;
  *                                     cells below are blue
  *   85 <= usedPct <  100 red phase    cells from firstRedCell up to
@@ -163,9 +162,9 @@ const CLAUDE_RED_THRESHOLD = 85;
  *                                     "demotes" back to blue)
  *   usedPct  == 100      override     every cell is red
  *
- * In a 10-wide bar firstYellowCell=6 and firstRedCell=9, so the
- * yellow band is cells 6-8 and the red band is cells 9-10 with no
- * overlap. In a 5-wide bar firstYellowCell=3 and firstRedCell=4, so
+ * In a 10-wide bar firstYellowCell=7 and firstRedCell=9, so the
+ * yellow band is cells 7-8 and the red band is cells 9-10 with no
+ * overlap. In a 5-wide bar firstYellowCell=4 and firstRedCell=4, so
  * cell 4 is yellow during 70-84 and upgrades in place to red at 85;
  * the yellow and red bands share cell 4. That sharing is what lets
  * the compact bar avoid a dead zone after the 85% threshold without
