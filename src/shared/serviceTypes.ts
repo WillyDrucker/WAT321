@@ -21,6 +21,14 @@ export type ServiceState<TData> =
        * line in the rate-limited tooltip when present. Absent if
        * the body was unparseable or empty. */
       serverMessage?: string;
+      /** True when the park was entered without recent session
+       * activity - Anthropic's usage endpoint 429s cold polls on
+       * accounts with no recent OAuth use, which is not a real
+       * rate-limit incident. Frozen at park time so a user who
+       * hits a real limit and then idles does not flip to the
+       * friendly skin. The renderer uses this to distinguish
+       * "idle / needs first activity" from "actively rate-limited". */
+      isColdStart?: boolean;
     }
   | { status: "offline"; message: string }
   | { status: "error"; message: string }

@@ -3,6 +3,12 @@ import {
   KICKSTART_ESCALATION_MS,
 } from "./constants";
 
+/** Public helper the usage service uses to classify a fresh
+ * `rate-limited` park as cold-start (no recent activity) vs active
+ * (user is currently working). Matches the kickstart window so the
+ * two concepts stay in sync: an activity gap long enough to disable
+ * kickstart is the same gap long enough to count as idle. */
+
 /**
  * Activity-driven kickstart gate for the usage polling service.
  * Decides when a rate-limited service should wake up early because
@@ -38,6 +44,16 @@ export class KickstartGate {
     const activityMs = this.getActivityMs?.() ?? null;
     if (activityMs === null) return false;
     return now - activityMs <= KICKSTART_ACTIVITY_WINDOW_MS;
+  }
+
+  /** Was the provider idle (no recent session activity) at `now`?
+   * Used by the usage service to tag a fresh `rate-limited` park as
+   * cold-start so the renderer can show a friendly "Idle" skin
+   * instead of the alarm-level "Offline" skin. */
+  isIdleAt(now: number): boolean {
+    const activityMs = this.getActivityMs?.() ?? null;
+    if (activityMs === null) return true;
+    return now - activityMs > KICKSTART_ACTIVITY_WINDOW_MS;
   }
 
   /** Called when a kickstart wake begins. Arms the post-wake strike

@@ -357,11 +357,20 @@ export abstract class UsageServiceBase<TResponse> {
       if (this.consecutiveRateLimits === 1) {
         this.setPollInterval(retryAfterMs);
       }
+      const now = Date.now();
+      // Anthropic's usage endpoint 429s cold polls on accounts with
+      // no recent OAuth activity. Tag the park as cold-start when
+      // the user is idle so the renderer shows a friendly "Idle"
+      // skin instead of the alarm-level "Offline" skin. Once the
+      // user activates a session and we re-park with fresh
+      // activity, the new park is not cold and shows the real
+      // Offline view.
       const newState: ServiceState<TResponse> = {
         status: "rate-limited",
         retryAfterMs,
-        rateLimitedAt: Date.now(),
+        rateLimitedAt: now,
         serverMessage: extractServerMessage(error),
+        isColdStart: this.kickstart.isIdleAt(now),
       };
       this.setState(newState);
       this.coordinator.writeCache(newState);

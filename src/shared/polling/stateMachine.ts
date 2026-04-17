@@ -35,11 +35,14 @@ export function statesEqual<TData>(
     // dedupe. Every current park path stamps a fresh `rateLimitedAt`
     // so this rarely fires in practice, but comparing it closes the
     // gap for any future path that reuses the same timestamp while
-    // changing only the friendly message.
+    // changing only the friendly message. `isColdStart` drives a
+    // different renderer skin, so a cold->active transition at the
+    // same timestamp must not dedupe.
     return (
       a.rateLimitedAt === b.rateLimitedAt &&
       a.retryAfterMs === b.retryAfterMs &&
-      a.serverMessage === b.serverMessage
+      a.serverMessage === b.serverMessage &&
+      a.isColdStart === b.isColdStart
     );
   }
   return true;
