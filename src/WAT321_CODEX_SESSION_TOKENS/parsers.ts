@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { readHead } from "../shared/fs/fileReaders";
+import type { LastEntryKind } from "../shared/transcriptClassifier";
 
 /**
  * Parsers for Codex rollout `.jsonl` transcripts. Rollouts live under
@@ -259,13 +260,38 @@ function extractOutputText(content: unknown): string | null {
 }
 
 /** Classify whether the last meaningful entry in a Codex rollout
- * tail represents a completed assistant turn. Walks backwards,
- * skipping bookkeeping events, and returns true when it finds a
- * known assistant-response event. Returns false only for known
- * mid-turn events (user messages, tool execution). Unrecognized
- * event types are skipped rather than rejected so new Codex event
- * types don't silently suppress notifications. */
+ * tail represents a completed assistant turn. Thin wrapper over
+ * `classifyCodexTurn` so the detection rules stay in one place.
+ *
+ * `user` and `assistant-pending` = mid-turn, notification gate should
+ * suppress. `assistant-done` and `unknown` = complete, notification
+ * gate should fire. The `unknown` -> fire bias matches the original
+ * behavior: a missing definitive event must not silently lose a
+ * notification. Interrupts (`turn_aborted`) map to `assistant-done`
+ * via the classifier, so notifications correctly do not fire on
+ * cancelled turns. */
 export function isCodexTurnComplete(tail: string): boolean {
+  const state = classifyCodexTurn(tail);
+  return state === "assistant-done" || state === "unknown";
+}
+
+/** Classify the last meaningful entry in a Codex rollout tail into
+ * one of the four turn states used by the session token active
+ * indicator. Walks backwards, skips bookkeeping events, returns the
+ * first definitive event found:
+ *   - `assistant-done` - a completed assistant response OR a turn
+ *     explicitly ended by `task_complete` / `turn_aborted`. Codex
+ *     writes `event_msg` / `turn_aborted` on user interrupt (Esc /
+ *     Ctrl+C) and `event_msg` / `task_complete` at normal turn end.
+ *     Both resolve the indicator instantly.
+ *   - `assistant-pending` - a tool / function call in flight
+ *   - `user` - last event was a user message (user is waiting)
+ *   - `unknown` - no definitive event in the tail window
+ *
+ * Unlike `isCodexTurnComplete` (which biases toward true for
+ * notification firing), this biases `unknown` to idle so the thinking
+ * indicator does not pin itself on when we cannot tell. */
+export function classifyCodexTurn(tail: string): LastEntryKind {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
@@ -281,24 +307,30 @@ export function isCodexTurnComplete(tail: string): boolean {
     const payload = entry.payload as Record<string, unknown> | undefined;
     const ptype = payload?.type as string | undefined;
 
-    // Known assistant-response events = turn complete
-    if (entry.type === "event_msg" && ptype === "agent_message") return true;
-    if (entry.type === "response_item" && ptype === "message" && payload?.role === "assistant") return true;
-    if (entry.type === "response.output_text.done") return true;
-    if (entry.type === "message" && payload?.role === "assistant") return true;
+    // Explicit turn-end signals: Codex writes turn_aborted on user
+    // interrupt and task_complete on normal end of turn. Both mean
+    // the turn is definitively over.
+    if (entry.type === "event_msg" && (ptype === "turn_aborted" || ptype === "task_complete")) {
+      return "assistant-done";
+    }
 
-    // Known mid-turn events = turn NOT complete, stop scanning
-    if (ptype === "user_message") return false;
-    if (ptype === "tool_call" || ptype === "function_call") return false;
-    if (entry.type === "response_item" && ptype === "function_call") return false;
+    // Assistant-response events = done
+    if (entry.type === "event_msg" && ptype === "agent_message") return "assistant-done";
+    if (entry.type === "response_item" && ptype === "message" && payload?.role === "assistant") return "assistant-done";
+    if (entry.type === "response.output_text.done") return "assistant-done";
+    if (entry.type === "message" && payload?.role === "assistant") return "assistant-done";
+
+    // User messages = user is waiting for a response
+    if (ptype === "user_message") return "user";
+
+    // Tool / function calls in flight = assistant is actively working
+    if (ptype === "tool_call" || ptype === "function_call") return "assistant-pending";
+    if (entry.type === "response_item" && ptype === "function_call") return "assistant-pending";
 
     // Everything else (token_count, turn_context, reasoning,
-    // exec_output, task events, etc.) is bookkeeping - skip and
-    // keep scanning backwards for a definitive event.
+    // exec_output) is bookkeeping - keep scanning.
   }
-  // No definitive event found in the tail. Bias toward firing so
-  // a notification is not silently lost.
-  return true;
+  return "unknown";
 }
 
 /** Codex rollout filenames are `rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl`.

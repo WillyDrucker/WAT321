@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -41,6 +41,10 @@
       {
         "command": "wat321.clearAllSettings",
         "title": "WAT321: Reset WAT321"
+      },
+      {
+        "command": "wat321.showProviderHealth",
+        "title": "WAT321: Show Provider Health"
       }
     ],
     "configuration": [

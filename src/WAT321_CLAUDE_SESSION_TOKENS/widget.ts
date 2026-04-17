@@ -12,6 +12,10 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
   provider: "Claude",
   whitePct: 90,
   yellowPct: 95,
+  idlePrefix: "$(claude)",
+  activeFrames: ["$(comment)", "$(comment-discussion-quote)"],
+  activeStepMs: 1000,
+  activeThresholdMs: 5_000,
   getRenderData: (state) => {
     const { session } = state;
     const ceiling = Math.round(
@@ -25,6 +29,9 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
       contextWindowSize: session.contextWindowSize,
       ceiling,
       baselineTokens: 0,
+      transcriptMtimeMs: session.lastActiveAt,
+      turnState: session.turnState,
+      pid: session.pid,
       lastActiveAt:
         session.source === "lastKnown" ? session.lastActiveAt : undefined,
     };

@@ -13,8 +13,10 @@ import type { EventHub } from "./eventHub";
  *     token count; that is not a new response).
  *   - Skip mid-turn emissions when a turn-completion classifier is
  *     provided and returns false.
- *   - Skip preview parsing entirely when notifications are disabled
- *     upstream (the `shouldParsePreview` callback gates tail reads).
+ *   - Skip preview parsing when notifications are disabled upstream
+ *     (`shouldParsePreview`). The tail is still read when a classifier
+ *     is provided, since the classifier needs it - only the assistant-
+ *     text parse is gated.
  *
  * Dependencies are injected so this module lives cleanly in engine
  * without reaching into shared/. Tool independence preserved - each

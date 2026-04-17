@@ -1,4 +1,5 @@
 import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/serviceTypes";
+import type { LastEntryKind } from "../shared/transcriptClassifier";
 
 /** Entry from ~/.codex/session_index.jsonl */
 export interface CodexSessionIndex {
@@ -17,6 +18,10 @@ export interface CodexResolvedSession {
   contextWindowSize: number; // effective model context window from token_count
   autoCompactTokens: number; // effective context window ceiling (matches Codex native hover); actual compact trigger is ~90/95 of this
   lastActiveAt: number; // ms - rollout file mtime (display metadata only)
+  /** Last rollout event classification. Drives the active-state
+   * indicator. `user` and `assistant-pending` mean a response is in
+   * flight; `assistant-done` and `unknown` are idle. */
+  turnState: LastEntryKind;
 }
 
 export type CodexTokenWidgetState =

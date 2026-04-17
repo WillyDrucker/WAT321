@@ -6,7 +6,10 @@ import type { EngineContext } from "./engine/engineContext";
 import { createEngineContext } from "./engine/engineContext";
 import { registerHealthCommand } from "./engine/healthCommand";
 import { SETTING } from "./engine/settingsKeys";
-import { dispose as disposeToastProcess } from "./engine/windowsToastProcess";
+import {
+  dispose as disposeToastProcess,
+  setHostAppName,
+} from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
 
 /**
@@ -19,6 +22,18 @@ let ctx: EngineContext | null = null;
 let lastNotificationMode = "System Notifications";
 
 export function activate(context: vscode.ExtensionContext) {
+  // Hand the host app name to the warm PowerShell process so it can
+  // resolve the correct AppUserModelID via `Get-StartApps` at its
+  // bootstrap. This is the only hook the toast module needs - AUMID
+  // discovery happens in-process, no second PowerShell spawn. An
+  // unregistered AUMID causes Windows to silently discard the toast
+  // with zero logging, so getting this right matters across every VS
+  // Code fork (Insiders, VSCodium, Cursor, Windsurf). Setter is a
+  // no-op outside Windows paths; safe to call unconditionally.
+  if (process.platform === "win32") {
+    setHostAppName(vscode.env.appName);
+  }
+
   ctx = createEngineContext();
   context.subscriptions.push(...registerProviders(ctx));
 

@@ -2,17 +2,19 @@ import * as vscode from "vscode";
 import type { ProviderKey } from "./contracts";
 import type { EngineContext } from "./engineContext";
 import { getNotificationDiagnostics } from "./toastNotifier";
+import { getAppUserModelID } from "./windowsToastProcess";
 
 /**
- * Hidden debug command. Registered internally with no `contributes`
- * entry in package.json so it does not appear in the palette by
- * default. Invocable via `code --command wat321.showProviderHealth`
- * or by typing the id in the palette.
+ * Diagnostic command exposed in the palette as
+ * `WAT321: Show Provider Health`. Opens a read-only output panel
+ * summarizing the current state of every provider and recent
+ * delivery decisions.
  *
  * Surfaces:
  *   - Provider lifecycle (registered / activated / connected)
  *   - Usage service state + kickstart escalation + rate-limit park
  *   - Active transcript paths per provider
+ *   - Windows host AUMID diagnostics
  *   - Recent provider transitions (ring buffer)
  *   - Recent notification deliveries (ring buffer)
  *
@@ -109,7 +111,7 @@ function renderNotifications(lines: string[]): void {
   }
   for (const d of diag) {
     const focus = d.focused ? "focused" : "unfocused";
-    lines.push(`  ${formatEpoch(d.at)}  ${d.provider.padEnd(7)} mode=${d.mode.padEnd(20)} ${d.delivered} (${focus})`);
+    lines.push(`  ${formatEpoch(d.at)}  ${d.provider.padEnd(7)} mode=${d.mode.padEnd(20)} ${d.outcome} (${focus})`);
   }
 }
 
@@ -145,8 +147,22 @@ export function registerHealthCommand(
         "=".repeat(30),
         "",
         `Active providers: ${ctx.providers.activeCount()}`,
-        "",
       ];
+
+      if (process.platform === "win32") {
+        // Mismatched AUMID is the most common silent-drop cause for
+        // Windows toasts on VS Code forks. Surface it prominently so
+        // a user seeing no notifications can spot a failed host
+        // resolution without reading source. AUMID is discovered
+        // inside the warm PowerShell process at first spawn; until
+        // then this reads `(pending)`.
+        const aumid = getAppUserModelID() || "(pending - no toast fired yet)";
+        lines.push(`Host appName:    ${vscode.env.appName}`);
+        lines.push(`Host uriScheme:  ${vscode.env.uriScheme}`);
+        lines.push(`Toast AUMID:     ${aumid}`);
+      }
+
+      lines.push("");
 
       for (const key of ctx.providers.keys()) {
         renderProvider(ctx, key, lines);
