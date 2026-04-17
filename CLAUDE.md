@@ -29,10 +29,11 @@ VS Code extension providing real-time AI usage status bar widgets (Claude + Code
 - **Error messages are passive** - friendly, short, no jargon
 
 ## Code Style
-- **No version numbers, timestamps, or release narrative in code comments.** History belongs in commits and CHANGELOG
-- **Comments are future-facing:** what the code does, WHY, and what constraints to preserve
-- **Semantic file names** - `compactDetector.ts`, `rolloutDiscovery.ts`, not generic catch-alls
-- **Scale intelligently** - extract shared helpers when duplication is genuine, but keep each service readable end-to-end
+- **Comments are just the facts and future-facing.** What the code does, WHY, what constraints to preserve, and pain points another session would need to avoid recreating. State them plainly, not as narrative.
+- **No history in code.** Never `// removed this to fix that` or version/date stamps. History belongs in commits and CHANGELOG. If a past pain point is still load-bearing context, surface it as a present-tense fact (e.g. "stale workspace-scope values can override application mode; heal on activate").
+- **Light and intelligent.** Short comments over long ones. Skip obvious ones. Keep the ones that save another session from repeating a mistake.
+- **Semantic file names** - `pathWatcher.ts`, `rolloutDiscovery.ts`, `sessionResponseBridge.ts`, not generic catch-alls.
+- **Scale intelligently** - extract shared helpers when duplication is genuine, but keep each service readable end-to-end.
 
 ## Conventions
 - `package.json` `displayName` is `"WAT321"` only
