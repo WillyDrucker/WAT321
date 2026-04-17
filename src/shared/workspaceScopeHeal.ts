@@ -2,40 +2,48 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
-import { clearCheckboxSetting } from "./resetSettings";
 
 /**
- * Heal `wat321.*` action-trigger settings that must never live at
- * workspace scope. A stuck workspace value blocks the checkbox
- * change handler because workspace overrides user during merge.
+ * Heal stale workspace-scoped values for `wat321.*` settings whose
+ * package.json declares `"scope": "application"`. VS Code's config
+ * API refuses to modify application-scoped keys at workspace scope,
+ * so a value already present in a workspace `.vscode/settings.json`
+ * survives silently and can override the user's current preference.
  *
- * Two-pronged:
- *   1. Clear at user scope via the config API.
- *   2. Surgically strip from `.vscode/settings.json` in every open
- *      workspace folder (VS Code's API refuses to modify
- *      application-scoped keys at workspace scope).
+ * Two-pronged on activate:
+ *   1. Strip from the workspace config API (for keys where the API
+ *      still allows removal, e.g. action-trigger checkboxes).
+ *   2. Surgically strip from every open workspace folder's
+ *      `.vscode/settings.json` file (the durable fix).
+ *
+ * Known observed symptom: a user on `"System Notifications"` mode
+ * seeing random "Auto"-style behavior because a stale workspace
+ * override from the pre-v1.1.2 default was never upgraded.
  */
 
-/** Keys that must never live at workspace scope because they are
- * action triggers (click to reset) rather than persistent preferences.
- * Every key here is also declared as `"scope": "application"` in
- * package.json so that new writes cannot land at workspace scope
- * going forward; the heal below is for early-adopter workspaces that
- * still physically have the key in their `.vscode/settings.json`
- * from before the scope tightening. */
+/** Application-scoped `wat321.*` keys. Must stay in sync with the
+ * `"scope": "application"` entries in package.json. */
 const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.clearAllData}`,
+  `wat321.${SETTING.notificationsMode}`,
+  `wat321.${SETTING.notificationsClaude}`,
+  `wat321.${SETTING.notificationsCodex}`,
 ] as const;
 
-/** Surgically strip a set of `wat321.*` keys from a single
- * settings.json file. Uses a conservative line-level regex per key
- * that matches the key at the start of its own line (optional
- * leading whitespace), any bool literal, and an optional trailing
- * comma. Preserves JSONC comments and every other key untouched
- * because we only delete the matching line. Atomic write via
- * tmp+rename so a crash mid-write cannot corrupt the file. Silent
- * no-op on missing file, IO error, or if no matching key is
- * present. */
+/** Value-pattern fragments matched per JSONC value shape. Ordered
+ * so the longest / most-specific form wins. */
+const VALUE_PATTERNS: readonly string[] = [
+  `"[^"]*"`, // any double-quoted string
+  `true|false`,
+  `-?\\d+(?:\\.\\d+)?`,
+];
+
+/** Surgically strip a set of `wat321.*` keys from a settings.json
+ * file. Matches each key at the start of its own line with any of
+ * the value patterns above and an optional trailing comma. Preserves
+ * JSONC comments and every other key untouched. Atomic tmp+rename so
+ * a crash mid-write cannot corrupt the file. Silent on missing file
+ * or IO error. */
 function stripApplicationScopeKeysFromFile(path: string): void {
   if (!existsSync(path)) return;
   let content: string;
@@ -46,43 +54,56 @@ function stripApplicationScopeKeysFromFile(path: string): void {
   }
   if (!APPLICATION_SCOPE_KEYS.some((k) => content.includes(k))) return;
 
+  const valueUnion = VALUE_PATTERNS.join("|");
   let next = content;
   for (const key of APPLICATION_SCOPE_KEYS) {
-    // Escape any regex metachars in the key so `.` matches literally.
     const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // Match the whole line, including its line terminator, so removing
-    // it leaves surrounding formatting intact.
     const lineRegex = new RegExp(
-      `^[ \\t]*"${escaped}"[ \\t]*:[ \\t]*(?:true|false)[ \\t]*,?[ \\t]*\\r?\\n`,
+      `^[ \\t]*"${escaped}"[ \\t]*:[ \\t]*(?:${valueUnion})[ \\t]*,?[ \\t]*\\r?\\n`,
       "gm"
     );
     next = next.replace(lineRegex, "");
   }
   if (next === content) return;
 
-  // Fix up a trailing comma that used to separate one of our keys
-  // from the closing brace: `, \n}` -> `\n}`. Safe at the end of an
-  // object literal. Runs after all strips so the final shape is
-  // always valid JSONC.
+  // A trailing comma left after stripping the last entry before `}`
+  // would make the object invalid JSON. Fix up: `, \n}` -> `\n}`.
   next = next.replace(/,(\s*})/g, "$1");
 
   try {
     const tmp = `${path}.wat321-heal.tmp`;
     writeFileSync(tmp, next, "utf8");
-    // Atomic rename; on Windows this overwrites the target.
     renameSync(tmp, path);
   } catch {
     // best-effort
   }
 }
 
-/** Fire-and-forget heal on activation. Strips stale application-scope
- * keys from workspace settings. Never throws. Only touches keys in
- * `APPLICATION_SCOPE_KEYS`. */
+/** Drop a stuck workspace-scope value via the config API where
+ * possible. Best-effort; some scope/value combinations reject and
+ * the file-surgery path is the durable fix. */
+async function clearWorkspaceScope(key: string): Promise<void> {
+  const config = vscode.workspace.getConfiguration();
+  try {
+    await config.update(key, undefined, vscode.ConfigurationTarget.Workspace);
+  } catch {
+    // scope inapplicable or read-only - fine
+  }
+  try {
+    await config.update(key, undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+  } catch {
+    // scope inapplicable - fine
+  }
+}
+
+/** Fire-and-forget heal on activation. Strips stale workspace-scope
+ * values for every application-scoped wat321 key. Never throws. */
 export function healStaleApplicationScopeKeys(): void {
-  void clearCheckboxSetting(SETTING.clearAllData).catch(() => {
-    // best-effort - never block activation
-  });
+  for (const key of APPLICATION_SCOPE_KEYS) {
+    void clearWorkspaceScope(key).catch(() => {
+      // best-effort - never block activation
+    });
+  }
 
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) return;

@@ -75,6 +75,7 @@
           "wat321.notifications.mode": {
             "type": "string",
             "default": "System Notifications",
+            "scope": "application",
             "enum": [
               "Off",
               "Auto",
@@ -82,10 +83,10 @@
               "In-App"
             ],
             "enumDescriptions": [
-              "No notifications",
-              "System notifications when your editor is unfocused, in-app when focused",
-              "Always use system notifications (native on Windows, in-app elsewhere)",
-              "Always use the in-app notification bar inside your editor"
+              "Notification services stopped and disabled",
+              "Receive system notifications when your editor is unfocused, in-app when focused",
+              "Only use Windows, Linux and macOS notifications",
+              "Only use editor in-app notifications"
             ],
             "order": 1,
             "markdownDescription": "Notify you when Claude or Codex finishes a response."
@@ -93,12 +94,14 @@
           "wat321.notifications.claude": {
             "type": "boolean",
             "default": true,
+            "scope": "application",
             "order": 2,
             "markdownDescription": "Show notifications for Claude sessions. Requires Claude to be enabled."
           },
           "wat321.notifications.codex": {
             "type": "boolean",
             "default": true,
+            "scope": "application",
             "order": 3,
             "markdownDescription": "Show notifications for Codex sessions. Requires Codex to be enabled."
           }

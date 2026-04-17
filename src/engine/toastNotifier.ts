@@ -1,35 +1,64 @@
-import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import type { AppEvents, EventHub } from "./eventHub";
 import { SETTING } from "./settingsKeys";
+import { showToast as showWindowsToast } from "./windowsToastProcess";
 
 /**
- * Toast notification system with configurable delivery modes.
+ * Toast notification delivery with configurable mode.
  *
- * Settings (all under `wat321.notifications.*`):
+ * Settings (under `wat321.notifications.*`):
  *   mode   - "Off" | "Auto" | "System Notifications" | "In-App"
  *   claude - per-provider filter (default true)
  *   codex  - per-provider filter (default true)
  *
  * Modes:
- *   Off                  - no notifications, no cycles consumed
+ *   Off                  - no delivery, no cycles
  *   Auto                 - system when editor unfocused, in-app when focused
  *   System Notifications - always native OS notifications
  *   In-App               - always in-editor notification bar
  *
- * On Windows, system notifications use the WinRT API via
- * PowerShell with a 3-line layout (provider header, session
- * title, response preview). On macOS / Linux, system mode uses
- * `showInformationMessage` which routes through the OS
- * notification center automatically.
+ * Windows: system mode uses a warm PowerShell / WinRT toast (3-line
+ * layout). On delivery failure (process died, stdin closed) the
+ * notifier falls back to in-app so the user still sees the event.
+ *
+ * macOS / Linux: system mode delegates to
+ * `vscode.window.showInformationMessage` which the OS notification
+ * center routes natively when the editor is unfocused.
+ *
+ * Cooldown is per-provider so a Claude response does not suppress
+ * a Codex notification that arrives seconds later. All recent
+ * delivery decisions are retained in a ring buffer for the health
+ * command.
  */
 
-// Cooldown is keyed by provider so Claude finishing doesn't
-// suppress a Codex notification that arrives seconds later.
-const lastNotificationTime = new Map<string, number>();
 const NOTIFICATION_COOLDOWN_MS = 10_000;
 const MAX_SESSION_TITLE_LENGTH = 40;
 const MAX_PREVIEW_LENGTH = 200;
+const DIAGNOSTIC_RING_SIZE = 20;
+
+const lastNotificationTime = new Map<string, number>();
+
+export interface NotificationDiagnostic {
+  at: number;
+  provider: string;
+  mode: string;
+  delivered: "system" | "in-app" | "suppressed-cooldown" | "suppressed-provider" | "suppressed-off" | "windows-failed-fallback";
+  focused: boolean;
+}
+
+const diagnostics: NotificationDiagnostic[] = [];
+
+/** Snapshot of the last N delivery decisions for the health command. */
+export function getNotificationDiagnostics(): readonly NotificationDiagnostic[] {
+  return [...diagnostics];
+}
+
+function recordDiagnostic(entry: NotificationDiagnostic): void {
+  diagnostics.push(entry);
+  if (diagnostics.length > DIAGNOSTIC_RING_SIZE) {
+    diagnostics.splice(0, diagnostics.length - DIAGNOSTIC_RING_SIZE);
+  }
+}
 
 function getConfig(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration("wat321");
@@ -39,9 +68,6 @@ function getMode(): string {
   return getConfig().get<string>(SETTING.notificationsMode, "System Notifications");
 }
 
-/** True when the mode is anything other than Off. Used by the
- * notification handler and the bootstrap bridge to skip response
- * preview parsing when notifications are disabled. */
 export function isNotificationsEnabled(): boolean {
   return getMode() !== "Off";
 }
@@ -53,7 +79,6 @@ function isProviderEnabled(provider: string): boolean {
   return getConfig().get<boolean>(key, true);
 }
 
-/** Truncate a session title for the toast header. */
 function truncateSessionTitle(title: string | null): string {
   if (!title) return "";
   const oneLine = title.replace(/[\r\n]+/g, " ").trim();
@@ -61,9 +86,6 @@ function truncateSessionTitle(title: string | null): string {
   return `${oneLine.slice(0, MAX_SESSION_TITLE_LENGTH - 1).trimEnd()}\u2026`;
 }
 
-/** Clean and truncate response text for the toast body. Collapses
- * whitespace runs and caps at a length that fits comfortably in
- * a Windows toast (~4 visible lines). */
 function truncatePreview(text: string | null): string {
   if (!text) return "";
   const clean = text
@@ -74,56 +96,6 @@ function truncatePreview(text: string | null): string {
   return `${clean.slice(0, MAX_PREVIEW_LENGTH - 1).trimEnd()}\u2026`;
 }
 
-// --- Windows native toast via WinRT ---
-
-/** Escape the five XML predefined entities. */
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-/** Fire a 3-line Windows system toast. Uses PowerShell's
- * `-EncodedCommand` to avoid shell-escaping issues with user
- * content. Fire-and-forget with a 5-second timeout. */
-function showWindowsToast(
-  headerLine: string,
-  sessionLine: string,
-  previewLine: string
-): void {
-  const h = escapeXml(headerLine);
-  const s = escapeXml(sessionLine);
-  const p = escapeXml(previewLine);
-
-  const script = [
-    "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null",
-    "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null",
-    "$x = New-Object Windows.Data.Xml.Dom.XmlDocument",
-    `$x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>${h}</text><text>${s}</text><text>${p}</text></binding></visual></toast>')`,
-    '$n = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Microsoft.VisualStudioCode")',
-    "$t = New-Object Windows.UI.Notifications.ToastNotification($x)",
-    "$n.Show($t)",
-  ].join("\n");
-
-  // Base64-encode as UTF-16LE for PowerShell's -EncodedCommand.
-  // This avoids all shell-escaping hazards with user-generated
-  // content (session titles, response text) that could contain
-  // quotes, dollar signs, or other PowerShell metacharacters.
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  execFile(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-    { timeout: 5000 },
-    () => {} // fire-and-forget, errors silently ignored
-  );
-}
-
-// --- Delivery logic ---
-
-/** Show via the editor's in-app notification bar. */
 function showInAppNotification(
   header: string,
   title: string,
@@ -132,70 +104,95 @@ function showInAppNotification(
   const message = title
     ? `${header} "${title}": ${preview || "response complete"}`
     : `${header}: ${preview || "response complete"}`;
-  vscode.window.showInformationMessage(message);
+  void vscode.window.showInformationMessage(message);
 }
 
-/** Show via OS-level system notification. On Windows uses WinRT
- * for a rich 3-line toast. On macOS / Linux falls back to
- * `showInformationMessage` which routes through the OS
- * notification center natively. */
+/** Deliver via the OS notification center. On Windows this is the
+ * warm PowerShell / WinRT path. Returns true when the OS path
+ * accepted the delivery, false on Windows stdin failure so the
+ * caller can fall back. macOS / Linux always return true because
+ * `showInformationMessage` routes through the OS automatically. */
 function showSystemNotification(
   header: string,
   title: string,
   preview: string
-): void {
+): boolean {
   if (process.platform === "win32") {
-    // Windows gets the rich 3-line toast: bold header, session
-    // title in curly quotes, response preview body.
     const sessionLine = title ? `\u201C${title}\u201D` : "";
-    showWindowsToast(header, sessionLine, preview || "response complete");
-  } else {
-    // macOS / Linux: showInformationMessage routes through the
-    // OS notification center when VS Code is unfocused.
-    showInAppNotification(header, title, preview);
+    return showWindowsToast(header, sessionLine, preview || "response complete");
   }
+  showInAppNotification(header, title, preview);
+  return true;
 }
 
-// --- Public API ---
-
-/** Handle a single `session.responseComplete` event. All gating
- * (master switch, per-provider filter, cooldown) lives here so
- * the emitter is completely notification-unaware. */
 function handleResponseComplete(
   payload: AppEvents["session.responseComplete"]
 ): void {
-  if (!isNotificationsEnabled()) return;
-  if (!isProviderEnabled(payload.provider)) return;
+  const focused = vscode.window.state.focused;
+  const mode = getMode();
+
+  if (mode === "Off") {
+    recordDiagnostic({ at: Date.now(), provider: payload.provider, mode, delivered: "suppressed-off", focused });
+    return;
+  }
+  if (!isProviderEnabled(payload.provider)) {
+    recordDiagnostic({ at: Date.now(), provider: payload.provider, mode, delivered: "suppressed-provider", focused });
+    return;
+  }
 
   const now = Date.now();
   const lastTime = lastNotificationTime.get(payload.provider) ?? 0;
-  if (now - lastTime < NOTIFICATION_COOLDOWN_MS) return;
+  if (now - lastTime < NOTIFICATION_COOLDOWN_MS) {
+    recordDiagnostic({ at: now, provider: payload.provider, mode, delivered: "suppressed-cooldown", focused });
+    return;
+  }
   lastNotificationTime.set(payload.provider, now);
 
-  const displayName = payload.displayName;
   const title = truncateSessionTitle(payload.sessionTitle || null);
   const preview = truncatePreview(payload.responsePreview || null);
   const header = payload.label
-    ? `${displayName} (${payload.label})`
-    : displayName;
+    ? `${payload.displayName} (${payload.label})`
+    : payload.displayName;
 
-  const mode = getMode();
-  if (mode === "In-App") {
-    showInAppNotification(header, title, preview);
-  } else if (mode === "System Notifications") {
-    showSystemNotification(header, title, preview);
-  } else {
-    // Auto: system when unfocused, in-app when focused
-    if (vscode.window.state.focused) {
-      showInAppNotification(header, title, preview);
-    } else {
-      showSystemNotification(header, title, preview);
+  // Resolve delivery path from the mode literally. The previous
+  // behavior - where any unrecognized mode fell through to Auto -
+  // masked stale workspace-scoped values (e.g. "Auto" left over from
+  // the pre-v1.1.2 default) as random deliveries. Workspace-scope
+  // heal is the durable fix; this literal branch keeps the surface
+  // predictable even if a value slips through.
+  const wantSystem =
+    mode === "System Notifications" ||
+    (mode === "Auto" && !focused);
+  const wantInApp =
+    mode === "In-App" ||
+    (mode === "Auto" && focused);
+
+  if (wantSystem) {
+    const ok = showSystemNotification(header, title, preview);
+    if (ok) {
+      recordDiagnostic({ at: now, provider: payload.provider, mode, delivered: "system", focused });
+      return;
     }
+    // Windows path failed - fall back to in-app so the user still
+    // sees the event instead of a silent drop.
+    showInAppNotification(header, title, preview);
+    recordDiagnostic({ at: now, provider: payload.provider, mode, delivered: "windows-failed-fallback", focused });
+    return;
   }
+
+  if (wantInApp) {
+    showInAppNotification(header, title, preview);
+    recordDiagnostic({ at: now, provider: payload.provider, mode, delivered: "in-app", focused });
+    return;
+  }
+
+  // Unknown mode value. Treat as Off so we fail closed rather than
+  // deliver through an unintended path.
+  recordDiagnostic({ at: now, provider: payload.provider, mode, delivered: "suppressed-off", focused });
 }
 
-/** Subscribe the toast notifier to the engine's EventHub.
- * Returns a Disposable for cleanup. Called once from bootstrap. */
+/** Subscribe the toast notifier to the engine's EventHub. Returns
+ * a Disposable for cleanup. Called once from bootstrap. */
 export function subscribeToNotifications(events: EventHub): vscode.Disposable {
   return events.on("session.responseComplete", handleResponseComplete);
 }
