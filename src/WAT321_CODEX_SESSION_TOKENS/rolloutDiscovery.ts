@@ -5,18 +5,31 @@ import { normalizePath } from "../shared/fs/pathUtils";
 import { parseCwd } from "./parsers";
 
 /**
- * Walks Codex's date-sharded rollout tree and picks the most recent
- * rollout whose `session_meta.cwd` matches the current workspace. Also
- * resolves session titles from `session_index.jsonl`.
+ * Walks Codex's date-sharded rollout tree and picks the active
+ * rollout for the current workspace. Also resolves session titles
+ * from `session_index.jsonl`.
  *
- * Codex keeps rollouts under `~/.codex/sessions/YYYY/MM/DD/`, sorted
- * lexically by path. Walking in reverse-sorted order visits newest
- * first, so the first match is the winner.
+ * Codex keeps rollouts under `~/.codex/sessions/YYYY/MM/DD/`. The
+ * filename encodes the session CREATION timestamp, but users
+ * regularly return to older sessions - those files then get mtime
+ * updates without a filename change. Ranking by filename alone
+ * misses the case where the active session has an older name but
+ * was most recently written to. We rank by file mtime instead to
+ * reflect actual recent use.
+ *
+ * The walk is bounded to a recent window so a machine with years
+ * of rollouts does not pay the stat cost on every cycle. Within
+ * the window we skip `parseCwd` (first-line read) for files older
+ * than the current best candidate by mtime.
  */
 
-/** Find the most recent rollout JSONL whose `session_meta.cwd` matches
- * the current workspace path. Walks `~/.codex/sessions/YYYY/MM/DD/` in
- * reverse date order. Returns `null` if nothing matches. */
+/** How many calendar day-directories back we walk. 30 days covers
+ * any realistic active-session age; older rollouts are ignored. */
+const MAX_DAYS_TO_SCAN = 30;
+
+/** Find the rollout JSONL most recently written to whose
+ * `session_meta.cwd` matches the current workspace. Returns `null`
+ * if no match exists in the scan window. */
 export function findLatestRollout(
   codexDir: string,
   workspacePath: string
@@ -26,39 +39,61 @@ export function findLatestRollout(
 
   const wsNorm = normalizePath(workspacePath);
 
+  let bestPath: string | null = null;
+  let bestMtime = 0;
+  let daysScanned = 0;
+
   try {
     const years = readdirSync(sessionsDir).sort().reverse();
     for (const year of years) {
       const yearDir = join(sessionsDir, year);
-      if (!statSync(yearDir).isDirectory()) continue;
+      try { if (!statSync(yearDir).isDirectory()) continue; } catch { continue; }
 
       const months = readdirSync(yearDir).sort().reverse();
       for (const month of months) {
         const monthDir = join(yearDir, month);
-        if (!statSync(monthDir).isDirectory()) continue;
+        try { if (!statSync(monthDir).isDirectory()) continue; } catch { continue; }
 
         const days = readdirSync(monthDir).sort().reverse();
         for (const day of days) {
-          const dayDir = join(monthDir, day);
-          if (!statSync(dayDir).isDirectory()) continue;
+          if (daysScanned >= MAX_DAYS_TO_SCAN) return bestPath;
+          daysScanned++;
 
-          const files = readdirSync(dayDir)
-            .filter((f) => f.startsWith("rollout-") && f.endsWith(".jsonl"))
-            .sort()
-            .reverse();
+          const dayDir = join(monthDir, day);
+          try { if (!statSync(dayDir).isDirectory()) continue; } catch { continue; }
+
+          let files: string[];
+          try {
+            files = readdirSync(dayDir)
+              .filter((f) => f.startsWith("rollout-") && f.endsWith(".jsonl"));
+          } catch {
+            continue;
+          }
 
           for (const file of files) {
             const fullPath = join(dayDir, file);
+            let mtime = 0;
+            try {
+              mtime = statSync(fullPath).mtimeMs;
+            } catch {
+              continue;
+            }
+            // Skip the cwd read (opens the file) when this rollout
+            // cannot beat the current best mtime. Most files in
+            // older day-dirs are immediately rejected this way.
+            if (mtime <= bestMtime) continue;
+
             const cwd = parseCwd(fullPath);
             if (!cwd) continue;
             const cwdNorm = normalizePath(cwd);
-            if (
+            const matches =
               wsNorm === "" ||
               cwdNorm === wsNorm ||
-              wsNorm.startsWith(cwdNorm + "/")
-            ) {
-              return fullPath;
-            }
+              wsNorm.startsWith(`${cwdNorm}/`);
+            if (!matches) continue;
+
+            bestPath = fullPath;
+            bestMtime = mtime;
           }
         }
       }
@@ -66,7 +101,7 @@ export function findLatestRollout(
   } catch {
     // ignore
   }
-  return null;
+  return bestPath;
 }
 
 /** Look up a session's thread name from `~/.codex/session_index.jsonl`
