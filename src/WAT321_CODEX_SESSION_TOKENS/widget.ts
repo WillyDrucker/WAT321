@@ -13,6 +13,10 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
   provider: "Codex",
   whitePct: 85,
   yellowPct: 90,
+  idlePrefix: "$(openai)",
+  activeFrames: ["$(comment)", "$(comment-discussion-quote)"],
+  activeStepMs: 1000,
+  activeThresholdMs: 30_000,  // Codex has no PID signal; mtime-only with generous window
   getRenderData: (state) => {
     const { session } = state;
     return {
@@ -23,6 +27,8 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
       contextWindowSize: session.contextWindowSize,
       ceiling: session.autoCompactTokens,
       baselineTokens: CODEX_BASELINE_TOKENS,
+      transcriptMtimeMs: session.lastActiveAt,
+      turnState: session.turnState,
     };
   },
 };

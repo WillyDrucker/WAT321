@@ -11,7 +11,7 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   name: "WAT321: Codex Usage (Weekly)",
   slot: WIDGET_SLOT.codexUsageWeekly,
   variant: "weekly",
-  loadingText: "Codex weekly $(loading~spin)",
+  loadingText: "$(openai) Weekly $(loading~spin)",
   loadingTooltip: "Fetching Codex usage data...",
   getDisplayPct: (data) => {
     const usedPct = data.rate_limit?.secondary_window?.used_percent ?? 0;
@@ -21,9 +21,9 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   buildTooltip: (data) => buildTooltip(data),
   getTextColor: (mode, remainingPct) => getCodexTextColor(mode, 100 - remainingPct),
   formatText: (mode, pct, bar5, bar10) => {
-    if (mode === "minimal") return `Codex weekly [${pct}%]`;
-    if (mode === "compact") return `Codex weekly ${bar5} ${pct}%`;
-    return `Codex weekly ${bar10} ${pct}%`;
+    if (mode === "minimal") return `$(openai) Weekly [${pct}%]`;
+    if (mode === "compact") return `$(openai) Weekly ${bar5} ${pct}%`;
+    return `$(openai) Weekly ${bar10} ${pct}%`;
   },
 };
 

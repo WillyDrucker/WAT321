@@ -8,6 +8,7 @@ import { readAutoCompactPct, SETTINGS_PATH } from "../shared/claudeSettings";
 import { resolveContextWindow } from "../engine/contracts";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
+import { classifyLastEntry } from "../shared/transcriptClassifier";
 import { parseFirstUserMessage, parseLastUsage } from "./parsers";
 import {
   findActiveSession,
@@ -96,6 +97,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     sessionId: string;
     cwdForLabel: string;
     source: "live" | "lastKnown";
+    pid?: number;
   } | null {
     const live = findActiveSession(sessionsDir, this.workspacePath);
     if (live) {
@@ -113,6 +115,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
           sessionId: live.sessionId,
           cwdForLabel: live.cwd,
           source: "live",
+          pid: live.pid,
         };
       }
     }
@@ -162,7 +165,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       return;
     }
 
-    const { transcriptPath, sessionId, cwdForLabel, source } = resolved;
+    const { transcriptPath, sessionId, cwdForLabel, source, pid } = resolved;
 
     if (!existsSync(transcriptPath)) {
       if (this.hasGoodData) return;
@@ -243,6 +246,8 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       autoCompactPct: this.cachedAutoCompactPct,
       source,
       lastActiveAt: mtime,
+      turnState: classifyLastEntry(tail),
+      pid,
     });
   }
 }

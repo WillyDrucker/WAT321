@@ -1,11 +1,24 @@
 /**
  * Classifier for the last parseable entry in a Claude transcript tail.
  * Consumed by the notification bridge in bootstrap.ts for
- * turn-completion gating.
+ * turn-completion gating AND by the session token widget's thinking
+ * indicator.
+ *
+ * Interrupt detection: Claude Code writes a user-type entry with
+ * content `[Request interrupted by user]` when the user hits Escape
+ * or Ctrl+C. Empirically verified by on-disk capture during interrupt
+ * tests. The classifier recognizes this text and returns
+ * `assistant-done` so the widget / notification gate treats it as
+ * turn complete rather than "user waiting for a reply."
  *
  * Lives in shared/ rather than the Claude session token tool because
  * cross-tool concerns belong in shared infrastructure.
  */
+
+/** Marker text Claude Code writes to the transcript when the user
+ * interrupts a turn. Matched as a substring to tolerate minor
+ * variations across Claude Code versions. */
+const INTERRUPT_MARKER = "[Request interrupted";
 
 /** Classification of the last parseable JSONL entry in a Claude
  * transcript tail. */
@@ -41,7 +54,27 @@ export function classifyLastEntry(tail: string): LastEntryKind {
       continue;
     }
 
-    if (entry.type === "user") return "user";
+    if (entry.type === "user") {
+      // An interrupt marker is a user-type entry in form but signals
+      // turn complete in meaning. Treat as assistant-done so callers
+      // that gate on "turn in progress" stop animating / firing.
+      const msg = entry.message as Record<string, unknown> | undefined;
+      const content = msg?.content;
+      if (Array.isArray(content)) {
+        const isInterrupt = content.some(
+          (p) =>
+            typeof p === "object" &&
+            p !== null &&
+            (p as Record<string, unknown>).type === "text" &&
+            typeof (p as Record<string, unknown>).text === "string" &&
+            ((p as Record<string, unknown>).text as string).includes(
+              INTERRUPT_MARKER
+            )
+        );
+        if (isInterrupt) return "assistant-done";
+      }
+      return "user";
+    }
     if (entry.type === "assistant") {
       const msg = entry.message as Record<string, unknown> | undefined;
       const content = msg?.content;

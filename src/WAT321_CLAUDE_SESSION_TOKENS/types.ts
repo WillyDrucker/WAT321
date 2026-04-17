@@ -1,4 +1,5 @@
 import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/serviceTypes";
+import type { LastEntryKind } from "../shared/transcriptClassifier";
 
 /** Active session entry from ~/.claude/sessions/<pid>.json */
 export interface SessionEntry {
@@ -19,6 +20,18 @@ export interface ResolvedSession {
   autoCompactPct: number; // e.g. 70
   source: "live" | "lastKnown"; // live = CLI process active, lastKnown = fallback from transcript mtime
   lastActiveAt: number; // ms - live: Date.now(); lastKnown: transcript file mtime
+  /** Last transcript entry classification. Drives the active-state
+   * indicator. `user` and `assistant-pending` mean a response is in
+   * flight; `assistant-done` and `unknown` are idle. Interrupts are
+   * mapped to `assistant-done` by the classifier so the widget
+   * returns to idle immediately. */
+  turnState: LastEntryKind;
+  /** Claude Code CLI process id for live sessions. Consumed by the
+   * widget's active indicator: PID alive extends animation through
+   * long silent thinking periods (deep reasoning Opus TTFB, slow
+   * tool calls). Undefined on lastKnown fallbacks - those rely on
+   * the mtime backstop alone. */
+  pid?: number;
 }
 
 export type WidgetState =

@@ -6,6 +6,7 @@ import { readHead, readTail } from "../shared/fs/fileReaders";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import {
+  classifyCodexTurn,
   extractSessionId,
   parseCwd,
   extractFirstUserMessage,
@@ -197,6 +198,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       contextWindowSize: usage.contextWindowSize,
       autoCompactTokens: this.cachedAutoCompactTokens,
       lastActiveAt: rolloutMtime,
+      turnState: classifyCodexTurn(tail),
     });
   }
 }

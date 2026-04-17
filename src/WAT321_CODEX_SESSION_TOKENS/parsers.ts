@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { readHead } from "../shared/fs/fileReaders";
+import type { LastEntryKind } from "../shared/transcriptClassifier";
 
 /**
  * Parsers for Codex rollout `.jsonl` transcripts. Rollouts live under
@@ -299,6 +300,53 @@ export function isCodexTurnComplete(tail: string): boolean {
   // No definitive event found in the tail. Bias toward firing so
   // a notification is not silently lost.
   return true;
+}
+
+/** Classify the last meaningful entry in a Codex rollout tail into
+ * one of the four turn states used by the session token active
+ * indicator. Walks backwards, skips bookkeeping events, returns the
+ * first definitive event found:
+ *   - `assistant-done` - a completed assistant response
+ *   - `assistant-pending` - a tool / function call in flight
+ *   - `user` - last event was a user message (user is waiting)
+ *   - `unknown` - no definitive event in the tail window
+ *
+ * Unlike `isCodexTurnComplete` (which biases toward true for
+ * notification firing), this biases `unknown` to idle so the thinking
+ * indicator does not pin itself on when we cannot tell. */
+export function classifyCodexTurn(tail: string): LastEntryKind {
+  const lines = tail.trimEnd().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const payload = entry.payload as Record<string, unknown> | undefined;
+    const ptype = payload?.type as string | undefined;
+
+    // Assistant-response events = done
+    if (entry.type === "event_msg" && ptype === "agent_message") return "assistant-done";
+    if (entry.type === "response_item" && ptype === "message" && payload?.role === "assistant") return "assistant-done";
+    if (entry.type === "response.output_text.done") return "assistant-done";
+    if (entry.type === "message" && payload?.role === "assistant") return "assistant-done";
+
+    // User messages = user is waiting for a response
+    if (ptype === "user_message") return "user";
+
+    // Tool / function calls in flight = assistant is actively working
+    if (ptype === "tool_call" || ptype === "function_call") return "assistant-pending";
+    if (entry.type === "response_item" && ptype === "function_call") return "assistant-pending";
+
+    // Everything else (token_count, turn_context, reasoning,
+    // exec_output, task events) is bookkeeping - keep scanning.
+  }
+  return "unknown";
 }
 
 /** Codex rollout filenames are `rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl`.
