@@ -2,8 +2,17 @@ import * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
 import { renderCodexBar } from "../ui/heatmap";
 import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
+import { buildUsageTooltipHtml } from "../ui/usageTooltipHtml";
 import { formatPlanLabel, getRemainingPct } from "./formatters";
 import type { CodexUsageResponse } from "./types";
+
+/** Codex full-mode bar color ramp (remaining-percent based, because
+ * the bar shrinks from full as capacity depletes). */
+function codexBarColor(remainingPct: number): string {
+  if (remainingPct <= 20) return "#ef4444";
+  if (remainingPct <= 50) return "#f59e0b";
+  return "#22c55e";
+}
 
 export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   const sPct = usage.rate_limit?.primary_window?.used_percent ?? 0;
@@ -17,7 +26,6 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     ? formatWeeklyReset(usage.rate_limit.secondary_window.reset_at * 1000)
     : "Resets unknown";
   const planLabel = formatPlanLabel(usage.plan_type);
-  const mode = getDisplayMode();
 
   let creditsText = "";
   if (usage.credits?.has_credits || usage.credits?.unlimited) {
@@ -27,13 +35,9 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     creditsText = `Credits: ${balance}`;
   }
 
-  if (mode === "minimal") {
-    // Minimal tooltip shows emoji-style progress bars to match the
-    // full-mode widget rendering. `renderCodexBar` is the shared
-    // entry point used by both the status bar widgets and this
-    // tooltip, so the band-based heatmap rules (including the
-    // minimum-one-red-cell guarantee and the full-red override at
-    // 0% remaining) apply uniformly.
+  if (getDisplayMode() === "minimal") {
+    // Minimal tooltip uses emoji bars so heatmap rules stay uniform
+    // with the status bar surface.
     const md = new vscode.MarkdownString();
     md.isTrusted = false;
     md.supportHtml = false;
@@ -49,54 +53,25 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     return md;
   }
 
-  // Color based on remaining - low remaining = red/yellow
-  const sBarColor =
-    sRemaining <= 20 ? "#ef4444" : sRemaining <= 50 ? "#f59e0b" : "#22c55e";
-  const wBarColor =
-    wRemaining <= 20 ? "#ef4444" : wRemaining <= 50 ? "#f59e0b" : "#22c55e";
-
-  const creditsLine = creditsText
-    ? `<div style="font-size:10px;opacity:0.6;margin-top:6px;">${creditsText}</div>`
-    : "";
-
-  const md = new vscode.MarkdownString();
-  md.isTrusted = false;
-  md.supportHtml = true;
-  md.appendMarkdown(`
-<div style="min-width:280px;">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-<strong style="font-size:12px;">Codex usage limits</strong>
-<span style="font-size:11px;opacity:0.7;">${planLabel}</span>
-</div>
-
-<div style="margin-bottom:4px;">
-<div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-<strong style="font-size:11px;">5 hour usage limit</strong>
-<span style="font-size:11px;">${sRemaining}% remaining</span>
-</div>
-<div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
-<div style="width:${Math.min(sRemaining, 100)}%;height:100%;border-radius:4px;background:${sBarColor};"></div>
-</div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">\u{29D7} ${sReset}</div>
-</div>
-
-<hr style="border:none;border-top:1px solid rgba(255,255,255,0.12);margin:8px 0;">
-
-<div>
-<div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-<strong style="font-size:11px;">Weekly usage limit</strong>
-<span style="font-size:11px;">${wRemaining}% remaining</span>
-</div>
-<div style="width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,0.13);overflow:hidden;">
-<div style="width:${Math.min(wRemaining, 100)}%;height:100%;border-radius:4px;background:${wBarColor};"></div>
-</div>
-<div style="font-size:10px;opacity:0.6;margin-top:3px;">\u{29D7} ${wReset}</div>
-</div>
-
-${creditsLine}
-
-<div style="font-size:9px;opacity:0.4;margin-top:8px;">Updated ${new Date().toLocaleTimeString()}</div>
-</div>
-`);
-  return md;
+  return buildUsageTooltipHtml({
+    heading: "Codex usage limits",
+    planLabel,
+    rows: [
+      {
+        title: "5 hour usage limit",
+        valueLabel: `${sRemaining}% remaining`,
+        barFillPct: sRemaining,
+        barColor: codexBarColor(sRemaining),
+        resetLine: sReset,
+      },
+      {
+        title: "Weekly usage limit",
+        valueLabel: `${wRemaining}% remaining`,
+        barFillPct: wRemaining,
+        barColor: codexBarColor(wRemaining),
+        resetLine: wReset,
+      },
+    ],
+    footer: creditsText || undefined,
+  });
 }
