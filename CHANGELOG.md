@@ -5,13 +5,26 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.5] - unreleased
+## [1.1.5] - 2026-04-17
 
 ### Added
 
+- **Session token widgets show when Claude and Codex are thinking.** A gentle animated indicator appears on each session token widget while a prompt is being processed, so you can tell at a glance whether your CLI is still working. The indicator lights up promptly on send and clears instantly on response or interrupt; detection combines a transcript tail classifier with process liveness for Claude and a short mtime backstop for both.
+- **Claude and OpenAI brand icons on every widget.** The status bar widgets now lead with the official brand glyph instead of the provider name text or the older thinking-bubble / pipe prefixes. The line reads shorter and tells you which provider you're looking at without having to read.
+- **`WAT321: Show Provider Health` is now in the Command Palette.** Previously you had to invoke it via `code --command` from a terminal. It now shows up alongside `WAT321: Reset WAT321` where you'd expect to find it.
+
 ### Changed
 
+- **Windows toast notifications now handle em dashes, smart quotes, emoji, and curly-quote title wrappers correctly.** The warm PowerShell process that delivers toasts forces UTF-8 input and output so non-ASCII content no longer gets mangled into `?` characters on its way to Windows.
+- **Windows toast notifications now work on VS Code forks.** Insiders, VSCodium, Cursor, Windsurf, and anything else that registers a unique AppUserModelID at install. Discovery runs inside the warm PowerShell process keyed on the host's app name, with a fallback to the generic `powershell` AUMID so delivery never silently drops on an unfamiliar host.
+- **macOS and Linux System Notifications are actually the OS toast now.** If you pick "System Notifications" mode on macOS you get a real macOS notification via `osascript`; on Linux you get `notify-send`. Previously both platforms quietly fell back to in-app banners.
+- **Notification settings moved to application scope.** `notifications.mode`, `notifications.claude`, and `notifications.codex` can't be silently overridden by a workspace `.vscode/settings.json` anymore. A one-time scope heal on startup strips any stuck workspace-level values left by older versions.
+
 ### Fixed
+
+- **The Codex session token widget now picks the session you're actually using.** When returning to an older Codex session, the widget used to stick on the most recently created session instead. Rollouts are now ranked by file modification time rather than filename, so the widget follows whichever session you're actively writing to.
+- **The thinking indicator resolves instantly when you press Escape or Ctrl+C.** For both Claude and Codex, interrupts are detected directly in the transcript (`[Request interrupted by user]` for Claude, `turn_aborted` for Codex) so the indicator goes idle immediately instead of hanging on for its backstop to age out.
+- **The Claude session token widget no longer holds a stale process ID when a session comes back.** The fast path that skips work when the transcript hasn't changed was preserving an old pid through a session-source flip. It now passes the current pid through, so process liveness correctly reflects the returning CLI.
 
 ### Removed
 
