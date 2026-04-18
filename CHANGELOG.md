@@ -5,11 +5,13 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.7] - unreleased
+## [1.1.7] - 2026-04-18
 
 ### Added
 
 ### Changed
+
+- **Smaller download.** The marketplace icon was shipping as a 1000x1000 source file that adds about 800 KB of unnecessary weight to every install. The 512x512 variant looks identical at every display size the marketplace actually uses and drops the packaged `.vsix` download well under 1 MB.
 
 ### Fixed
 
