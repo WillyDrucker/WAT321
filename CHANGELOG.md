@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Codex widgets no longer stay stuck on yesterday's session after you start a new one.** On Windows the filesystem watcher occasionally drops the event for a newly created dated folder under `~/.codex/sessions/YYYY/MM/DD/`, which used to leave the session-token widget pinned to the previous day's rollout for up to a minute before the safety-net scan ticked. Rollout discovery now runs on every poll (every 15 seconds), so switching to a new session - or to a different session that is actively being written to - takes at most a single poll cycle to show up. Same fix covers the case where toasts silently stopped firing because the bridge was watching a stale transcript.
+
 ### Removed
 
 ## [1.1.7] - 2026-04-18
