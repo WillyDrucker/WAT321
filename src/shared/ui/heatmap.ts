@@ -64,7 +64,7 @@ export function bandFromRemaining(remainingPct: number): HeatmapBand {
 /** Return the emoji fill character for a band. Used internally by
  * `buildCodexHeatmapBar` and exposed for widgets that need the raw
  * color mapping. */
-export function fillCharForBand(band: HeatmapBand): string {
+function fillCharForBand(band: HeatmapBand): string {
   switch (band) {
     case "green":
       return SQUARE_GREEN;

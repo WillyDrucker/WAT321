@@ -18,7 +18,8 @@ import { SETTING } from "../engine/settingsKeys";
  *
  * Known observed symptom: a user on `"System Notifications"` mode
  * seeing random "Auto"-style behavior because a stale workspace
- * override from the pre-v1.1.2 default was never upgraded.
+ * override from an earlier default persists in their workspace
+ * `.vscode/settings.json` even after the default changed upstream.
  */
 
 /** Application-scoped `wat321.*` keys. Must stay in sync with the

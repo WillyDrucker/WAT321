@@ -1,5 +1,5 @@
 /** Black large square, shared empty cell for all progress bars. */
-export const EMPTY_SQUARE = "\u2B1B";
+const EMPTY_SQUARE = "\u2B1B";
 
 /** Build an emoji progress bar of `width` cells, filled proportional
  * to `pct`. The caller supplies the fill character (blue for Claude,

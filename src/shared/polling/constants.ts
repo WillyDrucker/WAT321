@@ -82,7 +82,7 @@ export const ERROR_ABSORPTION_THRESHOLD = 3;
  * quick installs, slower later to stop hammering the filesystem for users
  * who will never install.
  */
-export interface DiscoveryBackoffStep {
+interface DiscoveryBackoffStep {
   readonly untilMs: number;
   readonly intervalMs: number;
 }
