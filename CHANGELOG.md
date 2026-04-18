@@ -5,13 +5,21 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.6] - unreleased
+## [1.1.6] - 2026-04-18
 
 ### Added
 
 ### Changed
 
+- **Status bar 5-hour labels drop the parentheses.** Reads as `5h 76%` now instead of `(5h) 76%`. The brand icon already tells you which provider you're looking at, so the extra punctuation was just noise.
+- **Usage tooltips now lead with the Claude or OpenAI brand icon.** Matches the status bar surface so you can tell at a glance which provider's tooltip you're reading without scanning the heading text.
+- **The extension icon gets the full WAT321 tile treatment.** The marketplace listing and extension panel now show the colored tile variant on a light background.
+
 ### Fixed
+
+- **No more "Offline" scare after you've been away from Claude for a bit.** Anthropic's usage endpoint throttles cold polls before you've had any activity in the session. WAT321 now shows that as a calm "Idle" state with a short note that usage data returns on Claude's next activity, instead of the alarm-level Offline label with a 16-minute countdown that never actually applied. The active rate-limited state during real use still surfaces the countdown.
+- **Codex toasts fire reliably for fast responses.** Quick "Are you there?" -> "Yes" style turns were being eaten by a race between how Codex writes rollout events and how WAT321 watched for changes. The bridge now treats a turn-classifier transition to done as a separate firing trigger so those fast turns no longer get silently skipped.
+- **Clicking into an older Codex session no longer pops a stale toast.** Previously, switching into a session whose last assistant turn was hours old would fire a fresh notification as if the message had just arrived. A new freshness check on the transcript file's write time blocks notifications for anything older than 30 seconds.
 
 ### Removed
 
