@@ -20,19 +20,27 @@ import { resolveAutoCompactTokens } from "./autoCompactLimit";
 /** Fallback poll cadence. fs.watch in the base class handles
  * instant transcript-change detection; this interval serves only
  * as a safety net for session discovery and any missed watcher
- * events. 15s keeps discovery responsive without wasting cycles. */
+ * events. 15s keeps discovery responsive without wasting cycles.
+ *
+ * Discovery runs on every poll. The walk is bounded to 30 days and
+ * skips the first-line read on any file that cannot beat the current
+ * best mtime, so cost is a handful of statSync calls. A longer
+ * interval masks two failure modes: (1) fs.watch on Windows
+ * occasionally drops the event for a newly created dated subdir
+ * (YYYY/MM/DD) so a brand new rollout is not discovered until the
+ * next scan tick, and (2) the user switching to a different session
+ * whose rollout file already existed would otherwise wait out the
+ * interval. */
 const POLL_INTERVAL = 15_000;
-const SESSION_SCAN_INTERVAL = 51_000;
 
 export class CodexSessionTokenService extends SessionTokenServiceBase<CodexTokenWidgetState> {
   private cachedRolloutPath: string | null = null;
-  private lastRolloutScan = 0;
 
   /** Watches ~/.codex/sessions/ for new rollout files. Recursive
    * on Windows/macOS to catch date-sharded subdirs; falls back to
-   * the 51s poll on Linux where recursive watch is unsupported. */
+   * per-poll discovery on Linux where recursive watch is
+   * unsupported. */
   private readonly sessionsWatcher = new PathWatcher(() => {
-    this.lastRolloutScan = 0;
     this.triggerPoll();
   }, 100, true);
   private cachedSessionTitle: string | null = null;
@@ -55,7 +63,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
 
   reset(): void {
     this.cachedRolloutPath = null;
-    this.lastRolloutScan = 0;
     this.cachedSessionTitle = null;
     this.cachedSessionTitleId = "";
     this.cachedCwd = null;
@@ -83,7 +90,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   protected poll(): void {
     if (this.disposed) return;
 
-    const now = Date.now();
     const home = homedir();
     const codexDir = join(home, ".codex");
 
@@ -97,14 +103,8 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
 
     this.sessionsWatcher.sync(join(codexDir, "sessions"));
 
-    if (
-      now - this.lastRolloutScan >= SESSION_SCAN_INTERVAL ||
-      !this.cachedRolloutPath
-    ) {
-      const found = findLatestRollout(codexDir, this.workspacePath);
-      if (found) this.cachedRolloutPath = found;
-      this.lastRolloutScan = now;
-    }
+    const found = findLatestRollout(codexDir, this.workspacePath);
+    if (found) this.cachedRolloutPath = found;
 
     if (!this.cachedRolloutPath || !existsSync(this.cachedRolloutPath)) {
       if (this.hasGoodData) return;
