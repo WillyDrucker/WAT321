@@ -13,16 +13,16 @@ const descriptor: UsageWidgetDescriptor<UsageResponse> = {
   nonOkOptions: {
     providerName: "Claude",
     providerKey: "claude",
-    loadingText: "$(claude) (5h) $(loading~spin)",
+    loadingText: "$(claude) 5h $(loading~spin)",
   },
   getDisplayPct: (data) => data.five_hour?.utilization ?? 0,
   renderBar: (pct, width) => renderClaudeBar(pct, width),
   buildTooltip: (data) => buildTooltip(data),
   getTextColor: (mode) => getClaudeTextColor(mode),
   formatText: (mode, pct, bar5, bar10) => {
-    if (mode === "minimal") return `$(claude) (5h) [${pct}%]`;
-    if (mode === "compact") return `$(claude) (5h) ${bar5} ${pct}%`;
-    return `$(claude) (5h) ${bar10} ${pct}%`;
+    if (mode === "minimal") return `$(claude) 5h [${pct}%]`;
+    if (mode === "compact") return `$(claude) 5h ${bar5} ${pct}%`;
+    return `$(claude) 5h ${bar10} ${pct}%`;
   },
 };
 

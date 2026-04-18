@@ -40,8 +40,14 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     // with the status bar surface.
     const md = new vscode.MarkdownString();
     md.isTrusted = false;
-    md.supportHtml = false;
-    md.appendMarkdown(`**Codex usage limits** ${planLabel}\n\n`);
+    // HTML needed for `&nbsp;` to render as non-breaking space (plain
+    // whitespace collapses in markdown). Theme icons needed so
+    // `$(openai)` renders the brand codicon.
+    md.supportHtml = true;
+    md.supportThemeIcons = true;
+    md.appendMarkdown(
+      `$(openai)&nbsp;&nbsp;**Codex usage limits** ${planLabel}\n\n`
+    );
     md.appendMarkdown(`**5 hour usage limit** ${sRemaining}% remaining  \n`);
     md.appendMarkdown(`${renderCodexBar(sPct, 10)}  \n`);
     md.appendMarkdown(`\u{29D7} ${sReset}\n\n`);
@@ -55,6 +61,7 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
 
   return buildUsageTooltipHtml({
     heading: "Codex usage limits",
+    headingIcon: "$(openai)",
     planLabel,
     rows: [
       {
