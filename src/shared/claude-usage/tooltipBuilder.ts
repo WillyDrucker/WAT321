@@ -33,8 +33,14 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
     // with the status bar surface.
     const md = new vscode.MarkdownString();
     md.isTrusted = false;
-    md.supportHtml = false;
-    md.appendMarkdown(`**Claude usage limits** ${planLabel}\n\n`);
+    // HTML needed for `&nbsp;` to render as non-breaking space (plain
+    // whitespace collapses in markdown). Theme icons needed so
+    // `$(claude)` renders the brand codicon.
+    md.supportHtml = true;
+    md.supportThemeIcons = true;
+    md.appendMarkdown(
+      `$(claude)&nbsp;&nbsp;**Claude usage limits** ${planLabel}\n\n`
+    );
     md.appendMarkdown(`**Current session (5hr)** ${sPct}% used  \n`);
     md.appendMarkdown(`${renderClaudeBar(sPct, 10)}  \n`);
     md.appendMarkdown(`\u{29D7} ${sReset}\n\n`);
@@ -47,6 +53,7 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
 
   return buildUsageTooltipHtml({
     heading: "Claude usage limits",
+    headingIcon: "$(claude)",
     planLabel,
     rows: [
       {

@@ -13,7 +13,7 @@ Claude and Codex usage bars built right into your IDE.
 WAT321 ships with **six read-only widgets** - three for Claude, three for Codex - all enabled out of the box. They only read your existing CLI files and poll a safe stats endpoint; they never modify anything.
 
 - 4 usage limit progress bars (Claude + Codex, 5-hour and weekly)
-- 2 real-time session token status bars
+- 2 real-time session token status bars with a live activity indicator
 - Heatmap for progress bars - colors warn as limits approach
 - System notifications when a response finishes - never miss a reply while tabbed away
 - Hover tooltips with the detailed breakdown
@@ -34,9 +34,12 @@ Live progress bars showing your 5-hour session utilization and weekly limits. Si
 
 ### Claude Session Tokens
 
-Tracks your active Claude Code session's context window usage against the auto-compact ceiling. See how much room you have before compaction kicks in.
+Real-time token count for your active Claude Code session so you can see where you stand without running any commands. Tooltip has the detailed breakdown.
 
-![Claude session tokens](images/screenshots/CLAUDE_SESSION_TOKENS.png)
+<p>
+<img src="images/screenshots/CLAUDE_SESSION_TOKENS.png" alt="Claude session tokens"><br>
+<img src="images/screenshots/CLAUDE_SESSION_TOKENS_BUSY.png" alt="Claude session tokens busy state">
+</p>
 
 ### Codex Usage
 
@@ -49,7 +52,7 @@ Same concept, **green** bars for Codex. Shows **remaining** capacity - the bars 
 
 ### Codex Session Tokens
 
-Monitors your Codex session's context window fill level. Same layout as Claude session tokens.
+Real-time token count for your active Codex session. Same layout and activity indicator as Claude session tokens.
 
 ![Codex session tokens](images/screenshots/CODEX_SESSION_TOKENS.png)
 
@@ -169,10 +172,10 @@ Need a clean slate? Open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) an
 
 A few rough edges that are worth knowing about. None of them need any action on your part - they either self-heal or are waiting on upstream fixes.
 
-- **Your Claude Max plan tier can look stale.** If you recently upgraded (for example from Max 5x to Max 20x), the Claude tooltip may keep showing the old tier for a while. The tier comes straight from Anthropic's usage endpoint and appears to refresh on the billing cycle rather than immediately after an upgrade. Your actual limits are still correct - it's only the label that lags. Nothing to reset on our side.
-- **If you ever see "Offline" with a countdown, just wait it out.** The usage API occasionally throttles briefly (upstream server-side backoff, brief outages). WAT321 detects it, shows a countdown in the tooltip, and reconnects itself when the window expires.
-- **API-only Anthropic accounts stay hidden.** Claude widgets need CLI OAuth credentials at `~/.claude/.credentials.json`. If you only use the Anthropic API without the Claude Code CLI, the Claude widgets stay hidden until those credentials exist.
-- **Team and Enterprise Claude plans are untested.** Everything should still work, but we haven't been able to verify it against those plans. If you're on one and something looks off, please open an issue.
+- **Claude Max plan tier label can lag.** Upgrades (for example Max 5x to Max 20x) may take a billing cycle to reflect. Actual limits are still correct.
+- **"Idle" means the usage endpoint throttled a cold poll.** Clears on Claude's next activity - no countdown, no wait. "Offline" with a countdown is a real rate limit and reconnects automatically.
+- **API-only Anthropic accounts stay hidden.** Claude widgets need CLI credentials at `~/.claude/.credentials.json`.
+- **Team and Enterprise Claude plans are untested.** Should work; open an issue if something looks off.
 
 ## Issues & Feedback
 

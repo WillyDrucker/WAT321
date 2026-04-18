@@ -70,6 +70,29 @@ export function renderUsageNonOkState<TData>(
       return true;
 
     case "rate-limited": {
+      // Cold-start skin: the park was entered while the user was
+      // idle (no recent session activity). Anthropic's usage
+      // endpoint 429s cold polls on accounts with no recent OAuth
+      // use - that is not a real incident and the alarm-level
+      // "Offline" treatment is misleading. Show the direct API
+      // message plus a short friendly context line, no countdown
+      // (the 15-minute timer does not apply - one activity
+      // kickstart is the real fix).
+      if (state.isColdStart) {
+        item.text = `$(circle-outline) ${opts.providerName} Usage - Idle`;
+        const lines: string[] = [];
+        if (state.serverMessage) {
+          lines.push(`API: ${state.serverMessage}`);
+        }
+        lines.push(
+          `Usage data becomes available after ${opts.providerName}'s next activity.`
+        );
+        item.tooltip = lines.join("\n");
+        item.color = undefined;
+        item.show();
+        return true;
+      }
+
       item.text = `$(warning) ${opts.providerName} Usage - Offline`;
       const elapsed = Date.now() - state.rateLimitedAt;
       const remaining = Math.max(

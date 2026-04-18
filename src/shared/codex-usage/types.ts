@@ -34,7 +34,7 @@ export interface RateLimitWindow {
   reset_at: number;
 }
 
-export interface AdditionalRateLimit {
+interface AdditionalRateLimit {
   limit_name: string;
   metered_feature: string;
   rate_limit: {

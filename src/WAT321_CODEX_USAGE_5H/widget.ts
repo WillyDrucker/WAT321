@@ -14,7 +14,7 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   nonOkOptions: {
     providerName: "Codex",
     providerKey: "codex",
-    loadingText: "$(openai) (5h) $(loading~spin)",
+    loadingText: "$(openai) 5h $(loading~spin)",
   },
   getDisplayPct: (data) => {
     const usedPct = data.rate_limit?.primary_window?.used_percent ?? 0;
@@ -24,9 +24,9 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   buildTooltip: (data) => buildTooltip(data),
   getTextColor: (mode, remainingPct) => getCodexTextColor(mode, 100 - remainingPct),
   formatText: (mode, pct, bar5, bar10) => {
-    if (mode === "minimal") return `$(openai) (5h) [${pct}%]`;
-    if (mode === "compact") return `$(openai) (5h) ${bar5} ${pct}%`;
-    return `$(openai) (5h) ${bar10} ${pct}%`;
+    if (mode === "minimal") return `$(openai) 5h [${pct}%]`;
+    if (mode === "compact") return `$(openai) 5h ${bar5} ${pct}%`;
+    return `$(openai) 5h ${bar10} ${pct}%`;
   },
 };
 
