@@ -4,6 +4,26 @@ import type { AppEvents, EventHub } from "./eventHub";
 import { SETTING } from "./settingsKeys";
 import { showToast as showWindowsToast } from "./windowsToastProcess";
 
+/** Optional probe injected from bootstrap so the toast notifier can
+ * skip Codex toasts while the Epic Handshake bridge is dispatching.
+ * The engine never imports from a tool; this callback crosses that
+ * boundary in the correct direction (bootstrap wires tool state in). */
+let bridgeActiveProbe: (() => boolean) | null = null;
+
+export function setBridgeActiveProbe(fn: (() => boolean) | null): void {
+  bridgeActiveProbe = fn;
+}
+
+function isEpicHandshakeBridgeActive(): boolean {
+  return bridgeActiveProbe?.() === true;
+}
+
+function isCodexToastSuppressionEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration("wat321")
+    .get<boolean>(SETTING.epicHandshakeSuppressCodexToasts, true);
+}
+
 /**
  * Toast notification delivery.
  *
@@ -58,7 +78,8 @@ export type NotificationOutcome =
   | "suppressed-cooldown"
   | "suppressed-provider"
   | "suppressed-off"
-  | "suppressed-unknown-mode";
+  | "suppressed-unknown-mode"
+  | "suppressed-epic-handshake";
 
 export interface NotificationDiagnostic {
   at: number;
@@ -220,6 +241,23 @@ function handleResponseComplete(
   }
   if (!isProviderEnabled(payload.provider)) {
     record({ ...baseDiag, outcome: "suppressed-provider" });
+    return;
+  }
+  // Epic Handshake bridge suppression: when a prompt is in flight or
+  // just completed, Codex's transcript updates trigger its normal
+  // "response complete" toast at roughly the same moment Claude's tool
+  // result flows back and fires its own toast. The user only wanted
+  // the Claude toast in that case - two toasts about the same event
+  // is noise. Skip the Codex toast if either bridge flag is present
+  // (in-flight or the 5000ms returning latch). Claude toasts are
+  // never suppressed, and Codex toasts fire normally when the user is
+  // working in Codex independently of the bridge.
+  if (
+    payload.provider === "codex" &&
+    isEpicHandshakeBridgeActive() &&
+    isCodexToastSuppressionEnabled()
+  ) {
+    record({ ...baseDiag, outcome: "suppressed-epic-handshake" });
     return;
   }
 
