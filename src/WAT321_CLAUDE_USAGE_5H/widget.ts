@@ -12,6 +12,7 @@ const descriptor: UsageWidgetDescriptor<UsageResponse> = {
   variant: "5h",
   nonOkOptions: {
     providerName: "Claude",
+    providerIcon: "$(claude)",
     providerKey: "claude",
     loadingText: "$(claude) 5h $(loading~spin)",
   },

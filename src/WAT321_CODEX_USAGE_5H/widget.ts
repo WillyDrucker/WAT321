@@ -13,6 +13,7 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   variant: "5h",
   nonOkOptions: {
     providerName: "Codex",
+    providerIcon: "$(openai)",
     providerKey: "codex",
     loadingText: "$(openai) 5h $(loading~spin)",
   },
