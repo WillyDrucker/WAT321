@@ -3,6 +3,10 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { CodexResolvedSession, CodexTokenWidgetState } from "./types";
 import { readHead, readTail } from "../shared/fs/fileReaders";
+import {
+  SESSION_TOKEN_POLL_MS,
+  SESSION_TOKEN_RESCAN_MS,
+} from "../shared/polling/constants";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import {
@@ -17,12 +21,10 @@ import {
 import { findLatestRollout, getSessionTitle } from "./rolloutDiscovery";
 import { resolveAutoCompactTokens } from "./autoCompactLimit";
 
-/** Fallback poll cadence. fs.watch in the base class handles
- * instant transcript-change detection; this interval serves only
- * as a safety net for session discovery and any missed watcher
- * events. 15s keeps discovery responsive without wasting cycles. */
-const POLL_INTERVAL = 15_000;
-const SESSION_SCAN_INTERVAL = 51_000;
+/** fs.watch in the base class handles instant transcript-change
+ * detection; the shared `SESSION_TOKEN_POLL_MS` cadence is a safety
+ * net for session discovery and missed watcher events.
+ * `SESSION_TOKEN_RESCAN_MS` gates the more expensive full rescan. */
 
 export class CodexSessionTokenService extends SessionTokenServiceBase<CodexTokenWidgetState> {
   private cachedRolloutPath: string | null = null;
@@ -30,8 +32,17 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
 
   /** Watches ~/.codex/sessions/ for new rollout files. Recursive
    * on Windows/macOS to catch date-sharded subdirs; falls back to
-   * the 51s poll on Linux where recursive watch is unsupported. */
+   * the 51s poll on Linux where recursive watch is unsupported.
+   *
+   * Null the cached rollout path (not just the scan timer) so the
+   * next poll re-picks the newest file. Without this, an Epic
+   * Handshake prompt that writes to a *different* rollout than the
+   * widget's currently-cached one (bridge session vs. user's TUI
+   * session) can go unnoticed for up to 51s - the window between
+   * rescans - and a short Codex turn may finish before the indicator
+   * ever lights up. */
   private readonly sessionsWatcher = new PathWatcher(() => {
+    this.cachedRolloutPath = null;
     this.lastRolloutScan = 0;
     this.triggerPoll();
   }, 100, true);
@@ -49,7 +60,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       existsSync(join(homedir(), ".codex"))
         ? { status: "no-session" }
         : { status: "not-installed" },
-      POLL_INTERVAL
+      SESSION_TOKEN_POLL_MS
     );
   }
 
@@ -98,7 +109,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     this.sessionsWatcher.sync(join(codexDir, "sessions"));
 
     if (
-      now - this.lastRolloutScan >= SESSION_SCAN_INTERVAL ||
+      now - this.lastRolloutScan >= SESSION_TOKEN_RESCAN_MS ||
       !this.cachedRolloutPath
     ) {
       const found = findLatestRollout(codexDir, this.workspacePath);

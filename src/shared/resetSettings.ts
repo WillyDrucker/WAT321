@@ -126,13 +126,17 @@ async function resetStatusBarItemVisibility(): Promise<void> {
   );
 }
 
-/** Optional hook fired after the user confirms Reset WAT321 and
- * after the stuck-override heal runs, but before any setting writes
- * or disk wipes. Used to clear in-memory state on running services
- * that `rmSync(~/.wat321/)` cannot reach - currently the kickstart
- * escalation counters on both usage services. Never blocks the
- * reset flow; failures in the callback are not awaited. */
-type OnResetCallback = () => void;
+/** Hook fired after the user confirms Reset WAT321 and after the
+ * stuck-override heal runs, but before any setting writes or disk
+ * wipes. Used to clear in-memory state on running services that
+ * `rmSync(~/.wat321/)` cannot reach (kickstart escalation counters
+ * on both usage services) AND to perform cross-tool cleanup that
+ * must complete before the wipe (Epic Handshake MCP entry removal
+ * from `~/.claude/settings.json`, VS Code globalState keys that
+ * would otherwise outlive a disk wipe). May return a Promise; the
+ * reset flow awaits it so cleanup finishes before the disk wipe.
+ * Individual failures inside are not expected to abort reset. */
+type OnResetCallback = () => void | Promise<void>;
 
 async function performClear(onReset?: OnResetCallback): Promise<void> {
   // Clear the checkbox at every scope BEFORE the confirmation toast
@@ -150,19 +154,19 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
 
   if (confirm !== "Clear Everything") return;
 
-  // In-memory reset hook: clears kickstart escalation counters on
-  // running services so a user trapped in a sustained outage gets
-  // the responsive fresh-park cadence back immediately. Runs after
-  // the stuck-override heal (so any hard-fail aborts before this)
-  // and before the setting writes below (so no user-visible churn
-  // overlaps). Gating is preserved - the hook only zeroes the
-  // counter and shrinks the poll interval; it does not force a
-  // fetch. Never awaited; handler errors do not block reset.
+  // Reset hook: awaited so cross-tool cleanup (MCP uninstall,
+  // globalState clears) completes BEFORE the disk wipe below. Also
+  // clears kickstart escalation counters on running services so a
+  // user trapped in a sustained outage gets the responsive fresh-
+  // park cadence back immediately. Runs after the stuck-override
+  // heal (so any hard-fail aborts before this) and before the
+  // setting writes (so no user-visible churn overlaps). Handler
+  // errors are swallowed - reset must complete even if a hook
+  // throws.
   try {
-    onReset?.();
+    await onReset?.();
   } catch {
-    // Silent - reset flow must not fail because an in-memory hook
-    // threw.
+    // Silent - reset flow must not fail because a hook threw.
   }
 
   // Reset all settings to defaults. Must clear at every scope
@@ -184,6 +188,8 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes(SETTING.notificationsMode, undefined),
     updateSettingAllScopes(SETTING.notificationsClaude, undefined),
     updateSettingAllScopes(SETTING.notificationsCodex, undefined),
+    updateSettingAllScopes(SETTING.epicHandshakeEnabled, undefined),
+    updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexToasts, undefined),
     resetStatusBarItemVisibility(),
   ]);
 

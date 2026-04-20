@@ -1,3 +1,4 @@
+import { normalizePath } from "../fs/pathUtils";
 import type { StateListener } from "../serviceTypes";
 import { PathWatcher } from "./pathWatcher";
 
@@ -42,7 +43,7 @@ export abstract class SessionTokenServiceBase<TState extends { status: string }>
     initialState: TState,
     private readonly pollIntervalMs: number
   ) {
-    this.workspacePath = workspacePath.replace(/\\/g, "/");
+    this.workspacePath = normalizePath(workspacePath);
     this.state = initialState;
   }
 

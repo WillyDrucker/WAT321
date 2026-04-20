@@ -84,6 +84,15 @@ export function bridgeSessionResponse(
   cfg: SessionResponseBridgeConfig
 ): vscode.Disposable {
   let prevContextUsed = -1;
+  // Track which rollout the baseline belongs to. When the service
+  // switches rollouts (e.g. a rollout gets deleted so "newest by
+  // mtime" now points at an older file, or Codex's extension bumps
+  // the mtime on a dormant rollout), the raw contextUsed comparison
+  // would fire a phantom responseComplete for an hours-old turn.
+  // Treat a path switch as a cold start: reset the baseline and
+  // suppress the first emission from the new path, same as the
+  // initial subscription replay.
+  let prevTranscriptPath: string | null = null;
   // Start true so a cached "done" state replay on startup does not
   // register as a fresh not-done -> done transition on the very
   // first emission. The first-read guard below stops that case
@@ -93,6 +102,13 @@ export function bridgeSessionResponse(
   const listener = (state: MaybeOkState) => {
     if (state.status !== "ok") return;
     const session = (state as { status: "ok"; session: SessionResponseFields }).session;
+
+    const path = cfg.tokenService.getActiveTranscriptPath();
+    if (path !== prevTranscriptPath) {
+      prevTranscriptPath = path;
+      prevContextUsed = -1;
+      prevClassifierDone = true;
+    }
 
     const isFirstRead = prevContextUsed === -1;
     const contextChanged = session.contextUsed !== prevContextUsed;
@@ -105,7 +121,6 @@ export function bridgeSessionResponse(
     const mtimeFresh =
       Date.now() - session.lastActiveAt <= RECENT_ACTIVITY_WINDOW_MS;
 
-    const path = cfg.tokenService.getActiveTranscriptPath();
     const tail = path ? cfg.readTail(path) : null;
     // Default true when no classifier is provided so the original
     // contextUsed-increase behavior stays the fallback.

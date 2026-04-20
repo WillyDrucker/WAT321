@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.1.7",
+  "version": "1.2.0",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -45,8 +45,121 @@
       {
         "command": "wat321.showProviderHealth",
         "title": "WAT321: Show Provider Health"
+      },
+      {
+        "command": "wat321.epicHandshake.enable",
+        "title": "WAT321: Enable Epic Handshake"
+      },
+      {
+        "command": "wat321.epicHandshake.disable",
+        "title": "WAT321: Disable Epic Handshake"
+      },
+      {
+        "command": "wat321.epicHandshake.resetCodexSession",
+        "title": "WAT321: Epic Handshake - Reset Codex Session"
+      },
+      {
+        "command": "wat321.epicHandshake.deleteCodexSession",
+        "title": "WAT321: Epic Handshake - Delete Codex Session (destructive)"
+      },
+      {
+        "command": "wat321.epicHandshake.manage",
+        "title": "WAT321: Epic Handshake - Manage"
       }
     ],
+    "icons": {
+      "wat321-epic-handshake": {
+        "description": "Epic Handshake",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E001"
+        }
+      },
+      "wat321-square-alert": {
+        "description": "Square with alert bang",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E002"
+        }
+      },
+      "wat321-square-arrow-left": {
+        "description": "Square with left arrow",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E003"
+        }
+      },
+      "wat321-square-arrow-right": {
+        "description": "Square with right arrow",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E004"
+        }
+      },
+      "wat321-square-bolt": {
+        "description": "Square with lightning bolt",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E005"
+        }
+      },
+      "wat321-square-check": {
+        "description": "Square with checkmark",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E006"
+        }
+      },
+      "wat321-square-error": {
+        "description": "Square with X",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E007"
+        }
+      },
+      "wat321-square-info": {
+        "description": "Square with info i",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E008"
+        }
+      },
+      "wat321-square-mail-open": {
+        "description": "Square with open envelope",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E009"
+        }
+      },
+      "wat321-square-mail": {
+        "description": "Square with closed envelope",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E00A"
+        }
+      },
+      "wat321-square-pause": {
+        "description": "Square with pause bars",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E00B"
+        }
+      },
+      "wat321-square-play": {
+        "description": "Square with play triangle",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E00C"
+        }
+      },
+      "wat321-square": {
+        "description": "Empty square",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E00D"
+        }
+      }
+    },
     "configuration": [
       {
         "title": "Claude",
@@ -144,12 +257,38 @@
             "default": true,
             "order": 3,
             "markdownDescription": "Enable heatmap colors on the usage progress bar. The bars gradually shift through warning colors as you get closer to your limits so tight sessions stand out at a glance."
+          }
+        }
+      },
+      {
+        "title": "Epic Handshake (Claude to Codex Only)",
+        "order": 5,
+        "properties": {
+          "wat321.epicHandshake.enabled": {
+            "type": "boolean",
+            "default": false,
+            "scope": "application",
+            "order": 1,
+            "markdownDescription": "**Enable Epic Handshake - Experimental** - Lets you say things like *\"Ask Codex to review this\"* in any Claude session and have Codex actually answer, through a small bridge WAT321 runs locally. Both the Claude and Codex widgets must be on for this to work.\n\nAfter you turn this on, any active Claude sessions will need to be restarted so they can use the bridge. New sessions pick it up automatically. Same applies in reverse: turning this off fully removes the bridge for new Claude sessions, but already active Claude sessions keep a tiny cached reference to the bridge (roughly 20 tokens per prompt) until you restart the session. *Note: resuming an existing Claude session recalculates the entire balance on first load. In other words, just leave it off until you are done with the session - it unloads automatically when the session ends.*\n\nBridge can be paused by clicking on the Epic Handshake status bar and selecting **Pause** from the top of the dropdown."
           },
+          "wat321.epicHandshake.suppressCodexNotifications": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "order": 4,
+            "markdownDescription": "Suppress Codex completion notifications while an Epic Handshake is in progress. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
+          }
+        }
+      },
+      {
+        "title": "Reset",
+        "order": 6,
+        "properties": {
           "wat321.clearAllData": {
             "type": "boolean",
             "default": false,
             "scope": "application",
-            "order": 99,
+            "order": 1,
             "markdownDescription": "**Reset WAT321** - Restore WAT321 to its defaults and clear everything it has stored locally. If any WAT321 tool appears unresponsive, this will reset all to a known-good state. A confirmation dialog will appear before resetting."
           }
         }
@@ -159,9 +298,15 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "lint": "eslint src/",
-    "build": "npm run clean && npm run lint && tsc",
+    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');const src=p.join('src','WAT321_EPIC_HANDSHAKE','bin','channel.mjs');const dst=p.join('out','WAT321_EPIC_HANDSHAKE','bin','channel.mjs');fs.mkdirSync(p.dirname(dst),{recursive:true});fs.copyFileSync(src,dst);\"",
+    "emit-prod-modules-manifest": "node -e \"const fs=require('fs');const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));const prod=Object.entries(lock.packages||{}).filter(([k,m])=>k.startsWith('node_modules/')&&m.dev!==true).map(([k])=>k);fs.mkdirSync('out/WAT321_EPIC_HANDSHAKE',{recursive:true});fs.writeFileSync('out/WAT321_EPIC_HANDSHAKE/prod-modules.json',JSON.stringify(prod,null,2));console.log('prod-modules manifest:',prod.length,'entries');\"",
+    "icons": "node scripts/buildIcons.mjs",
+    "build": "npm run clean && npm run lint && tsc && npm run copy-assets && npm run emit-prod-modules-manifest",
     "watch": "tsc -w",
-    "package": "npm run build && npx vsce package"
+    "package": "npm run build && npm prune --omit=dev && npx vsce package && npm install"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
@@ -169,6 +314,7 @@
     "@typescript-eslint/eslint-plugin": "^8.58.2",
     "@typescript-eslint/parser": "^8.58.2",
     "eslint": "^10.2.0",
+    "svgtofont": "^6.5.1",
     "typescript": "^6.0.2"
   }
 }

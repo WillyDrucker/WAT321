@@ -29,6 +29,8 @@ const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.notificationsMode}`,
   `wat321.${SETTING.notificationsClaude}`,
   `wat321.${SETTING.notificationsCodex}`,
+  `wat321.${SETTING.epicHandshakeEnabled}`,
+  `wat321.${SETTING.epicHandshakeSuppressCodexToasts}`,
 ] as const;
 
 /** Value-pattern fragments matched per JSONC value shape. Ordered

@@ -7,6 +7,10 @@ import { getProjectKey } from "../shared/fs/pathUtils";
 import { readAutoCompactPct, SETTINGS_PATH } from "../shared/claudeSettings";
 import { resolveContextWindow } from "../engine/contracts";
 import { PathWatcher } from "../shared/polling/pathWatcher";
+import {
+  SESSION_TOKEN_POLL_MS,
+  SESSION_TOKEN_RESCAN_MS,
+} from "../shared/polling/constants";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import { classifyLastEntry } from "../shared/transcriptClassifier";
 import { parseFirstUserMessage, parseLastUsage } from "./parsers";
@@ -16,12 +20,10 @@ import {
   type LastKnownTranscript,
 } from "./transcriptDiscovery";
 
-/** Fallback poll cadence. fs.watch in the base class handles
- * instant transcript-change detection; this interval serves only
- * as a safety net for session discovery and any missed watcher
- * events. 15s keeps discovery responsive without wasting cycles. */
-const POLL_INTERVAL = 15_000;
-const FALLBACK_SCAN_INTERVAL = 51_000;
+/** fs.watch in the base class handles instant transcript-change
+ * detection; the shared `SESSION_TOKEN_POLL_MS` cadence is a safety
+ * net for session discovery and any missed watcher events.
+ * `SESSION_TOKEN_RESCAN_MS` gates the more expensive full rescan. */
 
 export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetState> {
   private cachedLastKnown: LastKnownTranscript | null = null;
@@ -53,7 +55,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       existsSync(join(homedir(), ".claude"))
         ? { status: "no-session" }
         : { status: "not-installed" },
-      POLL_INTERVAL
+      SESSION_TOKEN_POLL_MS
     );
   }
 
@@ -121,7 +123,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     }
 
     if (
-      now - this.lastFallbackScan >= FALLBACK_SCAN_INTERVAL ||
+      now - this.lastFallbackScan >= SESSION_TOKEN_RESCAN_MS ||
       !this.cachedLastKnown
     ) {
       this.cachedLastKnown = findLastKnownTranscript(this.workspacePath);
@@ -229,7 +231,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
 
     if (
       this.cachedAutoCompactPct === null ||
-      now - this.cachedAutoCompactTime >= FALLBACK_SCAN_INTERVAL
+      now - this.cachedAutoCompactTime >= SESSION_TOKEN_RESCAN_MS
     ) {
       this.cachedAutoCompactPct = readAutoCompactPct(contextWindowSize);
       this.cachedAutoCompactTime = now;

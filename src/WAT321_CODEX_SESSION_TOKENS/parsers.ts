@@ -323,12 +323,26 @@ export function classifyCodexTurn(tail: string): LastEntryKind {
     // User messages = user is waiting for a response
     if (ptype === "user_message") return "user";
 
-    // Tool / function calls in flight = assistant is actively working
+    // Tool / function calls in flight = assistant is actively working.
+    // Codex emits many call variants depending on which tool fired:
+    // function_call (custom tools), web_search_call (built-in search),
+    // local_shell_call, file_search_call, etc. Any *_call under a
+    // response_item means a tool is mid-flight. Bridge-driven sessions
+    // rely on this heavily - they have no shell access so they lean on
+    // reasoning + built-in tools, which older logic missed entirely.
     if (ptype === "tool_call" || ptype === "function_call") return "assistant-pending";
-    if (entry.type === "response_item" && ptype === "function_call") return "assistant-pending";
+    if (entry.type === "response_item" && typeof ptype === "string" && ptype.endsWith("_call")) {
+      return "assistant-pending";
+    }
 
-    // Everything else (token_count, turn_context, reasoning,
-    // exec_output) is bookkeeping - keep scanning.
+    // Reasoning chunks under a response_item mean the model is thinking
+    // and has not yet emitted the final assistant message. Safe to mark
+    // pending: the backwards walk would have returned "assistant-done"
+    // first if a later agent_message existed.
+    if (entry.type === "response_item" && ptype === "reasoning") return "assistant-pending";
+
+    // Everything else (token_count, turn_context, exec_output) is
+    // bookkeeping - keep scanning.
   }
   return "unknown";
 }

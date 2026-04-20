@@ -11,6 +11,7 @@ import {
   setHostAppName,
 } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
+import { activateEpicHandshake } from "./WAT321_EPIC_HANDSHAKE";
 
 /**
  * Top-level entry point. Creates the engine context, registers
@@ -54,11 +55,22 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration((e) => handleConfigChange(e))
   );
 
+  // --- Epic Handshake tier (opt-in, feature-flagged) ---
+  // Registers its own commands and reconciles on-disk state with
+  // the `wat321.epicHandshake.enabled` setting. Activated before
+  // the reset command so `resetCleanup` is available to the hook.
+  const epicHandshake = activateEpicHandshake(context, ctx.events);
+  context.subscriptions.push(epicHandshake);
+
   // --- Command palette ---
-  registerClearSettingsCommand(context, () => {
+  // Reset hook awaits Epic Handshake cleanup (MCP uninstall from
+  // ~/.claude/settings.json + globalState key removal) before the
+  // disk wipe runs, so a prior MCP entry cannot survive as a zombie.
+  registerClearSettingsCommand(context, async () => {
     ctx?.providers.resetAllKickstartEscalation();
     ctx?.providers.resetAllTokenServices();
     ctx?.events.emit("engine.reset", {});
+    await epicHandshake.resetCleanup();
   });
   registerHealthCommand(context, () => ctx);
 }
