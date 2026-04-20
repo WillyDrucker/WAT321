@@ -5,6 +5,25 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-20
+
+### Added
+
+- **Epic Handshake lets Claude ask Codex a question and get a real answer back.** A new status bar widget sits alongside the usage and session token tiles and shows whether the bridge is ready, working, or paused. When Claude calls the bridge from a prompt, WAT321 hands the question to a local Codex app-server in read-only sandbox mode and streams Codex's reply straight back into Claude's turn. Threads persist per workspace so follow-up questions keep their context, and the widget surfaces failures passively the same way the usage widgets do. The bridge is opt-in and only activates when you actually install the MCP entry; everything it writes lives inside `~/.wat321/`.
+- **Codex session token widget now recognizes reasoning and tool-call activity.** The thinking indicator lights up during Codex's reasoning passes and any `*_call` response items, not just the final assistant message. You see the widget working through a longer turn instead of sitting idle until the text lands.
+
+### Changed
+
+- **Codex session token warning thresholds widened to 75% / 85%.** The white-to-yellow shift now happens at 75% used and the amber warning at 85%, so you get a softer ramp into the danger zone instead of a sudden jump near the top.
+- **Usage widgets lead with the provider's brand icon even in non-OK states.** Idle, offline, and rate-limited states now show the Claude or OpenAI glyph up front so you can tell at a glance which provider you're looking at without reading the label.
+- **Session token polling cadence is now defined in one place.** The 15-second poll and 51-second rescan intervals are hoisted to `src/shared/polling/constants.ts` so both providers stay in lockstep and future tuning is a single-file edit.
+
+### Fixed
+
+- **Codex notifications fire on the session you're actually using.** When Codex rolls over to a new transcript file mid-work, the notification bridge now resets its baseline for the new path instead of carrying stale state across the swap. Fast turns on a freshly-rolled session no longer get silently skipped.
+
+### Removed
+
 ## [1.1.7] - 2026-04-18
 
 ### Added
