@@ -7,6 +7,16 @@
 /** Minimum interval between API polls per instance. */
 export const POLL_INTERVAL_MS = 122_000;
 
+/** Session-token poll cadence (local file read, not an API call).
+ * Fast enough that new activity shows up within ~15s, slow enough
+ * that a user idling on a dashboard costs nothing. */
+export const SESSION_TOKEN_POLL_MS = 15_000;
+
+/** Fallback rescan cadence for session-token services - triggers a
+ * full transcript rediscovery even when the path watcher hasn't
+ * fired. Safety net for missed kernel notifications. */
+export const SESSION_TOKEN_RESCAN_MS = 51_000;
+
 /** Back off poll interval after we hit a 429 until we retry. Also the
  * hard ceiling for any server-supplied `Retry-After` value: a flailing
  * edge during an outage can return absurd Retry-After values (we have
