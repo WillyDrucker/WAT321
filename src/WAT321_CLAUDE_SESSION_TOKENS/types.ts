@@ -1,5 +1,6 @@
 import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/serviceTypes";
 import type { LastEntryKind } from "../shared/transcriptClassifier";
+import type { ClaudeTurnInfo } from "./parsers";
 
 /** Active session entry from ~/.claude/sessions/<pid>.json */
 export interface SessionEntry {
@@ -32,6 +33,11 @@ export interface ResolvedSession {
    * tool calls). Undefined on lastKnown fallbacks - those rely on
    * the mtime backstop alone. */
   pid?: number;
+  /** Tool names, tool call counter, thinking-block presence, and
+   * cache-hit split from the most recent turn. Parsed on every poll
+   * from the same tail read that populated `turnState`. Drives the
+   * session-token tooltip richness during active turns. */
+  turnInfo: ClaudeTurnInfo;
 }
 
 export type WidgetState =

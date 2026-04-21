@@ -13,7 +13,7 @@ import {
 } from "../shared/polling/constants";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import { classifyLastEntry } from "../shared/transcriptClassifier";
-import { parseFirstUserMessage, parseLastUsage } from "./parsers";
+import { parseFirstUserMessage, parseLastUsage, parseTurnInfo } from "./parsers";
 import {
   findActiveSession,
   findLastKnownTranscript,
@@ -255,6 +255,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       lastActiveAt: mtime,
       turnState: classifyLastEntry(tail),
       pid,
+      turnInfo: parseTurnInfo(tail),
     });
   }
 }

@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
 import { formatModelDisplayName } from "../../engine/contracts";
+import { renderStageDisplay } from "../codex-rollout/phaseRender";
+import type { StageInfo } from "../codex-rollout/types";
+import type { LastEntryKind } from "../transcriptClassifier";
+import type { ClaudeTurnInfo } from "./sessionTokenWidget";
 import { formatPct, formatTokens, makeTokenBar } from "./tokenFormatters";
 import { formatRelativeTime } from "./relativeTime";
 
@@ -14,7 +18,12 @@ import { formatRelativeTime } from "./relativeTime";
 
 const FOLDER = "\u{1F4C1}";
 const CLAMP = "\u{1F5DC}\u{FE0F}";
-const MAX_TITLE_LEN = 38;
+/** Per-line cap for the session title. VS Code's MarkdownString
+ * tooltip wraps at the rendered line, but we need a soft per-line
+ * limit to prevent very long titles from creating an unreadably
+ * wide tooltip. The wrap helper allows up to two visual lines before
+ * ellipsis-truncating; line two ends at the same per-line cap. */
+const MAX_TITLE_LINE_LEN = 38;
 
 
 export interface SessionTokenTooltipInput {
@@ -37,13 +46,38 @@ export interface SessionTokenTooltipInput {
    * When present, the tooltip adds a "Last active: X ago" line so
    * the user knows they are looking at a snapshot. */
   lastActiveAt?: number;
+  /** Codex-only: stage + tool + plan snapshot from the rollout.
+   * When turnState indicates an in-flight turn AND stageInfo is
+   * populated, the tooltip adds Plan / Tool / Token-split lines so
+   * the user sees what Codex is currently doing. */
+  stageInfo?: StageInfo;
+  /** Claude-only: tool_use name, tool call counter, thinking-block
+   * presence, and cache-hit split. Rendered under the Auto-Compact
+   * line when provider is Claude and turnState indicates in-flight. */
+  claudeTurnInfo?: ClaudeTurnInfo;
+  /** Current turn classification. Used to gate the stageInfo render:
+   * the plan / tool / reasoning lines only make sense while the
+   * session is actively mid-turn. */
+  turnState?: LastEntryKind;
 }
 
 export function buildSessionTokenTooltip(
   input: SessionTokenTooltipInput
 ): vscode.MarkdownString {
-  const { provider, sessionTitle, label, modelId, contextUsed, contextWindowSize, ceiling, baselineTokens = 0, lastActiveAt } =
-    input;
+  const {
+    provider,
+    sessionTitle,
+    label,
+    modelId,
+    contextUsed,
+    contextWindowSize,
+    ceiling,
+    baselineTokens = 0,
+    lastActiveAt,
+    stageInfo,
+    claudeTurnInfo,
+    turnState,
+  } = input;
 
   const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
   const effectiveUsed = Math.max(0, contextUsed - baselineTokens);
@@ -53,17 +87,22 @@ export function buildSessionTokenTooltip(
       : 0;
   const bar = makeTokenBar(pctUsed);
 
-  const title =
-    sessionTitle && sessionTitle.length > MAX_TITLE_LEN
-      ? sessionTitle.slice(0, MAX_TITLE_LEN) + "..."
-      : sessionTitle;
+  // Soft-wrap the title at MAX_TITLE_LINE_LEN by injecting a single
+  // line break, then ellipsis-truncate only if the title would still
+  // exceed two visual lines. Lets readable titles like 60-char
+  // "Refactoring the WAT321 status bar item to be smaller" wrap
+  // naturally instead of getting cut off mid-word.
+  const title = wrapAndTruncateTitle(sessionTitle);
 
   const md = new vscode.MarkdownString();
   md.isTrusted = false;
   md.supportHtml = false;
   md.appendMarkdown(`**${provider} session token context**  \n`);
   if (title) {
-    md.appendMarkdown(`"${title}"  \n`);
+    // Two trailing spaces + newline = MarkdownString hard line break,
+    // so the wrapped second line of a long title actually shows on its
+    // own row instead of running together with the model line below.
+    md.appendMarkdown(`"${title.replace(/\n/g, '"  \n"')}"  \n`);
   }
   if (modelId) {
     const modelName = formatModelDisplayName(modelId);
@@ -102,5 +141,88 @@ export function buildSessionTokenTooltip(
       `${CLAMP} Auto-Compact ~${formatTokens(compactTrigger)}`
     );
   }
+
+  // Codex mid-turn richness. Only render when a turn is in flight AND
+  // we have structured rollout state. Idle sessions skip these lines
+  // entirely so the tooltip stays short when nothing is happening.
+  if (provider === "Codex" && stageInfo && turnStateIsActive(turnState)) {
+    const display = renderStageDisplay(stageInfo);
+    const lines: string[] = [];
+    lines.push(`Codex: ${display.fraction} ${display.label}`);
+    if (display.planLine) lines.push(display.planLine);
+    if (display.toolLine) lines.push(display.toolLine);
+    if (stageInfo.toolCallCount > 0) {
+      lines.push(`${stageInfo.toolCallCount} tool call${stageInfo.toolCallCount === 1 ? "" : "s"} this turn`);
+    }
+    if (stageInfo.reasoningTokens > 0 || stageInfo.outputTokens > 0) {
+      lines.push(
+        `Thinking ${formatTokens(stageInfo.reasoningTokens)}, output ${formatTokens(stageInfo.outputTokens)} (last turn)`
+      );
+    }
+    if (stageInfo.inputTokens > 0) {
+      const pct = Math.round((stageInfo.cachedInputTokens / stageInfo.inputTokens) * 100);
+      if (pct > 0) lines.push(`${pct}% cached`);
+    }
+    md.appendMarkdown(`\n\n${lines.join("  \n")}`);
+  }
+
+  // Claude mid-turn richness. Analog of the Codex block above, shaped
+  // to Claude's transcript signals. Rendered only when actively mid-
+  // turn so the tooltip stays short on idle sessions.
+  if (provider === "Claude" && claudeTurnInfo && turnStateIsActive(turnState)) {
+    const lines: string[] = [];
+    if (claudeTurnInfo.activeToolName) {
+      lines.push(`Tool: ${claudeTurnInfo.activeToolName}`);
+    } else if (claudeTurnInfo.hasThinkingRecent) {
+      lines.push("Thinking");
+    }
+    if (claudeTurnInfo.toolCallCount > 0) {
+      lines.push(
+        `${claudeTurnInfo.toolCallCount} tool call${claudeTurnInfo.toolCallCount === 1 ? "" : "s"} this turn`
+      );
+    }
+    if (claudeTurnInfo.outputTokens > 0) {
+      lines.push(`Output ${formatTokens(claudeTurnInfo.outputTokens)} (last turn)`);
+    }
+    if (claudeTurnInfo.totalInputTokens > 0) {
+      const pct = Math.round(
+        (claudeTurnInfo.cachedInputTokens / claudeTurnInfo.totalInputTokens) * 100
+      );
+      if (pct > 0) lines.push(`${pct}% cached`);
+    }
+    if (lines.length > 0) {
+      md.appendMarkdown(`\n\n${lines.join("  \n")}`);
+    }
+  }
+
   return md;
+}
+
+/** Wrap a long session title across up to two lines, breaking on a
+ * word boundary inside the first line's character budget. Titles
+ * that fit on one line are returned unchanged; titles that exceed
+ * two lines are ellipsis-truncated. Used to give long session names
+ * a fair shot at full readability before falling back to truncation. */
+function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
+  if (!sessionTitle) return "";
+  if (sessionTitle.length <= MAX_TITLE_LINE_LEN) return sessionTitle;
+  // Find the last space at or before MAX_TITLE_LINE_LEN so the wrap
+  // happens between words. Falls back to a hard break if no space is
+  // present in that window (e.g. a single very long token).
+  const lastSpace = sessionTitle.lastIndexOf(" ", MAX_TITLE_LINE_LEN);
+  const breakAt = lastSpace > 0 ? lastSpace : MAX_TITLE_LINE_LEN;
+  const firstLine = sessionTitle.slice(0, breakAt).trimEnd();
+  const remainder = sessionTitle.slice(breakAt).trimStart();
+  if (remainder.length <= MAX_TITLE_LINE_LEN) {
+    return `${firstLine}\n${remainder}`;
+  }
+  return `${firstLine}\n${remainder.slice(0, MAX_TITLE_LINE_LEN - 3)}...`;
+}
+
+/** True while the session is mid-turn - stage-info tooltip lines
+ * only make sense during an in-flight response. `user` (waiting on
+ * Codex) and `assistant-pending` (Codex actively working) qualify;
+ * `assistant-done` and `unknown` are idle. */
+function turnStateIsActive(turnState: LastEntryKind | undefined): boolean {
+  return turnState === "user" || turnState === "assistant-pending";
 }

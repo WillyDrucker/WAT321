@@ -29,6 +29,7 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
       baselineTokens: CODEX_BASELINE_TOKENS,
       transcriptMtimeMs: session.lastActiveAt,
       turnState: session.turnState,
+      stageInfo: session.stageInfo,
     };
   },
 };
