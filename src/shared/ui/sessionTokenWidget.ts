@@ -1,7 +1,32 @@
 import * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
+import type { StageInfo } from "../codex-rollout/types";
 import type { LastEntryKind } from "../transcriptClassifier";
+
+/** Rich turn-state snapshot for the Claude session token tooltip.
+ * Defined here (shared/ui) rather than in the Claude tool folder so
+ * the generic widget can reference it without inverting the
+ * shared -> tool dependency direction. Claude's parser module imports
+ * this type back. Populated on every poll when state is `ok`. */
+export interface ClaudeTurnInfo {
+  /** Name of the most recent `tool_use` block if the last assistant
+   * message has an unresolved tool call. Null when the last turn was
+   * text-only or no tool calls have fired. */
+  activeToolName: string | null;
+  /** Count of `tool_use` blocks since the most recent user message. */
+  toolCallCount: number;
+  /** True if any of the last ~20 assistant entries carry a `thinking`
+   * content block. */
+  hasThinkingRecent: boolean;
+  /** Output tokens on the most recent assistant turn. */
+  outputTokens: number;
+  /** `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`
+   * on the most recent assistant turn. */
+  totalInputTokens: number;
+  /** `cache_read_input_tokens` on the most recent assistant turn. */
+  cachedInputTokens: number;
+}
 import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
 import { getSessionTokenColor } from "./textColors";
 import { formatPct, formatTokens } from "./tokenFormatters";
@@ -9,7 +34,7 @@ import { formatPct, formatTokens } from "./tokenFormatters";
 /**
  * Config-driven session token widget with a provider-branded idle
  * prefix and a DIY alternator "thinking" indicator while a turn is
- * in progress (issue #46).
+ * in progress.
  *
  * Active detection is a three-layer resolution:
  *   1. Classifier (primary end-state signal).
@@ -61,6 +86,15 @@ export interface SessionTokenRenderData {
    * undefined so the tooltip does not read as "last active" on a
    * currently-active session. */
   lastActiveAt?: number;
+  /** Codex-only: stage + tool + plan + token breakdown parsed from
+   * the rollout. Drives the tooltip richness during active turns
+   * (current tool name, plan progress, reasoning-vs-output split,
+   * cache hit rate). Undefined for Claude sessions. */
+  stageInfo?: StageInfo;
+  /** Claude-only: tool-use name, tool call counter, thinking-block
+   * presence, and cache-hit token split from the most recent turn.
+   * Undefined for Codex sessions. */
+  claudeTurnInfo?: ClaudeTurnInfo;
 }
 
 export interface SessionTokenWidgetDescriptor<TState extends { status: string }> {
@@ -202,6 +236,9 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           ceiling: data.ceiling,
           baselineTokens: data.baselineTokens,
           lastActiveAt: data.lastActiveAt,
+          stageInfo: data.stageInfo,
+          claudeTurnInfo: data.claudeTurnInfo,
+          turnState: data.turnState,
         });
         this.item.show();
         return;

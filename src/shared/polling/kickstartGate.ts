@@ -3,12 +3,6 @@ import {
   KICKSTART_ESCALATION_MS,
 } from "./constants";
 
-/** Public helper the usage service uses to classify a fresh
- * `rate-limited` park as cold-start (no recent activity) vs active
- * (user is currently working). Matches the kickstart window so the
- * two concepts stay in sync: an activity gap long enough to disable
- * kickstart is the same gap long enough to count as idle. */
-
 /**
  * Activity-driven kickstart gate for the usage polling service.
  * Decides when a rate-limited service should wake up early because

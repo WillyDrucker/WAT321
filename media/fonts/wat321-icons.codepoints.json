@@ -6,10 +6,15 @@
   "wat321-square-bolt": "E005",
   "wat321-square-check": "E006",
   "wat321-square-error": "E007",
-  "wat321-square-info": "E008",
-  "wat321-square-mail-open": "E009",
-  "wat321-square-mail": "E00A",
-  "wat321-square-pause": "E00B",
-  "wat321-square-play": "E00C",
-  "wat321-square": "E00D"
+  "wat321-square-five": "E008",
+  "wat321-square-four": "E009",
+  "wat321-square-info": "E00A",
+  "wat321-square-mail-open": "E00B",
+  "wat321-square-mail": "E00C",
+  "wat321-square-one": "E00D",
+  "wat321-square-pause": "E00E",
+  "wat321-square-play": "E00F",
+  "wat321-square-three": "E010",
+  "wat321-square-two": "E011",
+  "wat321-square": "E012"
 }

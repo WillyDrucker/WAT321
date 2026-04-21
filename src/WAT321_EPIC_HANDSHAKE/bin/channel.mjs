@@ -40,16 +40,50 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
-const INBOX_CLAUDE = join(EH_DIR, "inbox", "claude");
-const INBOX_CODEX = join(EH_DIR, "inbox", "codex");
-const SENT_CLAUDE = join(EH_DIR, "sent", "claude");
+const INBOX_CLAUDE_ROOT = join(EH_DIR, "inbox", "claude");
+const INBOX_CODEX_ROOT = join(EH_DIR, "inbox", "codex");
+const SENT_CLAUDE_ROOT = join(EH_DIR, "sent", "claude");
 const LOG_PATH = join(EH_DIR, "channel.log");
 const PAUSED_FLAG = join(EH_DIR, "paused.flag");
 const FIRE_AND_FORGET_FLAG = join(EH_DIR, "fire-and-forget.flag");
+const ADAPTIVE_FLAG = join(EH_DIR, "adaptive.flag");
 const LOG_MAX_BYTES = 50_000;
+
+/** Per-workspace identity. Mirrors `src/WAT321_EPIC_HANDSHAKE/
+ * workspaceHash.ts` so envelopes written here land in the same
+ * `<wshash>` subfolder the dispatcher watches. Multiple Claude
+ * sessions across multiple VS Code instances share `~/.wat321/`
+ * but each workspace gets its own inbox/sent subfolder so a
+ * dispatcher only sees envelopes meant for its workspace. Without
+ * this partition, two dispatchers race on a shared folder and a
+ * primary VS Code's dispatcher can win an envelope intended for
+ * a sibling test instance, routing it through the wrong bridge
+ * thread. */
+const WORKSPACE_PATH = process.env.WAT321_WORKSPACE_PATH || process.cwd();
+const WORKSPACE_HASH = createHash("sha256")
+  .update(
+    WORKSPACE_PATH.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase(),
+    "utf8"
+  )
+  .digest("hex")
+  .slice(0, 16);
+
+const INBOX_CLAUDE = join(INBOX_CLAUDE_ROOT, WORKSPACE_HASH);
+const INBOX_CODEX = join(INBOX_CODEX_ROOT, WORKSPACE_HASH);
+const SENT_CLAUDE = join(SENT_CLAUDE_ROOT, WORKSPACE_HASH);
+/** When adaptive mode is on the MCP tool keeps blocking as long as
+ * the dispatcher's heartbeat file for this envelope stays fresh.
+ * Matches TurnMonitor's default stallWindowMs in the TypeScript side.
+ * When a heartbeat goes stale past this, the tool gives up even if
+ * it has time left on timeoutMs - dispatcher already cut the turn. */
+const HEARTBEAT_STALE_MS = 60_000;
+/** Absolute ceiling on how long adaptive mode can extend the MCP
+ * tool wait. Matches TurnMonitor's hardCapMs so both sides give up
+ * at the same wall-clock moment. */
+const ADAPTIVE_HARD_CAP_MS = 300_000;
 
 const POLL_INTERVAL_MS = 500;
 
@@ -80,7 +114,7 @@ function log(level, msg) {
   }
 }
 
-log("info", "channel server starting (sync mode)");
+log("info", `channel server starting (sync mode) ws=${WORKSPACE_HASH} path=${WORKSPACE_PATH}`);
 
 // ---------------------------------------------------------------
 // MCP server - minimal declaration
@@ -220,7 +254,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     priority: "normal",
     intent: "question",
     title: "",
-    workspacePath: process.env.WAT321_WORKSPACE_PATH || process.cwd(),
+    workspacePath: WORKSPACE_PATH,
     replyTo: null,
     body: args.text,
   });
@@ -249,24 +283,62 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
   }
 
-  // Poll inbox/claude for matching reply envelope
-  const deadline = Date.now() + timeoutMs;
+  // Poll inbox/claude for matching reply envelope. Two timeout models:
+  //
+  //   - Standard (adaptive.flag absent): fixed `timeoutMs` wall-clock,
+  //     same behavior as before.
+  //   - Adaptive (adaptive.flag present): effective deadline extends
+  //     while the dispatcher's per-envelope heartbeat file stays
+  //     fresh. Dispatcher writes `turn-heartbeat.<id>.json` on every
+  //     TurnMonitor stage change; we give up only when the heartbeat
+  //     mtime is older than HEARTBEAT_STALE_MS AND the initial
+  //     `timeoutMs` grace has also elapsed. Hard-capped at
+  //     ADAPTIVE_HARD_CAP_MS so a runaway turn cannot block forever.
+  const adaptive = existsSync(ADAPTIVE_FLAG);
+  const startedAt = Date.now();
+  const initialDeadline = startedAt + timeoutMs;
+  const hardDeadline = startedAt + ADAPTIVE_HARD_CAP_MS;
+  const heartbeatFile = join(EH_DIR, `turn-heartbeat.${id}.json`);
   let replyContent = null;
   let replyFilename = null;
 
-  while (Date.now() < deadline) {
+  while (true) {
     const match = findReplyEnvelope(id);
     if (match !== null) {
       replyContent = match.body;
       replyFilename = match.filename;
       break;
     }
+    const now = Date.now();
+    if (!adaptive) {
+      if (now >= initialDeadline) break;
+    } else {
+      if (now >= hardDeadline) break;
+      if (now >= initialDeadline) {
+        // Past the initial window: only keep waiting if the
+        // dispatcher's heartbeat shows recent activity. No
+        // heartbeat file OR stale heartbeat = dispatcher is done
+        // (or never started), so there's no reason to keep blocking.
+        let heartbeatAgeMs = Infinity;
+        try {
+          heartbeatAgeMs = now - statSync(heartbeatFile).mtimeMs;
+        } catch {
+          // file missing - dispatcher either cleaned up (turn ended
+          // successfully and moved reply into place, but we lost the
+          // race on our prior findReplyEnvelope tick) or never wrote
+          // one (pre-adaptive dispatcher). Next tick either finds
+          // the reply or bails out if we cross hardDeadline.
+        }
+        if (heartbeatAgeMs > HEARTBEAT_STALE_MS) break;
+      }
+    }
     await sleep(POLL_INTERVAL_MS);
   }
 
   if (replyContent === null) {
-    log("warn", `timeout on codex/${id} after ${timeoutMs}ms`);
-    const timeoutMsg = `Claude to Codex prompt timed out after ${timeoutMs / 1000}s. No reply received yet.`;
+    const elapsedMs = Date.now() - startedAt;
+    log("warn", `timeout on codex/${id} after ${elapsedMs}ms (adaptive=${adaptive})`);
+    const timeoutMsg = `Claude to Codex prompt timed out after ${Math.round(elapsedMs / 1000)}s. No reply received yet.`;
     return {
       content: [
         {
@@ -296,14 +368,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 });
 
 /** Find any reply envelopes in inbox/claude/ tagged with our
- * fingerprint that are older than ~15 seconds (active prompts
+ * fingerprint that are older than ~5 seconds (active prompts
  * poll + consume matching replies within 500ms). These are late
  * arrivals from prior timed-out prompts. Prepend them to the
  * current tool response so Claude sees the backlog naturally.
  * Consumed envelopes are moved to sent/. */
 function collectLateReplies() {
   const out = [];
-  const cutoff = Date.now() - 15_000;
+  const cutoff = Date.now() - 5_000;
   let files;
   try {
     files = readdirSync(INBOX_CLAUDE);

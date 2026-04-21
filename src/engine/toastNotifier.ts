@@ -1,8 +1,10 @@
-import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import type { AppEvents, EventHub } from "./eventHub";
+import {
+  showInAppNotification,
+  showSystemNotification,
+} from "./notificationPlatforms";
 import { SETTING } from "./settingsKeys";
-import { showToast as showWindowsToast } from "./windowsToastProcess";
 
 /** Optional probe injected from bootstrap so the toast notifier can
  * skip Codex toasts while the Epic Handshake bridge is dispatching.
@@ -16,6 +18,25 @@ export function setBridgeActiveProbe(fn: (() => boolean) | null): void {
 
 function isEpicHandshakeBridgeActive(): boolean {
   return bridgeActiveProbe?.() === true;
+}
+
+/** Optional consume-on-read probe. The dispatcher writes a one-shot
+ * suppress-codex-toast sentinel on successful turn completion; this
+ * consumer reads it once. Returning true means "the most recent Codex
+ * activity was bridge-driven, suppress." Covers the gap where Codex's
+ * transcript fires `responseComplete` more than 5s after the bridge's
+ * `returning` flag has cleared (so `isEpicHandshakeBridgeActive` would
+ * return false). */
+let recentCodexCompletionConsumer: (() => boolean) | null = null;
+
+export function setRecentCodexCompletionConsumer(
+  fn: (() => boolean) | null
+): void {
+  recentCodexCompletionConsumer = fn;
+}
+
+function consumeRecentBridgeCompletion(): boolean {
+  return recentCodexCompletionConsumer?.() === true;
 }
 
 function isCodexToastSuppressionEnabled(): boolean {
@@ -138,92 +159,7 @@ function truncatePreview(text: string | null): string {
   return `${clean.slice(0, MAX_PREVIEW_LENGTH - 1).trimEnd()}\u2026`;
 }
 
-// --- Delivery paths ---
 
-function showInAppNotification(
-  header: string,
-  title: string,
-  preview: string
-): void {
-  const message = title
-    ? `${header} "${title}": ${preview || "response complete"}`
-    : `${header}: ${preview || "response complete"}`;
-  void vscode.window.showInformationMessage(message);
-}
-
-/** Escape for an AppleScript double-quoted string. AppleScript uses
- * `\"` for quote and `\\` for backslash inside `"..."`. */
-function escapeAppleScript(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function showMacNotification(
-  header: string,
-  title: string,
-  preview: string
-): boolean {
-  try {
-    const body = title ? `${title}: ${preview || "response complete"}` : (preview || "response complete");
-    const script = `display notification "${escapeAppleScript(body)}" with title "${escapeAppleScript(header)}"`;
-    const child = spawn("osascript", ["-e", script], {
-      stdio: "ignore",
-      detached: true,
-    });
-    child.unref();
-    child.on("error", () => { /* recorded by caller via bool */ });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function showLinuxNotification(
-  header: string,
-  title: string,
-  preview: string
-): boolean {
-  try {
-    const body = title ? `${title}: ${preview || "response complete"}` : (preview || "response complete");
-    // `--` terminates notify-send options so header/body cannot be
-    // interpreted as flags even if they start with a hyphen.
-    const child = spawn("notify-send", ["--", header, body], {
-      stdio: "ignore",
-      detached: true,
-    });
-    child.unref();
-    child.on("error", () => { /* spawn failed - notify-send missing */ });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Dispatch to the platform's OS notification path. Returns true if
- * delivery was accepted, false if it failed (silently discarded, for
- * caller to record). Note: on macOS / Linux `spawn` returning a valid
- * child does not guarantee delivery - osascript / notify-send can
- * still fail asynchronously. We treat spawn success as delivery
- * success because the async failure surface is identical to the
- * Windows OS-level silent-discard case (Focus Assist, permissions,
- * etc.) and not something we can reliably detect. */
-function showSystemNotification(
-  header: string,
-  title: string,
-  preview: string
-): boolean {
-  switch (process.platform) {
-    case "win32": {
-      const sessionLine = title ? `\u201C${title}\u201D` : "";
-      return showWindowsToast(header, sessionLine, preview || "response complete");
-    }
-    case "darwin":
-      return showMacNotification(header, title, preview);
-    case "linux":
-      return showLinuxNotification(header, title, preview);
-    default:
-      return false;
-  }
-}
 
 // --- Event handler ---
 
@@ -248,14 +184,17 @@ function handleResponseComplete(
   // "response complete" toast at roughly the same moment Claude's tool
   // result flows back and fires its own toast. The user only wanted
   // the Claude toast in that case - two toasts about the same event
-  // is noise. Skip the Codex toast if either bridge flag is present
-  // (in-flight or the 5000ms returning latch). Claude toasts are
-  // never suppressed, and Codex toasts fire normally when the user is
-  // working in Codex independently of the bridge.
+  // is noise. Two suppression sources, in priority order:
+  //   1. Bridge currently active (in-flight or 5s returning latch).
+  //   2. Recent bridge completion sentinel - one-shot, consume-on-read,
+  //      30s freshness window. Covers slow Codex transcript writes that
+  //      land after the returning latch has cleared.
+  // Claude toasts are never suppressed, and Codex toasts fire normally
+  // when the user is working in Codex independently of the bridge.
   if (
     payload.provider === "codex" &&
-    isEpicHandshakeBridgeActive() &&
-    isCodexToastSuppressionEnabled()
+    isCodexToastSuppressionEnabled() &&
+    (isEpicHandshakeBridgeActive() || consumeRecentBridgeCompletion())
   ) {
     record({ ...baseDiag, outcome: "suppressed-epic-handshake" });
     return;

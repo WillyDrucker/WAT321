@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -63,6 +63,10 @@
         "title": "WAT321: Epic Handshake - Delete Codex Session (destructive)"
       },
       {
+        "command": "wat321.epicHandshake.deleteAllCodexSessions",
+        "title": "WAT321: Epic Handshake - Delete All Codex Sessions (destructive)"
+      },
+      {
         "command": "wat321.epicHandshake.manage",
         "title": "WAT321: Epic Handshake - Manage"
       }
@@ -117,46 +121,81 @@
           "fontCharacter": "\\E007"
         }
       },
+      "wat321-square-five": {
+        "description": "Square with number 5",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E008"
+        }
+      },
+      "wat321-square-four": {
+        "description": "Square with number 4",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E009"
+        }
+      },
       "wat321-square-info": {
         "description": "Square with info i",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E008"
+          "fontCharacter": "\\E00A"
         }
       },
       "wat321-square-mail-open": {
         "description": "Square with open envelope",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E009"
+          "fontCharacter": "\\E00B"
         }
       },
       "wat321-square-mail": {
         "description": "Square with closed envelope",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00A"
+          "fontCharacter": "\\E00C"
+        }
+      },
+      "wat321-square-one": {
+        "description": "Square with number 1",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E00D"
         }
       },
       "wat321-square-pause": {
         "description": "Square with pause bars",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00B"
+          "fontCharacter": "\\E00E"
         }
       },
       "wat321-square-play": {
         "description": "Square with play triangle",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00C"
+          "fontCharacter": "\\E00F"
+        }
+      },
+      "wat321-square-three": {
+        "description": "Square with number 3",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E010"
+        }
+      },
+      "wat321-square-two": {
+        "description": "Square with number 2",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E011"
         }
       },
       "wat321-square": {
         "description": "Empty square",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00D"
+          "fontCharacter": "\\E012"
         }
       }
     },
@@ -276,7 +315,24 @@
             "default": true,
             "scope": "application",
             "order": 4,
-            "markdownDescription": "Suppress Codex completion notifications while an Epic Handshake is in progress. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
+            "markdownDescription": "Suppress Codex completion notifications while the Epic Handshake bridge is active. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
+          },
+          "wat321.epicHandshake.defaultWaitMode": {
+            "type": "string",
+            "default": "Adaptive",
+            "scope": "application",
+            "enum": [
+              "Standard",
+              "Adaptive",
+              "Fire-and-Forget"
+            ],
+            "enumDescriptions": [
+              "Claude blocks up to 2 min per prompt. Fixed timeout.",
+              "Claude waits while Codex is demonstrably working (heartbeat-driven). Cuts on stall, hard cap 5 min.",
+              "Claude's tool returns immediately; reply lands in inbox when ready."
+            ],
+            "order": 5,
+            "markdownDescription": "Starting wait mode after a VS Code restart. The Epic Handshake menu lets you cycle through the three modes live; this setting picks the baseline that restores on activate."
           }
         }
       },

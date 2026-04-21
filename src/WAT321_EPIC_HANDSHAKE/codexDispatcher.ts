@@ -1,36 +1,39 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { AppServerClient } from "./appServerClient";
-import { CANCEL_FLAG_PATH, INBOX_CLAUDE_DIR, INBOX_CODEX_DIR, SENT_CODEX_DIR } from "./constants";
+import {
+  inboxClaudeDir,
+  inboxCodexDir,
+  sentClaudeDir,
+  sentCodexDir,
+} from "./constants";
+import { newEnvelopeId, readEnvelope, writeEnvelopeAtomic, type Envelope } from "./envelope";
 import { classifyFailure } from "./failureClassifier";
+import { moveToSent, purgeSent } from "./mailbox";
+import { loadBridgeThreadRecord } from "./threadPersistence";
+import {
+  noteFailure,
+  noteSuccess,
+  rotateThreadRecord,
+  spawnFreshThread,
+} from "./threadLifecycle";
 import {
   clearInFlightFlag,
   clearProcessingFlag,
   writeInFlightFlag,
-  writeProcessingFlag,
   writeReturningFlag,
+  writeSuppressCodexToast,
 } from "./turnFlags";
-import { newEnvelopeId, readEnvelope, writeEnvelopeAtomic, type Envelope } from "./envelope";
-import type {
-  ThreadStartParams,
-  TurnInterruptParams,
-  TurnStartParams,
-} from "./protocol";
-import {
-  bridgeThreadDisplayName,
-  loadBridgeThreadRecord,
-  nextCollisionFreeCounter,
-  saveBridgeThreadRecord,
-  type BridgeThreadRecord,
-} from "./threadPersistence";
+import { runTurnOnce } from "./turnRunner";
 import type { EpicHandshakeLogger } from "./types";
+import { workspaceHash } from "./workspaceHash";
 
 /**
- * Watches `inbox/codex/` for envelopes from Claude, dispatches each
- * to `codex app-server` on the shared per-workspace thread, and
- * writes the reply back to `inbox/claude/` so the channel MCP server
- * can push it into the originating Claude session.
+ * Watches `inbox/codex/<wshash>/` for envelopes from Claude, dispatches
+ * each to `codex app-server` on the shared per-workspace thread, and
+ * writes the reply back to `inbox/claude/<wshash>/` so the channel MCP
+ * server can push it into the originating Claude session.
  *
  * Lifecycle:
  *   - On first envelope: spawn AppServerClient, initialize, create or
@@ -40,36 +43,18 @@ import type { EpicHandshakeLogger } from "./types";
  *     subprocess restarts. Non-ephemeral threads survive the subprocess
  *     idle-kill, so we can drop the client after N minutes idle and
  *     resume cleanly on the next envelope.
+ *
+ * This file is the orchestration shell. The heavy lifting lives in:
+ *   - `mailbox.ts`         - sent/inbox file housekeeping
+ *   - `threadLifecycle.ts` - spawn/rotate/note success/failure
+ *   - `turnRunner.ts`      - the runTurnOnce subscription + monitor loop
  */
 
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
-const TURN_TIMEOUT_MS = 5 * 60 * 1000;
 /** Consecutive recoverable-shape failures before we give up on the
  * thread and rotate to a fresh one. Keeps a user's S1 alive through
  * transient network blips but bails out of genuinely stuck threads. */
 const MAX_CONSECUTIVE_FAILURES = 3;
-
-interface ThreadStartResult {
-  thread: { id: string; path: string | null; ephemeral: boolean };
-}
-
-interface AgentMessageDelta {
-  itemId: string;
-  delta: string;
-}
-
-interface TurnCompleted {
-  turn: {
-    id: string;
-    status: "completed" | "interrupted" | "failed";
-    items: Array<{ type: string; id: string; text?: string; status: string }>;
-    error?: {
-      message: string;
-      codexErrorInfo?: string;
-      additionalDetails?: string;
-    } | null;
-  };
-}
 
 export class CodexDispatcher {
   private watcher: PathWatcher | null = null;
@@ -78,78 +63,60 @@ export class CodexDispatcher {
   private purgeTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private processing = false;
+  /** Workspace identity for inbox/sent partitioning. Computed once
+   * so both the watcher and the per-envelope reply writer point at
+   * the same `<wshash>` subfolder. Multiple dispatchers across
+   * separate VS Code instances each watch their own subfolder, so
+   * envelopes meant for one workspace can never be picked up by
+   * another's dispatcher. */
+  private readonly wsHash: string;
+  private readonly inboxCodex: string;
+  private readonly inboxClaude: string;
+  private readonly sentCodex: string;
+  private readonly sentClaude: string;
 
   constructor(
     private readonly workspacePath: string,
     private readonly logger: EpicHandshakeLogger
-  ) {}
+  ) {
+    this.wsHash = workspaceHash(workspacePath);
+    this.inboxCodex = inboxCodexDir(this.wsHash);
+    this.inboxClaude = inboxClaudeDir(this.wsHash);
+    this.sentCodex = sentCodexDir(this.wsHash);
+    this.sentClaude = sentClaudeDir(this.wsHash);
+  }
 
   start(): void {
-    for (const dir of [INBOX_CODEX_DIR, INBOX_CLAUDE_DIR, SENT_CODEX_DIR]) {
+    for (const dir of [this.inboxCodex, this.inboxClaude, this.sentCodex, this.sentClaude]) {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     }
-    this.watcher = new PathWatcher(() => {
-      void this.drainInbox();
-    }, 250, false);
-    this.watcher.sync(INBOX_CODEX_DIR);
+    this.logger.info(
+      `codex dispatcher binding to workspace ${this.wsHash} path=${this.workspacePath}`
+    );
+    this.watcher = new PathWatcher(
+      () => {
+        void this.drainInbox();
+      },
+      { debounceMs: 250 }
+    );
+    this.watcher.sync(this.inboxCodex);
     void this.drainInbox();
     // Sent-folder purge: delivered envelopes older than 5 minutes.
     // No downstream consumer - conversation lives in Claude's own
     // transcript, not here. Keeps disk footprint bounded.
-    this.purgeSent();
-    this.purgeTimer = setInterval(() => this.purgeSent(), 5 * 60 * 1000);
+    this.runPurge();
+    this.purgeTimer = setInterval(() => this.runPurge(), 5 * 60 * 1000);
     this.purgeTimer.unref?.();
     this.logger.info("codex dispatcher started");
   }
 
-  private purgeSent(): void {
-    try {
-      const cutoff = Date.now() - 5 * 60 * 1000;
-      if (existsSync(SENT_CODEX_DIR)) {
-        for (const f of readdirSync(SENT_CODEX_DIR)) {
-          const p = join(SENT_CODEX_DIR, f);
-          try {
-            const st = statSync(p);
-            if (st.mtimeMs < cutoff) unlinkSync(p);
-          } catch {
-            // best-effort
-          }
-        }
-      }
-    } catch {
-      // never throw from housekeeping
-    }
-    this.sweepStaleInboxMail();
-  }
-
-  /** Move any envelope in inbox/claude/ older than 1 hour to the
-   * sent/claude/ archive. Safety floor for the late-reply flow:
-   * normally a prompt via collectLateReplies consumes pending mail
-   * on the user's next bridge invocation, or the status-bar menu
-   * retrieves it. A user who walks away entirely should not find
-   * unbounded accumulation on return. 1 hour is long enough that a
-   * useful reply had real chances to be seen. */
-  private sweepStaleInboxMail(): void {
-    try {
-      if (!existsSync(INBOX_CLAUDE_DIR)) return;
-      const sentDir = join(SENT_CODEX_DIR, "..", "claude");
-      const cutoff = Date.now() - 60 * 60 * 1000;
-      for (const f of readdirSync(INBOX_CLAUDE_DIR)) {
-        if (!f.endsWith(".md")) continue;
-        const src = join(INBOX_CLAUDE_DIR, f);
-        try {
-          const st = statSync(src);
-          if (st.mtimeMs >= cutoff) continue;
-          if (!existsSync(sentDir)) mkdirSync(sentDir, { recursive: true });
-          renameSync(src, join(sentDir, f));
-          this.logger.info(`swept stale late reply ${f} (1h TTL)`);
-        } catch {
-          // best-effort per file
-        }
-      }
-    } catch {
-      // never throw from housekeeping
-    }
+  private runPurge(): void {
+    purgeSent({
+      sentCodex: this.sentCodex,
+      inboxClaude: this.inboxClaude,
+      sentClaude: this.sentClaude,
+      logger: this.logger,
+    });
   }
 
   async stop(): Promise<void> {
@@ -193,14 +160,14 @@ export class CodexDispatcher {
     try {
       let files: string[];
       try {
-        files = readdirSync(INBOX_CODEX_DIR).filter((f) => f.endsWith(".md"));
+        files = readdirSync(this.inboxCodex).filter((f) => f.endsWith(".md"));
       } catch {
         return;
       }
       files.sort();
       for (const f of files) {
         if (this.disposed) return;
-        await this.processEnvelope(join(INBOX_CODEX_DIR, f));
+        await this.processEnvelope(join(this.inboxCodex, f));
       }
     } finally {
       this.processing = false;
@@ -211,7 +178,7 @@ export class CodexDispatcher {
     const env = readEnvelope(path);
     if (!env) {
       this.logger.warn(`failed to parse envelope ${path}; moving to sent`);
-      this.moveToSent(path);
+      moveToSent(path, this.sentCodex);
       return;
     }
     if (env.target !== "codex") {
@@ -222,7 +189,11 @@ export class CodexDispatcher {
     try {
       const reply = await this.dispatchToCodex(env);
       this.writeReply(env, { body: reply, intent: "assessment" });
-      this.moveToSent(path);
+      // Belt-and-suspenders sentinel write. The runTurnOnce path also
+      // writes this on `turn/completed` and rollout-recovery success;
+      // the read side is consume-on-read so a double-write is harmless.
+      writeSuppressCodexToast(this.workspacePath);
+      moveToSent(path, this.sentCodex);
       this.resetIdleTimer();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -231,21 +202,7 @@ export class CodexDispatcher {
         body: `Codex bridge error: ${msg}`,
         intent: "blocker",
       });
-      this.moveToSent(path);
-    }
-  }
-
-  private moveToSent(path: string): void {
-    const filename = path.split(/[\\/]/).pop() || "";
-    const dest = join(SENT_CODEX_DIR, filename);
-    try {
-      renameSync(path, dest);
-    } catch {
-      try {
-        unlinkSync(path);
-      } catch {
-        // best-effort
-      }
+      moveToSent(path, this.sentCodex);
     }
   }
 
@@ -267,18 +224,20 @@ export class CodexDispatcher {
       replyTo: original.id,
       body: opts.body,
     };
-    const out = join(INBOX_CLAUDE_DIR, `${reply.id}.md`);
+    const out = join(this.inboxClaude, `${reply.id}.md`);
     writeEnvelopeAtomic(out, reply);
     this.logger.info(`reply written ${reply.id} chain=${reply.chainId} iter=${reply.iteration}`);
   }
 
   private async dispatchToCodex(env: Envelope): Promise<string> {
+    const dispatchStart = Date.now();
     const client = await this.ensureClient();
+    const clientReady = Date.now();
     let record = loadBridgeThreadRecord(this.workspacePath);
 
-    // Threshold-based rotation: if we've seen N consecutive
-    // recoverable failures on the same thread, rotate. Protects
-    // against a thread stuck in a bad state we can't detect cleanly.
+    // Threshold-based rotation: if we've seen N consecutive recoverable
+    // failures on the same thread, rotate. Protects against a thread
+    // stuck in a bad state we can't detect cleanly.
     if (
       record.threadId !== null &&
       (record.consecutiveFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES
@@ -286,12 +245,17 @@ export class CodexDispatcher {
       this.logger.warn(
         `thread ${record.threadId} hit ${MAX_CONSECUTIVE_FAILURES} consecutive failures; rotating`
       );
-      record = this.rotateThreadRecord(record);
+      record = rotateThreadRecord(record);
     }
 
     let threadId = record.threadId;
     if (threadId === null) {
-      const spawned = await this.spawnFreshThread(client, record);
+      const spawned = await spawnFreshThread({
+        client,
+        record,
+        workspacePath: this.workspacePath,
+        logger: this.logger,
+      });
       threadId = spawned.threadId;
       record = spawned.record;
     } else {
@@ -302,28 +266,71 @@ export class CodexDispatcher {
         const msg = err instanceof Error ? err.message : String(err);
         if (cls === "rotate") {
           this.logger.warn(`resume failed (${msg}); thread unrecoverable, rotating`);
-          record = this.rotateThreadRecord(record);
-          const spawned = await this.spawnFreshThread(client, record);
+          record = rotateThreadRecord(record);
+          const spawned = await spawnFreshThread({
+            client,
+            record,
+            workspacePath: this.workspacePath,
+            logger: this.logger,
+          });
           threadId = spawned.threadId;
           record = spawned.record;
         } else {
-          this.noteFailure(record, msg);
+          noteFailure(record, msg);
           throw err;
         }
       }
     }
 
+    const threadReady = Date.now();
     try {
-      writeInFlightFlag();
-      const result = await this.runTurn(client, threadId, env);
-      this.noteSuccess(record);
+      writeInFlightFlag(this.workspacePath);
+      let result: string;
+      try {
+        result = await this.runTurn(client, threadId, env);
+      } catch (err) {
+        // Late rotation: thread/resume can succeed (Codex's app-server
+        // has the thread cached in memory), but turn/start then fails
+        // with "no rollout found for thread id ..." when the rollout
+        // file on disk is gone - typically because the user deleted
+        // sessions manually or from a sibling Codex VS Code instance.
+        // Treat this exactly like a resume-time rotate: rotate, spawn
+        // fresh, retry runTurn ONCE. Without this the user sees a raw
+        // "Codex bridge error" reply for every prompt until they
+        // manually pick Reset from the menu.
+        const cls = classifyFailure(err);
+        if (cls !== "rotate") throw err;
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `runTurn rotate (${msg}); rotating + spawning fresh thread for retry`
+        );
+        record = rotateThreadRecord(record);
+        const spawned = await spawnFreshThread({
+          client,
+          record,
+          workspacePath: this.workspacePath,
+          logger: this.logger,
+        });
+        threadId = spawned.threadId;
+        record = spawned.record;
+        result = await this.runTurn(client, threadId, env);
+      }
+      const turnEnd = Date.now();
+      noteSuccess(record);
+      // Breakdown: client_setup is spawn + initialize (warm = ~0ms);
+      // thread_setup is thread/start or thread/resume; turn is the
+      // actual Codex work from turn/start to turn/completed. Helps
+      // tell "Codex is slow" from "we are slow" in post-mortems.
+      this.logger.info(
+        `[timing] turn ok client_setup=${clientReady - dispatchStart}ms thread_setup=${threadReady - clientReady}ms turn=${turnEnd - threadReady}ms total=${turnEnd - dispatchStart}ms`
+      );
       // Transition: in-flight -> returning. The reply starts flowing
       // back to Claude via the MCP tool result. Hold the returning
       // flag 5000ms so the status bar renders a clear minimum of the
       // arrow-circle-left animation before the delivered flash kicks in.
-      clearProcessingFlag();
-      clearInFlightFlag();
-      writeReturningFlag();
+      clearProcessingFlag(this.workspacePath);
+      clearInFlightFlag(this.workspacePath);
+      writeReturningFlag(this.workspacePath);
       return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -334,96 +341,24 @@ export class CodexDispatcher {
       // the flags and propagate so the reply path writes "cancelled
       // by user" back to Claude cleanly.
       if (msg !== "cancelled by user") {
-        this.noteFailure(record, msg);
+        noteFailure(record, msg);
       }
-      clearProcessingFlag();
-      clearInFlightFlag();
+      clearProcessingFlag(this.workspacePath);
+      clearInFlightFlag(this.workspacePath);
       throw err;
     }
   }
 
-  /** Create a fresh Codex thread with collision-free S<N> name and
-   * persist its id. Returns both the new threadId and the updated
-   * record so the caller's local view stays consistent. */
-  private async spawnFreshThread(
-    client: AppServerClient,
-    record: BridgeThreadRecord
-  ): Promise<{ threadId: string; record: BridgeThreadRecord }> {
-    const counter = nextCollisionFreeCounter(
-      this.workspacePath,
-      record.sessionCounter
-    );
-    const threadStartParams: ThreadStartParams = {
-      cwd: this.workspacePath,
-      approvalPolicy: "never",
-      sandbox: "read-only",
-      sessionStartSource: "startup",
-    };
-    const started = (await client.sendRequest(
-      "thread/start",
-      threadStartParams
-    )) as ThreadStartResult;
-    const threadId = started.thread.id;
-    const updated: BridgeThreadRecord = {
-      ...record,
-      threadId,
-      sessionCounter: counter,
-      consecutiveFailures: 0,
-      lastError: null,
-    };
-    saveBridgeThreadRecord(updated);
-    try {
-      await client.sendRequest("thread/name/set", {
-        threadId,
-        name: bridgeThreadDisplayName(this.workspacePath, counter),
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`thread/name/set failed: ${msg}`);
-    }
-    return { threadId, record: updated };
-  }
-
-  /** Null out threadId and bump counter so the next call creates a
-   * fresh S<N+1>. Called on definitive "thread not found" or
-   * threshold-exceeded failures. */
-  private rotateThreadRecord(record: BridgeThreadRecord): BridgeThreadRecord {
-    const next: BridgeThreadRecord = {
-      ...record,
-      threadId: null,
-      sessionCounter: record.sessionCounter + 1,
-      lastResetAt: new Date().toISOString(),
-      consecutiveFailures: 0,
-      lastError: null,
-    };
-    saveBridgeThreadRecord(next);
-    return next;
-  }
-
-  /** Mark success: clear failure counter, stamp lastSuccessAt. */
-  private noteSuccess(record: BridgeThreadRecord): void {
-    saveBridgeThreadRecord({
-      ...record,
-      consecutiveFailures: 0,
-      lastError: null,
-      lastSuccessAt: new Date().toISOString(),
-    });
-  }
-
-  /** Mark failure: bump consecutive counter, stash lastError. The
-   * threshold check at the top of dispatchToCodex uses this. */
-  private noteFailure(record: BridgeThreadRecord, message: string): void {
-    saveBridgeThreadRecord({
-      ...record,
-      consecutiveFailures: (record.consecutiveFailures ?? 0) + 1,
-      lastError: message.slice(0, 500),
-    });
-  }
-
   private async ensureClient(): Promise<AppServerClient> {
     if (this.client) return this.client;
+    const spawnStart = Date.now();
     const client = new AppServerClient({ logger: this.logger, instanceId: "codexDispatcher" });
     client.spawn();
+    // Bracket each stage so cold-start latency breaks down into spawn
+    // time, initialize handshake time, and post-initialize ack time.
+    // Warm starts skip this function entirely; only the first turn
+    // after a ~15 min idle pays these costs.
+    const initStart = Date.now();
     await client.sendRequest("initialize", {
       clientInfo: {
         name: "wat321_bridge",
@@ -435,10 +370,13 @@ export class CodexDispatcher {
         optOutNotificationMethods: [],
       },
     });
+    const initEnd = Date.now();
     // `initialized` is a notification, no id
     client.sendNotification("initialized", {});
     this.client = client;
-    this.logger.info("app-server client ready");
+    this.logger.info(
+      `[timing] app-server cold-start spawn_to_init=${initStart - spawnStart}ms initialize=${initEnd - initStart}ms total=${Date.now() - spawnStart}ms`
+    );
     return client;
   }
 
@@ -452,8 +390,16 @@ export class CodexDispatcher {
     threadId: string,
     env: Envelope
   ): Promise<string> {
+    const opts = {
+      client,
+      threadId,
+      env,
+      workspacePath: this.workspacePath,
+      wsHash: this.wsHash,
+      logger: this.logger,
+    };
     try {
-      return await this.runTurnOnce(client, threadId, env);
+      return await runTurnOnce(opts);
     } catch (err) {
       if (classifyFailure(err) !== "compact") throw err;
       const msg = err instanceof Error ? err.message : String(err);
@@ -466,140 +412,7 @@ export class CodexDispatcher {
         throw err;  // original error is more informative
       }
       this.logger.info(`compact complete; retrying turn on same thread`);
-      return await this.runTurnOnce(client, threadId, env);
+      return await runTurnOnce(opts);
     }
-  }
-
-  private runTurnOnce(
-    client: AppServerClient,
-    threadId: string,
-    env: Envelope
-  ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const chunks: string[] = [];
-      const itemText: Map<string, string> = new Map();
-
-      let processingSignaled = false;
-      const deltaSub = client.onNotification("item/agentMessage/delta", (params) => {
-        if (!processingSignaled) {
-          // First streaming delta = Codex has accepted the turn and
-          // is actively producing output. Flip the status bar from
-          // the "sending" arrow to the "processing" comment-discussion
-          // animation so the user sees the real work phase.
-          writeProcessingFlag();
-          processingSignaled = true;
-        }
-        const d = params as AgentMessageDelta;
-        const prev = itemText.get(d.itemId) || "";
-        itemText.set(d.itemId, prev + (d.delta || ""));
-      });
-
-      const completedSub = client.onNotification("turn/completed", (params) => {
-        const c = params as TurnCompleted;
-        deltaSub.dispose();
-        completedSub.dispose();
-        clearInterval(cancelWatch);
-
-        if (c.turn.status !== "completed") {
-          const errMsg = c.turn.error?.message ?? `turn ${c.turn.status}`;
-          reject(new Error(errMsg));
-          return;
-        }
-
-        // Prefer final item text over aggregated deltas
-        for (const item of c.turn.items) {
-          if (item.type === "agentMessage" && item.text) {
-            chunks.push(item.text);
-          }
-        }
-        if (chunks.length === 0) {
-          // Fall back to delta aggregation
-          for (const text of itemText.values()) chunks.push(text);
-        }
-
-        const combined = chunks.join("\n").trim();
-        if (combined.length === 0) {
-          // Empty completed turn means Codex accepted and finished
-          // but produced no agentMessage items - typically a thread
-          // poisoned by a prior orphan turn (timeout without
-          // interrupt) or a transient model issue. Treat as a
-          // recoverable failure so the consecutive-failure counter
-          // bumps and threshold-based rotation can kick in instead
-          // of silently surfacing "(empty reply)" to Claude.
-          clearTimeout(timeout);
-          reject(new Error("empty reply from Codex (thread may be in a degraded state; will rotate after threshold or pick \"Reset Codex Session\" from the menu)"));
-          return;
-        }
-        clearTimeout(timeout);
-        resolve(combined);
-      });
-
-      const timeout = setTimeout(() => {
-        deltaSub.dispose();
-        completedSub.dispose();
-        clearInterval(cancelWatch);
-        // Send turn/interrupt to Codex so the orphan turn stops on
-        // its side. Without this, the thread stays "busy" from
-        // Codex's view and the next prompt gets a degraded turn
-        // (often a turn/completed with zero agentMessage items,
-        // surfaced as "(empty reply)"). Best-effort - if interrupt
-        // itself errors there's nothing useful we can do.
-        const interruptParams: TurnInterruptParams = { threadId };
-        client
-          .sendRequest("turn/interrupt", interruptParams)
-          .catch(() => {
-            // intentionally swallowed
-          });
-        reject(new Error(`turn timeout after ${TURN_TIMEOUT_MS}ms`));
-      }, TURN_TIMEOUT_MS);
-
-      // User-cancel sentinel. Status bar's "Cancel in-flight prompt"
-      // action writes CANCEL_FLAG_PATH; we poll every 500ms, and
-      // when we see it we send turn/interrupt just like the timeout
-      // path and reject with a distinct message so the reply Claude
-      // sees is unambiguous ("cancelled by user"). The flag gets
-      // unlinked here so a later turn can set it again without a
-      // stale file blocking dispatch.
-      const cancelWatch = setInterval(() => {
-        if (!existsSync(CANCEL_FLAG_PATH)) return;
-        try {
-          unlinkSync(CANCEL_FLAG_PATH);
-        } catch {
-          // best-effort
-        }
-        clearTimeout(timeout);
-        clearInterval(cancelWatch);
-        deltaSub.dispose();
-        completedSub.dispose();
-        const interruptParams: TurnInterruptParams = { threadId };
-        client
-          .sendRequest("turn/interrupt", interruptParams)
-          .catch(() => {
-            // intentionally swallowed
-          });
-        reject(new Error("cancelled by user"));
-      }, 500);
-
-      // Fire and forget - responses arrive via the subscriptions above
-      const turnStartParams: TurnStartParams = {
-        threadId,
-        input: [{ type: "text", text: env.body }],
-        sandboxPolicy: { type: "readOnly" },
-        approvalPolicy: "never",
-      };
-      client
-        .sendRequest("turn/start", turnStartParams, TURN_TIMEOUT_MS)
-        .then(() => {
-          // turn/start returned with the turn object; we still wait
-          // for turn/completed notification (above)
-        })
-        .catch((err) => {
-          clearTimeout(timeout);
-          clearInterval(cancelWatch);
-          deltaSub.dispose();
-          completedSub.dispose();
-          reject(err);
-        });
-    });
   }
 }

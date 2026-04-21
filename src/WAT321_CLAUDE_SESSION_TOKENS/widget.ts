@@ -34,6 +34,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
       pid: session.pid,
       lastActiveAt:
         session.source === "lastKnown" ? session.lastActiveAt : undefined,
+      claudeTurnInfo: session.turnInfo,
     };
   },
 };

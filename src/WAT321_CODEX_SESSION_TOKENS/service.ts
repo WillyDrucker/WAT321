@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { CodexResolvedSession, CodexTokenWidgetState } from "./types";
+import { parseStageInfo } from "../shared/codex-rollout/phaseParser";
 import { readHead, readTail } from "../shared/fs/fileReaders";
 import {
   SESSION_TOKEN_POLL_MS,
@@ -41,11 +42,14 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
    * session) can go unnoticed for up to 51s - the window between
    * rescans - and a short Codex turn may finish before the indicator
    * ever lights up. */
-  private readonly sessionsWatcher = new PathWatcher(() => {
-    this.cachedRolloutPath = null;
-    this.lastRolloutScan = 0;
-    this.triggerPoll();
-  }, 100, true);
+  private readonly sessionsWatcher = new PathWatcher(
+    () => {
+      this.cachedRolloutPath = null;
+      this.lastRolloutScan = 0;
+      this.triggerPoll();
+    },
+    { debounceMs: 100, recursive: true }
+  );
   private cachedSessionTitle: string | null = null;
   private cachedSessionTitleId = "";
   private cachedCwd: string | null = null;
@@ -210,6 +214,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       autoCompactTokens: this.cachedAutoCompactTokens,
       lastActiveAt: rolloutMtime,
       turnState: classifyCodexTurn(tail),
+      stageInfo: parseStageInfo(tail),
     });
   }
 }

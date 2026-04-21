@@ -163,7 +163,7 @@ export function registerHealthCommand(
         "WAT321 Provider Health",
         "=".repeat(30),
         "",
-        `Active providers: ${ctx.providers.activeCount()}`,
+        `Activated provider groups: ${ctx.providers.activeCount()}`,
       ];
 
       if (process.platform === "win32") {

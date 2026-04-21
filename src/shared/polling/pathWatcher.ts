@@ -36,19 +36,11 @@ export class PathWatcher {
 
   constructor(
     private readonly onChange: () => void,
-    options: PathWatcherOptions | number = {},
-    recursiveLegacy?: boolean
+    options: PathWatcherOptions = {}
   ) {
-    // Back-compat: older callers used `(onChange, debounceMs, recursive)`.
-    if (typeof options === "number") {
-      this.debounceMs = options;
-      this.recursive = recursiveLegacy ?? false;
-      this.resetOnRename = false;
-    } else {
-      this.debounceMs = options.debounceMs ?? 100;
-      this.recursive = options.recursive ?? false;
-      this.resetOnRename = options.resetOnRename ?? false;
-    }
+    this.debounceMs = options.debounceMs ?? 100;
+    this.recursive = options.recursive ?? false;
+    this.resetOnRename = options.resetOnRename ?? false;
   }
 
   /** Start or swap the watcher when the target path changes. Close

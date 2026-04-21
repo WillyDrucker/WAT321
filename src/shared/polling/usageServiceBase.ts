@@ -43,7 +43,7 @@ export interface UsageServiceConfig {
  * kickstart with progressive escalation, error absorption, and
  * dispose cleanup.
  *
- * Provider-specific logic is supplied by three abstract methods:
+ * Provider-specific logic is supplied by two abstract methods:
  *   - `getAuth()` reads credentials and returns request headers
  *   - `validateResponse()` checks the API response shape
  *

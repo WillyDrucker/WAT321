@@ -29,8 +29,8 @@ export interface UsageNonOkOptions {
   providerName: string;
   /** Provider brand codicon rendered in place of the provider name
    * in every visible non-OK state. Examples: `$(claude)`, `$(openai)`.
-   * Format for visible text is `{status-icon} - {providerIcon} Usage
-   * - {skin}` (e.g. `$(key) - $(claude) Usage - Idle`). */
+   * Format for visible text is `{providerIcon} Usage - {status-icon}
+   * - {skin}` (e.g. `$(claude) Usage - $(key) - Idle`). */
   providerIcon: string;
   /** Provider key for incident status-page lookups. */
   providerKey: ProviderKey;
@@ -63,14 +63,14 @@ export function renderUsageNonOkState<TData>(
       return true;
 
     case "no-auth":
-      item.text = `$(key) - ${opts.providerIcon} Usage - Idle`;
+      item.text = `${opts.providerIcon} Usage - $(key) - Idle`;
       item.tooltip = `${opts.providerName} is signed out. Will reconnect automatically when credentials return.`;
       item.color = undefined;
       item.show();
       return true;
 
     case "token-expired":
-      item.text = `$(key) - ${opts.providerIcon} Usage - Idle`;
+      item.text = `${opts.providerIcon} Usage - $(key) - Idle`;
       item.tooltip = `${opts.providerName} is refreshing credentials. Will reconnect automatically on next activity.`;
       item.color = undefined;
       item.show();
@@ -86,7 +86,7 @@ export function renderUsageNonOkState<TData>(
       // (the 15-minute timer does not apply - one activity
       // kickstart is the real fix).
       if (state.isColdStart) {
-        item.text = `$(circle-slash) - ${opts.providerIcon} Usage - Idle`;
+        item.text = `${opts.providerIcon} Usage - $(circle-slash) - Idle`;
         const lines: string[] = [];
         if (state.serverMessage) {
           lines.push(`API: ${state.serverMessage}`);
@@ -100,7 +100,7 @@ export function renderUsageNonOkState<TData>(
         return true;
       }
 
-      item.text = `$(warning) - ${opts.providerIcon} Usage - Offline`;
+      item.text = `${opts.providerIcon} Usage - $(warning) - Offline`;
       const elapsed = Date.now() - state.rateLimitedAt;
       const remaining = Math.max(
         0,
@@ -142,14 +142,14 @@ export function renderUsageNonOkState<TData>(
     }
 
     case "offline":
-      item.text = `$(cloud-offline) - ${opts.providerIcon} Usage - No Network`;
+      item.text = `${opts.providerIcon} Usage - $(cloud-offline) - No Network`;
       item.tooltip = "Network unavailable. Will reconnect automatically.";
       item.color = undefined;
       item.show();
       return true;
 
     case "error":
-      item.text = `$(cloud-offline) - ${opts.providerIcon} Usage - Idle`;
+      item.text = `${opts.providerIcon} Usage - $(cloud-offline) - Idle`;
       item.tooltip = `${opts.providerName} usage temporarily unavailable. Will retry automatically.`;
       item.color = undefined;
       item.show();

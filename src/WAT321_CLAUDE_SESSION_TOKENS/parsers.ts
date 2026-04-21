@@ -1,9 +1,17 @@
 import { readHead } from "../shared/fs/fileReaders";
+import type { ClaudeTurnInfo } from "../shared/ui/sessionTokenWidget";
 
 /**
  * Parsers for Claude Code's `.jsonl` transcript files. The transcript
  * is append-only JSON-lines with one entry per turn/event.
  */
+
+/** Re-export the shared display type so callers in this tool can
+ * continue to import it from the parsers module without knowing
+ * about the shared-ui module. The interface itself lives in shared
+ * to keep the generic session-token widget independent of tool
+ * folders. */
+export type { ClaudeTurnInfo };
 
 /** Extract text from a Claude message content field. Handles both
  * `content: "string"` and `content: [{type: "text", text: "..."}]`
@@ -103,6 +111,101 @@ export function parseLastAssistantText(tail: string): string {
     if (text) return text;
   }
   return "";
+}
+
+/** Compose a `ClaudeTurnInfo` snapshot from a transcript tail. Walks
+ * backwards once, aggregates tool_use names, detects thinking blocks,
+ * and captures the last assistant turn's usage. Cheap enough to call
+ * on every poll - a single tail pass. */
+export function parseTurnInfo(tail: string): ClaudeTurnInfo {
+  const lines = tail.trimEnd().split("\n");
+
+  let activeToolName: string | null = null;
+  let activeToolLocked = false;
+  let toolCallCount = 0;
+  let hasThinkingRecent = false;
+  let outputTokens = 0;
+  let totalInputTokens = 0;
+  let cachedInputTokens = 0;
+  let usageLocked = false;
+  let thinkingScanBudget = 20;
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (entry.type === "user") {
+      // User message closes the current turn - stop counting tool
+      // calls at this boundary.
+      break;
+    }
+
+    if (entry.type !== "assistant") continue;
+    const msg = entry.message as Record<string, unknown> | undefined;
+    if (!msg) continue;
+
+    // First assistant entry encountered (walking backwards = newest)
+    // supplies the usage snapshot and the active tool name if any.
+    if (!usageLocked) {
+      const usage = msg.usage as Record<string, unknown> | undefined;
+      if (usage) {
+        outputTokens =
+          typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
+        const input =
+          typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+        const cacheCreation =
+          typeof usage.cache_creation_input_tokens === "number"
+            ? usage.cache_creation_input_tokens
+            : 0;
+        cachedInputTokens =
+          typeof usage.cache_read_input_tokens === "number"
+            ? usage.cache_read_input_tokens
+            : 0;
+        totalInputTokens = input + cacheCreation + cachedInputTokens;
+        usageLocked = true;
+      }
+    }
+
+    const content = msg.content;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        if (typeof part !== "object" || part === null) continue;
+        const p = part as Record<string, unknown>;
+        if (p.type === "tool_use") {
+          toolCallCount++;
+          if (!activeToolLocked && typeof p.name === "string") {
+            activeToolName = p.name;
+            activeToolLocked = true;
+          }
+        } else if (p.type === "thinking") {
+          hasThinkingRecent = true;
+        }
+      }
+    }
+
+    if (--thinkingScanBudget <= 0 && usageLocked && activeToolLocked) {
+      // Have enough signal; bail out rather than walk the rest of the
+      // tail. thinkingScanBudget also caps how far back we look for
+      // thinking blocks so very old blocks do not keep the indicator on.
+      break;
+    }
+  }
+
+  return {
+    activeToolName,
+    toolCallCount,
+    hasThinkingRecent,
+    outputTokens,
+    totalInputTokens,
+    cachedInputTokens,
+  };
 }
 
 /**
