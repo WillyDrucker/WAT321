@@ -103,9 +103,10 @@ export interface AppServerClientOptions {
 }
 
 /** Failure thrown by `sendRequest` when the server responds with a
- * JSON-RPC error body. Callers inspect `code` against the constants in
- * `protocol.ts` (e.g. ERROR_CODE_OVERLOADED) when they need to branch
- * on a specific failure mode. */
+ * JSON-RPC error body. Callers use `failureClassifier.classifyFailure()`
+ * to branch on recoverable vs definitive failure modes via message
+ * substring matching. Numeric codes are not used because they have
+ * drifted across Codex app-server versions. */
 export class AppServerRequestError extends Error {
   readonly code: number;
   readonly data: unknown;
@@ -381,8 +382,9 @@ export class AppServerClient {
 
   private onStdoutChunk(chunk: string): void {
     this.stdoutBuffer += chunk;
-    let nlIndex: number;
-    while ((nlIndex = this.stdoutBuffer.indexOf(LINE_TERMINATOR)) !== -1) {
+    while (true) {
+      const nlIndex = this.stdoutBuffer.indexOf(LINE_TERMINATOR);
+      if (nlIndex === -1) break;
       const line = this.stdoutBuffer.substring(0, nlIndex);
       this.stdoutBuffer = this.stdoutBuffer.substring(nlIndex + 1);
       if (line.trim() === "") continue;

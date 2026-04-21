@@ -10,27 +10,24 @@
  *     - initialize          - handshake at connection start
  *     - thread/start        - create a fresh Bridge thread
  *     - thread/resume       - resume a persisted thread by id
- *     - thread/read         - read persisted state without resuming
+ *     - thread/name/set     - stamp a display name for the TUI picker
+ *     - thread/compact/start - in-place compact on context exceeded
  *     - turn/start          - dispatch a Bridge message as a turn
  *     - turn/interrupt      - cancel an in-flight turn
  *
  *   Notifications (server to client):
- *     - turn/started
- *     - item/started
- *     - item/agentMessage/delta
- *     - item/completed
- *     - turn/diff/updated    (ignored when sandboxPolicy is readOnly)
- *     - thread/tokenUsage/updated   (log-only)
- *     - turn/completed       (terminal for a turn)
- *     - thread/closed        (recovery trigger)
+ *     - item/agentMessage/delta  (streamed assistant content)
+ *     - turn/completed           (terminal for a turn)
  *
- * Design note on type strictness: request params are typed strictly
- * so TypeScript enforces correctness on what we SEND. Results are
- * typed as `unknown` - callers do their own runtime shape check on
- * the fields they read. This insulates us from minor server-side
- * schema changes: if Codex adds a field, our code keeps working;
- * if a field we rely on goes missing, the runtime check fails loud
- * at exactly the call site that cares.
+ * Method and notification names are passed as string literals at call
+ * sites to keep the protocol surface honest: what the dispatcher
+ * actually sends is what you see. Request param types are typed
+ * strictly so TypeScript enforces correctness on the wire shape.
+ * Results are typed as `unknown` - callers do their own runtime shape
+ * check. This insulates us from minor server-side schema changes: if
+ * Codex adds a field, our code keeps working; if a field we rely on
+ * goes missing, the runtime check fails loud at exactly the call site
+ * that cares.
  */
 
 // -----------------------------------------------------------------------
@@ -80,62 +77,33 @@ export type JsonRpcResponse<TResult = unknown> =
   | JsonRpcErrorResponse;
 
 // -----------------------------------------------------------------------
-// Well-known error codes
+// Request param types for the methods Epic Handshake uses
 // -----------------------------------------------------------------------
 
-/** Backpressure: server overloaded, client should retry with
- * exponentially increasing delay plus jitter. Documented in the
- * Codex app-server README. */
-export const ERROR_CODE_OVERLOADED = -32001;
+/** Sandbox policy values Codex's app-server accepts. Defines what
+ * the bridge's Codex session is allowed to do at the OS level. Same
+ * values as the Codex CLI's `--sandbox` flag. */
+export type CodexSandbox = "read-only" | "workspace-write" | "danger-full-access";
 
-/** Standard JSON-RPC error codes we may encounter. */
-export const ERROR_CODE_PARSE_ERROR = -32700;
-export const ERROR_CODE_INVALID_REQUEST = -32600;
-export const ERROR_CODE_METHOD_NOT_FOUND = -32601;
-export const ERROR_CODE_INVALID_PARAMS = -32602;
-export const ERROR_CODE_INTERNAL_ERROR = -32603;
-
-// -----------------------------------------------------------------------
-// Request / result types for the methods Epic Handshake uses
-// -----------------------------------------------------------------------
-
-/** Method name constants. String-valued so the compiler can still
- * narrow on them when used with a discriminated union. */
-export const METHOD_INITIALIZE = "initialize";
-export const METHOD_THREAD_START = "thread/start";
-export const METHOD_THREAD_RESUME = "thread/resume";
-export const METHOD_THREAD_READ = "thread/read";
-export const METHOD_TURN_START = "turn/start";
-export const METHOD_TURN_INTERRUPT = "turn/interrupt";
-
-export type EpicHandshakeMethod =
-  | typeof METHOD_INITIALIZE
-  | typeof METHOD_THREAD_START
-  | typeof METHOD_THREAD_RESUME
-  | typeof METHOD_THREAD_READ
-  | typeof METHOD_TURN_START
-  | typeof METHOD_TURN_INTERRUPT;
-
-/** `initialize` params. `clientInfo.name` is written to OpenAI's
- * compliance logs so third-party integrations can be identified
- * distinctly from the first-party VS Code extension. We use
- * `wat321_bridge` as a stable identifier. */
-export interface InitializeParams {
-  clientInfo: {
-    name: string;
-    version?: string;
-  };
-  capabilities?: {
-    experimentalApi?: boolean;
-  };
-}
+/** Approval policy values. Controls when Codex pauses to ask for
+ * permission. `never` is what Bridge needs (we cannot present
+ * prompts back to the user mid-turn). The other values exist on the
+ * Codex CLI but are not useful from the bridge's blocking-call
+ * shape. */
+export type CodexApprovalPolicy =
+  | "never"
+  | "untrusted"
+  | "on-failure"
+  | "on-request";
 
 /** `thread/start` params. Creates a fresh Bridge thread owned by
- * this client. Bridge pins `approvalPolicy: "never"` and
- * `sandbox: "read-only"` so a recovered Codex session cannot
- * execute tools or edit files. `sessionStartSource` is echoed into
- * the rollout metadata and helps distinguish bridge-spawned
- * sessions from user-spawned ones when inspecting history. */
+ * this client. Defaults are `approvalPolicy: "never"` and
+ * `sandbox: "read-only"` (safest), overridable via the
+ * `wat321.epicHandshake.codexSandbox` and
+ * `wat321.epicHandshake.codexApprovalPolicy` settings.
+ * `sessionStartSource` is echoed into the rollout metadata and
+ * helps distinguish bridge-spawned sessions from user-spawned ones
+ * when inspecting history. */
 export interface ThreadStartParams {
   clientInfo?: {
     name: string;
@@ -146,24 +114,10 @@ export interface ThreadStartParams {
   cwd?: string;
   /** Optional model override. Omit to use the user's default. */
   model?: string;
-  /** Always `"never"` for Bridge. */
-  approvalPolicy?: "never";
-  /** Always `"read-only"` for Bridge; write sandboxes are future work. */
-  sandbox?: "read-only";
+  approvalPolicy?: CodexApprovalPolicy | string;
+  sandbox?: CodexSandbox | string;
   /** Source tag echoed into session metadata. Bridge uses `"startup"`. */
   sessionStartSource?: string;
-}
-
-/** `thread/resume` params. Resume a persisted thread by id. */
-export interface ThreadResumeParams {
-  threadId: string;
-}
-
-/** `thread/read` params. Inspects persisted state without loading
- * the thread into memory. Used by the recovery ladder to
- * disambiguate `notLoaded` from `ThreadNotFound`. */
-export interface ThreadReadParams {
-  threadId: string;
 }
 
 /** `turn/start` params. Begins a new turn with the given input.
@@ -197,21 +151,8 @@ export interface TurnInterruptParams {
 }
 
 // -----------------------------------------------------------------------
-// Notification names
+// Type guards
 // -----------------------------------------------------------------------
-
-/** Server to client notification method names. Used by the client's
- * subscription machinery. Payloads are handled as `unknown` and
- * validated at the consumer. */
-export const NOTIFICATION_TURN_STARTED = "turn/started";
-export const NOTIFICATION_ITEM_STARTED = "item/started";
-export const NOTIFICATION_ITEM_AGENT_MESSAGE_DELTA = "item/agentMessage/delta";
-export const NOTIFICATION_ITEM_COMPLETED = "item/completed";
-export const NOTIFICATION_TURN_DIFF_UPDATED = "turn/diff/updated";
-export const NOTIFICATION_THREAD_TOKEN_USAGE_UPDATED =
-  "thread/tokenUsage/updated";
-export const NOTIFICATION_TURN_COMPLETED = "turn/completed";
-export const NOTIFICATION_THREAD_CLOSED = "thread/closed";
 
 /** Helper predicate: is this payload a JSON-RPC response (has `id`
  * and either `result` or `error`)?

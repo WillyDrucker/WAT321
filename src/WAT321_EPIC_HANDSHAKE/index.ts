@@ -1,31 +1,41 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import type { EventHub } from "../engine/eventHub";
 import { registerHealthSection } from "../engine/healthCommand";
 import { SETTING } from "../engine/settingsKeys";
-import { setBridgeActiveProbe } from "../engine/toastNotifier";
-import { installChannel, isClaudeAvailable, uninstallChannel } from "./channelInstaller";
+import {
+  setBridgeActiveProbe,
+  setRecentCodexCompletionConsumer,
+} from "../engine/toastNotifier";
+import {
+  extractChannelScript,
+  installChannel,
+  isClaudeAvailable,
+  uninstallChannel,
+} from "./channelInstaller";
 import { CodexDispatcher } from "./codexDispatcher";
+import { registerEpicHandshakeCommands } from "./commandRegistration";
 import {
-  CANCEL_FLAG_PATH,
   EPIC_HANDSHAKE_DIR,
-  FIRE_AND_FORGET_FLAG_PATH,
-  INBOX_CLAUDE_DIR,
-  IN_FLIGHT_FLAG_PATH,
+  inFlightFlagPath,
   PAUSED_FLAG_PATH,
-  PROCESSING_FLAG_PATH,
-  RETURNING_FLAG_PATH,
-  SENT_CLAUDE_DIR,
+  processingFlagPath,
+  returningFlagPath,
 } from "./constants";
-import { deleteCurrentCodexSession } from "./deleteCommand";
-import { createOutputChannelLogger } from "./outputChannel";
-import { createEpicHandshakeStatusBarItem } from "./statusBarItem";
 import {
-  loadBridgeThreadRecord,
-  resetBridgeThread,
-  type BridgeThreadRecord,
-} from "./threadPersistence";
+  clearStaleRuntimeFiles,
+  migrateLegacyEnvelopes,
+} from "./legacyMigration";
+import { createOutputChannelLogger } from "./outputChannel";
+import {
+  applyDefaultWaitMode,
+  createEpicHandshakeStatusBarItem,
+  parseDefaultWaitMode,
+} from "./statusBarItem";
+import type { BridgeThreadRecord } from "./threadPersistence";
+import { consumeRecentCodexCompletion } from "./turnFlags";
+import { workspaceHash } from "./workspaceHash";
 
 /**
  * Epic Handshake tier entry point. Sync MCP architecture:
@@ -59,30 +69,59 @@ class EpicHandshakeTier {
   ) {}
 
   activate(): void {
+    // One-time migration: any envelopes left in the un-partitioned
+    // `inbox/codex/*.md` or `inbox/claude/*.md` from a v1.2.0 install
+    // get moved into their envelope's workspace subfolder. Runs
+    // before clearStaleRuntimeFiles so a migrated reply for THIS
+    // workspace is then properly swept by the per-workspace cleanup.
+    migrateLegacyEnvelopes(this.logger);
     // Clean stale state from a prior crash: an abandoned in-flight
     // flag would keep the widget animating forever, and stale mail
     // envelopes from a prior session are noise the user hasn't opted
     // into seeing. Both clears are best-effort.
-    this.clearStaleRuntimeFiles();
+    clearStaleRuntimeFiles();
     // Wire the probe so the engine's toast notifier can ask "is the
     // bridge currently dispatching?" without importing from this
     // tool. This preserves the one-way engine-depends-on-nothing
     // rule (the dependency flows tool -> engine via injection).
-    setBridgeActiveProbe(() =>
-      existsSync(IN_FLIGHT_FLAG_PATH) ||
-      existsSync(PROCESSING_FLAG_PATH) ||
-      existsSync(RETURNING_FLAG_PATH)
-    );
+    // Probe only flags its own workspace's flags so a sibling VS Code
+    // instance's active turn does not make this window's toast
+    // notifier suppress Codex notifications for unrelated activity.
+    setBridgeActiveProbe(() => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!ws) return false;
+      const hash = workspaceHash(ws);
+      return (
+        existsSync(inFlightFlagPath(hash)) ||
+        existsSync(processingFlagPath(hash)) ||
+        existsSync(returningFlagPath(hash))
+      );
+    });
+    // Consume-on-read complement to the active probe. The dispatcher
+    // writes a one-shot suppress sentinel on successful turn complete;
+    // the toast notifier drains it when Codex's transcript-driven
+    // responseComplete event fires (which can land more than 5s after
+    // the returning flag has cleared).
+    setRecentCodexCompletionConsumer(() => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!ws) return false;
+      return consumeRecentCodexCompletion(ws);
+    });
     this.disposables.push(registerHealthSection(appendEpicHandshakeHealth));
     this.statusBar = createEpicHandshakeStatusBarItem(this.context, this.events);
     this.registerCommands();
     this.watchSetting();
     this.refreshStatusBar();
     // Periodic refresh drives both state transitions and animation
-    // frames (1Hz arrow cycle, 2Hz delivered flash). 500ms is fast
-    // enough for smooth pulses and light enough to be negligible:
-    // cost is a few file stat calls per tick.
-    this.refreshTimer = setInterval(() => this.refreshStatusBar(), 500);
+    // frames. 1000ms is a trade: every tick that the tooltip text
+    // changes (e.g. wait-time counter tick) causes VS Code to reshow
+    // the MarkdownString hover overlay - a fundamental VS Code
+    // limitation we cannot suppress. Halving the refresh from 500ms
+    // to 1000ms halves the worst-case blink frequency at the cost
+    // of the arrow animations running at 0.5Hz instead of 1Hz, which
+    // is still visibly pulsing. File-stat cost per tick is
+    // negligible either way.
+    this.refreshTimer = setInterval(() => this.refreshStatusBar(), 1000);
     if (this.isEnabled()) {
       if (!this.providersPresent()) {
         // Settings say "on" but a provider got switched off between
@@ -93,6 +132,27 @@ class EpicHandshakeTier {
         void this.startEnabled();
       }
     }
+    this.applyDefaultWaitModeSetting();
+  }
+
+  /** Read the user's preferred default wait mode from settings and
+   * write the matching flag files. Called from three places so the
+   * setting cannot get stranded:
+   *   - tier construct (initial activate)
+   *   - settings change watcher (live edit)
+   *   - enable flow (flipping EH on after a settings change)
+   * Subsequent menu toggles override this until one of those fires
+   * again. The flag-file readers in the widget/menu pick up the
+   * change on the next refresh tick. */
+  private applyDefaultWaitModeSetting(): void {
+    try {
+      const raw = vscode.workspace
+        .getConfiguration("wat321")
+        .get<string>(SETTING.epicHandshakeDefaultWaitMode, "Standard");
+      applyDefaultWaitMode(parseDefaultWaitMode(raw));
+    } catch {
+      // best-effort; default to Standard if settings read fails
+    }
   }
 
   deactivate(): void {
@@ -102,6 +162,7 @@ class EpicHandshakeTier {
     }
     void this.stopEnabled();
     setBridgeActiveProbe(null);
+    setRecentCodexCompletionConsumer(null);
     this.statusBar?.dispose();
     this.statusBar = null;
     this.loggerHandle.dispose();
@@ -124,45 +185,9 @@ class EpicHandshakeTier {
     }
   }
 
-  /** Sweep any orphan runtime files left behind by a prior crash or
-   * abrupt VS Code exit. Called once on activate. The 1h safety TTL
-   * for in-inbox mail is a separate path in the dispatcher; this is
-   * just the activate-time clean slate the user chose over trying to
-   * preserve possibly-stale late replies across sessions. */
-  private clearStaleRuntimeFiles(): void {
-    try {
-      if (existsSync(IN_FLIGHT_FLAG_PATH)) unlinkSync(IN_FLIGHT_FLAG_PATH);
-      if (existsSync(PROCESSING_FLAG_PATH)) unlinkSync(PROCESSING_FLAG_PATH);
-      if (existsSync(RETURNING_FLAG_PATH)) unlinkSync(RETURNING_FLAG_PATH);
-      if (existsSync(CANCEL_FLAG_PATH)) unlinkSync(CANCEL_FLAG_PATH);
-      // Fire-and-forget is per-session by design: if the user opted
-      // into it for a long prompt yesterday, today's fresh VS Code
-      // window should start back in Standard (blocking) mode.
-      if (existsSync(FIRE_AND_FORGET_FLAG_PATH)) unlinkSync(FIRE_AND_FORGET_FLAG_PATH);
-      // Paused state intentionally persists across restarts: if the
-      // user paused the bridge, they expect it to stay paused after
-      // a VS Code reload, not silently un-pause.
-    } catch {
-      // best-effort
-    }
-    try {
-      if (!existsSync(INBOX_CLAUDE_DIR)) return;
-      if (!existsSync(SENT_CLAUDE_DIR)) mkdirSync(SENT_CLAUDE_DIR, { recursive: true });
-      for (const f of readdirSync(INBOX_CLAUDE_DIR)) {
-        if (!f.endsWith(".md")) continue;
-        try {
-          const src = join(INBOX_CLAUDE_DIR, f);
-          const dst = join(SENT_CLAUDE_DIR, f);
-          writeFileSync(dst, readFileSync(src));
-          unlinkSync(src);
-        } catch {
-          // best-effort per file
-        }
-      }
-    } catch {
-      // best-effort sweep
-    }
-  }
+  // Activate-time housekeeping moved to `legacyMigration.ts`. Both
+  // sweeps still run before the dispatcher binds; the orchestration
+  // call is below in startEnabled.
 
   private refreshStatusBar(): void {
     if (this.statusBar === null) return;
@@ -201,63 +226,10 @@ class EpicHandshakeTier {
 
   private registerCommands(): void {
     this.disposables.push(
-      vscode.commands.registerCommand(
-        "wat321.epicHandshake.enable",
-        async () => {
-          await vscode.workspace
-            .getConfiguration("wat321")
-            .update(
-              SETTING.epicHandshakeEnabled,
-              true,
-              vscode.ConfigurationTarget.Global
-            );
-        }
-      ),
-      vscode.commands.registerCommand(
-        "wat321.epicHandshake.disable",
-        async () => {
-          await vscode.workspace
-            .getConfiguration("wat321")
-            .update(
-              SETTING.epicHandshakeEnabled,
-              false,
-              vscode.ConfigurationTarget.Global
-            );
-        }
-      ),
-      vscode.commands.registerCommand(
-        "wat321.epicHandshake.resetCodexSession",
-        async () => {
-          const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          if (ws === undefined) {
-            void vscode.window.showWarningMessage(
-              "Epic Handshake: no workspace folder open."
-            );
-            return;
-          }
-          const current = loadBridgeThreadRecord(ws);
-          const nextCounter = current.sessionCounter + 1;
-          const confirm = await vscode.window.showInformationMessage(
-            `Roll Codex to the next session? The current session stays visible in Codex's history. Next Claude to Codex prompt spawns a fresh S${nextCounter}.`,
-            "Reset",
-            "Cancel"
-          );
-          if (confirm !== "Reset") return;
-          const next = resetBridgeThread(ws);
-          this.refreshStatusBar();
-          void vscode.window.showInformationMessage(
-            `Epic Handshake: Codex session reset. Next Claude to Codex prompt spawns S${next.sessionCounter}.`
-          );
-          this.logger.info(`codex session reset -> S${next.sessionCounter}`);
-        }
-      ),
-      vscode.commands.registerCommand(
-        "wat321.epicHandshake.deleteCodexSession",
-        async () => {
-          await deleteCurrentCodexSession(this.logger);
-          this.refreshStatusBar();
-        }
-      )
+      ...registerEpicHandshakeCommands({
+        logger: this.logger,
+        refreshStatusBar: () => this.refreshStatusBar(),
+      })
     );
   }
 
@@ -275,6 +247,13 @@ class EpicHandshakeTier {
         ) {
           await this.unflipForMissingProvider();
           return;
+        }
+        if (
+          e.affectsConfiguration(
+            `wat321.${SETTING.epicHandshakeDefaultWaitMode}`
+          )
+        ) {
+          this.applyDefaultWaitModeSetting();
         }
         if (
           !e.affectsConfiguration(`wat321.${SETTING.epicHandshakeEnabled}`)
@@ -321,6 +300,7 @@ class EpicHandshakeTier {
         }
 
         progress.report({ message: "starting dispatcher..." });
+        this.applyDefaultWaitModeSetting();
         await this.startEnabled();
 
         void vscode.window.showInformationMessage(
@@ -364,6 +344,21 @@ class EpicHandshakeTier {
     const ws =
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
     this.logger.info(`startEnabled workspace=${ws}`);
+    // Refresh the bundled channel.mjs on every activate. Without this
+    // the extension upgrade path leaves a stale channel.mjs on disk -
+    // the script is only re-extracted during the Epic Handshake
+    // enable-flow, so if the user already had EH enabled and just
+    // reinstalled the vsix, new Claude sessions would still spawn
+    // the old channel.mjs. Idempotent: writes are the same bytes
+    // across concurrent VS Code instances. Best-effort: failure to
+    // refresh leaves whatever is already on disk, which is no worse
+    // than today.
+    try {
+      extractChannelScript(this.context);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`channel.mjs refresh on activate failed: ${msg}`);
+    }
     if (this.dispatcher !== null) return;
     this.dispatcher = new CodexDispatcher(ws, this.logger);
     this.dispatcher.start();
