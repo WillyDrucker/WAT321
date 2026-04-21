@@ -27,4 +27,5 @@ export const SETTING = {
   clearAllData: "clearAllData",
   epicHandshakeEnabled: "epicHandshake.enabled",
   epicHandshakeSuppressCodexToasts: "epicHandshake.suppressCodexNotifications",
+  epicHandshakeDefaultWaitMode: "epicHandshake.defaultWaitMode",
 } as const satisfies Record<string, string>;
