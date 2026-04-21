@@ -5,13 +5,23 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.1] - unreleased
+## [1.2.1] - 2026-04-21
 
 ### Added
 
+- **Epic Handshake knows which of the five turn stages Codex is in and shows it right on the status bar.** A new stage walker on the widget steps through dispatched, received, working, writing, and complete using five numbered-square glyphs, so you can watch a turn progress at a glance instead of seeing one generic animation until the reply lands. Every stage holds for at least 3 seconds so fast turns still walk the full sequence.
+- **Pick your default wait mode for the bridge.** A new `wat321.epicHandshake.defaultWaitMode` setting lets you choose what mode Claude's side restores to after a VS Code restart: Standard (fixed 2 minute block per prompt), Adaptive (keeps waiting while Codex is demonstrably working, 5 minute hard cap), or Fire-and-Forget (Claude's tool returns immediately and the reply lands in the inbox when ready). The menu still cycles through the three modes live; this just picks the baseline.
+- **Delete all Codex sessions for this workspace in one go.** A new command palette entry (`WAT321: Epic Handshake - Delete All Codex Sessions`) wipes every bridge-owned Codex session for the current workspace at once, so you can reset a workspace's Codex history without clicking through each session.
+
 ### Changed
 
+- **Session token tooltips now show what the active turn is actually doing.** During an in-flight turn you see the current tool name, how many tools have been called so far, the reasoning/output token split, and a thinking hint while Codex or Claude is mid-thought. Previously the tooltip just showed the total token count; now it tells you what's eating those tokens.
+- **Usage widgets in non-OK states lead with the provider icon.** Idle, offline, rate-limited, and token-refresh states now read as `$(claude) Usage - $(key) - Idle` instead of `$(key) - $(claude) Usage - Idle`. The provider brand sits up front so you can tell at a glance which widget is the problem and the status glyph lines up where the cycle counter would be in the OK state.
+- **Epic Handshake source is now organized into focused modules.** The dispatcher, status bar, menus, and thread persistence monoliths each split into narrower units that match their real concerns (mailbox, threadLifecycle, turnRunner, turnMonitor, turnHeartbeat, menuPickers, statusBarState, and more). No behavior change - the split just makes each file readable end-to-end and keeps the engine/tool boundary clean.
+
 ### Fixed
+
+- **System notifications on macOS and Linux no longer report success when the OS path actually failed.** If `osascript` or `notify-send` is missing, the notification layer used to return `true` optimistically because the spawn error arrives asynchronously. Diagnostics now remember the failure and report the honest outcome on the next call, so health output doesn't tell you notifications are working when they aren't.
 
 ### Removed
 
