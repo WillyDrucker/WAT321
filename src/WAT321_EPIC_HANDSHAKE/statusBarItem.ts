@@ -446,6 +446,18 @@ export function createEpicHandshakeStatusBarItem(
       const frame = showCheck ? "$(wat321-square-check)" : "$(wat321-square)";
       icon = frame;
       tooltip = `${name}\nReply delivered. Click for options.`;
+    } else if (renderWaitModeFlash(now, wsHash)) {
+      // User-initiated wait-mode toggle needs visible feedback, so
+      // the flash preempts pendingCount / fail-count states that
+      // would otherwise mask it. Held solid (no alternation) for the
+      // 2500ms window: the tier refresh runs at 1000ms and any sub-
+      // tick alternation lands on the same parity at every sample,
+      // producing a static frame anyway. Falls through to whichever
+      // state was preempted on the next tick after expiry (the flag-
+      // file unlink happens lazily inside renderWaitModeFlash).
+      icon = "$(wat321-square-bolt)";
+      const flashMode = currentWaitMode();
+      tooltip = `Epic Handshake: ${waitModeLabel(flashMode)}. ${waitModeDetail(flashMode)}`;
     } else if (pendingCount > 0) {
       // Track arrival time of the current mail generation. A newer
       // mtime means a fresh envelope landed - reset the pulse state
@@ -473,7 +485,7 @@ export function createEpicHandshakeStatusBarItem(
         tooltip = `Epic Handshake is ready.\n${pendingCount} late ${pendingCount === 1 ? "reply is" : "replies are"} still in the inbox. They auto-deliver on your next Claude to Codex prompt, or click for options.`;
       } else {
         const mailIcon =
-          inPulseWindow && oneHz ? "$(wat321-square-mail-open)" : "$(wat321-square-mail)";
+          inPulseWindow && oneHz ? "$(mail-read)" : "$(mail)";
         icon = mailIcon;
         tooltip = `${pendingCount} late ${pendingCount === 1 ? "reply" : "replies"} waiting.\nAuto-delivers on your next Claude to Codex prompt. Click to retrieve manually.`;
       }
@@ -481,18 +493,6 @@ export function createEpicHandshakeStatusBarItem(
       icon = "$(wat321-square-alert)";
       const lastErr = rec?.lastError ? `\nLast error: ${rec.lastError.slice(0, 160)}` : "";
       tooltip = `${name}\n${fails} recent failure${fails > 1 ? "s" : ""}. The next successful Claude to Codex prompt clears this automatically, or pick "Clear error state" from the menu to dismiss now.${lastErr}\nClick for options.`;
-    } else if (renderWaitModeFlash(now, wsHash)) {
-      // 5-frame bolt/square sequence over 2500ms: bolt 500, square
-      // 500, bolt 500, square 500, bolt 500. Fires on any wait-mode
-      // toggle so the user sees the toggle take effect without a
-      // toast. Falls through to idle on the next tick after the
-      // window expires (the flag-file unlink happens lazily here).
-      const flashStart = readWaitModeFlashStart(wsHash);
-      const elapsed = flashStart === null ? Infinity : now - flashStart;
-      const frame = Math.floor(elapsed / 500) % 2 === 0 ? "$(wat321-square-bolt)" : "$(wat321-square)";
-      icon = frame;
-      const flashMode = currentWaitMode();
-      tooltip = `Epic Handshake: ${waitModeLabel(flashMode)}. ${waitModeDetail(flashMode)}`;
     } else {
       icon = "$(wat321-epic-handshake)";
       const lastSuccess = rec?.lastSuccessAt
