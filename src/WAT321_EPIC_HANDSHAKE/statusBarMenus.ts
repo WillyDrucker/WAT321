@@ -17,6 +17,7 @@ import {
   discardAllLateReplies,
   showLateRepliesPicker,
   showRecoverSessionPicker,
+  showRepairSessionsPicker,
   showSessionsSubmenu,
 } from "./menuPickers";
 import {
@@ -108,7 +109,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
       lateCount === 0
         ? "When Codex replies to a timed-out prompt, you can read it here."
         : "Pick one to copy to clipboard.",
-    iconPath: new vscode.ThemeIcon("wat321-square-mail"),
+    iconPath: new vscode.ThemeIcon("mail"),
     action: "retrieve",
   };
 
@@ -328,6 +329,9 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
         recoverable: ctx.recoverable,
         dispatch: handleAction,
       });
+      break;
+    case "repair-sessions":
+      await showRepairSessionsPicker(ctx.ws, ctx.recoverable, ctx.inFlight);
       break;
     case "back":
       // Sub-menus invoke this to return to the main menu so the user
