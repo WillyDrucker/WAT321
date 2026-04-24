@@ -3,13 +3,18 @@ import { parseLastAssistantText } from "../WAT321_CODEX_SESSION_TOKENS/parsers";
 import { extractCurrentTurn, parseStageInfo } from "../shared/codex-rollout/phaseParser";
 import { readTail } from "../shared/fs/fileReaders";
 import type { AppServerClient } from "./appServerClient";
-import { cancelFlagPath, turnHeartbeatPath } from "./constants";
+import {
+  CODEX_FULL_ACCESS_FLAG_PATH,
+  cancelFlagPath,
+  turnHeartbeatPath,
+} from "./constants";
 import type { Envelope } from "./envelope";
 import type { TurnInterruptParams, TurnStartParams } from "./protocol";
 import { findRolloutPath } from "./threadPersistence";
 import { TurnMonitor } from "./turnMonitor";
 import { writeProcessingFlag, writeSuppressCodexToast } from "./turnFlags";
 import type { EpicHandshakeLogger } from "./types";
+import type { WaitMode } from "./waitMode";
 
 /**
  * One-shot Codex turn execution. Subscribes to the JSON-RPC progress
@@ -54,10 +59,17 @@ export interface TurnRunnerOptions {
   workspacePath: string;
   wsHash: string;
   logger: EpicHandshakeLogger;
+  /** Current wait mode at dispatch time. Widens the monitor's hard cap
+   * and stall windows for Fire-and-Forget so long-chained scrapes (10+
+   * web searches, multi-minute reasoning) do not trip a false stall or
+   * the 5-minute hard cap while Claude is no longer blocking. Wait mode
+   * is locked during in-flight turns (see statusBarMenus permissions
+   * guard), so the value captured at dispatch holds for the full turn. */
+  waitMode: WaitMode;
 }
 
 export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
-  const { client, threadId, env, workspacePath, wsHash, logger } = opts;
+  const { client, threadId, env, workspacePath, wsHash, logger, waitMode } = opts;
   return new Promise((resolve, reject) => {
     const chunks: string[] = [];
     const itemText: Map<string, string> = new Map();
@@ -157,9 +169,23 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       });
     };
 
+    const isFireAndForget = waitMode === "fire-and-forget";
+    const isAdaptive = waitMode === "adaptive";
+    // Adaptive raises every per-tool stall window to at least 2 minutes
+    // so a legitimate pure-reasoning gap (model thinking without tool
+    // calls or reasoning tokens bumping the rollout) does not trip the
+    // 60-second default. Standard stays tight; Fire-and-Forget disables
+    // timers entirely below.
+    const ADAPTIVE_STALL_FLOOR_MS = 120_000;
     const monitor = new TurnMonitor({
       resolveRolloutPath,
       logger,
+      // Fire-and-Forget opts out of stall / hard-cap / phase-0 timers.
+      // The user explicitly asked for "reply lands when it lands" so
+      // applying any ceiling defeats the mode. Cancel is available via
+      // the status-bar action if the turn truly goes off the rails.
+      disableAllTimeouts: isFireAndForget,
+      stallFloorMs: isAdaptive ? ADAPTIVE_STALL_FLOOR_MS : undefined,
       onProgress: (stage, info) => {
         writeHeartbeat(stage, info);
       },
@@ -318,10 +344,19 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       settle(() => reject(new Error("cancelled by user")));
     }, 500);
 
+    // Read the full-access flag on every turn so mid-session permission
+    // toggles in the sessions submenu take effect on the next prompt
+    // without a thread reset. Casing here is camelCase - different from
+    // the kebab-case string at `thread/start` (see TurnSandboxPolicy in
+    // protocol.ts). Approval policy stays pinned to `never`; the bridge
+    // has no UI to relay Codex's approval prompts back mid-turn.
+    const sandboxPolicy = existsSync(CODEX_FULL_ACCESS_FLAG_PATH)
+      ? ({ type: "dangerFullAccess" } as const)
+      : ({ type: "readOnly" } as const);
     const turnStartParams: TurnStartParams = {
       threadId,
       input: [{ type: "text", text: env.body }],
-      sandboxPolicy: { type: "readOnly" },
+      sandboxPolicy,
       approvalPolicy: "never",
     };
     client

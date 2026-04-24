@@ -281,18 +281,17 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       );
       break;
     case "permissions-toggle": {
-      // Toggle the Codex full-access sentinel flag. New value takes
-      // effect on the NEXT thread spawn (reset / delete / fresh
-      // after rotate); existing thread keeps its current sandbox
-      // because Codex's app-server doesn't allow mid-session change.
-      // Toast tells the user explicitly so they can decide whether
-      // to reset right away.
+      // Toggle the Codex full-access sentinel flag. Takes effect on the
+      // NEXT prompt - turnRunner reads the flag on every `turn/start`
+      // so the existing thread picks up the new sandbox without a
+      // reset. No approval prompt layer, so there is no mid-turn
+      // confirmation to worry about either.
       const isFullAccessNow = existsSync(CODEX_FULL_ACCESS_FLAG_PATH);
       try {
         if (isFullAccessNow) {
           unlinkSync(CODEX_FULL_ACCESS_FLAG_PATH);
           void vscode.window.showInformationMessage(
-            "Epic Handshake: Codex permissions set to Read-Only. Reset the session for the change to take effect."
+            "Epic Handshake: Codex permissions set to Read-Only. Takes effect on the next prompt."
           );
         } else {
           writeFileSync(
@@ -301,7 +300,7 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
             "utf8"
           );
           void vscode.window.showWarningMessage(
-            "Epic Handshake: Codex permissions set to Full-Access. Reset the session for the change to take effect. Codex now has full filesystem and shell access."
+            "Epic Handshake: Codex permissions set to Full-Access. Takes effect on the next prompt. Codex now has full filesystem and shell access."
           );
         }
       } catch (err) {

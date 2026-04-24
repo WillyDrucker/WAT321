@@ -19,6 +19,12 @@ import type { EpicHandshakeLogger } from "./types";
 const MCP_SERVER_NAME = "wat321";
 const CHANNEL_SCRIPT_NAME = "channel.mjs";
 const INSTALLED_SCRIPT_PATH = join(BIN_DIR, CHANNEL_SCRIPT_NAME);
+/** Helper scripts shipped alongside channel.mjs in `bin/`. Extracted
+ * to `~/.wat321/epic-handshake/bin/` on install so Claude can invoke
+ * them from Bash by absolute path - zero MCP surface token cost, the
+ * logic lives on disk instead of baked into a tool description. Keep
+ * this list tight; every entry is one more file we install. */
+const HELPER_SCRIPT_NAMES = ["stage-clipboard.ps1"] as const;
 
 export interface InstallResult {
   ok: boolean;
@@ -59,6 +65,20 @@ export function extractChannelScript(context: vscode.ExtensionContext): string {
   const dir = dirname(INSTALLED_SCRIPT_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   copyFileSync(source, INSTALLED_SCRIPT_PATH);
+  // Also extract helper scripts (e.g. stage-clipboard.ps1) so Claude
+  // can invoke them via Bash by absolute path. Skipped silently per
+  // script if not present in the vsix - helper scripts are optional
+  // extras, their absence never blocks MCP install.
+  for (const name of HELPER_SCRIPT_NAMES) {
+    const helperCandidates = [
+      join(context.extensionPath, "out", "WAT321_EPIC_HANDSHAKE", "bin", name),
+      join(context.extensionPath, "src", "WAT321_EPIC_HANDSHAKE", "bin", name),
+    ];
+    const helperSource = helperCandidates.find((c) => existsSync(c));
+    if (helperSource !== undefined) {
+      copyFileSync(helperSource, join(BIN_DIR, name));
+    }
+  }
   return INSTALLED_SCRIPT_PATH;
 }
 

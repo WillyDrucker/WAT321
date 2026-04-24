@@ -120,11 +120,24 @@ export interface ThreadStartParams {
   sessionStartSource?: string;
 }
 
+/** Sandbox policy object shape accepted by `turn/start`. Casing here
+ * is DIFFERENT from the `thread/start` `sandbox` string parameter:
+ *   - `thread/start.sandbox` -> kebab string (`"read-only"`, `"danger-full-access"`)
+ *   - `turn/start.sandboxPolicy.type` -> camelCase (`"readOnly"`, `"dangerFullAccess"`)
+ * Both casings are native to the app-server's Rust source. Do not
+ * try to unify - the server rejects the wrong casing at the wrong
+ * layer. */
+export type TurnSandboxPolicy =
+  | { type: "readOnly" }
+  | { type: "workspaceWrite" }
+  | { type: "dangerFullAccess" };
+
 /** `turn/start` params. Begins a new turn with the given input.
- * Epic Handshake always pins `sandboxPolicy` to readOnly and
- * `approvalPolicy` to never so Bridge Codex cannot execute tools
- * or modify files. `sandboxPolicy` is the discriminated-union shape
- * the app-server expects ({ type: "readOnly" }), not a bare string. */
+ * `approvalPolicy` is always `"never"` - the bridge has no UI to
+ * relay Codex's approval prompts back mid-turn. `sandboxPolicy` is
+ * read from the `codex-full-access.flag` sentinel at every turn,
+ * so toggling permissions in the sessions submenu takes effect on
+ * the next prompt without needing a thread reset. */
 export interface TurnStartParams {
   threadId: string;
   /** Input content. We send a single text block constructed from
@@ -133,8 +146,8 @@ export interface TurnStartParams {
   input: TurnInputItem[];
   /** Always `"never"` for Bridge. */
   approvalPolicy: "never";
-  /** Always `{ type: "readOnly" }` for Bridge. */
-  sandboxPolicy: { type: "readOnly" };
+  /** Resolved per-turn from the full-access flag. */
+  sandboxPolicy: TurnSandboxPolicy;
 }
 
 /** Supported input item types in a `turn/start`. Bridge only sends

@@ -29,6 +29,10 @@ import {
 } from "./legacyMigration";
 import { createOutputChannelLogger } from "./outputChannel";
 import {
+  clearClipboardStaging,
+  sweepStaleClipboardStages,
+} from "./stageClipboardImage";
+import {
   applyDefaultWaitMode,
   createEpicHandshakeStatusBarItem,
   parseDefaultWaitMode,
@@ -80,6 +84,10 @@ class EpicHandshakeTier {
     // envelopes from a prior session are noise the user hasn't opted
     // into seeing. Both clears are best-effort.
     clearStaleRuntimeFiles();
+    // Clipboard-staging dir is a separate folder for screenshot
+    // attachments the user wants Codex to see. Sweep anything older
+    // than the TTL so a long-forgotten paste does not sit on disk.
+    sweepStaleClipboardStages(this.logger);
     // Wire the probe so the engine's toast notifier can ask "is the
     // bridge currently dispatching?" without importing from this
     // tool. This preserves the one-way engine-depends-on-nothing
@@ -183,6 +191,10 @@ class EpicHandshakeTier {
     } catch {
       // best-effort - reset must not fail if CLI removal glitches
     }
+    // Wipe any staged clipboard screenshots; they are disposable and
+    // the user expects Reset WAT321 to clear everything the tier
+    // writes to disk.
+    clearClipboardStaging();
   }
 
   // Activate-time housekeeping moved to `legacyMigration.ts`. Both

@@ -61,6 +61,16 @@ export abstract class UsageServiceBase<TResponse> {
   private disposed = false;
   private consecutiveRateLimits = 0;
   private consecutiveErrors = 0;
+  /** Transient 429s tagged cold-start that we have absorbed while an
+   * ok state is on display. Anthropic's usage endpoint cold-polls 429
+   * on brief idle gaps (most visibly at the 5h billing-window rollover),
+   * and flipping the widget straight to the "Idle" skin violates the
+   * last-known-good principle - the user just had valid numbers a
+   * minute ago. Instead, we keep rendering the prior ok state for a
+   * few more polls, then fall through to the full rate-limited park
+   * if the cold-start persists. Counter resets on any successful
+   * fetch. */
+  private consecutiveColdStartAbsorbs = 0;
 
   private readonly kickstart = new KickstartGate();
   private readonly coordinator: Coordinator<ServiceState<TResponse>>;
@@ -302,6 +312,7 @@ export abstract class UsageServiceBase<TResponse> {
       }
       this.consecutiveRateLimits = 0;
       this.consecutiveErrors = 0;
+      this.consecutiveColdStartAbsorbs = 0;
       this.kickstart.reset();
     } catch (error: unknown) {
       this.handleFetchError(error);
@@ -346,6 +357,29 @@ export abstract class UsageServiceBase<TResponse> {
         // Strikes remain - keep retrying at normal cadence.
         this.setPollInterval(POLL_INTERVAL_MS);
         this.setState({ status: "loading" });
+        return;
+      }
+
+      // Cold-start absorption. If the 429 lands while we already have
+      // ok numbers on display AND the user is idle (= the park would
+      // be tagged cold-start), keep showing the last good numbers for
+      // a few polls instead of flipping the widget to the "Idle" skin.
+      // Covers the 5h billing-window rollover, brief idle gaps, and
+      // other transient cold-poll 429s that resolve on the next tick.
+      // Falls through to the full park if the cold-start persists
+      // past COLD_START_ABSORPTION_THRESHOLD polls.
+      const nowForAbsorb = Date.now();
+      const COLD_START_ABSORPTION_THRESHOLD = 3;
+      if (
+        this.state.status === "ok" &&
+        this.kickstart.isIdleAt(nowForAbsorb) &&
+        this.consecutiveColdStartAbsorbs < COLD_START_ABSORPTION_THRESHOLD
+      ) {
+        this.consecutiveColdStartAbsorbs++;
+        // Keep polling at normal cadence so a fresh activity kickstart
+        // picks up quickly. Do not touch state - widget continues to
+        // render the prior ok numbers from `this.state`.
+        this.setPollInterval(POLL_INTERVAL_MS);
         return;
       }
 

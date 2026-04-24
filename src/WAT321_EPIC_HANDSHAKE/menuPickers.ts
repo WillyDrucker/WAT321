@@ -201,10 +201,9 @@ export async function showSessionsSubmenu(opts: {
   const cancelItem = makeCancelItem(opts.inFlight);
 
   // Codex permissions toggle. State lives in a flag file (no settings
-  // UI clutter). Click flips Read-Only <-> Full-Access. The new value
-  // takes effect on the NEXT thread spawn (reset / delete / first
-  // prompt after rotate); existing thread keeps its current sandbox
-  // because Codex's app-server doesn't allow mid-session change.
+  // UI clutter). Click flips Read-Only <-> Full-Access. Takes effect on
+  // the next prompt - turnRunner reads the flag on every `turn/start`,
+  // so the existing thread picks up the new sandbox live without a reset.
   const isFullAccess = existsSync(CODEX_FULL_ACCESS_FLAG_PATH);
   const permissionsItem: Item = {
     label: `Codex permissions: ${isFullAccess ? "Full-Access" : "Read-Only"}`,

@@ -33,6 +33,7 @@ import {
 } from "./turnFlags";
 import { runTurnOnce } from "./turnRunner";
 import type { EpicHandshakeLogger } from "./types";
+import { currentWaitMode } from "./waitMode";
 import { workspaceHash } from "./workspaceHash";
 
 /**
@@ -472,6 +473,12 @@ export class CodexDispatcher {
     threadId: string,
     env: Envelope
   ): Promise<string> {
+    // Capture wait mode at dispatch time. Fire-and-Forget widens the
+    // monitor's hard cap + stall windows because Claude already returned
+    // from the MCP tool and no one is waiting. Wait mode is locked
+    // during in-flight turns (menu guard), so this snapshot holds for
+    // the full turn even if the user tries to flip mid-turn.
+    const waitMode = currentWaitMode();
     const opts = {
       client,
       threadId,
@@ -479,6 +486,7 @@ export class CodexDispatcher {
       workspacePath: this.workspacePath,
       wsHash: this.wsHash,
       logger: this.logger,
+      waitMode,
     };
     try {
       return await runTurnOnce(opts);

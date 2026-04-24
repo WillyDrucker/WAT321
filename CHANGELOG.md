@@ -5,6 +5,28 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-04-24
+
+### Added
+
+- **Codex permissions toggle now takes effect on your next prompt instead of requiring a session reset.** Flipping "Codex permissions: Full-Access" or "Read-Only" in the sessions submenu used to only apply to fresh threads, so an existing session silently ignored the change. The bridge now reads the flag on every turn, so your toggle lands on the very next Claude-to-Codex prompt without touching the session. The toast message was updated to match. Closes #59 and unblocks #56.
+- **A yellow `LOAD` banner on session token widgets for the first cache-miss-pattern turn after a reload.** A deliberate Claude Code reload always pays a cache-seeding cost on its first turn, and that previously showed as red `MISS` - reading as an alarm when really the reload was the point. The widget now flashes yellow `LOAD` on the first qualifying turn after mount, then switches to red `MISS` for any subsequent cache miss. Red is reserved for the "investigate" case. Closes #60.
+- **`file_paths` on the Epic Handshake bridge tool.** When you want Codex to look at specific files, the Claude-to-Codex bridge now accepts an optional list of absolute paths alongside your prompt. Codex reads them directly from disk - no copy-pasting file contents into the prompt text, no hitting token limits on large files. Sandbox permissions still apply: Read-Only Codex can read files but not execute; Full-Access Codex can do both.
+- **A clipboard-to-screenshot helper so Codex can see pasted images.** A standalone PowerShell script lands at `~/.wat321/epic-handshake/bin/stage-clipboard.ps1` at install time. When you paste a screenshot into Claude and ask Codex to look at it, Claude runs the script via Bash, the script writes the clipboard image to a timestamped PNG under `~/.wat321/epic-handshake/attachments/clipboard/`, and Claude passes the resulting path through the new `file_paths` field. The image never enters your token budget - only the path string travels through the conversation. A manual command `WAT321: Epic Handshake - Stage Clipboard Image for Codex` is available from the command palette as a fallback. Partial progress on #57.
+
+### Changed
+
+- **Fire-and-Forget now truly fires and forgets.** The bridge previously still enforced a 5-minute hard cap and per-tool stall windows on Fire-and-Forget turns, which defeated the mode's whole point ("reply lands when it lands"). Stall detection, hard cap, and the phase-0 "never activated" timer are all disabled when Fire-and-Forget is on. If a turn truly hangs, cancel from the status bar or reset the session.
+- **Adaptive wait mode tolerates longer pure-reasoning gaps.** Complex design and analysis tasks often spend 60+ seconds in model-side reasoning before the first tool call, which was tripping Adaptive's 60-second stall window and killing legitimate turns. Every per-tool stall window on Adaptive now floors at 2 minutes, so silent reasoning gaps survive. Standard mode still uses the tight default.
+- **The Claude Usage widget stays on the last-known numbers through the 5-hour billing-window rollover.** Anthropic's usage endpoint returns 429 on cold polls when you've been idle past the 30-second activity window, and the widget used to flip to "Idle" immediately. The widget now absorbs up to three consecutive cold-start 429s while it has recent numbers on display, so the rollover no longer flashes a misleading idle state between live polls. If the cold state persists past the absorption threshold (~6 min at 2-min poll cadence), the normal rate-limited skin takes over.
+
+### Fixed
+
+- **Mid-session permission toggles actually work now.** The turn-level `sandboxPolicy` was hardcoded to `readOnly` on every turn, silently overriding whatever the thread-level sandbox was set to. Issue #59 documented the fix; the bug was defeating the Full-Access toggle since v1.1. Shell commands, file writes, and network access now follow your menu selection on the very next prompt.
+- **Diagnostic logging of MCP tool-call shape.** Every invocation of `epic_handshake_ask` and `epic_handshake_inbox` now logs its argument shape and a truncated raw JSON dump to `channel.log`. Enables future investigation of how Claude Code forwards pasted images, clipboard payloads, and other non-text content through the MCP layer. No user-visible behavior change.
+
+### Removed
+
 ## [1.2.3] - 2026-04-24
 
 ### Added
