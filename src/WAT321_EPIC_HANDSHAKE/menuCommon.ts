@@ -30,6 +30,7 @@ export type Action =
   | "clear-error"
   | "cancel"
   | "wait-mode-toggle"
+  | "wait-mode-locked"
   | "permissions-toggle"
   | "manage-sessions"
   | "repair-sessions"
