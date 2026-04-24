@@ -78,15 +78,6 @@ export function parseStageInfo(tail: string): StageInfo {
 
   const pendingByCallId = new Map<string, ToolCall>();
   const completedCallIds = new Set<string>();
-  /** Count of assistant-role response_item/message entries seen in
-   * this turn so far. Codex emits two per turn in every observed
-   * rollout: one for the commentary preamble ("I'm checking X first")
-   * and one for the final answer. When the count crosses to >= 2 the
-   * second message IS the final-answer text, equivalent to seeing
-   * `event_msg/agent_message phase=final_answer`. Used as a defensive
-   * fallback if a future Codex rollout schema changes the phase tag
-   * wording or omits the agent_message event entirely. */
-  let assistantMessageCount = 0;
   /** Counters for the "post-tool reasoning" heuristic that promotes
    * the turn to stage 4 (Finalizing). After Codex finishes its last
    * function_call_output it typically reasons for 10-30s before the
@@ -133,17 +124,16 @@ export function parseStageInfo(tail: string): StageInfo {
       }
       continue;
     }
-    if (
-      entry.type === "response_item" &&
-      payloadType === "message" &&
-      getPayloadField<string>(entry, "role") === "assistant"
-    ) {
-      assistantMessageCount++;
-      if (assistantMessageCount >= 2) {
-        tryAdvance("writing");
-      }
-      continue;
-    }
+    // `response_item/message` role=assistant entries used to promote
+    // to `writing` on count >= 2, but Codex 0.124 emits multiple
+    // commentary messages per tool-heavy turn ("I'll look at X first",
+    // "Now let me cross-check Y"), so that fallback fired on the 2nd
+    // commentary at ~27% of turn duration and pinned stage 4 for the
+    // remaining majority. The authoritative `agent_message
+    // phase=final_answer` branch above fires 1:1 with turn end, and
+    // the post-tool reasoning heuristic below covers the genuine
+    // wrap-up window. No action needed here - the entry is handled
+    // by other branches (and is intentionally not a stage signal).
 
     if (entry.type === "response_item" && payloadType === "function_call") {
       toolCallCount++;

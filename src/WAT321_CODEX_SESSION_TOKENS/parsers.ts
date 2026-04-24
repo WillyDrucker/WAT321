@@ -315,11 +315,34 @@ export function classifyCodexTurn(tail: string): LastEntryKind {
       return "assistant-done";
     }
 
-    // Assistant-response events = done
-    if (entry.type === "event_msg" && ptype === "agent_message") return "assistant-done";
-    if (entry.type === "response_item" && ptype === "message" && payload?.role === "assistant") return "assistant-done";
+    // Assistant-response events = done ONLY for the final_answer
+    // phase. Codex 0.124 emits an `agent_message` with
+    // phase=commentary mid-turn ("I'll look into X first") before
+    // the phase=final_answer message at turn end; treating the
+    // commentary message as turn-complete made the thinking
+    // indicator flicker idle in the window between commentary and
+    // the next reasoning/tool event. Only final_answer + the
+    // explicit turn_aborted / task_complete signals close the turn.
+    // Commentary-phase messages fall through to keep scanning so a
+    // later definitive signal (function_call, reasoning) wins.
+    if (entry.type === "event_msg" && ptype === "agent_message") {
+      const phase = payload?.phase;
+      if (phase === "final_answer") return "assistant-done";
+      // phase=commentary or unphased: treat as still-pending, keep
+      // walking backward for a stronger signal.
+      return "assistant-pending";
+    }
+    // `response_item/message` role=assistant has no phase tag; it
+    // fires for both commentary and final_answer. Without phase we
+    // cannot distinguish, so treat as pending and let the backward
+    // walk continue searching for an authoritative done signal.
+    // Without this fallthrough, catching a commentary message as
+    // the tail would mark the turn done mid-work.
+    if (entry.type === "response_item" && ptype === "message" && payload?.role === "assistant") {
+      return "assistant-pending";
+    }
     if (entry.type === "response.output_text.done") return "assistant-done";
-    if (entry.type === "message" && payload?.role === "assistant") return "assistant-done";
+    if (entry.type === "message" && payload?.role === "assistant") return "assistant-pending";
 
     // User messages = user is waiting for a response
     if (ptype === "user_message") return "user";
