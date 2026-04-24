@@ -181,6 +181,13 @@ const CACHE_MISS_FLASH_MS = 2000;
 const CACHE_MISS_CACHED_MAX = 1_000;
 const CACHE_MISS_CREATION_MIN = 10_000;
 const CACHE_MISS_BANNER = "🔴MISS🔴";
+/** Yellow LOAD banner for the FIRST qualifying cache-miss-pattern turn
+ * after a widget mount. Distinguishes the expected cost of a fresh
+ * session / deliberate reload from an unexpected miss. Same 2000ms
+ * flash cadence as MISS; only the emoji color changes. Red MISS stays
+ * reserved for every subsequent qualifying turn during the same
+ * widget lifetime so a real alarm still reads as an alarm. */
+const CACHE_LOAD_BANNER = "🟡LOAD🟡";
 
 export class SessionTokenWidget<TState extends { status: string }> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
@@ -194,6 +201,14 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    * cadence and any intermediate triggerPoll). */
   private lastUsageSignature: string | null = null;
   private cacheMissFlashStartedAt: number | null = null;
+  private cacheLoadFlashStartedAt: number | null = null;
+  /** First qualifying cache-miss-pattern turn on this widget instance
+   * fires LOAD (yellow); every subsequent one fires MISS (red). Flips
+   * true the first time either banner is latched so the next unexpected
+   * miss reads as an alarm. Widget instances are recreated on every
+   * tier reactivate, so a deliberate extension reload resets this to
+   * false and the next seeding turn reads LOAD as intended. */
+  private hasEverFlashedCacheBanner = false;
 
   constructor(descriptor: SessionTokenWidgetDescriptor<TState>) {
     this.descriptor = descriptor;
@@ -209,7 +224,9 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
   /** Detect a Claude turn that paid full input price because the
    * prefix cache was not usable (TTL expired after idle, context
-   * invalidated, auto-compact ran). Signal requires all three:
+   * invalidated, auto-compact ran, or this is the first-load seeding
+   * after a fresh session / deliberate reload). Signal requires all
+   * three:
    *   1. Usage bundle changed from the last poll (new turn landed,
    *      not a duplicate read of the same turn). Signature covers
    *      output + total input + cached + creation so any per-turn
@@ -220,41 +237,59 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    *      rehashed enough content to indicate a real rebuild, not
    *      the small every-turn creation that is normal cache upkeep.
    *
+   * First qualifying turn on this widget instance latches LOAD (yellow).
+   * Every subsequent qualifying turn latches MISS (red). The distinction
+   * separates "expected seeding cost after reload" from "unexpected
+   * mid-session invalidation" so the alarm reading of red stays
+   * meaningful. Widget instances are recreated on every tier
+   * reactivate, so a deliberate reload resets the counter.
+   *
    * Codex sessions never populate `claudeTurnInfo` so this no-ops on
-   * that side. First-observation case is also skipped so the widget
-   * does not flash on initial widget mount. */
+   * that side. */
   private maybeLatchCacheMiss(claudeTurnInfo: ClaudeTurnInfo | undefined): void {
     if (claudeTurnInfo === undefined) return;
     const sig = `${claudeTurnInfo.outputTokens}:${claudeTurnInfo.totalInputTokens}:${claudeTurnInfo.cachedInputTokens}:${claudeTurnInfo.cacheCreationTokens}`;
     if (sig === this.lastUsageSignature) return;
-    const firstObservation = this.lastUsageSignature === null;
     this.lastUsageSignature = sig;
-    if (firstObservation) return;
     if (
       claudeTurnInfo.cachedInputTokens < CACHE_MISS_CACHED_MAX &&
       claudeTurnInfo.cacheCreationTokens >= CACHE_MISS_CREATION_MIN
     ) {
-      this.cacheMissFlashStartedAt = Date.now();
+      if (this.hasEverFlashedCacheBanner) {
+        this.cacheMissFlashStartedAt = Date.now();
+      } else {
+        this.cacheLoadFlashStartedAt = Date.now();
+      }
+      this.hasEverFlashedCacheBanner = true;
     }
   }
 
-  /** True if the current render should show the MISS banner instead
-   * of the normal token readout. Three-frame sequence over 2000ms:
+  /** Current cache-banner flash state, if any. Three-frame sequence
+   * over 2000ms, identical cadence for LOAD (yellow) and MISS (red):
    *
-   *   0-500    MISS banner
+   *   0-500    banner
    *   500-1000 tokens
-   *   1000-2000 MISS banner (held)
+   *   1000-2000 banner (held)
    *
    * After 2000ms the flash window ends. Widget's 250ms ticker samples
    * this every frame so the alternation lands visibly despite each
-   * half-cycle being short. */
-  private cacheMissFrameShowsMiss(): boolean {
-    if (this.cacheMissFlashStartedAt === null) return false;
-    const elapsed = Date.now() - this.cacheMissFlashStartedAt;
-    if (elapsed >= CACHE_MISS_FLASH_MS) return false;
-    if (elapsed < 500) return true;
-    if (elapsed < 1000) return false;
-    return true;
+   * half-cycle being short. Returns which banner (if any) the current
+   * frame should show so the render path can swap in the right emoji. */
+  private currentCacheBanner(): string | null {
+    const now = Date.now();
+    if (this.cacheLoadFlashStartedAt !== null) {
+      const elapsed = now - this.cacheLoadFlashStartedAt;
+      if (elapsed < CACHE_MISS_FLASH_MS && (elapsed < 500 || elapsed >= 1000)) {
+        return CACHE_LOAD_BANNER;
+      }
+    }
+    if (this.cacheMissFlashStartedAt !== null) {
+      const elapsed = now - this.cacheMissFlashStartedAt;
+      if (elapsed < CACHE_MISS_FLASH_MS && (elapsed < 500 || elapsed >= 1000)) {
+        return CACHE_MISS_BANNER;
+      }
+    }
+    return null;
   }
 
   update(state: TState): void {
@@ -374,14 +409,15 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
         const mode = getDisplayMode();
         const prefix = this.currentPrefix(data);
-        if (this.cacheMissFrameShowsMiss()) {
-          // MISS alternates with tokens across the 2000ms flash window
-          // (see cacheMissFrameShowsMiss for the cadence). Prefix stays
-          // visible throughout so the brand icon and thinking indicator
-          // ride through the flash - only the tokens/percent portion
-          // gets replaced. Tooltip keeps showing real data so hovering
-          // during the flash still gives you session info.
-          this.item.text = `${prefix} ${CACHE_MISS_BANNER}`;
+        const banner = this.currentCacheBanner();
+        if (banner !== null) {
+          // LOAD or MISS alternates with tokens across the 2000ms flash
+          // window (see currentCacheBanner for the cadence). Prefix
+          // stays visible throughout so the brand icon and thinking
+          // indicator ride through the flash - only the tokens/percent
+          // portion gets replaced. Tooltip keeps showing real data so
+          // hovering during the flash still gives you session info.
+          this.item.text = `${prefix} ${banner}`;
         } else if (mode === "minimal" || mode === "compact") {
           this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}`;
         } else {
