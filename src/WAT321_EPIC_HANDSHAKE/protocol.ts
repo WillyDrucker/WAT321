@@ -122,8 +122,8 @@ export interface ThreadStartParams {
 
 /** Sandbox policy object shape accepted by `turn/start`. Casing here
  * is DIFFERENT from the `thread/start` `sandbox` string parameter:
- *   - `thread/start.sandbox` → kebab string (`"read-only"`, `"danger-full-access"`)
- *   - `turn/start.sandboxPolicy.type` → camelCase (`"readOnly"`, `"dangerFullAccess"`)
+ *   - `thread/start.sandbox` -> kebab string (`"read-only"`, `"danger-full-access"`)
+ *   - `turn/start.sandboxPolicy.type` -> camelCase (`"readOnly"`, `"dangerFullAccess"`)
  * Both casings are native to the app-server's Rust source. Do not
  * try to unify - the server rejects the wrong casing at the wrong
  * layer. */
