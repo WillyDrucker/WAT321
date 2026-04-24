@@ -83,12 +83,16 @@ export function suppressCodexToastFlagPath(wsHash: string): string {
 }
 
 /** User-scope toggle for Codex bridge sandbox. When present, Codex
- * sessions spawn with `sandbox: "danger-full-access"` instead of the
- * default `read-only`. Toggled live via the sessions submenu so the
- * user can experiment with permissions without touching settings.
- * Setting takes effect on the NEXT thread spawn (reset / delete /
- * fresh after rotate); existing thread keeps its current permissions
- * because Codex's app-server doesn't allow mid-session sandbox change. */
+ * sessions run with `danger-full-access` instead of the default
+ * `read-only`. Toggled live via the sessions submenu so the user can
+ * experiment with permissions without touching settings. Read in two
+ * places:
+ *   - `threadLifecycle.spawnFreshThread` at `thread/start` (kebab
+ *     string form, `sandbox` param)
+ *   - `turnRunner.runTurnOnce` at every `turn/start` (camelCase
+ *     object form, `sandboxPolicy.type`)
+ * Because the flag is read on every turn, toggling takes effect on
+ * the next prompt without needing a thread reset. */
 export const CODEX_FULL_ACCESS_FLAG_PATH = join(
   EPIC_HANDSHAKE_DIR,
   "codex-full-access.flag"

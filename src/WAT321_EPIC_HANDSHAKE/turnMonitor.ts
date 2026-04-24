@@ -86,6 +86,18 @@ export interface TurnMonitorOptions {
   hardCapMs?: number;
   /** How often to stat + tail the rollout file. Default 5_000. */
   pollIntervalMs?: number;
+  /** Minimum stall window applied on top of the per-tool values in
+   * `stallWindowForCurrentActivity`. When set, every tool window gets
+   * max()'d with this floor - useful for modes that should tolerate
+   * longer silent gaps (e.g. Adaptive). Default 0 (no floor). */
+  stallFloorMs?: number;
+  /** Disable stall detection, hard-cap, and phase-0 "never activated"
+   * checks entirely. For Fire-and-Forget, where the user explicitly
+   * opted out of waiting - letting Codex run as long as it needs is
+   * the whole point of the mode. The reply lands when it lands, and
+   * if Codex truly hangs the user can cancel from the widget or reset
+   * the session. Default false. */
+  disableAllTimeouts?: boolean;
 }
 
 /** Kind of RPC progress event observed. Drives the stall-reset path
@@ -148,6 +160,8 @@ export class TurnMonitor {
       stallWindowMs: options.stallWindowMs ?? 60_000,
       hardCapMs: options.hardCapMs ?? 300_000,
       pollIntervalMs: options.pollIntervalMs ?? 5_000,
+      stallFloorMs: options.stallFloorMs ?? 0,
+      disableAllTimeouts: options.disableAllTimeouts ?? false,
     };
   }
 
@@ -159,25 +173,33 @@ export class TurnMonitor {
     this.turnStartAt = Date.now();
     this.lastProgressAt = this.turnStartAt;
 
-    this.hardCapTimer = setTimeout(() => {
-      this.hardCapTimer = null;
-      if (this.stopped) return;
-      this.options.logger.warn(
-        `[monitor] hard cap ${this.options.hardCapMs}ms exceeded - forcing interrupt`
-      );
-      this.options.onHardCap();
-    }, this.options.hardCapMs);
-
-    this.phase0Timer = setTimeout(() => {
-      this.phase0Timer = null;
-      if (this.stopped) return;
-      if (this.currentStage === "dispatched") {
+    // Fire-and-Forget opts out of all timeouts - user explicitly asked
+    // for "reply lands when it lands", so stall detection, hard cap,
+    // and phase-0 "never activated" checks all go silent. Rollout
+    // polling still runs because the stage-progress heartbeat is how
+    // the status bar widget animates; only the failure-inducing
+    // timers are disabled.
+    if (!this.options.disableAllTimeouts) {
+      this.hardCapTimer = setTimeout(() => {
+        this.hardCapTimer = null;
+        if (this.stopped) return;
         this.options.logger.warn(
-          `[monitor] phase 0 window ${this.options.phase0WindowMs}ms expired without task_started`
+          `[monitor] hard cap ${this.options.hardCapMs}ms exceeded - forcing interrupt`
         );
-        this.options.onStall("Codex never activated");
-      }
-    }, this.options.phase0WindowMs);
+        this.options.onHardCap();
+      }, this.options.hardCapMs);
+
+      this.phase0Timer = setTimeout(() => {
+        this.phase0Timer = null;
+        if (this.stopped) return;
+        if (this.currentStage === "dispatched") {
+          this.options.logger.warn(
+            `[monitor] phase 0 window ${this.options.phase0WindowMs}ms expired without task_started`
+          );
+          this.options.onStall("Codex never activated");
+        }
+      }, this.options.phase0WindowMs);
+    }
 
     // Always start polling. The first few ticks may find no rollout
     // path yet (Codex has not created the file), in which case
@@ -368,6 +390,8 @@ export class TurnMonitor {
       clearTimeout(this.stallTimer);
       this.stallTimer = null;
     }
+    // Fire-and-Forget disables stall detection entirely.
+    if (this.options.disableAllTimeouts) return;
     // Phase 0 has its own (tighter) timer; do not double-arm the
     // stall timer until we have crossed into phase 1+.
     if (this.currentStage === "dispatched") return;
@@ -394,6 +418,14 @@ export class TurnMonitor {
    * default when no active tool is set (pure-reasoning phase or
    * between tool calls). */
   private stallWindowForCurrentActivity(): number {
+    const raw = this.rawStallWindowForCurrentActivity();
+    // Apply the configured floor so Fire-and-Forget turns can ride out
+    // long chained tool calls without tripping a false stall. Default
+    // floor is 0, which is a no-op for Standard/Adaptive.
+    return Math.max(raw, this.options.stallFloorMs);
+  }
+
+  private rawStallWindowForCurrentActivity(): number {
     const tool = this.lastInfo?.activeTool?.name;
     if (!tool) {
       // Reasoning-only phases can run long (model thinking without
