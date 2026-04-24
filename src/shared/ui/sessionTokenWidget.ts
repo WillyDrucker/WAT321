@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
+import { readBridgePhase } from "../bridgePhase";
 import type { StageInfo } from "../codex-rollout/types";
 import type { LastEntryKind } from "../transcriptClassifier";
 
@@ -181,14 +182,6 @@ const CACHE_MISS_CACHED_MAX = 1_000;
 const CACHE_MISS_CREATION_MIN = 10_000;
 const CACHE_MISS_BANNER = "🔴MISS🔴";
 
-/** Transcript/rollout staleness threshold for the heuristic network-
- * disconnect indicator. PID-alive + no-writes-for-30s is not a proof
- * of network loss (could be a legitimately long reasoning pass), but
- * it matches user-reported "hang" perception often enough to surface
- * a `$(debug-disconnect)` glyph. Longer than the 5s active threshold
- * so a normal slow turn does not trip it. */
-const NETWORK_STALL_STALE_MS = 30_000;
-
 export class SessionTokenWidget<TState extends { status: string }> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
   private descriptor: SessionTokenWidgetDescriptor<TState>;
@@ -283,6 +276,58 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
   private currentPrefix(data: SessionTokenRenderData): string {
     const d = this.descriptor;
     const now = Date.now();
+
+    // Bridge turns carry their own "in flight" signal independent of
+    // transcript mtime or PID liveness, so the bridge branch runs
+    // first. Sequence from turn start:
+    //   pre-ceremony (envelope queued, no heartbeat yet)
+    //                                 force activeFrames so the
+    //                                 widget does not flicker to
+    //                                 idle or a stale turn glyph in
+    //                                 the short window before the
+    //                                 dispatcher writes its first
+    //                                 heartbeat
+    //   0-1000ms   debug-disconnect
+    //   1000-2000  debug-connected
+    //   2000-3000  debug-disconnect
+    //   3000-4000  debug-connected   (4s ceremony floor regardless
+    //                                 of how long dispatched lasts;
+    //                                 starts on disconnect so the
+    //                                 alternation reads as motion
+    //                                 from the first frame)
+    //   >=4000 and stage=dispatched  debug-connected (hold)
+    //   stage>=received
+    //     Claude widget + Standard/Adaptive wait modes: blank/claude
+    //       blink at 1s (Claude is still blocking on the reply)
+    //     Codex widget, or Claude in Fire-and-Forget: fall through
+    //       to the provider's own activeFrames (normal thinking)
+    // Bridge error / pause / completion all flip readBridgePhase to
+    // null, which drops the branch and lets the widget render its
+    // normal non-bridge behavior.
+    const workspacePath =
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+    const bridge = readBridgePhase(workspacePath);
+    if (bridge !== null) {
+      if (bridge.phase === "pre-ceremony") {
+        const idx = Math.floor(now / d.activeStepMs) % d.activeFrames.length;
+        return d.activeFrames[idx];
+      }
+      // phase === "in-turn"
+      const elapsed = now - bridge.turnStartedAt;
+      if (elapsed < 4000) {
+        const frame = Math.floor(elapsed / 1000);
+        return frame % 2 === 0 ? "$(debug-disconnect)" : "$(debug-connected)";
+      }
+      if (bridge.stage === "dispatched") return "$(debug-connected)";
+      if (d.provider === "Claude" && bridge.claudeBlocking) {
+        const tick = Math.floor(now / 1000) % 2;
+        return tick === 0 ? "$(blank)" : "$(claude)";
+      }
+      // Fall through to normal activeFrames below: Codex animates its
+      // native thinking during working/writing, and Claude under
+      // Fire-and-Forget behaves the same as a non-bridge turn.
+    }
+
     const turnInProgress =
       data.turnState === "user" || data.turnState === "assistant-pending";
     if (!turnInProgress || d.activeFrames.length === 0) return d.idlePrefix;
@@ -294,19 +339,6 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     const pidAlive = data.pid !== undefined && isPidAlive(data.pid);
     const mtimeFresh = now - data.transcriptMtimeMs < d.activeThresholdMs;
     if (!pidAlive && !mtimeFresh) return d.idlePrefix;
-
-    // Heuristic disconnect indicator. When the turn has been in
-    // progress long enough that no normal response would still be
-    // streaming AND the transcript mtime is stale (no writes for
-    // 30s+), swap the animated prefix for a debug-disconnect glyph.
-    // PID alive + no output for 30s+ points at network loss or API
-    // stall more often than a legitimately quiet thinking phase.
-    // Purely cosmetic: no API probe, no socket inspection, just
-    // surfacing a signal we already have.
-    const staleMs = now - data.transcriptMtimeMs;
-    if (staleMs > NETWORK_STALL_STALE_MS) {
-      return "$(debug-disconnect)";
-    }
 
     const index = Math.floor(now / d.activeStepMs) % d.activeFrames.length;
     return d.activeFrames[index];
@@ -345,11 +377,10 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         if (this.cacheMissFrameShowsMiss()) {
           // MISS alternates with tokens across the 2000ms flash window
           // (see cacheMissFrameShowsMiss for the cadence). Prefix stays
-          // visible throughout so the brand icon and any thinking /
-          // disconnect indicator ride through the flash - only the
-          // tokens/percent portion gets replaced. Tooltip keeps showing
-          // real data so hovering during the flash still gives you
-          // session info.
+          // visible throughout so the brand icon and thinking indicator
+          // ride through the flash - only the tokens/percent portion
+          // gets replaced. Tooltip keeps showing real data so hovering
+          // during the flash still gives you session info.
           this.item.text = `${prefix} ${CACHE_MISS_BANNER}`;
         } else if (mode === "minimal" || mode === "compact") {
           this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}`;

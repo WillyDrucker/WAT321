@@ -115,15 +115,32 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
 
   const current = currentWaitMode();
   const next = nextWaitMode(current);
+  // Wait mode locks while a turn is in flight. Switching mid-turn
+  // would let the in-flight envelope's dispatcher flags go out of
+  // sync with the newly-selected mode (Standard -> Fire-and-Forget
+  // mid-turn leaves the blocking MCP call waiting forever, the
+  // reverse direction leaves a fire-and-forget reply stranded). The
+  // row stays visible showing the current mode so the user can see
+  // it but cannot flip it; action-handler guard enforces the lock
+  // even if the click lands between build and handle.
   const waitModeItem: Item | null = paused
     ? null
-    : {
-        label: `Wait mode: ${waitModeLabel(current)}`,
-        description: `Click to switch to ${waitModeLabel(next)}.`,
-        detail: waitModeDetail(current),
-        iconPath: new vscode.ThemeIcon("wat321-square-bolt"),
-        action: "wait-mode-toggle",
-      };
+    : opts.inFlight
+      ? {
+          label: `Wait mode: ${waitModeLabel(current)}`,
+          description: "Locked while a bridge turn is running.",
+          detail:
+            "Wait mode cannot change mid-turn. This row unlocks automatically when the bridge finishes (reply received, timed out, paused, cancelled, or errored).",
+          iconPath: new vscode.ThemeIcon("wat321-square-bolt"),
+          action: "wait-mode-locked",
+        }
+      : {
+          label: `Wait mode: ${waitModeLabel(current)}`,
+          description: `Click to switch to ${waitModeLabel(next)}.`,
+          detail: waitModeDetail(current),
+          iconPath: new vscode.ThemeIcon("wat321-square-bolt"),
+          action: "wait-mode-toggle",
+        };
 
   const sessionsItem: Item = {
     label: `Manage Codex Sessions (S${sessionCounter})`,
@@ -301,6 +318,18 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       // status bar is the visual confirmation regardless of which
       // direction the cycle advanced. Flash flag is workspace-scoped
       // so only THIS window flashes; sibling windows ignore.
+      //
+      // Race guard: a bridge turn may have started between menu
+      // build and click. Re-check `isBridgeBusy` here and fall
+      // through to the locked toast instead of switching under an
+      // in-flight turn, which would desync the dispatcher's wait
+      // behavior from the envelope that is already out on the wire.
+      if (isBridgeBusy(ctx.ws)) {
+        void vscode.window.showInformationMessage(
+          "Epic Handshake: wait mode is locked while a bridge turn is running. It will unlock automatically when the turn finishes."
+        );
+        break;
+      }
       applyWaitMode(nextWaitMode(currentWaitMode()));
       if (ctx.ws) {
         try {
@@ -315,6 +344,11 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       }
       break;
     }
+    case "wait-mode-locked":
+      void vscode.window.showInformationMessage(
+        "Epic Handshake: wait mode is locked while a bridge turn is running. It will unlock automatically when the turn finishes."
+      );
+      break;
     case "show-status":
       // Info-only item: the status block renders in the item's
       // `detail` field which is already visible when the menu is

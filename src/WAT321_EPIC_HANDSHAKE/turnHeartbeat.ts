@@ -136,6 +136,34 @@ const STAGE_LATCH_MS: Record<Stage, number> = {
   complete: 3000,
 };
 
+/** Per-stage maximum display time before the walker force-advances
+ * one step even when the parser has NOT signaled a higher target
+ * stage. Needed because tool-heavy Codex turns spend 80-95% of their
+ * wall time emitting `function_call` / `web_search_call` interleaved
+ * with `reasoning`, so `parseStageInfo` sits at `working` until the
+ * very last `agent_message phase=final_answer`. Without a max-hold
+ * the status-bar walker pins at stage 3 for a full minute+, leaving
+ * stage 4 essentially invisible.
+ *
+ * Stages 1 (dispatched) and 5 (complete) are intentionally left at 0
+ * (never force-advance): stage 1 is the send/init bookend and should
+ * resolve naturally when `task_started` fires; stage 5 is reserved
+ * for "reply coming back" and must be driven exclusively by
+ * `task_complete` in the rollout so we never claim a turn is done
+ * before Codex actually finishes.
+ *
+ * Stages 2-4 cover Codex's real workload. The max-hold evens out the
+ * visible progression so a long turn walks 2 -> 3 -> 4 at reasonable
+ * intervals instead of stalling at one stage.
+ */
+const STAGE_MAX_HOLD_MS: Record<Stage, number> = {
+  dispatched: 0, // never force; resolves on task_started
+  received: 15_000,
+  working: 30_000,
+  writing: 0, // holds until task_complete, never force into stage 5
+  complete: 0,
+};
+
 const STAGE_ORDER_LIST: readonly Stage[] = [
   "dispatched",
   "received",
@@ -179,14 +207,28 @@ export function applyStageLatch(hb: TurnHeartbeat): TurnHeartbeat {
   }
   const displayedIdx = stageIdx(latchState.displayedStage);
   const targetIdx = stageIdx(hb.stage);
-  if (targetIdx <= displayedIdx) {
-    // Real stage at or below displayed. Keep showing current.
+  const maxMs = STAGE_MAX_HOLD_MS[latchState.displayedStage];
+  const heldMs = now - latchState.displayedAt;
+  // Force-advance only when the parser hasn't already signaled a
+  // higher target (targetIdx <= displayedIdx), max-hold is set
+  // (stages 2-4), the max has elapsed, and a non-terminal next
+  // stage exists (never force into `complete`, stage 5 is reserved
+  // for reply-back and must be driven by task_complete alone).
+  const shouldForceAdvance =
+    targetIdx <= displayedIdx &&
+    maxMs > 0 &&
+    heldMs >= maxMs &&
+    displayedIdx + 1 < STAGE_ORDER_LIST.length - 1;
+  if (targetIdx <= displayedIdx && !shouldForceAdvance) {
+    // Real stage at or below displayed, no force-advance warranted.
+    // Keep showing current.
     return { ...hb, stage: latchState.displayedStage };
   }
-  // Real stage is ahead. Advance by exactly one step if the current
-  // stage has been shown long enough; otherwise hold.
+  // Either the parser's target is ahead, or the max-hold elapsed
+  // and a force-advance is due. Respect the min-hold floor so we
+  // never flip faster than intended.
   const minMs = STAGE_LATCH_MS[latchState.displayedStage];
-  if (now - latchState.displayedAt < minMs) {
+  if (heldMs < minMs) {
     return { ...hb, stage: latchState.displayedStage };
   }
   const next = STAGE_ORDER_LIST[displayedIdx + 1];

@@ -271,8 +271,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   // working in Claude without blocking for long Codex analyses.
   if (existsSync(FIRE_AND_FORGET_FLAG)) {
     log("info", `fire-and-forget mode: returning immediately for ${id}`);
+    // Tool response wording is load-bearing: fire-and-forget is an
+    // intentional early-return, not a timeout. Previous phrasing
+    // ("Dispatched to Codex. Reply will land...") read close enough
+    // to the timeout fallback that Claude was paraphrasing it to the
+    // user as "Codex didn't reply within the timeout" - which is
+    // confusing in a mode where no wait was attempted. Lead with the
+    // explicit mode name and "no wait attempted" so Claude has no
+    // reason to introduce failure-shaped language downstream.
     const text =
-      "Dispatched to Codex. Reply will land in the Epic Handshake inbox when done - pick \"Retrieve late replies\" from the status bar widget, or I'll auto-include it on your next Claude-to-Codex prompt.";
+      "Fire-and-forget dispatch complete. The prompt was delivered to Codex and this tool returned immediately as intended - no wait was attempted and this is not a timeout. Codex will reply on its own schedule; the reply will appear in the Epic Handshake inbox (retrieve via the status bar widget, or it will auto-include on your next Claude-to-Codex prompt).";
     return {
       content: [
         {
