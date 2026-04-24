@@ -69,6 +69,10 @@
       {
         "command": "wat321.epicHandshake.manage",
         "title": "WAT321: Epic Handshake - Manage"
+      },
+      {
+        "command": "wat321.epicHandshake.stageClipboardImage",
+        "title": "WAT321: Epic Handshake - Stage Clipboard Image for Codex"
       }
     ],
     "icons": {
@@ -354,7 +358,7 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "lint": "eslint src/",
-    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');const src=p.join('src','WAT321_EPIC_HANDSHAKE','bin','channel.mjs');const dst=p.join('out','WAT321_EPIC_HANDSHAKE','bin','channel.mjs');fs.mkdirSync(p.dirname(dst),{recursive:true});fs.copyFileSync(src,dst);\"",
+    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');const srcDir=p.join('src','WAT321_EPIC_HANDSHAKE','bin');const dstDir=p.join('out','WAT321_EPIC_HANDSHAKE','bin');fs.mkdirSync(dstDir,{recursive:true});for(const f of ['channel.mjs','stage-clipboard.ps1']){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}\"",
     "emit-prod-modules-manifest": "node -e \"const fs=require('fs');const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));const prod=Object.entries(lock.packages||{}).filter(([k,m])=>k.startsWith('node_modules/')&&m.dev!==true).map(([k])=>k);fs.mkdirSync('out/WAT321_EPIC_HANDSHAKE',{recursive:true});fs.writeFileSync('out/WAT321_EPIC_HANDSHAKE/prod-modules.json',JSON.stringify(prod,null,2));console.log('prod-modules manifest:',prod.length,'entries');\"",
     "icons": "node scripts/buildIcons.mjs",
     "build": "npm run clean && npm run lint && tsc && npm run copy-assets && npm run emit-prod-modules-manifest",

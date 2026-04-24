@@ -181,12 +181,18 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "epic_handshake_ask",
         description:
-          "Send a Claude to Codex prompt via Epic Handshake. Use when user says ask/tell/prompt Codex. Only fire for an actual current request, not past references or hypotheticals. Auto-includes pending late replies.",
+          "Send a Claude to Codex prompt via Epic Handshake. Use when user says ask/tell/prompt Codex. Only fire for an actual current request, not past references or hypotheticals. Auto-includes pending late replies. Pass absolute paths in file_paths when the user wants Codex to look at specific files - Codex reads them directly from disk (sandbox permitting). For pasted screenshots/images, first run `powershell -NoProfile -File ~/.wat321/epic-handshake/bin/stage-clipboard.ps1` via Bash (Windows) to stage the clipboard image to disk, capture the printed path, and pass it via file_paths.",
         inputSchema: {
           type: "object",
           properties: {
             text: { type: "string" },
             timeout_sec: { type: "integer" },
+            file_paths: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Optional absolute paths to files Codex should read as context. Appended to the prompt body so Codex knows which paths to open.",
+            },
           },
           required: ["text"],
         },
@@ -201,7 +207,46 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
+/** Diagnostic: log the shape of every tool invocation's arguments so
+ * we can see what Claude Code actually forwards when the user pastes
+ * images, references files, or copy-pastes large payloads alongside a
+ * prompt. The tool's inputSchema only declares `text` + `timeout_sec`;
+ * any other fields get silently dropped today. Surfacing them in the
+ * log lets us design the attachment-passing feature from real evidence
+ * instead of guessing at the MCP layer's behavior. Safe to keep on:
+ * logs rotate at 50KB, bodies are truncated, no payload content
+ * leaves the local machine. */
+function logRequestShape(req) {
+  try {
+    const args = req.params.arguments || {};
+    const keys = Object.keys(args);
+    const shape = keys.map((k) => {
+      const v = args[k];
+      if (v === null) return `${k}:null`;
+      if (Array.isArray(v)) {
+        const first = v[0];
+        const firstType =
+          first && typeof first === "object" ? Object.keys(first).join(",") : typeof first;
+        return `${k}:array(len=${v.length},first={${firstType}})`;
+      }
+      if (typeof v === "object") return `${k}:object(${Object.keys(v).join(",")})`;
+      if (typeof v === "string") return `${k}:string(len=${v.length})`;
+      return `${k}:${typeof v}`;
+    });
+    log("info", `tool=${req.params.name} arg-shape=[${shape.join(" ")}]`);
+    // Also dump raw JSON so we can inspect content blocks, MIME types,
+    // and resource references Claude Code might pass. Truncated at 4KB
+    // so a large pasted blob does not flood the log.
+    const raw = JSON.stringify(args);
+    const trimmed = raw.length > 4096 ? `${raw.slice(0, 4096)}...<truncated len=${raw.length}>` : raw;
+    log("info", `tool=${req.params.name} arg-raw=${trimmed}`);
+  } catch (err) {
+    log("warn", `arg-shape log failed: ${err?.message || String(err)}`);
+  }
+}
+
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+  logRequestShape(req);
   if (req.params.name === "epic_handshake_inbox") {
     const preamble = collectLateReplies();
     const text = preamble
@@ -237,6 +282,21 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   const args = req.params.arguments || {};
 
+  // Append file references so Codex knows which paths to open. Codex
+  // reads them directly from disk, so we just surface the list in the
+  // prompt body - no staging, no envelope schema change. Sandbox
+  // permissions still apply: Read-Only Codex can read files but not
+  // execute; Full-Access Codex can both.
+  let bodyText = args.text || "";
+  if (Array.isArray(args.file_paths) && args.file_paths.length > 0) {
+    const paths = args.file_paths.filter((p) => typeof p === "string" && p.length > 0);
+    if (paths.length > 0) {
+      const list = paths.map((p) => `  - ${p}`).join("\n");
+      bodyText = `${bodyText}\n\nAttached file paths:\n${list}`;
+      log("info", `file_paths attached: ${paths.length} path(s)`);
+    }
+  }
+
   const id = randomUUID();
   // 120s default covers most Claude to Codex prompts. Complex
   // analyses can exceed it; the widget surfaces the timeout and the
@@ -256,7 +316,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     title: "",
     workspacePath: WORKSPACE_PATH,
     replyTo: null,
-    body: args.text,
+    body: bodyText,
   });
 
   const envPath = join(INBOX_CODEX, `${id}.md`);

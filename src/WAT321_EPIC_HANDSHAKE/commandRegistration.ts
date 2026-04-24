@@ -4,6 +4,7 @@ import {
   deleteAllCodexSessions,
   deleteCurrentCodexSession,
 } from "./deleteCommand";
+import { stageClipboardImageCommand } from "./stageClipboardImage";
 import {
   loadBridgeThreadRecord,
   resetBridgeThread,
@@ -90,6 +91,12 @@ export function registerEpicHandshakeCommands(
       async () => {
         await deleteAllCodexSessions(logger);
         refreshStatusBar();
+      }
+    ),
+    vscode.commands.registerCommand(
+      "wat321.epicHandshake.stageClipboardImage",
+      async () => {
+        await stageClipboardImageCommand(logger);
       }
     ),
   ];
