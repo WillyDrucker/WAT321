@@ -5,15 +5,26 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.3] - unreleased
+## [1.2.3] - 2026-04-24
 
 ### Added
 
+- **Wait mode locks while an Epic Handshake turn is in flight.** Flipping Standard / Adaptive / Fire-and-Forget mid-turn let the dispatcher's wait behavior get out of sync with the envelope that was already on the wire, which could strand replies or leave blocking calls waiting past their intended timeout. The wait mode row in the menu now stays visible during active turns so you can still see the current mode, but clicking it produces a lock toast instead of switching. The row unlocks automatically when the turn finishes for any reason (reply received, timed out, paused, cancelled, or errored).
+- **Session token widgets show a bridge handshake animation during Epic Handshake turns.** When Claude calls the bridge, both the Claude and Codex session token widgets play a 4-second intro (`disconnect`, `connected`, `disconnect`, `connected` at one-second cadence) so the handshake always reads as a joint event regardless of how fast Codex acks. After the intro the widgets hold `debug-connected` until Codex reaches the `received` stage, at which point the Codex widget returns to its normal thinking cycle while the Claude widget blinks its brand glyph (`blank`, `claude` at one-second cadence) to indicate Claude is still blocking on the bridge reply under Standard or Adaptive wait modes; under Fire-and-Forget the Claude widget resumes its normal thinking cycle too. Any bridge error, pause, or completion clears the animation immediately and the widgets return to normal behavior. A new shared reader in `src/shared/bridgePhase.ts` maps the existing per-turn heartbeat file into a provider-agnostic snapshot so neither provider widget has to know about Epic Handshake directly.
+
 ### Changed
+
+- **Fire-and-Forget bridge dispatch no longer reads as a timeout to Claude.** The tool response sent back to Claude now leads with "Fire-and-forget dispatch complete" and states plainly that no wait was attempted, instead of "Dispatched to Codex. Reply will land...". Claude was paraphrasing the previous wording to the user as "Codex didn't reply within the timeout", which reads as a failure in a mode where no wait is ever attempted in the first place. The new wording leaves Claude no room to introduce timeout-shaped language downstream.
 
 ### Fixed
 
+- **Codex session token thinking indicator no longer flickers idle mid-turn.** Codex CLI 0.124 emits a `commentary` agent_message mid-turn ("I'll look at X first") before the `final_answer` message at turn end, and the transcript classifier was treating the commentary as turn-complete. On every poll that landed right after a commentary message the widget blinked to idle and back, producing a stuttery thinking indicator during long research turns. The classifier now distinguishes `phase=final_answer` from `phase=commentary` and only closes the turn on final_answer or the explicit `task_complete` / `turn_aborted` signals.
+- **Epic Handshake stage walker spreads tool-heavy Codex turns across stages 3 and 4 instead of pinning at stage 3.** On tool-heavy turns Codex emits `function_call` / `web_search_call` interleaved with `reasoning` for 80-95% of wall time, so the rollout parser would sit at `working` until the very last moment and stage 4 was essentially invisible. The walker now force-advances stage 2 to 3 after 15 seconds and stage 3 to 4 after 30 seconds when the parser hasn't signaled a higher stage, so the numbered-square glyphs track Codex's actual progress. Stages 1 and 5 are intentionally left on the parser's authoritative signals (task_started / task_complete) because those are the send and reply-back bookends and must not advance without real observation.
+- **Stage 4 no longer latches prematurely on the 2nd commentary message.** The parser had a fallback that advanced to `writing` on the second assistant `response_item/message` to cover a hypothetical schema without a phase tag. In 0.124 that fallback was firing on the 2nd commentary at roughly 27% through a long turn and pinning stage 4 for the remaining majority. The fallback is removed; `agent_message phase=final_answer` and the post-tool reasoning heuristic now own stage 4 advancement.
+
 ### Removed
+
+- **Dropped the heuristic disconnect glyph from session token widgets.** The 30-second stale-transcript check was swapping the thinking indicator for a disconnect icon during normal long reasoning passes, where the transcript legitimately stops growing for a while. The regular thinking animation now rides through the entire turn so you see Claude or Codex working. Bridge activity gets its own dedicated cue (see Added above).
 
 ## [1.2.2] - 2026-04-24
 
