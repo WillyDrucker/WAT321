@@ -149,7 +149,11 @@ export function renderUsageNonOkState<TData>(
       return true;
 
     case "error":
-      item.text = `${opts.providerIcon} Usage - $(cloud-offline) - Idle`;
+      // `$(sync-ignored)` instead of `$(cloud-offline)` so error
+      // reads visually different from the network-offline case.
+      // Both show "Idle" skin but the glyph distinguishes API error
+      // (will retry) from network absence (will reconnect).
+      item.text = `${opts.providerIcon} Usage - $(sync-ignored) - Idle`;
       item.tooltip = `${opts.providerName} usage temporarily unavailable. Will retry automatically.`;
       item.color = undefined;
       item.show();

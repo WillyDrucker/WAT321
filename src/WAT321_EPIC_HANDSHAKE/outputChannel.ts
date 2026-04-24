@@ -52,6 +52,9 @@ export function createOutputChannelLogger(): {
     error(message: string): void {
       channel.appendLine(`${stamp()} [error] ${message}`);
     },
+    show(): void {
+      channel.show(true);
+    },
   };
 
   return {

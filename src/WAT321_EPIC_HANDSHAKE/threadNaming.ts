@@ -8,10 +8,11 @@ import { basename, join } from "node:path";
  * also the regex anchor we use to find existing bridge sessions in
  * Codex's `session_index.jsonl`.
  *
- * Workspace identity is basename-scoped here: two workspaces named
- * `foo` in different parent paths share the same regex pattern. That's
- * a known limitation flagged in the session handoff (collision risk
- * for bulk delete + recovery scan); fix deferred until needed.
+ * Workspace identity is basename-scoped in this file: two workspaces
+ * named `foo` in different parent paths share the same regex pattern.
+ * Callers that cannot tolerate false positives (bulk delete, recovery)
+ * must confirm ownership by reading `session_meta.cwd` from each
+ * candidate rollout - see `readRolloutCwd` in sessionRecovery.ts.
  */
 
 /** Build the Codex thread display name. Shown in the Codex TUI's

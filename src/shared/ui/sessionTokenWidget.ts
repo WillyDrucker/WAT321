@@ -26,6 +26,12 @@ export interface ClaudeTurnInfo {
   totalInputTokens: number;
   /** `cache_read_input_tokens` on the most recent assistant turn. */
   cachedInputTokens: number;
+  /** `cache_creation_input_tokens` on the most recent assistant turn.
+   * Substantial creation alongside near-zero cached read is the signal
+   * for a real cache miss (TTL expired, context invalidated, auto-
+   * compact fired); small creation is normal every-turn cache upkeep
+   * and is not a miss. */
+  cacheCreationTokens: number;
 }
 import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
 import { getSessionTokenColor } from "./textColors";
@@ -95,6 +101,11 @@ export interface SessionTokenRenderData {
    * presence, and cache-hit token split from the most recent turn.
    * Undefined for Codex sessions. */
   claudeTurnInfo?: ClaudeTurnInfo;
+  /** Claude-only: real compaction fire point in tokens. Distinct from
+   * `ceiling` because recent Claude Code releases stack a reserve on
+   * the override rather than replacing the default formula. Drives
+   * the "Auto-Compact at ~X" tooltip line. Undefined for Codex. */
+  autoCompactEffectiveTokens?: number;
 }
 
 export interface SessionTokenWidgetDescriptor<TState extends { status: string }> {
@@ -136,11 +147,60 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+/** Cache-miss flash window. Three-frame cycle over 2000ms:
+ *
+ *   0-500    MISS banner
+ *   500-1000 normal tokens
+ *   1000-2000 MISS banner (held)
+ *
+ * After 2000ms the widget returns to the normal readout permanently.
+ * Widget's 250ms ticker samples the frame selector every render so the
+ * alternation lands visibly despite each half-cycle being short. */
+const CACHE_MISS_FLASH_MS = 2000;
+/** Cache-miss definition: a new turn's usage bundle lands where
+ * `cache_read_input_tokens` is near zero AND `cache_creation_input_tokens`
+ * is substantial. Near-zero cached read means the prefix cache was not
+ * used this turn; substantial creation means Claude had to rewrite
+ * stable content that normally stays cached. Both signals together
+ * isolate a real miss (TTL expired, context invalidated, auto-compact
+ * fired) from normal every-turn cache writes (cache_creation is small,
+ * cached read stays high).
+ *
+ * Thresholds:
+ *   - CURR_MAX (cached read ceiling for "near zero"): 1,000 tokens.
+ *     A real miss reads essentially nothing from cache.
+ *   - CREATION_MIN (cache creation floor for "substantial"): 10,000
+ *     tokens. Normal every-turn creation is typically a few hundred
+ *     to a couple thousand tokens for just the new message block.
+ *     10k+ means Claude rehashed system prompt + history.
+ *
+ * Also gated by usage-bundle change (`outputTokens:totalInput:cached`
+ * signature) so a repeated poll that re-reads the same turn never
+ * fires a duplicate miss flash. */
+const CACHE_MISS_CACHED_MAX = 1_000;
+const CACHE_MISS_CREATION_MIN = 10_000;
+const CACHE_MISS_BANNER = "🔴MISS🔴";
+
+/** Transcript/rollout staleness threshold for the heuristic network-
+ * disconnect indicator. PID-alive + no-writes-for-30s is not a proof
+ * of network loss (could be a legitimately long reasoning pass), but
+ * it matches user-reported "hang" perception often enough to surface
+ * a `$(debug-disconnect)` glyph. Longer than the 5s active threshold
+ * so a normal slow turn does not trip it. */
+const NETWORK_STALL_STALE_MS = 30_000;
+
 export class SessionTokenWidget<TState extends { status: string }> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
   private descriptor: SessionTokenWidgetDescriptor<TState>;
   private lastState: TState | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
+  /** Signature of the last usage bundle we've seen on this widget
+   * instance. Format: `output:totalInput:cached:creation`. Guards the
+   * miss detector against firing twice on the same turn when multiple
+   * polls read the same assistant entry (normal between the 15s poll
+   * cadence and any intermediate triggerPoll). */
+  private lastUsageSignature: string | null = null;
+  private cacheMissFlashStartedAt: number | null = null;
 
   constructor(descriptor: SessionTokenWidgetDescriptor<TState>) {
     this.descriptor = descriptor;
@@ -152,6 +212,56 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     this.item.name = `WAT321: ${descriptor.provider} Session Tokens`;
     this.item.text = `${descriptor.idlePrefix} ${descriptor.provider} -`;
     this.item.tooltip = `No active ${descriptor.provider} session`;
+  }
+
+  /** Detect a Claude turn that paid full input price because the
+   * prefix cache was not usable (TTL expired after idle, context
+   * invalidated, auto-compact ran). Signal requires all three:
+   *   1. Usage bundle changed from the last poll (new turn landed,
+   *      not a duplicate read of the same turn). Signature covers
+   *      output + total input + cached + creation so any per-turn
+   *      difference trips the check.
+   *   2. `cachedInputTokens < CACHE_MISS_CACHED_MAX` - the cache
+   *      was not substantially read this turn.
+   *   3. `cacheCreationTokens >= CACHE_MISS_CREATION_MIN` - Claude
+   *      rehashed enough content to indicate a real rebuild, not
+   *      the small every-turn creation that is normal cache upkeep.
+   *
+   * Codex sessions never populate `claudeTurnInfo` so this no-ops on
+   * that side. First-observation case is also skipped so the widget
+   * does not flash on initial widget mount. */
+  private maybeLatchCacheMiss(claudeTurnInfo: ClaudeTurnInfo | undefined): void {
+    if (claudeTurnInfo === undefined) return;
+    const sig = `${claudeTurnInfo.outputTokens}:${claudeTurnInfo.totalInputTokens}:${claudeTurnInfo.cachedInputTokens}:${claudeTurnInfo.cacheCreationTokens}`;
+    if (sig === this.lastUsageSignature) return;
+    const firstObservation = this.lastUsageSignature === null;
+    this.lastUsageSignature = sig;
+    if (firstObservation) return;
+    if (
+      claudeTurnInfo.cachedInputTokens < CACHE_MISS_CACHED_MAX &&
+      claudeTurnInfo.cacheCreationTokens >= CACHE_MISS_CREATION_MIN
+    ) {
+      this.cacheMissFlashStartedAt = Date.now();
+    }
+  }
+
+  /** True if the current render should show the MISS banner instead
+   * of the normal token readout. Three-frame sequence over 2000ms:
+   *
+   *   0-500    MISS banner
+   *   500-1000 tokens
+   *   1000-2000 MISS banner (held)
+   *
+   * After 2000ms the flash window ends. Widget's 250ms ticker samples
+   * this every frame so the alternation lands visibly despite each
+   * half-cycle being short. */
+  private cacheMissFrameShowsMiss(): boolean {
+    if (this.cacheMissFlashStartedAt === null) return false;
+    const elapsed = Date.now() - this.cacheMissFlashStartedAt;
+    if (elapsed >= CACHE_MISS_FLASH_MS) return false;
+    if (elapsed < 500) return true;
+    if (elapsed < 1000) return false;
+    return true;
   }
 
   update(state: TState): void {
@@ -185,6 +295,19 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     const mtimeFresh = now - data.transcriptMtimeMs < d.activeThresholdMs;
     if (!pidAlive && !mtimeFresh) return d.idlePrefix;
 
+    // Heuristic disconnect indicator. When the turn has been in
+    // progress long enough that no normal response would still be
+    // streaming AND the transcript mtime is stale (no writes for
+    // 30s+), swap the animated prefix for a debug-disconnect glyph.
+    // PID alive + no output for 30s+ points at network loss or API
+    // stall more often than a legitimately quiet thinking phase.
+    // Purely cosmetic: no API probe, no socket inspection, just
+    // surfacing a signal we already have.
+    const staleMs = now - data.transcriptMtimeMs;
+    if (staleMs > NETWORK_STALL_STALE_MS) {
+      return "$(debug-disconnect)";
+    }
+
     const index = Math.floor(now / d.activeStepMs) % d.activeFrames.length;
     return d.activeFrames[index];
   }
@@ -201,7 +324,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
       case "no-session":
       case "waiting":
-        this.item.text = `${d.idlePrefix} ${d.provider} -`;
+        this.item.text = `${d.idlePrefix} -`;
         this.item.tooltip = `No active ${d.provider} session`;
         this.item.color = undefined;
         this.item.show();
@@ -209,6 +332,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
       case "ok": {
         const data = d.getRenderData(state as TState & { status: "ok" });
+        this.maybeLatchCacheMiss(data.claudeTurnInfo);
 
         const effectiveCeiling = Math.max(0, data.ceiling - data.baselineTokens);
         const effectiveUsed = Math.max(0, data.contextUsed - data.baselineTokens);
@@ -218,10 +342,19 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
         const mode = getDisplayMode();
         const prefix = this.currentPrefix(data);
-        if (mode === "minimal" || mode === "compact") {
-          this.item.text = `${prefix} ${d.provider} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}`;
+        if (this.cacheMissFrameShowsMiss()) {
+          // MISS alternates with tokens across the 2000ms flash window
+          // (see cacheMissFrameShowsMiss for the cadence). Prefix stays
+          // visible throughout so the brand icon and any thinking /
+          // disconnect indicator ride through the flash - only the
+          // tokens/percent portion gets replaced. Tooltip keeps showing
+          // real data so hovering during the flash still gives you
+          // session info.
+          this.item.text = `${prefix} ${CACHE_MISS_BANNER}`;
+        } else if (mode === "minimal" || mode === "compact") {
+          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}`;
         } else {
-          this.item.text = `${prefix} ${d.provider} ${formatTokens(data.contextUsed)} / ${formatTokens(data.ceiling)} ${formatPct(pctOfCeiling)}`;
+          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} / ${formatTokens(data.ceiling)} ${formatPct(pctOfCeiling)}`;
         }
 
         this.item.color = getSessionTokenColor(pctOfCeiling, d.whitePct, d.yellowPct);
@@ -239,6 +372,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           stageInfo: data.stageInfo,
           claudeTurnInfo: data.claudeTurnInfo,
           turnState: data.turnState,
+          autoCompactEffectiveTokens: data.autoCompactEffectiveTokens,
         });
         this.item.show();
         return;

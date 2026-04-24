@@ -18,7 +18,9 @@ export {
 export {
   findRolloutPath,
   listRecoverableSessions,
+  readRolloutModelSlug,
   recoverBridgeThread,
+  rewriteRolloutModelSlug,
   type RecoverableSession,
 } from "./sessionRecovery";
 export {

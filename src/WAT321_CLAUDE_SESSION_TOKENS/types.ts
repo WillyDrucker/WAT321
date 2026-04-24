@@ -19,6 +19,14 @@ export interface ResolvedSession {
   contextUsed: number; // tokens currently in context
   contextWindowSize: number; // 200k or 1M
   autoCompactPct: number; // e.g. 70
+  /** Real compaction fire point in tokens. Distinct from
+   * `autoCompactPct * contextWindowSize` because recent Claude Code
+   * releases stack a small reserve on the override rather than
+   * replacing the default formula. Widget uses the nominal product
+   * for the bar + "N/M" numerator (that's the user's target); this
+   * effective value drives the "Auto-Compact at ~X" label so the
+   * advertised fire point matches observed behavior. */
+  autoCompactEffectiveTokens: number;
   source: "live" | "lastKnown"; // live = CLI process active, lastKnown = fallback from transcript mtime
   lastActiveAt: number; // ms - live: Date.now(); lastKnown: transcript file mtime
   /** Last transcript entry classification. Drives the active-state

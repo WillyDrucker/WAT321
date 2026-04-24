@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { isKnownCodexModel } from "../codexModels";
 import { formatModelDisplayName } from "../../engine/contracts";
 import { renderStageDisplay } from "../codex-rollout/phaseRender";
 import type { StageInfo } from "../codex-rollout/types";
@@ -59,6 +60,11 @@ export interface SessionTokenTooltipInput {
    * the plan / tool / reasoning lines only make sense while the
    * session is actively mid-turn. */
   turnState?: LastEntryKind;
+  /** Claude-only: real compaction fire point. When supplied, the
+   * "Auto-Compact at ~X" line uses this value with a `~` prefix to
+   * signal approximate, matching the Codex pattern. Falls back to
+   * `ceiling` when absent (older callers, Codex path). */
+  autoCompactEffectiveTokens?: number;
 }
 
 export function buildSessionTokenTooltip(
@@ -77,6 +83,7 @@ export function buildSessionTokenTooltip(
     stageInfo,
     claudeTurnInfo,
     turnState,
+    autoCompactEffectiveTokens,
   } = input;
 
   const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
@@ -109,7 +116,22 @@ export function buildSessionTokenTooltip(
     const windowLabel = contextWindowSize
       ? ` (${formatTokens(contextWindowSize)} context)`
       : "";
-    md.appendMarkdown(`${modelName}${windowLabel}  \n`);
+    // Codex-only: flag a stored model slug that's absent from the
+    // local `~/.codex/models_cache.json`. Every `thread/resume` ships
+    // the stored slug to the API, so an unknown slug guarantees a 404
+    // on the next prompt. Prefixing a warning badge lets the user
+    // spot config drift before dispatching. Claude model IDs aren't
+    // validated this way - Claude's slugs come from WAT321's own
+    // MODEL_CONTEXT_WINDOWS table, not a user-editable cache.
+    const codexModelInvalid =
+      provider === "Codex" && !isKnownCodexModel(modelId);
+    const prefix = codexModelInvalid ? "⚠ " : "";
+    md.appendMarkdown(`${prefix}${modelName}${windowLabel}  \n`);
+    if (codexModelInvalid) {
+      md.appendMarkdown(
+        `_Model not in your installed Codex's known set. The next prompt will fail; repair via the bridge menu._  \n`
+      );
+    }
   }
   if (typeof lastActiveAt === "number") {
     md.appendMarkdown(`Last active: ${formatRelativeTime(lastActiveAt)}  \n`);
@@ -119,12 +141,18 @@ export function buildSessionTokenTooltip(
   );
   md.appendMarkdown(`${bar} ${formatPct(pctUsed)} used\n\n`);
   if (provider === "Claude") {
-    // Claude's ceiling is the literal compact trigger
-    // (`autoCompactPct * contextWindow`, e.g. 700k for extended
-    // models at 70%). Compact fires at exactly the displayed ceiling,
-    // so "Auto-Compact at {ceiling}" reads literally.
+    // Claude Code's percentage override stacks with an internal
+    // reserve in recent releases: setting OVERRIDE=73 on a 1M window
+    // triggers compaction around ~715k, not the nominal 730k the
+    // ceiling math produces. `autoCompactEffectiveTokens` (when
+    // supplied) captures that drift. Prefix `~` to signal approximate
+    // so the label doesn't read as a guaranteed exact fire point.
+    // Falls back to the exact ceiling when the caller didn't wire
+    // the effective value through.
+    const triggerTokens = autoCompactEffectiveTokens ?? ceiling;
+    const prefix = autoCompactEffectiveTokens !== undefined ? "~" : "";
     md.appendMarkdown(
-      `${CLAMP} Auto-Compact at ${formatTokens(ceiling)}`
+      `${CLAMP} Auto-Compact at ${prefix}${formatTokens(triggerTokens)}`
     );
   } else {
     // Codex's ceiling is the effective context window. Actual

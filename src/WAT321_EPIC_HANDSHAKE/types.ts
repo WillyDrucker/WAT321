@@ -16,4 +16,10 @@ export interface EpicHandshakeLogger {
   warn(message: string): void;
   /** Unexpected failures that need attention. */
   error(message: string): void;
+  /** Reveal the underlying output channel in the VS Code Output panel.
+   * Used by diagnostic UI paths (Delete All "(0) - View details",
+   * Repair picker Force Repair, etc.) to surface the scan breakdown
+   * a user just logged. No-op if the logger is backed by a non-VS
+   * Code implementation (test doubles). */
+  show(): void;
 }

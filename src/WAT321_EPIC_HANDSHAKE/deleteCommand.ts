@@ -1,10 +1,12 @@
 import { existsSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import * as vscode from "vscode";
+import { readFirstLine } from "../shared/fs/fileReaders";
 import { EPIC_HANDSHAKE_DIR } from "./constants";
 import {
   bridgeThreadDisplayName,
+  findRolloutPath,
   listRecoverableSessions,
   type BridgeThreadRecord,
 } from "./threadPersistence";
@@ -155,21 +157,110 @@ function walk(dir: string): string[] {
   return out;
 }
 
+/** Scan `~/.codex/session_index.jsonl` for bridge-pattern entries and
+ * classify each against the current workspace. Used by Delete All to
+ * explain a (0) result instead of silently exiting. Returns null when
+ * the index has no bridge-pattern entries at all (genuine clean state);
+ * otherwise returns the rows (one per scanned entry) plus a short
+ * summary suitable for a toast. Detail goes to the Epic Handshake
+ * output channel via the caller's logger. */
+function buildDeleteAllDiagnostic(workspacePath: string): {
+  summary: string;
+  rows: string[];
+  basename: string;
+  normalized: string;
+} | null {
+  const indexPath = join(homedir(), ".codex", "session_index.jsonl");
+  if (!existsSync(indexPath)) return null;
+
+  const bridgeRe = /Epic Handshake Claude-to-Codex S(\d+)$/;
+  const wsBasename = basename(workspacePath) || "Workspace";
+  const wsNorm = normalizePath(workspacePath);
+
+  const rows: string[] = [];
+  let matchingCount = 0;
+  try {
+    const raw = readFileSync(indexPath, "utf8");
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let entry: { id?: string; thread_name?: string };
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const name = entry.thread_name ?? "";
+      if (!bridgeRe.test(name)) continue;
+      matchingCount++;
+      const id = entry.id;
+      if (typeof id !== "string") {
+        rows.push(`${name}: rejected - no id in index entry`);
+        continue;
+      }
+      if (!name.startsWith(`${wsBasename} `)) {
+        rows.push(`${name}: rejected - basename mismatch (belongs to another workspace)`);
+        continue;
+      }
+      const rolloutPath = findRolloutPath(id);
+      if (rolloutPath === null) {
+        rows.push(`${name} (${id.slice(0, 8)}...): rejected - rollout file missing on disk`);
+        continue;
+      }
+      const rolloutCwd = readRolloutCwdHeader(rolloutPath);
+      if (rolloutCwd === null) {
+        rows.push(`${name} (${id.slice(0, 8)}...): rejected - cwd not readable from rollout`);
+        continue;
+      }
+      if (normalizePath(rolloutCwd) !== wsNorm) {
+        rows.push(`${name} (${id.slice(0, 8)}...): rejected - session_meta.cwd is "${rolloutCwd}" (expected "${workspacePath}")`);
+        continue;
+      }
+      rows.push(`${name} (${id.slice(0, 8)}...): ACCEPTED - would be deleted`);
+    }
+  } catch {
+    return null;
+  }
+
+  if (matchingCount === 0) return null;
+
+  const summary = `no bridge sessions matched this workspace. Scanned ${matchingCount} bridge-pattern session${matchingCount === 1 ? "" : "s"} in the index. Click "View details" for the full breakdown.`;
+
+  return { summary, rows, basename: wsBasename, normalized: wsNorm };
+}
+
+function normalizePath(p: string): string {
+  const s = p.replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? s.toLowerCase() : s;
+}
+
+function readRolloutCwdHeader(rolloutPath: string): string | null {
+  const firstLine = readFirstLine(rolloutPath);
+  if (firstLine === null) return null;
+  try {
+    const entry = JSON.parse(firstLine) as {
+      type?: string;
+      payload?: { cwd?: unknown };
+    };
+    if (entry.type !== "session_meta") return null;
+    const cwd = entry.payload?.cwd;
+    return typeof cwd === "string" ? cwd : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Destructive bulk delete of every Codex session matching this
  * workspace's bridge pattern. Enumerates sessions via
  * `listRecoverableSessions` (scans `~/.codex/session_index.jsonl`
- * for `^<basename> Epic Handshake Claude-to-Codex S\d+$`), then for
- * each one deletes the rollout file and strips the index entry.
- * Null's the local bridge-thread record at the end so the next prompt
- * spawns a fresh S<N+1>. Single confirmation covers the whole set.
- *
- * Known limitation: workspace identity is basename-scoped. Two
- * workspaces named "foo" in different parent paths would each see
- * the other's sessions in this list and the delete would hit both.
- * Documented in the session handoff as the basename-scope issue to
- * fix before bulk delete ships broadly. For a user clearing their
- * own machine, that risk is negligible.
+ * for `^<basename> Epic Handshake Claude-to-Codex S\d+$` AND confirms
+ * the rollout's `session_meta.cwd` equals the current workspacePath),
+ * then for each one deletes the rollout file and strips the index
+ * entry. Null's the local bridge-thread record at the end so the
+ * next prompt spawns a fresh S<N+1>. Single confirmation covers the
+ * whole set. The cwd-match gate in the lister is load-bearing:
+ * without it a sibling workspace sharing this workspace's basename
+ * would get swept by this delete.
  */
 export async function deleteAllCodexSessions(
   logger: EpicHandshakeLogger
@@ -184,9 +275,29 @@ export async function deleteAllCodexSessions(
 
   const sessions = listRecoverableSessions(workspacePath);
   if (sessions.length === 0) {
-    void vscode.window.showInformationMessage(
-      "Epic Handshake: no Codex bridge sessions found for this workspace."
+    // Diagnostic path: write the per-entry scan breakdown to the
+    // Epic Handshake output channel and show a short toast pointing
+    // at it. Keeps the on-screen feedback terse while preserving full
+    // detail where a user can page through it.
+    const diag = buildDeleteAllDiagnostic(workspacePath);
+    if (diag === null) {
+      void vscode.window.showInformationMessage(
+        "Epic Handshake: no Codex bridge sessions found for this workspace."
+      );
+      return;
+    }
+    logger.info("[delete-all] (0) diagnostic:");
+    for (const row of diag.rows) logger.info(`  ${row}`);
+    logger.info(
+      `[delete-all] workspace=${workspacePath} basename=${diag.basename} normalized=${diag.normalized}`
     );
+    const pick = await vscode.window.showInformationMessage(
+      `Epic Handshake: ${diag.summary}`,
+      "View details"
+    );
+    if (pick === "View details") {
+      logger.show();
+    }
     return;
   }
 

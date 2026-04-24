@@ -32,6 +32,7 @@ export type Action =
   | "wait-mode-toggle"
   | "permissions-toggle"
   | "manage-sessions"
+  | "repair-sessions"
   | "show-status"
   | "back";
 
@@ -99,6 +100,8 @@ export function makePauseResumeItem(
     ? {
         label: "🟢 Resume bridge",
         description: "Re-enable Claude to Codex prompts.",
+        detail:
+          "New prompts from Claude will dispatch to Codex again. Any prompt Claude queued while paused still has to be sent from Claude's side; pausing does not buffer prompts.",
         // Emoji prefix matches the pause/cancel pattern. VS Code
         // QuickPick ignores iconPath ThemeColor (Issue #72489), so
         // colored codicons via the ThemeIcon path would not render.
@@ -110,6 +113,8 @@ export function makePauseResumeItem(
     : {
         label: "🟡 Pause bridge",
         description: "Block new prompts until you resume.",
+        detail:
+          "New Claude to Codex prompts get a short \"bridge paused\" reply instead of dispatching. Any turn already in flight runs to completion. The widget shows the paused state so you can tell at a glance; resume returns to normal dispatch.",
         // Emoji prefix instead of codicon. Web research confirmed
         // VS Code does not apply ThemeColor to QuickPickItem iconPath
         // (Issue #72489 - open since 2019) and inline codicon colors

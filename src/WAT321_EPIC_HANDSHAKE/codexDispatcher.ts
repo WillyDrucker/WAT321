@@ -11,7 +11,13 @@ import {
 import { newEnvelopeId, readEnvelope, writeEnvelopeAtomic, type Envelope } from "./envelope";
 import { classifyFailure } from "./failureClassifier";
 import { moveToSent, purgeSent } from "./mailbox";
-import { loadBridgeThreadRecord } from "./threadPersistence";
+import { isKnownCodexModel, readCodexConfigModel } from "../shared/codexModels";
+import {
+  clearBridgeErrorState,
+  findRolloutPath,
+  readRolloutModelSlug,
+  loadBridgeThreadRecord,
+} from "./threadPersistence";
 import {
   noteFailure,
   noteSuccess,
@@ -55,6 +61,26 @@ const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
  * thread and rotate to a fresh one. Keeps a user's S1 alive through
  * transient network blips but bails out of genuinely stuck threads. */
 const MAX_CONSECUTIVE_FAILURES = 3;
+
+/** Recognize a bridge-thread `lastError` string that came from an
+ * upstream "model does not exist" / "model not available" response.
+ * Used by auto-recovery: if past failures on this thread were all
+ * model-unknown errors AND the model is now in the cache, we can
+ * safely clear the failure counter and resume. Matches substrings
+ * so minor wording changes across Codex / OpenAI versions still
+ * classify correctly. */
+function looksLikeModelError(lastError: string | null | undefined): boolean {
+  if (!lastError) return false;
+  const lower = lastError.toLowerCase();
+  return (
+    lower.includes("does not exist") ||
+    lower.includes("does not recognize") ||
+    lower.includes("model not available") ||
+    lower.includes("model not found") ||
+    lower.includes("do not have access to") ||
+    lower.includes("is not in your installed codex")
+  );
+}
 
 export class CodexDispatcher {
   private watcher: PathWatcher | null = null;
@@ -235,9 +261,34 @@ export class CodexDispatcher {
     const clientReady = Date.now();
     let record = loadBridgeThreadRecord(this.workspacePath);
 
+    // Auto-recovery: if the stored model slug is NOW recognized
+    // (Codex CLI upgrade added support for it, or the cache refreshed)
+    // and the last failure was a model-unknown error, clear the
+    // failure state and preserve the threadId. Lets a session that
+    // was bricked by upstream absence-of-model recover silently on
+    // the next prompt without the user clicking "Clear error state".
+    // Runs BEFORE the threshold rotation check so a session at or
+    // past the threshold can still be rescued.
+    if (
+      record.threadId !== null &&
+      (record.consecutiveFailures ?? 0) > 0 &&
+      looksLikeModelError(record.lastError)
+    ) {
+      const rolloutPath = findRolloutPath(record.threadId);
+      const storedSlug = rolloutPath ? readRolloutModelSlug(rolloutPath) : null;
+      if (storedSlug !== null && isKnownCodexModel(storedSlug)) {
+        this.logger.info(
+          `[auto-recover] session S${record.sessionCounter} stored model "${storedSlug}" is now recognized; clearing ${record.consecutiveFailures} prior failure(s) and resuming`
+        );
+        record = clearBridgeErrorState(this.workspacePath);
+      }
+    }
+
     // Threshold-based rotation: if we've seen N consecutive recoverable
     // failures on the same thread, rotate. Protects against a thread
-    // stuck in a bad state we can't detect cleanly.
+    // stuck in a bad state we can't detect cleanly. Runs after the
+    // auto-recovery check above so model-unknown failures that the
+    // upstream cache now covers don't trigger a pointless rotation.
     if (
       record.threadId !== null &&
       (record.consecutiveFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES
@@ -250,6 +301,20 @@ export class CodexDispatcher {
 
     let threadId = record.threadId;
     if (threadId === null) {
+      // Pre-spawn config validation. `thread/start` accepts any
+      // model slug silently; Codex only validates when the first
+      // `turn/start` actually calls the upstream API. Without this
+      // check, a config.toml with a bogus model births a zombie
+      // thread (rollout file on disk with a bad session_meta.model)
+      // that fails every subsequent turn with a cryptic API error.
+      // Catch it here before any side effect lands.
+      const configDefault = readCodexConfigModel();
+      if (configDefault !== null && !isKnownCodexModel(configDefault)) {
+        const msg = `Your Codex config default model "${configDefault}" is not in your installed Codex CLI's models cache. Every bridge session would be born broken. Fix \`~/.codex/config.toml\` to a valid slug (see \`codex --help\` for supported models) or remove the \`model\` line entirely to use Codex's built-in default, then try again.`;
+        this.logger.warn(`[preflight] ${msg}`);
+        noteFailure(record, msg);
+        throw new Error(msg);
+      }
       const spawned = await spawnFreshThread({
         client,
         record,
@@ -259,6 +324,23 @@ export class CodexDispatcher {
       threadId = spawned.threadId;
       record = spawned.record;
     } else {
+      // Pre-flight model validation. Every `thread/resume` ships the
+      // rollout's stored `session_meta.model` to the API; if that slug
+      // is no longer in the user's `~/.codex/models_cache.json` the
+      // next turn 404s with a cryptic "model X does not exist" error
+      // that surfaces inside Codex's own stream. Catching it here
+      // keeps the failure actionable - the user sees a clear reply
+      // and a pointer at the Repair menu instead of an API stack.
+      // Validation is lossy in the "cache unreadable" case (returns
+      // true), so a missing cache never gates a legit dispatch.
+      const rolloutPath = findRolloutPath(threadId);
+      const storedSlug = rolloutPath ? readRolloutModelSlug(rolloutPath) : null;
+      if (storedSlug !== null && !isKnownCodexModel(storedSlug)) {
+        const msg = `Codex session S${record.sessionCounter} stores model "${storedSlug}" which your installed Codex CLI does not recognize. Open the bridge menu and pick "Manage Codex Sessions" then "Repair sessions" to fix, or "Reset Codex Session" to roll to a fresh thread.`;
+        this.logger.warn(`[preflight] ${msg}`);
+        noteFailure(record, msg);
+        throw new Error(msg);
+      }
       try {
         await client.sendRequest("thread/resume", { threadId });
       } catch (err) {

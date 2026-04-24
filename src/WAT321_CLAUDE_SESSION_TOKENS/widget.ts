@@ -35,6 +35,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
       lastActiveAt:
         session.source === "lastKnown" ? session.lastActiveAt : undefined,
       claudeTurnInfo: session.turnInfo,
+      autoCompactEffectiveTokens: session.autoCompactEffectiveTokens,
     };
   },
 };

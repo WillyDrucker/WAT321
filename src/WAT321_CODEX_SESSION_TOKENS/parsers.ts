@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { readHead } from "../shared/fs/fileReaders";
+import { readFirstLine, readHead } from "../shared/fs/fileReaders";
 import type { LastEntryKind } from "../shared/transcriptClassifier";
 
 /**
@@ -76,12 +76,13 @@ export function parseLastTokenCount(tail: string): LastTokenCount | null {
 }
 
 /** Read `session_meta.payload.cwd` from the first line of the rollout.
- * Used both to match rollouts to a workspace and to label the widget. */
+ * Used both to match rollouts to a workspace and to label the widget.
+ * `readFirstLine` reads in chunks until a newline, so an oversized
+ * session_meta first line (routinely 15-25KB on recent Codex CLI
+ * rollouts; can grow further as Codex adds metadata) is always
+ * captured intact. */
 export function parseCwd(rolloutPath: string): string | null {
-  const head = readHead(rolloutPath, 32_768);
-  if (!head) return null;
-
-  const firstLine = head.split("\n")[0];
+  const firstLine = readFirstLine(rolloutPath);
   if (!firstLine) return null;
 
   try {
