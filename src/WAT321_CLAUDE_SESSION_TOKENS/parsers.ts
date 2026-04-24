@@ -127,6 +127,7 @@ export function parseTurnInfo(tail: string): ClaudeTurnInfo {
   let outputTokens = 0;
   let totalInputTokens = 0;
   let cachedInputTokens = 0;
+  let cacheCreationTokens = 0;
   let usageLocked = false;
   let thinkingScanBudget = 20;
 
@@ -160,7 +161,7 @@ export function parseTurnInfo(tail: string): ClaudeTurnInfo {
           typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
         const input =
           typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
-        const cacheCreation =
+        cacheCreationTokens =
           typeof usage.cache_creation_input_tokens === "number"
             ? usage.cache_creation_input_tokens
             : 0;
@@ -168,7 +169,7 @@ export function parseTurnInfo(tail: string): ClaudeTurnInfo {
           typeof usage.cache_read_input_tokens === "number"
             ? usage.cache_read_input_tokens
             : 0;
-        totalInputTokens = input + cacheCreation + cachedInputTokens;
+        totalInputTokens = input + cacheCreationTokens + cachedInputTokens;
         usageLocked = true;
       }
     }
@@ -205,6 +206,7 @@ export function parseTurnInfo(tail: string): ClaudeTurnInfo {
     outputTokens,
     totalInputTokens,
     cachedInputTokens,
+    cacheCreationTokens,
   };
 }
 

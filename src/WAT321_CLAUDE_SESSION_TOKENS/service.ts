@@ -4,7 +4,11 @@ import { basename, join } from "node:path";
 import type { ResolvedSession, WidgetState } from "./types";
 import { readTail } from "../shared/fs/fileReaders";
 import { getProjectKey } from "../shared/fs/pathUtils";
-import { readAutoCompactPct, SETTINGS_PATH } from "../shared/claudeSettings";
+import {
+  readAutoCompactEffectiveTriggerTokens,
+  readAutoCompactPct,
+  SETTINGS_PATH,
+} from "../shared/claudeSettings";
 import { resolveContextWindow } from "../engine/contracts";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import {
@@ -251,6 +255,8 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       contextUsed,
       contextWindowSize,
       autoCompactPct: this.cachedAutoCompactPct,
+      autoCompactEffectiveTokens:
+        readAutoCompactEffectiveTriggerTokens(contextWindowSize),
       source,
       lastActiveAt: mtime,
       turnState: classifyLastEntry(tail),
