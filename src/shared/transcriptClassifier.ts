@@ -20,6 +20,31 @@
  * variations across Claude Code versions. */
 const INTERRUPT_MARKER = "[Request interrupted";
 
+/** Markers Claude Code writes to the transcript as the terminal entry
+ * of an auto-compact operation. The compact summary arrives as a
+ * `type: "user"` entry (structurally a new prompt) but meaning-wise
+ * is the end state of the prior turn, not a pending question. Without
+ * this recognition the session-token widget's thinking indicator stays
+ * on after every auto-compact because the classifier returns `user`
+ * and keeps waiting for an assistant response that never comes (the
+ * real next assistant response only fires on the user's NEXT prompt).
+ * Matched as substrings to tolerate wording drift across Claude Code
+ * releases. */
+const COMPACT_MARKERS = [
+  "This session is being continued from a previous conversation",
+  "conversation was compacted",
+  "<command-name>compact</command-name>",
+] as const;
+
+/** True if a decoded text block contains any of our auto-compact
+ * terminal markers. Used inside the user-entry classifier path. */
+function isCompactMarker(text: string): boolean {
+  for (const marker of COMPACT_MARKERS) {
+    if (text.includes(marker)) return true;
+  }
+  return false;
+}
+
 /** Classification of the last parseable JSONL entry in a Claude
  * transcript tail. */
 export type LastEntryKind =
@@ -58,20 +83,26 @@ export function classifyLastEntry(tail: string): LastEntryKind {
       // An interrupt marker is a user-type entry in form but signals
       // turn complete in meaning. Treat as assistant-done so callers
       // that gate on "turn in progress" stop animating / firing.
+      // Same reasoning applies to auto-compact summary entries: the
+      // compact runs AFTER the assistant reply landed and the summary
+      // is the terminal state of that turn, not a fresh prompt.
       const msg = entry.message as Record<string, unknown> | undefined;
       const content = msg?.content;
-      if (Array.isArray(content)) {
-        const isInterrupt = content.some(
-          (p) =>
-            typeof p === "object" &&
-            p !== null &&
-            (p as Record<string, unknown>).type === "text" &&
-            typeof (p as Record<string, unknown>).text === "string" &&
-            ((p as Record<string, unknown>).text as string).includes(
-              INTERRUPT_MARKER
-            )
-        );
-        if (isInterrupt) return "assistant-done";
+      const textBlobs: string[] = [];
+      if (typeof content === "string") {
+        textBlobs.push(content);
+      } else if (Array.isArray(content)) {
+        for (const p of content) {
+          if (typeof p !== "object" || p === null) continue;
+          const block = p as Record<string, unknown>;
+          if (block.type === "text" && typeof block.text === "string") {
+            textBlobs.push(block.text);
+          }
+        }
+      }
+      for (const text of textBlobs) {
+        if (text.includes(INTERRUPT_MARKER)) return "assistant-done";
+        if (isCompactMarker(text)) return "assistant-done";
       }
       return "user";
     }
