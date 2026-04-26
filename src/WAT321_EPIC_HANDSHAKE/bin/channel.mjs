@@ -46,11 +46,23 @@ const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
 const INBOX_CLAUDE_ROOT = join(EH_DIR, "inbox", "claude");
 const INBOX_CODEX_ROOT = join(EH_DIR, "inbox", "codex");
 const SENT_CLAUDE_ROOT = join(EH_DIR, "sent", "claude");
+const ATTACHMENTS_CLIPBOARD_DIR = join(EH_DIR, "attachments", "clipboard");
 const LOG_PATH = join(EH_DIR, "channel.log");
 const PAUSED_FLAG = join(EH_DIR, "paused.flag");
 const FIRE_AND_FORGET_FLAG = join(EH_DIR, "fire-and-forget.flag");
 const ADAPTIVE_FLAG = join(EH_DIR, "adaptive.flag");
 const LOG_MAX_BYTES = 50_000;
+/** TTL on staged clipboard images. Stage helper sweeps before each
+ * stage, and `epic_handshake_ask` sweeps before each dispatch, so
+ * stale images never accumulate beyond this window. Anything older is
+ * unlinked on the next sweep. Reset WAT321 wipes the dir entirely. */
+const ATTACHMENTS_TTL_MS = 5 * 60 * 1000;
+
+/** Threshold beyond which an in-flight turn with no heartbeat updates
+ * is treated as stuck. The bridge auto-aborts and writes a synthetic
+ * "stale heartbeat" reply into the inbox so the next prompt or inbox
+ * check surfaces the failure instead of polling forever. Issue #61. */
+const STALE_HEARTBEAT_MS = 10 * 60 * 1000;
 
 /** Per-workspace identity. Mirrors `src/WAT321_EPIC_HANDSHAKE/
  * workspaceHash.ts` so envelopes written here land in the same
@@ -181,18 +193,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "epic_handshake_ask",
         description:
-          "Send a Claude to Codex prompt via Epic Handshake. Use when user says ask/tell/prompt Codex. Only fire for an actual current request, not past references or hypotheticals. Auto-includes pending late replies. Pass absolute paths in file_paths when the user wants Codex to look at specific files - Codex reads them directly from disk (sandbox permitting). For pasted screenshots/images, first run `powershell -NoProfile -File ~/.wat321/epic-handshake/bin/stage-clipboard.ps1` via Bash (Windows) to stage the clipboard image to disk, capture the printed path, and pass it via file_paths.",
+          "Send a Claude to Codex prompt via Epic Handshake. Use when user says ask/tell/prompt Codex. Only fire for an actual current request, not past references or hypotheticals. Auto-includes pending late replies. To attach files or pasted screenshots, mention their absolute path in your prompt body and Codex will read them from disk (sandbox permitting). For pasted clipboard images, run `node ~/.wat321/epic-handshake/bin/stage-clipboard.mjs` via Bash and include the printed path in your prompt - run it ONLY when about to send a bridge prompt referencing the screenshot, not on every paste.",
         inputSchema: {
           type: "object",
           properties: {
             text: { type: "string" },
             timeout_sec: { type: "integer" },
-            file_paths: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "Optional absolute paths to files Codex should read as context. Appended to the prompt body so Codex knows which paths to open.",
-            },
           },
           required: ["text"],
         },
@@ -248,11 +254,26 @@ function logRequestShape(req) {
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   logRequestShape(req);
   if (req.params.name === "epic_handshake_inbox") {
-    const preamble = collectLateReplies();
+    let preamble = collectLateReplies();
+    let inFlightLine = null;
+    if (!preamble) {
+      // Empty inbox: surface in-flight status (or auto-abort stuck
+      // turns) so the user doesn't poll forever against a dead bridge.
+      // The auto-abort path deposits a synthetic envelope, so we
+      // re-collect once after the call.
+      inFlightLine = reportInFlightOrAbortStale();
+      preamble = collectLateReplies();
+    }
     const text = preamble
       ? preamble
-      : "No pending replies from Codex. The Epic Handshake inbox is empty.";
-    log("info", `inbox tool invoked; ${preamble ? "returned backlog" : "empty"}`);
+      : inFlightLine ||
+        "No pending replies from Codex. The Epic Handshake inbox is empty.";
+    log(
+      "info",
+      `inbox tool invoked; ${
+        preamble ? "returned backlog" : inFlightLine ? "in-flight status" : "empty"
+      }`
+    );
     return { content: [{ type: "text", text }] };
   }
   if (req.params.name !== "epic_handshake_ask") {
@@ -280,22 +301,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   // backlog on the next Claude to Codex prompt.
   const latePreamble = collectLateReplies();
 
-  const args = req.params.arguments || {};
+  // Sweep stale clipboard attachments before dispatching. Combined
+  // with the stage helper's own pre-stage sweep, this keeps the
+  // attachments dir bounded to the 5-minute TTL window without
+  // requiring a dedicated timer.
+  sweepStaleAttachments();
 
-  // Append file references so Codex knows which paths to open. Codex
-  // reads them directly from disk, so we just surface the list in the
-  // prompt body - no staging, no envelope schema change. Sandbox
-  // permissions still apply: Read-Only Codex can read files but not
-  // execute; Full-Access Codex can both.
-  let bodyText = args.text || "";
-  if (Array.isArray(args.file_paths) && args.file_paths.length > 0) {
-    const paths = args.file_paths.filter((p) => typeof p === "string" && p.length > 0);
-    if (paths.length > 0) {
-      const list = paths.map((p) => `  - ${p}`).join("\n");
-      bodyText = `${bodyText}\n\nAttached file paths:\n${list}`;
-      log("info", `file_paths attached: ${paths.length} path(s)`);
-    }
-  }
+  const args = req.params.arguments || {};
+  const bodyText = args.text || "";
 
   const id = randomUUID();
   // 120s default covers most Claude to Codex prompts. Complex
@@ -486,6 +499,136 @@ function collectLateReplies() {
   return chunks.join("\n\n---\n\n");
 }
 
+/** Locate the freshest `turn-heartbeat.<envelopeId>.json` file written
+ * for THIS workspace. Returns `{ path, parsed }` or null. The
+ * heartbeat carries `workspaceHash` in its payload so we can filter
+ * out heartbeats from sibling VS Code windows that share the same
+ * `~/.wat321/` directory. */
+function findOurHeartbeat() {
+  let entries;
+  try {
+    entries = readdirSync(EH_DIR);
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const name of entries) {
+    if (!name.startsWith("turn-heartbeat.") || !name.endsWith(".json")) continue;
+    const p = join(EH_DIR, name);
+    let st;
+    let raw;
+    try {
+      st = statSync(p);
+      raw = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (parsed.workspaceHash !== WORKSPACE_HASH) continue;
+    if (!best || st.mtimeMs > best.mtimeMs) {
+      best = { path: p, parsed, mtimeMs: st.mtimeMs };
+    }
+  }
+  return best;
+}
+
+/** Inspect bridge state for the current workspace and either return a
+ * status line (turn still in flight, heartbeat fresh) or auto-abort a
+ * stuck turn (heartbeat older than `STALE_HEARTBEAT_MS`) by depositing
+ * a synthetic abort reply into the inbox and clearing the heartbeat
+ * file. Returns null when nothing is in flight.
+ *
+ * Called from the `epic_handshake_inbox` handler when no late replies
+ * are pending. Issue #61. */
+function reportInFlightOrAbortStale() {
+  const wsInFlightFlag = join(EH_DIR, `in-flight.${WORKSPACE_HASH}.flag`);
+  if (!existsSync(wsInFlightFlag)) return null;
+
+  const hb = findOurHeartbeat();
+  if (hb === null) {
+    // Flag set but no heartbeat anywhere - dispatcher might be in the
+    // pre-heartbeat window. Surface the bare fact so the user knows
+    // something is starting; no abort yet.
+    return "Epic Handshake: a Claude to Codex turn is in flight (no heartbeat yet). Try again in a few seconds.";
+  }
+
+  const now = Date.now();
+  const lastProgressMs =
+    typeof hb.parsed.lastProgressAt === "number"
+      ? hb.parsed.lastProgressAt
+      : hb.mtimeMs;
+  const elapsedSinceProgress = now - lastProgressMs;
+  const stage = hb.parsed.stage || "unknown";
+  const envelopeId = hb.parsed.envelopeId || "unknown";
+
+  if (elapsedSinceProgress >= STALE_HEARTBEAT_MS) {
+    // Stuck turn. Auto-abort: deposit a synthetic "stale heartbeat"
+    // envelope into the inbox so the next collectLateReplies pass
+    // surfaces it, and unlink the heartbeat + flag files so subsequent
+    // dispatches start clean.
+    const abortId = randomUUID();
+    const minutes = Math.round(elapsedSinceProgress / 60_000);
+    const body = [
+      `[Epic Handshake auto-abort: stale heartbeat]`,
+      ``,
+      `The previous Claude to Codex turn (envelope ${envelopeId}) stalled in stage \`${stage}\` with no heartbeat updates for ~${minutes} minute(s). The bridge has cleaned up the stuck state so the next prompt starts fresh.`,
+      ``,
+      `If this happens repeatedly on long-running Codex tasks, consider switching to Fire-and-Forget mode via the Epic Handshake menu so Claude returns immediately and replies land in the inbox when ready.`,
+    ].join("\n");
+    const envelope = buildEnvelope({
+      id: abortId,
+      chainId: abortId,
+      iteration: 0,
+      source: "codex",
+      target: "claude",
+      sourceSessionFp: SESSION_FP,
+      priority: "normal",
+      intent: "abort",
+      title: "",
+      workspacePath: WORKSPACE_PATH,
+      replyTo: envelopeId,
+      body,
+    });
+    try {
+      writeAtomic(join(INBOX_CLAUDE, `${abortId}.md`), envelope);
+    } catch (err) {
+      log("warn", `auto-abort envelope write failed: ${err?.message || String(err)}`);
+    }
+    // Best-effort cleanup. The dispatcher's own watchers may also clean
+    // these up; double-unlink is harmless because we wrap in try/catch.
+    for (const cleanup of [
+      hb.path,
+      wsInFlightFlag,
+      join(EH_DIR, `processing.${WORKSPACE_HASH}.flag`),
+    ]) {
+      try {
+        if (existsSync(cleanup)) unlinkSync(cleanup);
+      } catch {
+        // best-effort
+      }
+    }
+    log(
+      "warn",
+      `auto-abort stale turn envelope=${envelopeId} stage=${stage} stalled=${minutes}min`
+    );
+    return null;
+  }
+
+  const elapsedTotalMs =
+    typeof hb.parsed.elapsedMs === "number" ? hb.parsed.elapsedMs : 0;
+  const elapsedMin = Math.floor(elapsedTotalMs / 60_000);
+  const elapsedSec = Math.floor((elapsedTotalMs % 60_000) / 1000);
+  const elapsedStr =
+    elapsedMin > 0 ? `${elapsedMin}m ${elapsedSec}s` : `${elapsedSec}s`;
+  const sinceProgressSec = Math.floor(elapsedSinceProgress / 1000);
+  return `Epic Handshake: a Claude to Codex turn is in flight. Stage \`${stage}\`, ${elapsedStr} elapsed, last progress ${sinceProgressSec}s ago. Reply will land here when Codex finishes.`;
+}
+
 function findReplyEnvelope(promptId) {
   let files;
   try {
@@ -595,6 +738,28 @@ function purgeOldSent() {
         } catch {
           // best-effort
         }
+      }
+    }
+  } catch {
+    // never throw from housekeeping
+  }
+}
+
+/** Purge clipboard-staged images older than the TTL. Called at the top
+ * of every `epic_handshake_ask` dispatch so stale images don't survive
+ * a turn cycle. The stage helper itself also sweeps before staging, so
+ * cleanup pressure is high regardless of which side acts first. */
+function sweepStaleAttachments() {
+  try {
+    if (!existsSync(ATTACHMENTS_CLIPBOARD_DIR)) return;
+    const cutoff = Date.now() - ATTACHMENTS_TTL_MS;
+    for (const f of readdirSync(ATTACHMENTS_CLIPBOARD_DIR)) {
+      const p = join(ATTACHMENTS_CLIPBOARD_DIR, f);
+      try {
+        const st = statSync(p);
+        if (st.mtimeMs < cutoff) unlinkSync(p);
+      } catch {
+        // best-effort
       }
     }
   } catch {

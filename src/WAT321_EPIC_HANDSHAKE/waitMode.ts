@@ -1,4 +1,5 @@
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { ADAPTIVE_FLAG_PATH, FIRE_AND_FORGET_FLAG_PATH } from "./constants";
 
 /**
@@ -30,36 +31,22 @@ export function currentWaitMode(): WaitMode {
   return "standard";
 }
 
+/** Binary toggle between Adaptive and Fire-and-Forget. The Standard
+ * (fixed 2-min) mode still exists internally for legacy/diagnostic
+ * use but is intentionally unreachable from the menu - if the runtime
+ * observes it, the next toggle moves to Adaptive as the modern default. */
 export function nextWaitMode(current: WaitMode): WaitMode {
-  switch (current) {
-    case "standard":
-      return "adaptive";
-    case "adaptive":
-      return "fire-and-forget";
-    case "fire-and-forget":
-      return "standard";
-  }
+  return current === "fire-and-forget" ? "adaptive" : "fire-and-forget";
 }
 
 export function waitModeLabel(mode: WaitMode): string {
   switch (mode) {
     case "standard":
-      return "Standard (2 min)";
+      return "STANDARD";
     case "adaptive":
-      return "Adaptive (progress-aware)";
+      return "ADAPTIVE";
     case "fire-and-forget":
-      return "Fire and forget";
-  }
-}
-
-export function waitModeDetail(mode: WaitMode): string {
-  switch (mode) {
-    case "standard":
-      return "Claude blocks up to 2 min per prompt. Fixed timeout.";
-    case "adaptive":
-      return "Claude waits while Codex is demonstrably working (heartbeat-driven). Cuts on stall, hard cap 5 min.";
-    case "fire-and-forget":
-      return "Claude's tool returns immediately; reply lands in inbox when ready.";
+      return "FIRE & FORGET";
   }
 }
 
@@ -78,7 +65,7 @@ export function applyWaitMode(mode: WaitMode): void {
   };
   const set = (path: string): void => {
     try {
-      writeFileSync(path, new Date().toISOString(), "utf8");
+      writeFileAtomic(path, new Date().toISOString());
     } catch {
       // best-effort; next refresh reflects whichever state the writes
       // actually achieved
@@ -92,17 +79,12 @@ export function applyWaitMode(mode: WaitMode): void {
 }
 
 /** Parse the user-facing `wat321.epicHandshake.defaultWaitMode`
- * setting value into our internal enum. Unknown values fall back
- * to standard. */
+ * setting value into our internal enum. The setting now exposes only
+ * Adaptive and Fire-and-Forget; users who carried over a "Standard"
+ * value from earlier versions migrate to Adaptive on activate. */
 export function parseDefaultWaitMode(raw: string | undefined): WaitMode {
-  switch (raw) {
-    case "Adaptive":
-      return "adaptive";
-    case "Fire-and-Forget":
-      return "fire-and-forget";
-    default:
-      return "standard";
-  }
+  if (raw === "Fire-and-Forget") return "fire-and-forget";
+  return "adaptive";
 }
 
 /** Apply the user's default wait mode at tier activation. Subsequent
