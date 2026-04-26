@@ -16,6 +16,8 @@ Top-of-chain session-start file. Orients a new session in under a minute, then p
 
 **System 2 - Memory (meta/process).** Owned by `/watmemory-update` (manual only, never auto-invoked). Updated rarely - only when architecture, rules, or process pitfalls change.
 
+Two state coordinators (`bridgeStageCoordinator`, `lateReplyInboxCoordinator`) live in the Epic Handshake tier. They own the canonical view of in-flight bridge state, react via fs.watch with a polling backstop, and republish transitions through typed events on `EventHub`. Widgets subscribe to events and read snapshots rather than polling source-of-truth files directly. See `WD_WAT321_MEMORY.md` Engine section for the event inventory.
+
 - `CLAUDE.md` - this file (orchestrator + read orders)
 - `AIDOCS/WD_WAT321_MEMORY.md` - stable architecture + key pitfalls
 - `AIDOCS/WD_WAT321_MEMORY_EXTENDED.md` - process scratchpad (pitfall root-causes, formulas, carried-forward pitfalls)

@@ -73,6 +73,10 @@
       {
         "command": "wat321.epicHandshake.stageClipboardImage",
         "title": "WAT321: Epic Handshake - Stage Clipboard Image for Codex"
+      },
+      {
+        "command": "wat321.epicHandshake.restartCodexBridge",
+        "title": "WAT321: Epic Handshake - Restart Codex Bridge"
       }
     ],
     "icons": {
@@ -326,17 +330,58 @@
             "default": "Adaptive",
             "scope": "application",
             "enum": [
-              "Standard",
               "Adaptive",
               "Fire-and-Forget"
             ],
             "enumDescriptions": [
-              "Claude blocks up to 2 min per prompt. Fixed timeout.",
-              "Claude waits while Codex is demonstrably working (heartbeat-driven). Cuts on stall, hard cap 5 min.",
-              "Claude's tool returns immediately; reply lands in inbox when ready."
+              "Claude waits while Codex is demonstrably working. Heartbeat-driven, cuts on stall.",
+              "Claude's tool returns immediately. Reply lands in the inbox when ready."
             ],
             "order": 5,
-            "markdownDescription": "Starting wait mode after a VS Code restart. The Epic Handshake menu lets you cycle through the three modes live; this setting picks the baseline that restores on activate."
+            "markdownDescription": "Starting wait mode after a VS Code restart. The Epic Handshake menu toggles between Adaptive and Fire-and-Forget live; this setting picks the baseline that restores on activate."
+          },
+          "wat321.epicHandshake.codexSandboxDefault": {
+            "type": "string",
+            "default": "Read-Only",
+            "scope": "application",
+            "enum": [
+              "Full-Access",
+              "Read-Only"
+            ],
+            "enumDescriptions": [
+              "Codex can run shell commands and write files. Recommended on dev machines you own.",
+              "Codex can read files and reach the network at the per-turn level only. Conservative default."
+            ],
+            "order": 6,
+            "markdownDescription": "Codex sandbox state applied at every bridge prompt. The Codex Defaults picker can override this mid-session - the override lasts until the next VS Code reload, then this setting wins again."
+          },
+          "wat321.epicHandshake.codexModelDefault": {
+            "type": "string",
+            "default": "",
+            "scope": "application",
+            "markdownDescription": "Codex model slug (e.g. `gpt-5.5`, `gpt-5.4-mini`) used as the default at every bridge prompt. Leave empty to use whatever `~/.codex/config.toml` declares. Validated against `~/.codex/models_cache.json` at runtime; an unrecognized slug falls back silently to no override.",
+            "order": 7
+          },
+          "wat321.epicHandshake.codexEffortDefault": {
+            "type": "string",
+            "default": "",
+            "scope": "application",
+            "enum": [
+              "",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "enumDescriptions": [
+              "Use whatever the model's own default effort is.",
+              "Fast responses with lighter reasoning.",
+              "Balanced speed and depth for everyday tasks.",
+              "Greater reasoning depth for complex problems.",
+              "Extra-high reasoning depth for the hardest problems."
+            ],
+            "order": 8,
+            "markdownDescription": "Codex reasoning-effort level applied at every bridge prompt. Empty uses the model's own default. The Codex Defaults picker can override this mid-session."
           }
         }
       },
@@ -358,7 +403,7 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "lint": "eslint src/",
-    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');const srcDir=p.join('src','WAT321_EPIC_HANDSHAKE','bin');const dstDir=p.join('out','WAT321_EPIC_HANDSHAKE','bin');fs.mkdirSync(dstDir,{recursive:true});for(const f of ['channel.mjs','stage-clipboard.ps1']){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}\"",
+    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');const srcDir=p.join('src','WAT321_EPIC_HANDSHAKE','bin');const dstDir=p.join('out','WAT321_EPIC_HANDSHAKE','bin');fs.mkdirSync(dstDir,{recursive:true});for(const f of ['channel.mjs','stage-clipboard.mjs']){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}\"",
     "emit-prod-modules-manifest": "node -e \"const fs=require('fs');const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));const prod=Object.entries(lock.packages||{}).filter(([k,m])=>k.startsWith('node_modules/')&&m.dev!==true).map(([k])=>k);fs.mkdirSync('out/WAT321_EPIC_HANDSHAKE',{recursive:true});fs.writeFileSync('out/WAT321_EPIC_HANDSHAKE/prod-modules.json',JSON.stringify(prod,null,2));console.log('prod-modules manifest:',prod.length,'entries');\"",
     "icons": "node scripts/buildIcons.mjs",
     "build": "npm run clean && npm run lint && tsc && npm run copy-assets && npm run emit-prod-modules-manifest",
