@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
 import type { AppServerClient } from "./appServerClient";
-import { CODEX_FULL_ACCESS_FLAG_PATH } from "./constants";
 import type { ThreadStartParams } from "./protocol";
 import {
   bridgeThreadDisplayName,
@@ -42,15 +40,17 @@ export async function spawnFreshThread(opts: {
     opts.workspacePath,
     opts.record.sessionCounter
   );
-  // Sandbox is read-only by default; the user toggles full-access
-  // live via the sessions submenu, which writes the
-  // `codex-full-access.flag` sentinel. Approval policy stays pinned
-  // to `never` regardless - the bridge has no UI to relay Codex's
-  // approval prompts back to Claude mid-turn, so any other value
-  // would stall.
-  const sandbox = existsSync(CODEX_FULL_ACCESS_FLAG_PATH)
-    ? "danger-full-access"
-    : "read-only";
+  // Always create the thread at the maximum ceiling. Per-turn
+  // overrides on `turn/start` are authoritative for actual policy -
+  // each turn passes the live sandbox/model/effort values from the
+  // override flag files. Creating the thread permissive means the
+  // user can dial down for one turn and back up for the next without
+  // ever needing a thread reset (verified end-to-end via probe). The
+  // user's actual sandbox preference is enforced per-turn.
+  // Approval policy stays pinned to `never` regardless - the bridge
+  // has no UI to relay Codex's approval prompts back to Claude
+  // mid-turn, so any other value would stall.
+  const sandbox = "danger-full-access";
   const approvalPolicy = "never";
   opts.logger.info(
     `[thread] starting S${counter} sandbox=${sandbox} approvalPolicy=${approvalPolicy}`

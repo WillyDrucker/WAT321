@@ -2,10 +2,9 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { EPIC_HANDSHAKE_DIR } from "./constants";
 import { workspaceHash } from "./workspaceHash";
 
@@ -117,14 +116,14 @@ export function loadBridgeThreadRecord(workspacePath: string): BridgeThreadRecor
   }
 }
 
-/** Atomic tmp+rename. Caller handles errors via try/catch if needed. */
+/** Atomic write via tmp + rename. Returns silently on rename failure
+ * (e.g. EBUSY); caller can re-call to retry. Persists per-workspace
+ * bridge thread state to `~/.wat321/epic-handshake/bridge-thread.<wsHash>.json`. */
 export function saveBridgeThreadRecord(record: BridgeThreadRecord): void {
   const path = recordPath(record.workspacePath);
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, JSON.stringify(record, null, 2), "utf8");
-  renameSync(tmp, path);
+  writeFileAtomic(path, JSON.stringify(record, null, 2));
 }
 
 /** Clear the error counter and last-error message without touching

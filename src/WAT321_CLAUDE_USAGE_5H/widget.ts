@@ -10,6 +10,7 @@ const descriptor: UsageWidgetDescriptor<UsageResponse> = {
   name: "WAT321: Claude Usage (5h)",
   slot: WIDGET_SLOT.claudeUsage5H,
   variant: "5h",
+  loadingText: "$(claude) 5h $(loading~spin)",
   nonOkOptions: {
     providerName: "Claude",
     providerIcon: "$(claude)",

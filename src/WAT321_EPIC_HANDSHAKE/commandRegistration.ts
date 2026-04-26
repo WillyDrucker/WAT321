@@ -25,12 +25,18 @@ import type { EpicHandshakeLogger } from "./types";
 export interface CommandRegistrationDeps {
   logger: EpicHandshakeLogger;
   refreshStatusBar: () => void;
+  /** Cancel any in-flight bridge turn, force-kill the dispatcher's
+   * Codex app-server child process, and wipe per-workspace runtime
+   * flags. Bridge thread record (S<n>), mode flags, and late replies
+   * are preserved - only stuck runtime state is cleared. Backs the
+   * "Restart Codex Bridge" main-menu action. Zero Claude impact. */
+  restartCodexBridge: () => Promise<void>;
 }
 
 export function registerEpicHandshakeCommands(
   deps: CommandRegistrationDeps
 ): vscode.Disposable[] {
-  const { logger, refreshStatusBar } = deps;
+  const { logger, refreshStatusBar, restartCodexBridge } = deps;
   return [
     vscode.commands.registerCommand("wat321.epicHandshake.enable", async () => {
       await vscode.workspace
@@ -97,6 +103,12 @@ export function registerEpicHandshakeCommands(
       "wat321.epicHandshake.stageClipboardImage",
       async () => {
         await stageClipboardImageCommand(logger);
+      }
+    ),
+    vscode.commands.registerCommand(
+      "wat321.epicHandshake.restartCodexBridge",
+      async () => {
+        await restartCodexBridge();
       }
     ),
   ];

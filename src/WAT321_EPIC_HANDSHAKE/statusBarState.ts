@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import * as vscode from "vscode";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import {
   inboxCodexDir,
   inFlightFlagPath,
@@ -27,7 +28,7 @@ export function isPaused(): boolean {
  * unpaused. */
 export function setPaused(paused: boolean): void {
   if (paused) {
-    writeFileSync(PAUSED_FLAG_PATH, new Date().toISOString(), "utf8");
+    writeFileAtomic(PAUSED_FLAG_PATH, new Date().toISOString());
   } else if (existsSync(PAUSED_FLAG_PATH)) {
     unlinkSync(PAUSED_FLAG_PATH);
   }

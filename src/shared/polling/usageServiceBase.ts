@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 
-import type { ServiceState, StateListener } from "../serviceTypes";
+import type { ServiceState, StateListener } from "../../engine/serviceTypes";
 import { Coordinator } from "../cacheCoordinator";
 import {
   AUTH_ERROR_CODES,

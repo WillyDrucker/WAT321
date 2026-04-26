@@ -1,10 +1,14 @@
 import type * as vscode from "vscode";
 
 /**
- * Generic service state machine for anything that polls an external source
- * and can end up in loading / not-connected / no-auth / token-expired /
- * rate-limited / offline / error / ok states. The success payload is
- * provider-specific (TData); everything else is shared.
+ * Generic state-machine types every poller surfaces, plus the listener
+ * and status-bar-widget contracts they hand to subscribers. Lives in
+ * the engine layer so any future engine-tier consumer can subscribe to
+ * service state without inverting the dependency graph through `shared/`.
+ *
+ * The success payload is provider-specific (`TData`); everything else
+ * is shared shape. Tools and shared helpers import these here too -
+ * the engine is the single source of truth for the contract.
  */
 export type ServiceState<TData> =
   | { status: "loading" }

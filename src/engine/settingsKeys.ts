@@ -28,4 +28,19 @@ export const SETTING = {
   epicHandshakeEnabled: "epicHandshake.enabled",
   epicHandshakeSuppressCodexToasts: "epicHandshake.suppressCodexNotifications",
   epicHandshakeDefaultWaitMode: "epicHandshake.defaultWaitMode",
+  /** Sandbox state applied at every bridge `turn/start`. Default
+   * `Read-Only`; `Full-Access` opens shell + filesystem write.
+   * Codex Defaults picker writes the runtime override flag; tier
+   * activate re-syncs the flag from this setting so the user's
+   * persistent preference always wins after a VS Code reload. */
+  epicHandshakeCodexSandboxDefault: "epicHandshake.codexSandboxDefault",
+  /** Codex model slug used as the default for every bridge
+   * `turn/start`. Empty string means "use Codex thread / config
+   * default" (no override). Codex Defaults picker writes the runtime
+   * override flag; tier activate re-syncs from this setting. */
+  epicHandshakeCodexModelDefault: "epicHandshake.codexModelDefault",
+  /** Codex reasoning effort (low/medium/high/xhigh). Empty string
+   * means "use Codex thread / config default". Codex Defaults picker
+   * writes the runtime override flag; tier activate re-syncs. */
+  epicHandshakeCodexEffortDefault: "epicHandshake.codexEffortDefault",
 } as const satisfies Record<string, string>;

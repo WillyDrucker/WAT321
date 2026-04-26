@@ -128,6 +128,7 @@ export function parseTurnInfo(tail: string): ClaudeTurnInfo {
   let totalInputTokens = 0;
   let cachedInputTokens = 0;
   let cacheCreationTokens = 0;
+  let lastCompactTimestamp: number | null = null;
   let usageLocked = false;
   let thinkingScanBudget = 20;
 
@@ -144,7 +145,17 @@ export function parseTurnInfo(tail: string): ClaudeTurnInfo {
 
     if (entry.type === "user") {
       // User message closes the current turn - stop counting tool
-      // calls at this boundary.
+      // calls at this boundary. If the closing user entry is itself
+      // a compact summary, capture its timestamp so the widget can
+      // classify the trailing assistant turn's cache rebuild as a
+      // compact-driven LOAD rather than an involuntary MISS.
+      if (
+        entry.isCompactSummary === true &&
+        typeof entry.timestamp === "string"
+      ) {
+        const ts = Date.parse(entry.timestamp);
+        if (!Number.isNaN(ts)) lastCompactTimestamp = ts;
+      }
       break;
     }
 
@@ -207,6 +218,7 @@ export function parseTurnInfo(tail: string): ClaudeTurnInfo {
     totalInputTokens,
     cachedInputTokens,
     cacheCreationTokens,
+    lastCompactTimestamp,
   };
 }
 

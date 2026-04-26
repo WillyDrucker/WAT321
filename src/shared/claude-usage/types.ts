@@ -1,7 +1,7 @@
 import type {
   ServiceState as GenericServiceState,
   StatusBarWidget as GenericStatusBarWidget,
-} from "../serviceTypes";
+} from "../../engine/serviceTypes";
 
 export interface UsageResponse {
   five_hour: { utilization: number; resets_at: string } | null;

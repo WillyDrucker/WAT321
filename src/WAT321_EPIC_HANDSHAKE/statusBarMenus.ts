@@ -1,9 +1,6 @@
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import * as vscode from "vscode";
-import {
-  CODEX_FULL_ACCESS_FLAG_PATH,
-  waitModeFlashFlagPath,
-} from "./constants";
+import { waitModeFlashFlagPath } from "./constants";
 import { listLateReplies } from "./lateReplyInbox";
 import {
   makeCancelItem,
@@ -13,9 +10,12 @@ import {
   type ActionContext,
   type Item,
 } from "./menuCommon";
+import { showCodexDefaultsPicker } from "./codexDefaultsPicker";
 import {
   discardAllLateReplies,
   showLateRepliesPicker,
+} from "./lateReplyPickers";
+import {
   showRecoverSessionPicker,
   showRepairSessionsPicker,
   showSessionsSubmenu,
@@ -33,14 +33,9 @@ import {
 } from "./threadPersistence";
 import { writeCancelFlag } from "./turnFlags";
 import {
-  readNewestHeartbeat,
-  renderStageTooltipBlock,
-} from "./turnHeartbeat";
-import {
   applyWaitMode,
   currentWaitMode,
   nextWaitMode,
-  waitModeDetail,
   waitModeLabel,
 } from "./waitMode";
 import { workspaceHash } from "./workspaceHash";
@@ -55,8 +50,6 @@ import { workspaceHash } from "./workspaceHash";
  * Item factories and lifecycle plumbing live in `menuCommon.ts`.
  */
 
-export { setMenuLifecycleHooks } from "./menuCommon";
-
 export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   const paused = isPaused();
   const ws = currentWorkspacePath();
@@ -69,46 +62,15 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   const pauseItem = makePauseResumeItem(paused, opts.inFlight);
   const cancelItem = makeCancelItem(opts.inFlight);
 
-  // Bridge status info - placed first so VS Code's QuickPick
-  // auto-focus lands here and its `detail` renders expanded on menu
-  // open. This is the click-to-see replacement for the old
-  // hover-tooltip stage block (stripped to eliminate VS Code's
-  // reassignment-reshow bug over toasts).
-  const wsHash = ws ? workspaceHash(ws) : null;
-  const hb = wsHash ? readNewestHeartbeat(wsHash) : null;
-  const statusDetail = hb
-    ? renderStageTooltipBlock(hb, Date.now())
-    : paused
-      ? "Bridge paused. Resume via the menu below."
-      : opts.inFlight
-        ? "Turn starting. Details populate on the next heartbeat."
-        : "Bridge idle. Send a Claude to Codex prompt to start a turn.";
-  const statusItem: Item = {
-    label: "Bridge status",
-    description: hb
-      ? `Stage ${hb.stage}`
-      : paused
-        ? "(paused)"
-        : opts.inFlight
-          ? "(turn starting...)"
-          : "(idle)",
-    detail: statusDetail,
-    iconPath: new vscode.ThemeIcon("info"),
-    action: "show-status",
-  };
-
   // Retrieve always visible. At zero it's informational (friendly
-  // toast on click); at >= 1 it opens the late-replies picker.
+  // toast on click); at >= 1 it opens the late-replies picker which
+  // copies each reply to clipboard and clears it from the inbox.
   const retrieveItem: Item = {
-    label: `Retrieve late replies (${lateCount})`,
+    label: `RETRIEVE LATE REPLIES (${lateCount})`,
     description:
       lateCount === 0
         ? "No pending replies right now."
-        : "Codex replies that arrived after a prompt timed out.",
-    detail:
-      lateCount === 0
-        ? "When Codex replies to a timed-out prompt, you can read it here."
-        : "Pick one to copy to clipboard.",
+        : "Copies to clipboard and clears the inbox.",
     iconPath: new vscode.ThemeIcon("mail"),
     action: "retrieve",
   };
@@ -117,7 +79,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   const next = nextWaitMode(current);
   // Wait mode locks while a turn is in flight. Switching mid-turn
   // would let the in-flight envelope's dispatcher flags go out of
-  // sync with the newly-selected mode (Standard -> Fire-and-Forget
+  // sync with the newly-selected mode (Adaptive -> Fire-and-Forget
   // mid-turn leaves the blocking MCP call waiting forever, the
   // reverse direction leaves a fire-and-forget reply stranded). The
   // row stays visible showing the current mode so the user can see
@@ -127,25 +89,21 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     ? null
     : opts.inFlight
       ? {
-          label: `Wait mode: ${waitModeLabel(current)}`,
+          label: `WAIT MODE: ${waitModeLabel(current)}`,
           description: "Locked while a bridge turn is running.",
-          detail:
-            "Wait mode cannot change mid-turn. This row unlocks automatically when the bridge finishes (reply received, timed out, paused, cancelled, or errored).",
           iconPath: new vscode.ThemeIcon("wat321-square-bolt"),
           action: "wait-mode-locked",
         }
       : {
-          label: `Wait mode: ${waitModeLabel(current)}`,
+          label: `WAIT MODE: ${waitModeLabel(current)}`,
           description: `Click to switch to ${waitModeLabel(next)}.`,
-          detail: waitModeDetail(current),
           iconPath: new vscode.ThemeIcon("wat321-square-bolt"),
           action: "wait-mode-toggle",
         };
 
   const sessionsItem: Item = {
-    label: `Manage Codex Sessions (S${sessionCounter})`,
-    description: "Reset, delete, or recover.",
-    detail: "Opens a submenu for Codex session controls.",
+    label: `MANAGE CODEX SESSION (S${sessionCounter})`,
+    description: "Reset, delete or recover.",
     iconPath: new vscode.ThemeIcon("wat321-square-arrow-right"),
     action: "manage-sessions",
   };
@@ -153,34 +111,47 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   const clearErrorItem: Item | null =
     hasError && !paused
       ? {
-          label: "Clear error state",
-          description: "Dismiss the red icon without rotating thread.",
+          label: "CLEAR",
+          description: "Clears bridge errors, only if there's something to clear.",
           detail: currentRecord?.lastError
             ? `Last error: ${currentRecord.lastError.slice(0, 120)}`
-            : "Resets the failure counter. If next prompt also fails, pick Reset from Manage Codex Sessions.",
+            : undefined,
           iconPath: new vscode.ThemeIcon("wat321-square-check"),
           action: "clear-error",
         }
       : null;
 
-  // Menu ordering rules (applied across every picker):
-  //   1. Status info at the very top. VS Code auto-focuses the first
-  //      item and expands its `detail` - that's how the user reads
-  //      the stage block without a hover tooltip. Icon is neutral
-  //      `info` so the focus-highlight overlay doesn't cover any
-  //      colored tint.
-  //   2. Retrieve next - always visible, still above colored icons.
-  //   3. Pause and Cancel paired at the bottom of every menu -
-  //      Pause right above Cancel - predictable across main + submenus.
-  //   4. Everything else (wait mode, sessions, clear-error) goes in
-  //      between.
+  // Backup safety net for the rare case where Codex's app-server has
+  // cached stale config or otherwise needs a hard reset. Bundles
+  // cancel + clear + force-kill so the user has one click instead of
+  // three. Resumes the active S<n> bridge thread on the next prompt;
+  // does NOT touch the Codex VS Code extension itself (that would
+  // require a full window reload, which we cannot avoid - and which
+  // would force a Claude cache LOAD). Always visible because the
+  // value is exactly that it works when nothing else does.
+  const restartBridgeItem: Item = {
+    label: "RESTART CODEX BRIDGE",
+    description: "Cancel + clear bridge state + restart the Codex bridge process.",
+    detail:
+      "Resumes the active session (S" +
+      sessionCounter +
+      ") on next prompt. Does NOT restart the Codex VS Code extension; zero impact on your Claude session.",
+    iconPath: new vscode.ThemeIcon("debug-restart"),
+    action: "restart-bridge",
+  };
+
+  // Menu ordering: retrieve up top (always visible), wait-mode toggle,
+  // sessions submenu entry, conditional clear, pause, then the
+  // restart-bridge backup-net immediately above cancel so users
+  // recognize it as the heavier escalation when CANCEL alone would not
+  // be enough. CANCEL stays at the bottom for predictability.
   const items: Item[] = [
-    statusItem,
     retrieveItem,
     ...(waitModeItem ? [waitModeItem] : []),
     sessionsItem,
     ...(clearErrorItem ? [clearErrorItem] : []),
     ...(pauseItem ? [pauseItem] : []),
+    restartBridgeItem,
     ...(cancelItem ? [cancelItem] : []),
   ];
 
@@ -280,37 +251,22 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
         "Epic Handshake: sent interrupt to Codex. Claude receives a \"cancelled by user\" reply within ~1s."
       );
       break;
-    case "permissions-toggle": {
-      // Toggle the Codex full-access sentinel flag. Takes effect on the
-      // NEXT prompt - turnRunner reads the flag on every `turn/start`
-      // so the existing thread picks up the new sandbox without a
-      // reset. No approval prompt layer, so there is no mid-turn
-      // confirmation to worry about either.
-      const isFullAccessNow = existsSync(CODEX_FULL_ACCESS_FLAG_PATH);
-      try {
-        if (isFullAccessNow) {
-          unlinkSync(CODEX_FULL_ACCESS_FLAG_PATH);
-          void vscode.window.showInformationMessage(
-            "Epic Handshake: Codex permissions set to Read-Only. Takes effect on the next prompt."
-          );
-        } else {
-          writeFileSync(
-            CODEX_FULL_ACCESS_FLAG_PATH,
-            new Date().toISOString(),
-            "utf8"
-          );
-          void vscode.window.showWarningMessage(
-            "Epic Handshake: Codex permissions set to Full-Access. Takes effect on the next prompt. Codex now has full filesystem and shell access."
-          );
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(
-          `Epic Handshake: could not toggle Codex permissions: ${msg}`
+    case "codex-defaults":
+      // Codex Defaults picker: combined sandbox + model + effort
+      // entry point. All three are per-turn overrides, so the change
+      // takes effect on the next prompt without a thread reset. The
+      // picker is locked while a bridge turn is running because the
+      // override flags it writes are read mid-turn; switching while
+      // a turn is outstanding would mean the in-flight envelope used
+      // one set of values while the user expected another.
+      if (isBridgeBusy(ctx.ws)) {
+        void vscode.window.showInformationMessage(
+          "Epic Handshake: Codex Defaults are locked while a bridge turn is running. They will unlock automatically when the turn finishes."
         );
+        break;
       }
+      await showCodexDefaultsPicker();
       break;
-    }
     case "wait-mode-toggle": {
       // Three-way cycle: Standard -> Adaptive -> Fire-and-Forget ->
       // Standard. No toast; the 2500ms bolt-square flash on the
@@ -332,10 +288,9 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       applyWaitMode(nextWaitMode(currentWaitMode()));
       if (ctx.ws) {
         try {
-          writeFileSync(
+          writeFileAtomic(
             waitModeFlashFlagPath(workspaceHash(ctx.ws)),
-            new Date().toISOString(),
-            "utf8"
+            new Date().toISOString()
           );
         } catch {
           // best-effort
@@ -348,13 +303,6 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
         "Epic Handshake: wait mode is locked while a bridge turn is running. It will unlock automatically when the turn finishes."
       );
       break;
-    case "show-status":
-      // Info-only item: the status block renders in the item's
-      // `detail` field which is already visible when the menu is
-      // open (VS Code auto-focuses the first item). Clicking it
-      // closes the menu - nothing else to do. The block updates
-      // every time the menu opens because this switch rebuilds it.
-      return;
     case "manage-sessions":
       await showSessionsSubmenu({
         ws: ctx.ws,
@@ -366,6 +314,14 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
     case "repair-sessions":
       await showRepairSessionsPicker(ctx.ws, ctx.recoverable, ctx.inFlight);
       break;
+    case "restart-bridge":
+      await vscode.commands.executeCommand(
+        "wat321.epicHandshake.restartCodexBridge"
+      );
+      void vscode.window.showInformationMessage(
+        "Epic Handshake: bridge restarted. The active session resumes on your next prompt."
+      );
+      break;
     case "back":
       // Sub-menus invoke this to return to the main menu so the user
       // doesn't have to close + re-click the status bar widget. We
@@ -375,8 +331,3 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       break;
   }
 }
-
-// Re-exports preserved for callers that imported through this module
-// before the menuCommon/menuPickers split.
-export { bridgeThreadDisplayName } from "./threadPersistence";
-export { countPendingLateReplies } from "./lateReplyInbox";

@@ -98,9 +98,32 @@ export const CODEX_FULL_ACCESS_FLAG_PATH = join(
   "codex-full-access.flag"
 );
 
-/** Legacy root-level flag paths. Only referenced by the one-time
- * migration sweep at activate that cleans up v1.2.0 leftovers and
- * pre-partition v1.2.1 writes. Runtime code never reads these. */
+/** Optional per-session model override. Body is the bare slug
+ * (e.g. `gpt-5.4-mini`). When present, `turnRunner` passes
+ * `model` on every `turn/start` so the running thread uses the
+ * override - per-turn, no thread reset. When absent, turn/start
+ * passes `model: null` and Codex falls back to the thread default
+ * (which itself comes from `~/.codex/config.toml`). User toggles
+ * via the Codex Defaults picker; tier activate writes/clears
+ * based on the `wat321.epicHandshake.codexModelDefault` setting. */
+export const CODEX_MODEL_FLAG_PATH = join(
+  EPIC_HANDSHAKE_DIR,
+  "codex-model.flag"
+);
+
+/** Optional per-session reasoning-effort override. Body is the
+ * bare effort level (e.g. `xhigh`). Same semantics as the model
+ * override above - per-turn pass-through with null fallback to
+ * Codex's thread default. */
+export const CODEX_EFFORT_FLAG_PATH = join(
+  EPIC_HANDSHAKE_DIR,
+  "codex-effort.flag"
+);
+
+/** Legacy root-level flag paths from before workspace partitioning.
+ * Only referenced by the one-time activate-time migration sweep
+ * that deletes any leftovers on disk. Runtime code never reads these
+ * - the active dispatcher only consumes per-workspace flag paths. */
 export const LEGACY_FLAG_PATHS: readonly string[] = [
   join(EPIC_HANDSHAKE_DIR, "in-flight.flag"),
   join(EPIC_HANDSHAKE_DIR, "processing.flag"),

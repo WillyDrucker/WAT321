@@ -122,12 +122,13 @@ export function readAutoCompactPct(contextWindowSize: number): number {
  * actual trigger. Priority: WINDOW env wins outright -> OVERRIDE env
  * percent minus OVERRIDE_EFFECTIVE_RESERVE -> default formula.
  *
- * Widget consumers use this for the "Auto-Compact at ~X" label where
- * ~X is the number the user will actually hit. The nominal ceiling
- * (for the bar and "N/M" numerator) is still computed separately as
- * `autoCompactPct * contextWindow` because that's the user's stated
- * target; showing the effective trigger in both places would make
- * the percentage disagree with the visible bar. */
+ * Widget consumers use this as the unified denominator for bars, the
+ * displayed percentage, the "N/M" numerator's right-hand side, and
+ * the "Auto-Compact at ~X" tooltip line. The nominal ceiling
+ * (`autoCompactPct * contextWindow`) is no longer surfaced anywhere -
+ * showing 73% / 730k while compaction actually fires at 715k confused
+ * the percentage / fire-point relationship. The widget now reports the
+ * actual hit point everywhere it shows a target. */
 export function readAutoCompactEffectiveTriggerTokens(
   contextWindowSize: number
 ): number {

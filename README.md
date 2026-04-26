@@ -126,9 +126,9 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 ## How It Works
 
 - **Claude Usage / Codex Usage** poll each provider's stats endpoint on a safe interval (~2 minutes) with rate-limit protection.
-- **Session Tokens** read local CLI files only - no API calls, no network.
+- **Session Tokens** read local CLI files only - no API calls, no network. Yellow `LOAD` flashes during deliberate cache rebuilds (`/compact` or reload); red `MISS` is reserved for unexpected eviction.
 - Everything WAT321 writes is a disposable cache inside `~/.wat321/`. Settings changes take effect immediately with no reload.
-- **Epic Handshake** adds a widget between the Claude and Codex session token bars. Click it to pause, resume, or reset the bridge. Full settings live under **Epic Handshake (Claude to Codex Only)**.
+- **Epic Handshake** adds a widget between the Claude and Codex session token bars. Click it to retrieve late replies, switch wait mode, change Codex defaults (sandbox / model / effort), or restart the bridge. Full settings live under **Epic Handshake (Claude to Codex Only)**.
 
 ## What It Doesn't Do
 

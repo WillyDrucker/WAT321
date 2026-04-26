@@ -1,3 +1,4 @@
+import type { BridgeStageReader } from "../engine/bridgeTypes";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 import {
   SessionTokenWidget,
@@ -20,6 +21,7 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
   getRenderData: (state) => {
     const { session } = state;
     return {
+      sessionId: session.sessionId,
       sessionTitle: session.sessionTitle,
       label: session.label,
       modelId: session.modelSlug,
@@ -30,12 +32,13 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
       transcriptMtimeMs: session.lastActiveAt,
       turnState: session.turnState,
       stageInfo: session.stageInfo,
+      lastCompactTimestamp: session.lastCompactTimestamp,
     };
   },
 };
 
 export class CodexSessionTokensWidget extends SessionTokenWidget<CodexTokenWidgetState> {
-  constructor() {
-    super(descriptor);
+  constructor(bridgeStage: BridgeStageReader) {
+    super(descriptor, bridgeStage);
   }
 }

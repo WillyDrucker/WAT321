@@ -27,11 +27,13 @@ const CLIPBOARD_STAGING_DIR = join(
   "attachments",
   "clipboard"
 );
-/** TTL for staged images. Sweep on tier activate deletes entries
- * older than this so the folder does not grow without bound. One
- * hour is enough for the user to paste and reference in their next
- * Claude prompt; anything older is forgotten. */
-const STAGING_TTL_MS = 60 * 60 * 1000;
+/** TTL for staged images. Tight 5-minute window matches the stage
+ * helper script and the channel.mjs per-dispatch sweep, so staged
+ * images never accumulate beyond the immediate "stage and use"
+ * window. Sweeps run on tier activate, on every bridge dispatch
+ * (channel.mjs), and on every new stage helper invocation. Reset
+ * WAT321 wipes the dir entirely. */
+const STAGING_TTL_MS = 5 * 60 * 1000;
 
 /** Purge clipboard-staged images older than the TTL. Called once at
  * tier activate. Best-effort; individual unlink failures are ignored. */

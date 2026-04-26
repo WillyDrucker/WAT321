@@ -376,6 +376,29 @@ export class AppServerClient {
     this.failAllPending(new Error("AppServerClient: shut down"));
   }
 
+  /** Immediate kill. Sends SIGKILL straight to the child without
+   * the SIGTERM grace period that `shutdown` uses. The bridge's
+   * "Restart Codex Bridge" menu action calls this when the user
+   * wants the running app-server gone now (cached stale config,
+   * misbehaving connection, etc.). Any in-flight pending requests
+   * are rejected synchronously so callers unwind cleanly. Idempotent;
+   * subsequent calls no-op once `child` is null. */
+  forceKill(): void {
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
+    this.logger.info(`[${this.instanceId}] force-killing app-server (SIGKILL)`);
+    const child = this.child;
+    this.child = null;
+    if (child !== null && child.exitCode === null) {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // best-effort
+      }
+    }
+    this.failAllPending(new Error("AppServerClient: force-killed"));
+  }
+
   // -----------------------------------------------------------------
   // Internal: stdout line parsing and frame dispatch
   // -----------------------------------------------------------------

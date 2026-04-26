@@ -15,6 +15,7 @@ import {
   extractSessionId,
   parseCwd,
   extractFirstUserMessage,
+  parseLastCompactTimestamp,
   parseLastTokenCount,
   parseLatestModelSlug,
   parseModelSlug,
@@ -215,6 +216,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       lastActiveAt: rolloutMtime,
       turnState: classifyCodexTurn(tail),
       stageInfo: parseStageInfo(tail),
+      lastCompactTimestamp: parseLastCompactTimestamp(tail),
     });
   }
 }

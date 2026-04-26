@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { BridgeStageReader } from "./engine/bridgeTypes";
 import type { ProviderGroup, ProviderKey, Subscribable } from "./engine/contracts";
 import { setProviderActive } from "./engine/displayMode";
 import type { EngineContext } from "./engine/engineContext";
@@ -10,12 +11,13 @@ import { CodexUsageSharedService } from "./shared/codex-usage/service";
 import { readTail } from "./shared/fs/fileReaders";
 import { classifyLastEntry } from "./shared/transcriptClassifier";
 import { activateWidget } from "./shared/usageWidgetActivation";
+import { parseLastAssistantText as parseCodexAssistantText } from "./shared/codex-rollout/assistantTextParser";
 import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
 import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
 import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
 import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/widget";
-import { isCodexTurnComplete, parseLastAssistantText as parseCodexAssistantText } from "./WAT321_CODEX_SESSION_TOKENS/parsers";
+import { isCodexTurnComplete } from "./WAT321_CODEX_SESSION_TOKENS/parsers";
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { CodexSessionTokensWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 import { CodexUsage5hrWidget } from "./WAT321_CODEX_USAGE_5H/widget";
@@ -72,15 +74,22 @@ function isClaudeTurnComplete(tail: string): boolean {
 }
 
 /** Register both providers with the engine and subscribe engine-level
- * event consumers. Call once from extension.ts activate(). */
-export function registerProviders(ctx: EngineContext): vscode.Disposable[] {
+ * event consumers. Call once from extension.ts activate(). The
+ * `bridgeStage` reader comes from the EH tier (which activates first
+ * in extension.ts) and feeds the session-token widgets so they can
+ * render the bridge ceremony / stage glyph cycle without polling
+ * heartbeat files directly. */
+export function registerProviders(
+  ctx: EngineContext,
+  bridgeStage: BridgeStageReader
+): vscode.Disposable[] {
   ctx.providers.register(
     { key: "claude", displayName: "Claude", settingKey: SETTING.enableClaude },
-    () => buildClaudeGroup(ctx)
+    () => buildClaudeGroup(ctx, bridgeStage)
   );
   ctx.providers.register(
     { key: "codex", displayName: "Codex", settingKey: SETTING.enableCodex },
-    () => buildCodexGroup(ctx)
+    () => buildCodexGroup(ctx, bridgeStage)
   );
 
   return [
@@ -88,7 +97,10 @@ export function registerProviders(ctx: EngineContext): vscode.Disposable[] {
   ];
 }
 
-function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
+function buildClaudeGroup(
+  ctx: EngineContext,
+  bridgeStage: BridgeStageReader
+): ProviderGroup {
   const usageService = new ClaudeUsageSharedService();
   const tokenService = new ClaudeSessionTokenService(getWorkspacePath());
 
@@ -97,7 +109,7 @@ function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
   const disposables: vscode.Disposable[] = [
     ...activateWidget(usageService, new ClaudeUsage5hrWidget()),
     ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
-    ...activateWidget(tokenService, new ClaudeSessionTokensWidget()),
+    ...activateWidget(tokenService, new ClaudeSessionTokensWidget(bridgeStage)),
     watchProviderAvailability("claude", usageService, ctx),
     bridgeSessionResponse({
       provider: "claude",
@@ -119,7 +131,10 @@ function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
   return { disposables, usageService, tokenService };
 }
 
-function buildCodexGroup(ctx: EngineContext): ProviderGroup {
+function buildCodexGroup(
+  ctx: EngineContext,
+  bridgeStage: BridgeStageReader
+): ProviderGroup {
   const usageService = new CodexUsageSharedService();
   const tokenService = new CodexSessionTokenService(getWorkspacePath());
 
@@ -128,7 +143,7 @@ function buildCodexGroup(ctx: EngineContext): ProviderGroup {
   const disposables: vscode.Disposable[] = [
     ...activateWidget(usageService, new CodexUsage5hrWidget()),
     ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
-    ...activateWidget(tokenService, new CodexSessionTokensWidget()),
+    ...activateWidget(tokenService, new CodexSessionTokensWidget(bridgeStage)),
     watchProviderAvailability("codex", usageService, ctx),
     bridgeSessionResponse({
       provider: "codex",

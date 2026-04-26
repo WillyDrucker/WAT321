@@ -1,11 +1,11 @@
 import type * as vscode from "vscode";
 import type { ProviderKey } from "../../engine/contracts";
+import type { ServiceState } from "../../engine/serviceTypes";
 import {
   getCachedStatus,
   getProviderOwner,
   refreshIfStale,
 } from "../incidentStatusPoller";
-import type { ServiceState } from "../serviceTypes";
 
 /**
  * Shared renderer for the non-OK states of the Claude and Codex

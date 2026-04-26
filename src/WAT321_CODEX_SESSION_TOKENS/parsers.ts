@@ -182,84 +182,6 @@ export function extractFirstUserMessage(headContent: string): string {
   return "";
 }
 
-/** Extract the text content from the most recent assistant message in
- * the tail. Walks backwards through the rollout scanning multiple
- * Codex event shapes:
- *
- *   - `event_msg` with `payload.type: "agent_message"` (final answers)
- *   - `response_item` with `payload.type: "message"`, role "assistant"
- *     and `output_text` content parts
- *   - `response.output_text.done` events with inline text
- *   - `message` events with `payload.role: "assistant"` and text content
- *
- * Codex has evolved its rollout format across versions, so we check
- * all known shapes. Returns "" if none found. */
-export function parseLastAssistantText(tail: string): string {
-  const lines = tail.trimEnd().split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line) continue;
-
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
-    const payload = entry.payload as Record<string, unknown> | undefined;
-
-    // Shape 1: event_msg with agent_message payload
-    if (entry.type === "event_msg" && payload?.type === "agent_message") {
-      const msg = payload.message;
-      if (typeof msg === "string" && msg.length > 0) return msg;
-    }
-
-    // Shape 2: response_item with assistant message + output_text parts
-    if (entry.type === "response_item" && payload?.type === "message" && payload.role === "assistant") {
-      const text = extractOutputText(payload.content);
-      if (text) return text;
-    }
-
-    // Shape 3: response.output_text.done with inline text
-    if (entry.type === "response.output_text.done") {
-      const text = typeof payload?.text === "string" ? payload.text
-        : typeof entry.text === "string" ? entry.text
-        : null;
-      if (text && text.length > 0) return text;
-    }
-
-    // Shape 4: message event with assistant role
-    if (entry.type === "message" && payload?.role === "assistant") {
-      const text = extractOutputText(payload.content);
-      if (text) return text;
-      // Plain string content
-      if (typeof payload.content === "string" && payload.content.length > 0) {
-        return payload.content;
-      }
-    }
-  }
-  return "";
-}
-
-/** Extract text from an `output_text` content array. Shared by
- * multiple Codex event shapes that carry the same content structure. */
-function extractOutputText(content: unknown): string | null {
-  if (!Array.isArray(content)) return null;
-  for (const part of content) {
-    if (typeof part !== "object" || part === null) continue;
-    const p = part as Record<string, unknown>;
-    if (p.type === "output_text" && typeof p.text === "string" && p.text.length > 0) {
-      return p.text;
-    }
-    // Also check plain text parts
-    if (p.type === "text" && typeof p.text === "string" && p.text.length > 0) {
-      return p.text;
-    }
-  }
-  return null;
-}
-
 /** Classify whether the last meaningful entry in a Codex rollout
  * tail represents a completed assistant turn. Thin wrapper over
  * `classifyCodexTurn` so the detection rules stay in one place.
@@ -378,4 +300,48 @@ export function extractSessionId(rolloutPath: string): string {
   const parts = filename.split("-");
   if (parts.length > 6) return parts.slice(6).join("-");
   return filename;
+}
+
+/** Walk the tail backwards looking for the most recent compact event.
+ * Codex emits two paired entries on every compact (auto-compact at the
+ * threshold or `/compact` user invocation):
+ *
+ *   - `type: "compacted"` (carries the replacement_history payload)
+ *   - `type: "event_msg"`, `payload.type: "context_compacted"` (signal-only)
+ *
+ * Either qualifies; we accept the first match and return its timestamp
+ * in ms (epoch). The session token widget uses this to fire a yellow
+ * LOAD banner on the trailing render, signaling a deliberate context
+ * rebuild rather than letting the resume read as silent.
+ *
+ * Marker-only detection here. Codex doesn't surface cache_creation /
+ * cache_read tokens the way Claude does, so the qualifying rule is
+ * "a new compact event has been observed" - no numeric ratio gate. */
+export function parseLastCompactTimestamp(tail: string): number | null {
+  const lines = tail.trimEnd().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const payload = entry.payload as Record<string, unknown> | undefined;
+    const isCompact =
+      entry.type === "compacted" ||
+      (entry.type === "event_msg" && payload?.type === "context_compacted");
+    if (!isCompact) continue;
+
+    if (typeof entry.timestamp === "string") {
+      const ts = Date.parse(entry.timestamp);
+      if (!Number.isNaN(ts)) return ts;
+    }
+    // Compact event without a parseable timestamp; keep walking
+    // for an older one with a usable timestamp.
+  }
+  return null;
 }

@@ -1,10 +1,15 @@
-import { existsSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { parseLastAssistantText } from "../WAT321_CODEX_SESSION_TOKENS/parsers";
+import { existsSync, unlinkSync } from "node:fs";
+import { parseLastAssistantText } from "../shared/codex-rollout/assistantTextParser";
 import { extractCurrentTurn, parseStageInfo } from "../shared/codex-rollout/phaseParser";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { readTail } from "../shared/fs/fileReaders";
 import type { AppServerClient } from "./appServerClient";
 import {
-  CODEX_FULL_ACCESS_FLAG_PATH,
+  readCodexEffortOverride,
+  readCodexModelOverride,
+  readCodexSandboxOverride,
+} from "./codexRuntimeOverrides";
+import {
   cancelFlagPath,
   turnHeartbeatPath,
 } from "./constants";
@@ -117,14 +122,9 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
         turnStartedAt,
         stageEnteredAt,
       });
-      const tmp = `${heartbeatFile}.tmp`;
-      try {
-        writeFileSync(tmp, body, "utf8");
-        renameSync(tmp, heartbeatFile);
-      } catch {
-        // best-effort - heartbeat loss just means channel.mjs uses
-        // its fallback timeout
-      }
+      // best-effort - heartbeat loss just means channel.mjs uses its
+      // fallback timeout
+      writeFileAtomic(heartbeatFile, body);
     };
 
     const cleanup = (): void => {
@@ -344,20 +344,26 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       settle(() => reject(new Error("cancelled by user")));
     }, 500);
 
-    // Read the full-access flag on every turn so mid-session permission
-    // toggles in the sessions submenu take effect on the next prompt
-    // without a thread reset. Casing here is camelCase - different from
-    // the kebab-case string at `thread/start` (see TurnSandboxPolicy in
-    // protocol.ts). Approval policy stays pinned to `never`; the bridge
-    // has no UI to relay Codex's approval prompts back mid-turn.
-    const sandboxPolicy = existsSync(CODEX_FULL_ACCESS_FLAG_PATH)
-      ? ({ type: "dangerFullAccess" } as const)
-      : ({ type: "readOnly" } as const);
+    // Read all three runtime overrides on every turn so the Codex
+    // Defaults picker (and settings) take effect on the next prompt
+    // without a thread reset. Casing for sandboxPolicy here is
+    // camelCase - different from the kebab-case string at thread/start
+    // (see TurnSandboxPolicy in protocol.ts). Model + effort accept
+    // null when no override is set; Codex falls back to the thread /
+    // config default in that case. Approval policy stays pinned to
+    // `never`; the bridge has no UI to relay Codex's approval prompts
+    // back mid-turn.
+    const sandboxPolicy =
+      readCodexSandboxOverride() === "full-access"
+        ? ({ type: "dangerFullAccess" } as const)
+        : ({ type: "readOnly" } as const);
     const turnStartParams: TurnStartParams = {
       threadId,
       input: [{ type: "text", text: env.body }],
       sandboxPolicy,
       approvalPolicy: "never",
+      model: readCodexModelOverride(),
+      effort: readCodexEffortOverride(),
     };
     client
       .sendRequest("turn/start", turnStartParams)
@@ -372,9 +378,11 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
 }
 
 /** Read the rollout file and see if Codex finished writing this turn
- * even though the turn/completed notification never arrived. The case
- * that bit us in v1.2.1 testing: Codex wrote task_complete ~10s after
- * our timeout fired, but our subscription was already disposed.
+ * even though the turn/completed notification never arrived. Codex can
+ * write task_complete to disk seconds after our timeout fires when our
+ * subscription has already been disposed, so the rollout is the source
+ * of truth for "did the turn actually finish" once the notification
+ * path has given up.
  *
  * Turn-scoping is load-bearing here. `parseStageInfo` and
  * `parseLastAssistantText` are both called on the current-turn slice

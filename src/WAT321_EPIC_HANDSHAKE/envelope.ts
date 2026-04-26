@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 
 /**
  * Envelope format for Epic Handshake messages passed between agents
@@ -116,9 +117,7 @@ export function parseEnvelope(raw: string): Envelope | null {
 }
 
 export function writeEnvelopeAtomic(path: string, env: Envelope): void {
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, serializeEnvelope(env), "utf8");
-  renameSync(tmp, path);
+  writeFileAtomic(path, serializeEnvelope(env));
 }
 
 export function readEnvelope(path: string): Envelope | null {

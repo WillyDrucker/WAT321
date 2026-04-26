@@ -1,4 +1,5 @@
-import { existsSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, unlinkSync } from "node:fs";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import {
   cancelFlagPath,
   inFlightFlagPath,
@@ -15,10 +16,9 @@ import { workspaceHash } from "./workspaceHash";
  * is never cancelled by a click in this window. */
 export function writeCancelFlag(workspacePath: string): void {
   try {
-    writeFileSync(
+    writeFileAtomic(
       cancelFlagPath(workspaceHash(workspacePath)),
-      new Date().toISOString(),
-      "utf8"
+      new Date().toISOString()
     );
   } catch {
     // best-effort - caller surfaces the error
@@ -57,10 +57,9 @@ const SUPPRESS_CODEX_TOAST_FRESHNESS_MS = 30_000;
 
 export function writeInFlightFlag(workspacePath: string): void {
   try {
-    writeFileSync(
+    writeFileAtomic(
       inFlightFlagPath(workspaceHash(workspacePath)),
-      new Date().toISOString(),
-      "utf8"
+      new Date().toISOString()
     );
   } catch {
     // best-effort; status bar will just miss the in-flight signal
@@ -78,10 +77,9 @@ export function clearInFlightFlag(workspacePath: string): void {
 
 export function writeProcessingFlag(workspacePath: string): void {
   try {
-    writeFileSync(
+    writeFileAtomic(
       processingFlagPath(workspaceHash(workspacePath)),
-      new Date().toISOString(),
-      "utf8"
+      new Date().toISOString()
     );
   } catch {
     // best-effort
@@ -107,10 +105,9 @@ export function clearProcessingFlag(workspacePath: string): void {
  * writes. */
 export function writeSuppressCodexToast(workspacePath: string): void {
   try {
-    writeFileSync(
+    writeFileAtomic(
       suppressCodexToastFlagPath(workspaceHash(workspacePath)),
-      new Date().toISOString(),
-      "utf8"
+      new Date().toISOString()
     );
   } catch {
     // best-effort
@@ -141,6 +138,31 @@ export function consumeRecentCodexCompletion(workspacePath: string): boolean {
   return fresh;
 }
 
+/** Wipe every per-workspace runtime flag the dispatcher writes during
+ * a turn. Used by the "Restart Codex Bridge" main-menu action after
+ * force-killing the app-server so a stuck-state can be cleared in one
+ * pass. Preserves user-data flags (paused, fire-and-forget, adaptive,
+ * codex-full-access, late-reply envelopes, thread record) - those
+ * represent intentional state, not stale runtime cruft.
+ *
+ * Per-workspace by design: a sibling VS Code instance's bridge stays
+ * untouched. */
+export function clearBridgeRuntimeFlags(workspacePath: string): void {
+  const hash = workspaceHash(workspacePath);
+  const removeIfExists = (path: string): void => {
+    try {
+      if (existsSync(path)) unlinkSync(path);
+    } catch {
+      // best-effort
+    }
+  };
+  removeIfExists(inFlightFlagPath(hash));
+  removeIfExists(processingFlagPath(hash));
+  removeIfExists(returningFlagPath(hash));
+  removeIfExists(cancelFlagPath(hash));
+  removeIfExists(suppressCodexToastFlagPath(hash));
+}
+
 /** Write the returning flag and schedule its cleanup 5000ms later.
  * The unref'd timer lets the dispatcher shut down without waiting.
  * 5s visibility makes the arrow-circle-left animation easy to
@@ -149,7 +171,7 @@ export function consumeRecentCodexCompletion(workspacePath: string): boolean {
 export function writeReturningFlag(workspacePath: string): void {
   const path = returningFlagPath(workspaceHash(workspacePath));
   try {
-    writeFileSync(path, new Date().toISOString(), "utf8");
+    writeFileAtomic(path, new Date().toISOString());
     const t = setTimeout(() => {
       try {
         if (existsSync(path)) unlinkSync(path);

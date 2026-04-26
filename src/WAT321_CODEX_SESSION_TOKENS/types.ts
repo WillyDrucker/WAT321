@@ -1,5 +1,5 @@
+import type { StatusBarWidget as GenericStatusBarWidget } from "../engine/serviceTypes";
 import type { StageInfo } from "../shared/codex-rollout/types";
-import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/serviceTypes";
 import type { LastEntryKind } from "../shared/transcriptClassifier";
 
 /** Entry from ~/.codex/session_index.jsonl */
@@ -29,6 +29,12 @@ export interface CodexResolvedSession {
    * split, cache hit rate). Parser is shared with the Epic Handshake
    * dispatcher. */
   stageInfo: StageInfo;
+  /** Timestamp (ms) of the most recent `compacted` / `context_compacted`
+   * rollout entry. Drives compact-aware banner classification: the
+   * widget fires a yellow LOAD banner once per new compact observation,
+   * signaling a deliberate context rebuild. Null when no compact event
+   * is in the scanned tail window. */
+  lastCompactTimestamp: number | null;
 }
 
 export type CodexTokenWidgetState =

@@ -5,6 +5,46 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2026-04-26
+
+### Added
+
+- **Cache LOAD / MISS banners actually fire now.** The previous detector required cache reads to be near zero, which essentially never happens in real Claude Code 1M sessions because the warm prefix cache always has something to read back. Sampling shows the old rule fired about 35 times across 25,000+ turns - users reported never seeing it once. The new detector uses a ratio rule that catches the dominance pattern regardless of absolute numbers, so every legitimate cache rebuild surfaces. Yellow LOAD also fires after a `/compact` (auto or manual) so a deliberate rebuild reads as expected cost, not as an unexpected miss. Red MISS stays reserved for involuntary mid-session evictions. Closes #60 follow-up.
+
+- **The Claude-to-Codex bridge surfaces in-flight status when you check the inbox during a turn.** Asking Claude to check the inbox during an active bridge turn used to return a misleading "empty" message. The bridge now reports stage, elapsed time, and time since last progress instead. If a heartbeat hasn't moved for 10+ minutes, the bridge auto-aborts the stuck turn, deposits a friendly synthetic abort reply into the inbox, and cleans up the flag files so your next prompt starts clean. No more polling forever against a dead bridge. Closes #61.
+
+- **macOS and Linux can stage clipboard screenshots through the Codex bridge.** A single Node-based `stage-clipboard.mjs` shim replaces the prior Windows-only PowerShell script. On Windows it shells out to `powershell.exe`; on macOS it uses `osascript`; on Linux it prefers `wl-paste` (Wayland) and falls back to `xclip` (X11). Same output convention everywhere - prints the absolute path on stdout - so Claude's invocation flow is identical across platforms. Old screenshots auto-sweep on a 5-minute TTL so abandoned clipboard pastes don't accumulate. Image bytes stay on disk; only the path travels through the conversation. Closes #57.
+
+- **Codex sandbox, model, and effort all change without a session reset.** A new `CODEX DEFAULTS` row in the sessions submenu opens a single picker covering all three: sandbox (Full-Access / Read-Only), model (any visibility=list slug from your `models_cache.json`), and effort (low / medium / high / xhigh, or whatever the selected model supports). Every row shows your persisted default alongside the current live value so you can see at a glance which knob differs. Threads always start at maximum permission and capability ceiling so any dial-down is reachable without recreating the session. Settings still drive the on-activate default; the picker overrides until the next reload. Closes #58 and addresses #63.
+
+- **A `RESTART CODEX BRIDGE` row sits in the main menu above CANCEL as a backup safety net.** When the Codex side gets wedged - rare, but it happens - one click cancels the in-flight turn, clears the bridge runtime state, force-kills the Codex app-server child process, and respawns it cleanly. The active session resumes on your next prompt because Codex sessions are file-backed; nothing about your conversation is lost. Critically, this does NOT restart the WAT321 VS Code extension and does NOT touch Claude's MCP connection, so there is zero impact on your Claude session token usage.
+
+- **Codex session token widgets light up during stages 1-2 of a bridge turn.** On first bridge activation, Codex hasn't written its rollout file yet during the early "dispatched" and "received" stages, so the Codex widget had no transcript signal and stayed idle. The widget now blinks `disconnect` <-> `connected` at 1Hz during those early stages, mirroring the Claude widget's debug ceremony. Once stage 3+ ticks in, normal in-turn rendering takes over.
+
+- **Cache LOAD detection now works for Codex sessions too.** Codex rollouts use a different compact marker than Claude (an `event_msg/context_compacted` event plus a legacy `compacted` rollout line). The widget now reads both and feeds the same provider-agnostic compact-aware state machine, so a yellow `LOAD` banner fires after a Codex compaction the same way it does after a Claude `/compact`. Closes #62.
+
+- **The bridge walker now blinks at 1Hz with directional cues.** Stages 1-2 alternate the numbered square with an outbound arrow; stages 3-4 alternate with a blank during the working phase; stage 5 alternates with a returning arrow. The dispatcher's existing reply-incoming flag drives a sub-state where stage 4's alternate frame switches from blank to a returning arrow once the reply is forming, so you see the direction of the handoff change in real time.
+
+- **A blank-and-logo blink replaces the activity-icon cycle during the bridge's pre-ceremony window.** Before the dispatcher writes its first heartbeat, no real thinking is happening yet, so the previous activity icons misrepresented state. The session token widgets now blink the provider logo against a blank square to read as "we know something is starting" without falsely advertising thinking activity.
+
+### Changed
+
+- **All Epic Handshake menu labels now use ALL CAPS with updated wording.** The main menu reads `RETRIEVE LATE REPLIES (n)` / `WAIT MODE` / `MANAGE CODEX SESSION (S{n})` / `CLEAR` / `PAUSE` / `RESTART CODEX BRIDGE` / `CANCEL`. The Codex session submenu matches the same convention with `BACK` at the top, then `CODEX DEFAULTS` / `RESET` / `DELETE` / `DELETE ALL (n)` / `RECOVER (n)` / `REPAIR SESSIONS (n)`. The `BRIDGE STATUS` row is hidden in this release; all actionable bridge state lives in the click menu instead.
+
+- **Wait mode is now a binary toggle between Adaptive and Fire-and-Forget.** The old three-way Standard / Adaptive / Fire-and-Forget cycle introduced friction the third mode didn't pay back for most users. Standard mode stays internal for any legacy state, but the menu and the settings dropdown only expose Adaptive and Fire-and-Forget. If you had Standard set as your default, you migrate to Adaptive on the next activate.
+
+- **Bars, percentages, and the "Auto-Compact at ~X" tooltip line all show the actual compaction fire point.** Recent Claude Code releases stack a small reserve on the override percentage rather than replacing the default formula, so 73% on a 1M context fires around ~715k instead of the nominal ~730k. The widget used to show 730k in the bar but 715k only in the tooltip, which read as a contradiction. All displays now agree on the effective trigger. Closes #55.
+
+- **The bridge widget no longer renders a hover tooltip.** VS Code Issues #128887 (open since 2021) and #293360 (PR #305676 in development) cause the tooltip overlay to reshow over toasts and re-fire on alt-tab no matter what the extension does about the property. Hovering the bridge widget now shows just the static `Epic Handshake` label. All actionable bridge state lives in the click menu.
+
+- **The Claude session token widget keeps its logo blinking through the full bridge turn under Fire-and-Forget.** Previously, once Claude's MCP call returned the dispatched ack and the transcript classifier saw the tool result land, the widget went idle - even though Codex was still working through the bridge on the other side. The widget now stays visually engaged for the entire bridge in-turn window regardless of which wait mode is active.
+
+- **Internal: bridge state now flows through tool-tier coordinators with a type-only contract for engine consumers.** Two coordinators (`bridgeStageCoordinator`, `lateReplyInboxCoordinator`) live alongside the Epic Handshake source-of-truth files in the EH tier and own an `fs.watch` + 50ms debounce reactor with a 1s polling backstop. Engine consumers depend on a small type-only contract (`engine/bridgeTypes.ts`, `engine/serviceTypes.ts`) so the one-way dependency rule holds. Visible benefit: bridge state changes propagate to widgets in ~50ms instead of up to 1000ms because file-system watch fires events at kernel speed. Background benefit: long-idle stretches save CPU because the bridge stage timer self-suspends after 30s of inactivity and session token widget tickers self-suspend when nothing is animating.
+
+### Fixed
+
+### Removed
+
 ## [1.2.4] - 2026-04-24
 
 ### Added
