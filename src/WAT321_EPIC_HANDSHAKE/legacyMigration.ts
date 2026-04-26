@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import {
   cancelFlagPath,
   FIRE_AND_FORGET_FLAG_PATH,
@@ -27,19 +28,19 @@ import { workspaceHash } from "./workspaceHash";
  * could pick up legacy envelopes from the wrong workspace or render
  * stale runtime flags as if a turn were active.
  *
- *   - `migrateLegacyEnvelopes`: moves v1.2.0 root-level envelopes
- *     (`inbox/codex/<id>.md`) into the v1.2.1 partitioned layout
+ *   - `migrateLegacyEnvelopes`: moves root-level legacy envelopes
+ *     (`inbox/codex/<id>.md`) into the partitioned workspace layout
  *     (`inbox/codex/<wshash>/<id>.md`). Idempotent. Safe to run
  *     forever - subsequent activates find nothing in the root.
  *
  *   - `clearStaleRuntimeFiles`: deletes per-workspace runtime flags
  *     left behind by a prior crash + sweeps the per-workspace inbox
  *     into sent/. Also drops the user-scope fire-and-forget sentinel
- *     so each VS Code window starts in Standard wait mode. Paused
+ *     so activation restores the configured default wait mode. Paused
  *     and adaptive flags intentionally survive (user preference).
  */
 
-/** Move v1.2.0 root-level envelopes into the v1.2.1 partitioned
+/** Move root-level legacy envelopes into the partitioned workspace
  * layout. Routes by the envelope's own `workspace_path` field;
  * unparseable or workspace-less envelopes archive to
  * `sent/<dir>/legacy/` for human inspection. */
@@ -93,7 +94,7 @@ function migrateLegacyDir(
     try {
       const destDir = join(dest, "..");
       if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
-      writeFileSync(dest, readFileSync(src));
+      writeFileAtomic(dest, readFileSync(src));
       unlinkSync(src);
       if (envWsHash !== null) migrated++;
       else orphaned++;
@@ -131,15 +132,17 @@ export function clearStaleRuntimeFiles(): void {
       // otherwise eat the first unrelated Codex toast in this session.
       removeIfExists(suppressCodexToastFlagPath(hash));
     }
-    // Legacy root-level flags from pre-partition builds. Delete so a
-    // v1.2.1+ dispatcher never reads them. Safe even if the user
-    // downgrades; the next v1.2.0 activate would just recreate them.
+    // Legacy root-level flag files from before workspace partitioning.
+    // Delete so the partitioned dispatcher never reads them - the
+    // active dispatcher only consumes per-workspace flag paths.
     for (const legacyPath of LEGACY_FLAG_PATHS) {
       if (existsSync(legacyPath)) unlinkSync(legacyPath);
     }
-    // Fire-and-forget is per-session by design: if the user opted
-    // into it for a long prompt yesterday, today's fresh VS Code
-    // window should start back in Standard (blocking) mode.
+    // Fire-and-forget is per-session by design: clearing the sentinel
+    // here lets activation restore the configured default wait mode
+    // (Adaptive unless the user picked Fire-and-Forget in settings).
+    // Adaptive flag intentionally survives so the user's preference
+    // is preserved across reloads.
     if (existsSync(FIRE_AND_FORGET_FLAG_PATH)) unlinkSync(FIRE_AND_FORGET_FLAG_PATH);
     // Paused state intentionally persists across restarts: if the
     // user paused the bridge, they expect it to stay paused after a
@@ -149,8 +152,8 @@ export function clearStaleRuntimeFiles(): void {
   }
   // Per-workspace inbox sweep. Only this workspace's subfolder is
   // touched; sibling workspaces (other VS Code instances) own their
-  // own subfolders. Without the partition this used to clear the
-  // shared inbox for everyone.
+  // own subfolders. Without the partition the sweep would clear the
+  // shared inbox for every workspace, not just this one.
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) return;
   const wsHash = workspaceHash(ws);
@@ -164,7 +167,7 @@ export function clearStaleRuntimeFiles(): void {
       try {
         const src = join(myInboxClaude, f);
         const dst = join(mySentClaude, f);
-        writeFileSync(dst, readFileSync(src));
+        writeFileAtomic(dst, readFileSync(src));
         unlinkSync(src);
       } catch {
         // best-effort per file

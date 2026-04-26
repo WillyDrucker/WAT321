@@ -8,6 +8,7 @@ import {
   setBridgeActiveProbe,
   setRecentCodexCompletionConsumer,
 } from "../engine/toastNotifier";
+import { BridgeStageCoordinator } from "./bridgeStageCoordinator";
 import {
   extractChannelScript,
   installChannel,
@@ -16,6 +17,12 @@ import {
 } from "./channelInstaller";
 import { CodexDispatcher } from "./codexDispatcher";
 import { registerEpicHandshakeCommands } from "./commandRegistration";
+import {
+  writeCodexEffortOverride,
+  writeCodexModelOverride,
+  writeCodexSandboxOverride,
+} from "./codexRuntimeOverrides";
+import { LateReplyInboxCoordinator } from "./lateReplyInboxCoordinator";
 import {
   EPIC_HANDSHAKE_DIR,
   inFlightFlagPath,
@@ -38,8 +45,19 @@ import {
   parseDefaultWaitMode,
 } from "./statusBarItem";
 import type { BridgeThreadRecord } from "./threadPersistence";
-import { consumeRecentCodexCompletion } from "./turnFlags";
+import {
+  clearBridgeRuntimeFlags,
+  consumeRecentCodexCompletion,
+  writeCancelFlag,
+} from "./turnFlags";
 import { workspaceHash } from "./workspaceHash";
+
+/** How long the restart-bridge orchestration waits between writing
+ * the cancel sentinel and force-killing the app-server child. Long
+ * enough for an in-flight `runTurnOnce` to observe the flag and write
+ * its "cancelled by user" reply through the existing reply path; short
+ * enough that a stuck bridge does not feel sluggish to recover. */
+const RESTART_CANCEL_GRACE_MS = 500;
 
 /**
  * Epic Handshake tier entry point. Sync MCP architecture:
@@ -66,13 +84,23 @@ class EpicHandshakeTier {
   private readonly logger = this.loggerHandle.logger;
   private statusBar: ReturnType<typeof createEpicHandshakeStatusBarItem> | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  readonly bridgeStage: BridgeStageCoordinator;
+  readonly lateReplyInbox: LateReplyInboxCoordinator;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly events: EventHub
-  ) {}
+  ) {
+    this.bridgeStage = new BridgeStageCoordinator(events);
+    this.lateReplyInbox = new LateReplyInboxCoordinator(events);
+  }
 
   activate(): void {
+    // Coordinators are constructed in the ctor but their polling loops
+    // start here so subscribers (toast notifier probes wired below,
+    // status bar refresh handlers) register before the first tick fires.
+    this.bridgeStage.start();
+    this.lateReplyInbox.start();
     // One-time migration: any envelopes left in the un-partitioned
     // `inbox/codex/*.md` or `inbox/claude/*.md` from a v1.2.0 install
     // get moved into their envelope's workspace subfolder. Runs
@@ -116,7 +144,12 @@ class EpicHandshakeTier {
       return consumeRecentCodexCompletion(ws);
     });
     this.disposables.push(registerHealthSection(appendEpicHandshakeHealth));
-    this.statusBar = createEpicHandshakeStatusBarItem(this.context, this.events);
+    this.statusBar = createEpicHandshakeStatusBarItem(
+      this.context,
+      this.events,
+      this.bridgeStage,
+      this.lateReplyInbox
+    );
     this.registerCommands();
     this.watchSetting();
     this.refreshStatusBar();
@@ -130,6 +163,16 @@ class EpicHandshakeTier {
     // is still visibly pulsing. File-stat cost per tick is
     // negligible either way.
     this.refreshTimer = setInterval(() => this.refreshStatusBar(), 1000);
+    // Bridge state coordinator emits phase + stage transitions as
+    // they happen (driven by fs-watch on heartbeat/flag/envelope
+    // writes within ~50ms). Refresh on each event so the status bar
+    // reflects state changes instantly instead of waiting for the
+    // next 1s animation tick.
+    this.disposables.push(
+      this.events.on("bridge.phaseChanged", () => this.refreshStatusBar()),
+      this.events.on("bridge.stageChanged", () => this.refreshStatusBar()),
+      this.events.on("inbox.countChanged", () => this.refreshStatusBar())
+    );
     if (this.isEnabled()) {
       if (!this.providersPresent()) {
         // Settings say "on" but a provider got switched off between
@@ -141,6 +184,7 @@ class EpicHandshakeTier {
       }
     }
     this.applyDefaultWaitModeSetting();
+    this.applyCodexDefaultsSettings();
   }
 
   /** Read the user's preferred default wait mode from settings and
@@ -156,10 +200,59 @@ class EpicHandshakeTier {
     try {
       const raw = vscode.workspace
         .getConfiguration("wat321")
-        .get<string>(SETTING.epicHandshakeDefaultWaitMode, "Standard");
+        .get<string>(SETTING.epicHandshakeDefaultWaitMode, "Adaptive");
       applyDefaultWaitMode(parseDefaultWaitMode(raw));
     } catch {
-      // best-effort; default to Standard if settings read fails
+      // best-effort; parseDefaultWaitMode falls back to Adaptive on any
+      // unrecognized value, so a settings read failure leaves the user
+      // in the same state as a fresh install.
+    }
+  }
+
+  /** Sync the three Codex-defaults settings to their runtime override
+   * flag files. Called on activate + on settings change. The flags
+   * are read by `turnRunner` on every `turn/start`, so any change
+   * here takes effect on the next bridge prompt - no thread reset.
+   * Codex Defaults menu picker writes the flags directly during a
+   * session (overrides this until the next reload). */
+  private applyCodexDefaultsSettings(): void {
+    const cfg = vscode.workspace.getConfiguration("wat321");
+    try {
+      const sandboxRaw = cfg.get<string>(
+        SETTING.epicHandshakeCodexSandboxDefault,
+        "Read-Only"
+      );
+      writeCodexSandboxOverride(
+        sandboxRaw === "Full-Access" ? "full-access" : "read-only"
+      );
+    } catch {
+      // best-effort
+    }
+    try {
+      const modelRaw = cfg
+        .get<string>(SETTING.epicHandshakeCodexModelDefault, "")
+        .trim();
+      writeCodexModelOverride(modelRaw.length > 0 ? modelRaw : null);
+    } catch {
+      // best-effort
+    }
+    try {
+      const effortRaw = cfg
+        .get<string>(SETTING.epicHandshakeCodexEffortDefault, "")
+        .trim();
+      const validEfforts = new Set([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ]);
+      writeCodexEffortOverride(
+        validEfforts.has(effortRaw)
+          ? (effortRaw as "low" | "medium" | "high" | "xhigh")
+          : null
+      );
+    } catch {
+      // best-effort
     }
   }
 
@@ -174,8 +267,47 @@ class EpicHandshakeTier {
     this.statusBar?.dispose();
     this.statusBar = null;
     this.loggerHandle.dispose();
+    this.bridgeStage.dispose();
+    this.lateReplyInbox.dispose();
     for (const d of this.disposables) d.dispose();
     this.disposables.length = 0;
+  }
+
+  /** "Restart Codex Bridge" main-menu action. Bundles three things:
+   *
+   *   1. Cancel any in-flight turn (writes the cancel sentinel; the
+   *      runTurnOnce poll surfaces a "cancelled by user" reply if it
+   *      fires before step 3 force-kills the app-server).
+   *   2. Force-kill the dispatcher's `codex app-server` child process
+   *      (SIGKILL, no SIGTERM grace) so a stuck or stale-config server
+   *      is gone immediately. Next dispatch spawns a fresh one with
+   *      whatever config.toml currently holds.
+   *   3. Wipe per-workspace runtime flags (in-flight, processing,
+   *      returning, cancel, suppress-toast) so the status bar widget
+   *      returns to idle and the next turn starts from a clean state.
+   *
+   * Preserves: bridge thread record (S<n> resumes on next prompt),
+   * mode flags (paused / adaptive / fire-and-forget), sandbox flag,
+   * late replies, session_index. The user's intentional state survives;
+   * only the stuck runtime cruft is cleared.
+   *
+   * Zero impact on the Claude session - Claude's MCP connection is to
+   * `channel.mjs`, not the dispatcher's app-server. Nothing Claude can
+   * see changes. */
+  async restartBridge(): Promise<void> {
+    const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (ws !== undefined) {
+      writeCancelFlag(ws);
+    }
+    // Brief grace so an in-flight runTurnOnce can observe the cancel
+    // flag and write its "cancelled by user" reply before the next
+    // step kills the connection underneath it.
+    await new Promise((r) => setTimeout(r, RESTART_CANCEL_GRACE_MS));
+    this.dispatcher?.forceRestart();
+    if (ws !== undefined) {
+      clearBridgeRuntimeFlags(ws);
+    }
+    this.logger.info("bridge restarted via main-menu action");
   }
 
   /** Reset hook: ensure cross-tool state is cleaned up synchronously
@@ -196,10 +328,6 @@ class EpicHandshakeTier {
     // writes to disk.
     clearClipboardStaging();
   }
-
-  // Activate-time housekeeping moved to `legacyMigration.ts`. Both
-  // sweeps still run before the dispatcher binds; the orchestration
-  // call is below in startEnabled.
 
   private refreshStatusBar(): void {
     if (this.statusBar === null) return;
@@ -241,6 +369,7 @@ class EpicHandshakeTier {
       ...registerEpicHandshakeCommands({
         logger: this.logger,
         refreshStatusBar: () => this.refreshStatusBar(),
+        restartCodexBridge: () => this.restartBridge(),
       })
     );
   }
@@ -266,6 +395,19 @@ class EpicHandshakeTier {
           )
         ) {
           this.applyDefaultWaitModeSetting();
+        }
+        if (
+          e.affectsConfiguration(
+            `wat321.${SETTING.epicHandshakeCodexSandboxDefault}`
+          ) ||
+          e.affectsConfiguration(
+            `wat321.${SETTING.epicHandshakeCodexModelDefault}`
+          ) ||
+          e.affectsConfiguration(
+            `wat321.${SETTING.epicHandshakeCodexEffortDefault}`
+          )
+        ) {
+          this.applyCodexDefaultsSettings();
         }
         if (
           !e.affectsConfiguration(`wat321.${SETTING.epicHandshakeEnabled}`)
@@ -383,15 +525,27 @@ class EpicHandshakeTier {
   }
 }
 
+export interface EpicHandshakeHandle extends vscode.Disposable {
+  resetCleanup: () => Promise<void>;
+  /** Concrete coordinator the EH tier owns. Re-exposed so the
+   * activator (`extension.ts`) can pass it to bootstrap, where the
+   * Claude/Codex session-token widgets need a `BridgeStageReader`
+   * to render the bridge-driven prefix animations. */
+  bridgeStage: BridgeStageCoordinator;
+  lateReplyInbox: LateReplyInboxCoordinator;
+}
+
 export function activateEpicHandshake(
   context: vscode.ExtensionContext,
   events: EventHub
-): vscode.Disposable & { resetCleanup: () => Promise<void> } {
+): EpicHandshakeHandle {
   const tier = new EpicHandshakeTier(context, events);
   tier.activate();
   return {
     dispose: () => tier.deactivate(),
     resetCleanup: () => tier.resetCleanup(),
+    bridgeStage: tier.bridgeStage,
+    lateReplyInbox: tier.lateReplyInbox,
   };
 }
 

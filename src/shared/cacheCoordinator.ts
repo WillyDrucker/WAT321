@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { releaseClaim, tryAcquireClaim } from "./claimFile";
+import { writeFileAtomic } from "./fs/atomicWrite";
 
 /**
  * Cross-instance coordinator for shared API state.
@@ -86,13 +87,14 @@ export class Coordinator<TState> {
     return Date.now() - cache.timestamp < window;
   }
 
-  /** Write the latest state to the cache file. Best-effort. */
+  /** Write the latest state to the cache file atomically so concurrent
+   * readers in sibling VS Code windows never see torn JSON. Best-effort. */
   writeCache(state: TState): void {
     try {
       const dir = dirname(this.cachePath);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const payload = JSON.stringify({ timestamp: Date.now(), state });
-      writeFileSync(this.cachePath, payload);
+      writeFileAtomic(this.cachePath, payload);
       // Invalidate our own throttled read so the next call returns
       // fresh data.
       this.lastReadAt = 0;

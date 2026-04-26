@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import * as vscode from "vscode";
@@ -110,9 +111,9 @@ export async function deleteCurrentCodexSession(
         }
       });
       strippedIndexLines = lines.filter((l) => l.trim()).length - kept.length;
-      const tmp = `${indexPath}.tmp`;
-      writeFileSync(tmp, `${kept.join("\n")}\n`, "utf8");
-      renameSync(tmp, indexPath);
+      if (!writeFileAtomic(indexPath, `${kept.join("\n")}\n`)) {
+        logger.warn("session_index strip failed: atomic write rejected");
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(`session_index strip failed: ${msg}`);
@@ -129,9 +130,7 @@ export async function deleteCurrentCodexSession(
     lastError: null,
     lastSuccessAt: null,
   };
-  const tmp = `${recordPath}.tmp`;
-  writeFileSync(tmp, JSON.stringify(next, null, 2), "utf8");
-  renameSync(tmp, recordPath);
+  writeFileAtomic(recordPath, JSON.stringify(next, null, 2));
 
   logger.info(
     `codex session S${record.sessionCounter} deleted: ${removedRollouts} rollouts, ${strippedIndexLines} index entries. Next: S${next.sessionCounter}`
@@ -351,9 +350,9 @@ export async function deleteAllCodexSessions(
         }
       });
       strippedIndexLines = lines.filter((l) => l.trim()).length - kept.length;
-      const tmp = `${indexPath}.tmp`;
-      writeFileSync(tmp, `${kept.join("\n")}\n`, "utf8");
-      renameSync(tmp, indexPath);
+      if (!writeFileAtomic(indexPath, `${kept.join("\n")}\n`)) {
+        logger.warn("bulk session_index strip failed: atomic write rejected");
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(`bulk session_index strip failed: ${msg}`);
@@ -381,9 +380,9 @@ export async function deleteAllCodexSessions(
         lastError: null,
         lastSuccessAt: null,
       };
-      const tmp = `${recordPath}.tmp`;
-      writeFileSync(tmp, JSON.stringify(next, null, 2), "utf8");
-      renameSync(tmp, recordPath);
+      if (!writeFileAtomic(recordPath, JSON.stringify(next, null, 2))) {
+        logger.warn("bridge-thread record null failed: atomic write rejected");
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(`bridge-thread record null failed: ${msg}`);
