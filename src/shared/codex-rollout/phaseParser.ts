@@ -124,16 +124,15 @@ export function parseStageInfo(tail: string): StageInfo {
       }
       continue;
     }
-    // `response_item/message` role=assistant entries used to promote
-    // to `writing` on count >= 2, but Codex 0.124 emits multiple
-    // commentary messages per tool-heavy turn ("I'll look at X first",
-    // "Now let me cross-check Y"), so that fallback fired on the 2nd
-    // commentary at ~27% of turn duration and pinned stage 4 for the
-    // remaining majority. The authoritative `agent_message
+    // `response_item/message` role=assistant entries are intentionally
+    // not a stage signal. Codex 0.124+ emits multiple commentary
+    // messages per tool-heavy turn ("I'll look at X first", "Now let me
+    // cross-check Y"); a naive "promote to writing on count >= 2" gate
+    // fires on the 2nd commentary at ~27% of turn duration and pins
+    // stage 4 for the rest. The authoritative `agent_message
     // phase=final_answer` branch above fires 1:1 with turn end, and
     // the post-tool reasoning heuristic below covers the genuine
-    // wrap-up window. No action needed here - the entry is handled
-    // by other branches (and is intentionally not a stage signal).
+    // wrap-up window. No action needed here.
 
     if (entry.type === "response_item" && payloadType === "function_call") {
       toolCallCount++;

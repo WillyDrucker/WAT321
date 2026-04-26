@@ -11,6 +11,7 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   name: "WAT321: Codex Usage (5h)",
   slot: WIDGET_SLOT.codexUsage5H,
   variant: "5h",
+  loadingText: "$(openai) 5h $(loading~spin)",
   nonOkOptions: {
     providerName: "Codex",
     providerIcon: "$(openai)",

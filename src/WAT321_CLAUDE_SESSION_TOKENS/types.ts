@@ -1,4 +1,4 @@
-import type { StatusBarWidget as GenericStatusBarWidget } from "../shared/serviceTypes";
+import type { StatusBarWidget as GenericStatusBarWidget } from "../engine/serviceTypes";
 import type { LastEntryKind } from "../shared/transcriptClassifier";
 import type { ClaudeTurnInfo } from "./parsers";
 
