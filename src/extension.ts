@@ -36,7 +36,18 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   ctx = createEngineContext();
-  context.subscriptions.push(...registerProviders(ctx));
+
+  // Epic Handshake tier activates first so its bridge-stage
+  // coordinator exists by the time the Claude / Codex session-token
+  // widgets construct in registerProviders. The session-token widgets
+  // depend on the bridge stage reader for their prefix animations
+  // (debug-disconnect ceremony, stage glyph cycle, etc.).
+  const epicHandshake = activateEpicHandshake(context, ctx.events);
+  context.subscriptions.push(epicHandshake);
+
+  context.subscriptions.push(
+    ...registerProviders(ctx, epicHandshake.bridgeStage)
+  );
 
   const config = vscode.workspace.getConfiguration("wat321");
   lastNotificationMode = config.get<string>(SETTING.notificationsMode, "System Notifications");
@@ -54,13 +65,6 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => handleConfigChange(e))
   );
-
-  // --- Epic Handshake tier (opt-in, feature-flagged) ---
-  // Registers its own commands and reconciles on-disk state with
-  // the `wat321.epicHandshake.enabled` setting. Activated before
-  // the reset command so `resetCleanup` is available to the hook.
-  const epicHandshake = activateEpicHandshake(context, ctx.events);
-  context.subscriptions.push(epicHandshake);
 
   // --- Command palette ---
   // Reset hook awaits Epic Handshake cleanup (MCP uninstall from

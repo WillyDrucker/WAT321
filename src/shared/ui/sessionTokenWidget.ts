@@ -1,9 +1,12 @@
 import * as vscode from "vscode";
+import type { BridgeStageReader } from "../../engine/bridgeTypes";
 import { getDisplayMode } from "../../engine/displayMode";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
-import { readBridgePhase } from "../bridgePhase";
 import type { StageInfo } from "../codex-rollout/types";
 import type { LastEntryKind } from "../transcriptClassifier";
+import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
+import { getSessionTokenColor } from "./textColors";
+import { formatPct, formatTokens } from "./tokenFormatters";
 
 /** Rich turn-state snapshot for the Claude session token tooltip.
  * Defined here (shared/ui) rather than in the Claude tool folder so
@@ -27,16 +30,16 @@ export interface ClaudeTurnInfo {
   totalInputTokens: number;
   /** `cache_read_input_tokens` on the most recent assistant turn. */
   cachedInputTokens: number;
-  /** `cache_creation_input_tokens` on the most recent assistant turn.
-   * Substantial creation alongside near-zero cached read is the signal
-   * for a real cache miss (TTL expired, context invalidated, auto-
-   * compact fired); small creation is normal every-turn cache upkeep
-   * and is not a miss. */
+  /** `cache_creation_input_tokens` on the most recent assistant turn. */
   cacheCreationTokens: number;
+  /** Timestamp (ms) of the most recent `isCompactSummary` user entry
+   * sitting immediately before the latest assistant turn in the tail.
+   * Drives compact-aware banner classification: a cache rebuild on the
+   * turn following a compact reads as yellow LOAD (deliberate rebuild)
+   * rather than red MISS (involuntary eviction). Null when the latest
+   * turn is not preceded by a compact summary. */
+  lastCompactTimestamp: number | null;
 }
-import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
-import { getSessionTokenColor } from "./textColors";
-import { formatPct, formatTokens } from "./tokenFormatters";
 
 /**
  * Config-driven session token widget with a provider-branded idle
@@ -70,6 +73,12 @@ import { formatPct, formatTokens } from "./tokenFormatters";
  */
 
 export interface SessionTokenRenderData {
+  /** Stable identifier for the session this render represents. The
+   * widget compares it against its `lastSeenSessionId` to detect
+   * session change and reset per-session latch state (LOAD/MISS
+   * watermark, compact watermark) so each session gets its own
+   * "first load" yellow banner. */
+  sessionId: string;
   sessionTitle: string;
   label: string;
   modelId: string;
@@ -107,6 +116,13 @@ export interface SessionTokenRenderData {
    * the override rather than replacing the default formula. Drives
    * the "Auto-Compact at ~X" tooltip line. Undefined for Codex. */
   autoCompactEffectiveTokens?: number;
+  /** Provider-agnostic: timestamp (ms) of the most recent observed
+   * compact event in the underlying transcript / rollout. Drives the
+   * widget's compact-aware LOAD banner. Claude sources this from the
+   * `isCompactSummary` user entry; Codex from the `compacted` /
+   * `context_compacted` rollout entry. Null when no compact event is
+   * in the scanned tail window. */
+  lastCompactTimestamp: number | null;
 }
 
 export interface SessionTokenWidgetDescriptor<TState extends { status: string }> {
@@ -148,46 +164,56 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-/** Cache-miss flash window. Three-frame cycle over 2000ms:
+/** Cache-banner flash window. Three-frame cycle over 2000ms:
  *
- *   0-500    MISS banner
+ *   0-500    banner
  *   500-1000 normal tokens
- *   1000-2000 MISS banner (held)
+ *   1000-2000 banner (held)
  *
  * After 2000ms the widget returns to the normal readout permanently.
  * Widget's 250ms ticker samples the frame selector every render so the
  * alternation lands visibly despite each half-cycle being short. */
-const CACHE_MISS_FLASH_MS = 2000;
-/** Cache-miss definition: a new turn's usage bundle lands where
- * `cache_read_input_tokens` is near zero AND `cache_creation_input_tokens`
- * is substantial. Near-zero cached read means the prefix cache was not
- * used this turn; substantial creation means Claude had to rewrite
- * stable content that normally stays cached. Both signals together
- * isolate a real miss (TTL expired, context invalidated, auto-compact
- * fired) from normal every-turn cache writes (cache_creation is small,
- * cached read stays high).
+const CACHE_BANNER_FLASH_MS = 2000;
+/** Cache-rebuild detection. Two paths qualify a turn as a rebuild
+ * event the user paid input price for:
  *
- * Thresholds:
- *   - CURR_MAX (cached read ceiling for "near zero"): 1,000 tokens.
- *     A real miss reads essentially nothing from cache.
- *   - CREATION_MIN (cache creation floor for "substantial"): 10,000
- *     tokens. Normal every-turn creation is typically a few hundred
- *     to a couple thousand tokens for just the new message block.
- *     10k+ means Claude rehashed system prompt + history.
+ *   1. Strict ratio rule (involuntary eviction signal).
+ *      `cacheCreation >= CACHE_REBUILD_CREATION_MIN`
+ *      AND `cacheCreation >= cachedInput * 2`.
+ *      Creation dominates this turn 2:1 over reads. Catches mid-
+ *      session full rebuilds (TTL expiry, server-side eviction,
+ *      mystery cold-poll on healthy sessions) without false-firing
+ *      on user-pasted big content (where reads stay large).
  *
- * Also gated by usage-bundle change (`outputTokens:totalInput:cached`
- * signature) so a repeated poll that re-reads the same turn never
- * fires a duplicate miss flash. */
-const CACHE_MISS_CACHED_MAX = 1_000;
-const CACHE_MISS_CREATION_MIN = 10_000;
-const CACHE_MISS_BANNER = "🔴MISS🔴";
-/** Yellow LOAD banner for the FIRST qualifying cache-miss-pattern turn
- * after a widget mount. Distinguishes the expected cost of a fresh
- * session / deliberate reload from an unexpected miss. Same 2000ms
- * flash cadence as MISS; only the emoji color changes. Red MISS stays
- * reserved for every subsequent qualifying turn during the same
- * widget lifetime so a real alarm still reads as an alarm. */
+ *   2. Compact-driven rule (deliberate rebuild signal).
+ *      `awaitingCompactLoad === true`
+ *      AND `cacheCreation >= CACHE_REBUILD_CREATION_MIN`.
+ *      Compact (auto or /compact) caches a fresh summary alongside
+ *      the surviving system prompt + tools, so creation is meaningful
+ *      but reads are also non-trivial - the strict ratio gate would
+ *      miss most of these. The marker (parser-detected
+ *      `isCompactSummary` user entry) is the source of truth; we drop
+ *      the ratio gate when it's set.
+ *
+ * Floor thresholds derived from sampling 25k+ unique signatures across
+ * pre- and post-2026-04-24 sessions: tiny creation events are normal
+ * mid-turn caching of new content; real rebuilds are always >= 5k. */
+const CACHE_REBUILD_CREATION_MIN = 5_000;
+const CACHE_REBUILD_RATIO_DENOM = 2;
+
+/** Two-banner classification. Same 2000ms flash cadence for both;
+ * the color signals cause:
+ *
+ *   yellow LOAD = deliberate cache build event - either first build
+ *                 for this session lifetime (cold start, session
+ *                 resume into a fresh widget) or a compact-driven
+ *                 rebuild (auto or /compact). Either way the user
+ *                 paid the input cost as part of an intentional
+ *                 cache-load action.
+ *   red    MISS = involuntary mid-session cache eviction (TTL,
+ *                 server-side fault); user paid again unexpectedly. */
 const CACHE_LOAD_BANNER = "🟡LOAD🟡";
+const CACHE_MISS_BANNER = "🔴MISS🔴";
 
 export class SessionTokenWidget<TState extends { status: string }> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
@@ -196,21 +222,36 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** Signature of the last usage bundle we've seen on this widget
    * instance. Format: `output:totalInput:cached:creation`. Guards the
-   * miss detector against firing twice on the same turn when multiple
-   * polls read the same assistant entry (normal between the 15s poll
-   * cadence and any intermediate triggerPoll). */
+   * latch against firing twice on the same turn when multiple polls
+   * read the same assistant entry (normal between the 15s poll cadence
+   * and any intermediate triggerPoll). Reset on session change. */
   private lastUsageSignature: string | null = null;
-  private cacheMissFlashStartedAt: number | null = null;
   private cacheLoadFlashStartedAt: number | null = null;
-  /** First qualifying cache-miss-pattern turn on this widget instance
-   * fires LOAD (yellow); every subsequent one fires MISS (red). Flips
-   * true the first time either banner is latched so the next unexpected
-   * miss reads as an alarm. Widget instances are recreated on every
-   * tier reactivate, so a deliberate extension reload resets this to
-   * false and the next seeding turn reads LOAD as intended. */
-  private hasEverFlashedCacheBanner = false;
+  private cacheMissFlashStartedAt: number | null = null;
+  /** Tracks the session this widget last observed. When the underlying
+   * session changes (user switched Claude Code projects, opened a
+   * different conversation, etc.) we reset all per-session state so
+   * the new session's first qualifying turn reads as LOAD, not MISS.
+   * Null until the first ok-state poll lands. */
+  private lastSeenSessionId: string | null = null;
+  /** Most recent compact summary timestamp this widget has reacted
+   * to. The parser reports `lastCompactTimestamp` whenever the latest
+   * assistant turn is preceded by an `isCompactSummary` user entry; we
+   * fire LOAD on the trailing rebuild only when this is newer than what
+   * we've already classified. Adopted (not fired) on session change so
+   * historical compacts visible in the tail don't fire spurious LOADs. */
+  private lastSeenCompactTimestamp: number | null = null;
+  /** True until the next qualifying cache-rebuild event fires the
+   * yellow LOAD banner. Set true on widget mount, on session change,
+   * and on detection of a new compact summary. The next qualifying
+   * rebuild flips it back to false; subsequent rebuilds in the same
+   * "epoch" fire red MISS instead. */
+  private awaitingFirstLoad = true;
 
-  constructor(descriptor: SessionTokenWidgetDescriptor<TState>) {
+  constructor(
+    descriptor: SessionTokenWidgetDescriptor<TState>,
+    private readonly bridgeStage: BridgeStageReader
+  ) {
     this.descriptor = descriptor;
     this.item = vscode.window.createStatusBarItem(
       descriptor.id,
@@ -222,45 +263,87 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     this.item.tooltip = `No active ${descriptor.provider} session`;
   }
 
-  /** Detect a Claude turn that paid full input price because the
-   * prefix cache was not usable (TTL expired after idle, context
-   * invalidated, auto-compact ran, or this is the first-load seeding
-   * after a fresh session / deliberate reload). Signal requires all
-   * three:
-   *   1. Usage bundle changed from the last poll (new turn landed,
-   *      not a duplicate read of the same turn). Signature covers
-   *      output + total input + cached + creation so any per-turn
-   *      difference trips the check.
-   *   2. `cachedInputTokens < CACHE_MISS_CACHED_MAX` - the cache
-   *      was not substantially read this turn.
-   *   3. `cacheCreationTokens >= CACHE_MISS_CREATION_MIN` - Claude
-   *      rehashed enough content to indicate a real rebuild, not
-   *      the small every-turn creation that is normal cache upkeep.
+  /** Detect cache-rebuild events and latch the appropriate banner.
+   * Two provider-specific paths converge on the same banner state.
    *
-   * First qualifying turn on this widget instance latches LOAD (yellow).
-   * Every subsequent qualifying turn latches MISS (red). The distinction
-   * separates "expected seeding cost after reload" from "unexpected
-   * mid-session invalidation" so the alarm reading of red stays
-   * meaningful. Widget instances are recreated on every tier
-   * reactivate, so a deliberate reload resets the counter.
+   * Claude path (cc/cr tokens available):
+   *   1. Strict ratio rule (involuntary eviction).
+   *      `cacheCreation >= CACHE_REBUILD_CREATION_MIN`
+   *      AND `cacheCreation >= cachedInput * CACHE_REBUILD_RATIO_DENOM`.
+   *      Catches mid-session full rebuilds (TTL expiry, server-side
+   *      eviction) without firing on user-pasted big content where
+   *      reads stay large.
+   *   2. Compact-driven rule (deliberate rebuild).
+   *      A new `isCompactSummary` user entry has been observed since
+   *      last poll, which sets `awaitingFirstLoad`. The trailing
+   *      rebuild qualifies on creation alone (`>= CREATION_MIN`) since
+   *      we already know a compact happened.
    *
-   * Codex sessions never populate `claudeTurnInfo` so this no-ops on
-   * that side. */
-  private maybeLatchCacheMiss(claudeTurnInfo: ClaudeTurnInfo | undefined): void {
-    if (claudeTurnInfo === undefined) return;
-    const sig = `${claudeTurnInfo.outputTokens}:${claudeTurnInfo.totalInputTokens}:${claudeTurnInfo.cachedInputTokens}:${claudeTurnInfo.cacheCreationTokens}`;
+   *   Banner choice:
+   *     awaitingFirstLoad = true  -> yellow LOAD (deliberate event)
+   *     awaitingFirstLoad = false -> red MISS (involuntary event)
+   *
+   * Codex path (no token-level cache breakdown in rollouts):
+   *   Marker-only. A new `compacted` / `context_compacted` rollout
+   *   entry fires yellow LOAD immediately on detection. No MISS
+   *   detection - Codex doesn't surface eviction signals. */
+  private maybeLatchCacheBanner(data: SessionTokenRenderData): void {
+    if (data.sessionId !== this.lastSeenSessionId) {
+      this.lastSeenSessionId = data.sessionId;
+      this.lastUsageSignature = null;
+      this.awaitingFirstLoad = true;
+      // Adopt the new session's compact watermark without firing.
+      // Historical compacts visible in the tail belong to a prior
+      // epoch we never observed live; the next compact AFTER this
+      // adoption is the one we react to.
+      this.lastSeenCompactTimestamp = data.lastCompactTimestamp;
+    }
+
+    // Provider-agnostic compact detection. A newer compact timestamp
+    // than what we adopted on session attach means a fresh compact
+    // happened in this session epoch.
+    const compactTs = data.lastCompactTimestamp;
+    const newCompactObserved =
+      compactTs !== null &&
+      this.lastSeenCompactTimestamp !== null &&
+      compactTs > this.lastSeenCompactTimestamp;
+
+    if (newCompactObserved) {
+      this.lastSeenCompactTimestamp = compactTs;
+      this.awaitingFirstLoad = true;
+    }
+
+    const info = data.claudeTurnInfo;
+    if (info === undefined) {
+      // Codex path: marker-only. Fire LOAD immediately on a new
+      // compact observation; Codex rollouts don't expose cache_creation
+      // tokens for the strict ratio gate.
+      if (newCompactObserved) {
+        this.cacheLoadFlashStartedAt = Date.now();
+        this.awaitingFirstLoad = false;
+      }
+      return;
+    }
+
+    // Claude path: token-gated detection.
+    const sig = `${info.outputTokens}:${info.totalInputTokens}:${info.cachedInputTokens}:${info.cacheCreationTokens}`;
     if (sig === this.lastUsageSignature) return;
     this.lastUsageSignature = sig;
-    if (
-      claudeTurnInfo.cachedInputTokens < CACHE_MISS_CACHED_MAX &&
-      claudeTurnInfo.cacheCreationTokens >= CACHE_MISS_CREATION_MIN
-    ) {
-      if (this.hasEverFlashedCacheBanner) {
-        this.cacheMissFlashStartedAt = Date.now();
-      } else {
-        this.cacheLoadFlashStartedAt = Date.now();
-      }
-      this.hasEverFlashedCacheBanner = true;
+
+    const cc = info.cacheCreationTokens;
+    const cr = info.cachedInputTokens;
+    const meetsCreationFloor = cc >= CACHE_REBUILD_CREATION_MIN;
+    if (!meetsCreationFloor) return;
+    const meetsStrict = cc >= cr * CACHE_REBUILD_RATIO_DENOM;
+    const meetsCompact = this.awaitingFirstLoad;
+    if (!meetsStrict && !meetsCompact) return;
+
+    const now = Date.now();
+    if (this.awaitingFirstLoad) {
+      this.cacheLoadFlashStartedAt = now;
+      this.awaitingFirstLoad = false;
+    } else {
+      this.cacheMissFlashStartedAt = now;
     }
   }
 
@@ -279,13 +362,13 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     const now = Date.now();
     if (this.cacheLoadFlashStartedAt !== null) {
       const elapsed = now - this.cacheLoadFlashStartedAt;
-      if (elapsed < CACHE_MISS_FLASH_MS && (elapsed < 500 || elapsed >= 1000)) {
+      if (elapsed < CACHE_BANNER_FLASH_MS && (elapsed < 500 || elapsed >= 1000)) {
         return CACHE_LOAD_BANNER;
       }
     }
     if (this.cacheMissFlashStartedAt !== null) {
       const elapsed = now - this.cacheMissFlashStartedAt;
-      if (elapsed < CACHE_MISS_FLASH_MS && (elapsed < 500 || elapsed >= 1000)) {
+      if (elapsed < CACHE_BANNER_FLASH_MS && (elapsed < 500 || elapsed >= 1000)) {
         return CACHE_MISS_BANNER;
       }
     }
@@ -298,10 +381,56 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     this.ensureTicker();
   }
 
+  /** True when an animation needs the 250ms sampling cadence:
+   *   - bridge widget is mid-turn (logo blink / debug ceremony /
+   *     stage cycle frames)
+   *   - cache LOAD or MISS flash window is open
+   *   - transcript was active within the last `activeThresholdMs`
+   *     so the activeFrames cycle is progressing
+   *
+   * When all three are false the widget is rendering a static idle
+   * state - the ticker can self-suspend until the next external
+   * update() restarts it. Avoids the 4Hz tick during long idle
+   * stretches when the user is not interacting with either CLI. */
+  private animationsActive(): boolean {
+    if (this.bridgeStage.snapshot().phase !== "idle") return true;
+    if (this.cacheLoadFlashStartedAt !== null) {
+      const elapsed = Date.now() - this.cacheLoadFlashStartedAt;
+      if (elapsed < CACHE_BANNER_FLASH_MS) return true;
+    }
+    if (this.cacheMissFlashStartedAt !== null) {
+      const elapsed = Date.now() - this.cacheMissFlashStartedAt;
+      if (elapsed < CACHE_BANNER_FLASH_MS) return true;
+    }
+    if (this.lastState?.status === "ok") {
+      const data = this.descriptor.getRenderData(
+        this.lastState as TState & { status: "ok" }
+      );
+      const turnInProgress =
+        data.turnState === "user" || data.turnState === "assistant-pending";
+      if (turnInProgress) return true;
+      const mtimeFresh =
+        Date.now() - data.transcriptMtimeMs < this.descriptor.activeThresholdMs;
+      if (mtimeFresh) return true;
+    }
+    return false;
+  }
+
   private ensureTicker(): void {
-    const shouldTick = this.lastState?.status === "ok";
+    const shouldTick =
+      this.lastState?.status === "ok" && this.animationsActive();
     if (shouldTick && !this.ticker) {
-      this.ticker = setInterval(() => this.render(), TICK_MS);
+      this.ticker = setInterval(() => {
+        this.render();
+        // Self-suspend when animations stop. The next update() call
+        // will re-evaluate and restart if needed.
+        if (!this.animationsActive()) {
+          if (this.ticker) {
+            clearInterval(this.ticker);
+            this.ticker = null;
+          }
+        }
+      }, TICK_MS);
     } else if (!shouldTick && this.ticker) {
       clearInterval(this.ticker);
       this.ticker = null;
@@ -316,12 +445,16 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     // transcript mtime or PID liveness, so the bridge branch runs
     // first. Sequence from turn start:
     //   pre-ceremony (envelope queued, no heartbeat yet)
-    //                                 force activeFrames so the
-    //                                 widget does not flicker to
-    //                                 idle or a stale turn glyph in
-    //                                 the short window before the
-    //                                 dispatcher writes its first
-    //                                 heartbeat
+    //                                 blink the provider logo
+    //                                 (idlePrefix) against blank at
+    //                                 1Hz. No real thinking is
+    //                                 happening yet - just queue
+    //                                 latency before the dispatcher
+    //                                 writes its first heartbeat - so
+    //                                 the activity-icon cycle would
+    //                                 misrepresent state. Logo blink
+    //                                 reads as "we know something is
+    //                                 starting" without committing.
     //   0-1000ms   debug-disconnect
     //   1000-2000  debug-connected
     //   2000-3000  debug-disconnect
@@ -332,35 +465,51 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     //                                 from the first frame)
     //   >=4000 and stage=dispatched  debug-connected (hold)
     //   stage>=received
-    //     Claude widget + Standard/Adaptive wait modes: blank/claude
-    //       blink at 1s (Claude is still blocking on the reply)
-    //     Codex widget, or Claude in Fire-and-Forget: fall through
-    //       to the provider's own activeFrames (normal thinking)
-    // Bridge error / pause / completion all flip readBridgePhase to
-    // null, which drops the branch and lets the widget render its
-    // normal non-bridge behavior.
-    const workspacePath =
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
-    const bridge = readBridgePhase(workspacePath);
-    if (bridge !== null) {
-      if (bridge.phase === "pre-ceremony") {
-        const idx = Math.floor(now / d.activeStepMs) % d.activeFrames.length;
-        return d.activeFrames[idx];
+    //     Claude widget: 1Hz blank/claude blink for the entire bridge
+    //       in-turn window, regardless of wait mode
+    //     Codex widget: falls through to its own activeFrames
+    //       (normal thinking)
+    // The engine's BridgeStageCoordinator owns ceremony detection
+    // (`snapshot.ceremonyActive`) and latched stage. Both widgets read
+    // the same snapshot so they always observe the same phase + stage
+    // at the same wall-clock instant. Bridge error / pause / completion
+    // all collapse the snapshot to idle, dropping us out of this branch.
+    const snapshot = this.bridgeStage.snapshot();
+    if (snapshot.phase !== "idle") {
+      if (snapshot.phase === "pre-ceremony") {
+        const tick = Math.floor(now / 1000) % 2;
+        return tick === 0 ? "$(blank)" : d.idlePrefix;
       }
-      // phase === "in-turn"
-      const elapsed = now - bridge.turnStartedAt;
-      if (elapsed < 4000) {
+      if (snapshot.ceremonyActive) {
+        const elapsed = now - (snapshot.heartbeat?.turnStartedAt ?? now);
         const frame = Math.floor(elapsed / 1000);
         return frame % 2 === 0 ? "$(debug-disconnect)" : "$(debug-connected)";
       }
-      if (bridge.stage === "dispatched") return "$(debug-connected)";
-      if (d.provider === "Claude" && bridge.claudeBlocking) {
+      if (d.provider === "Claude") {
+        // Whether Claude's MCP call is blocking on the reply
+        // (Standard/Adaptive) or already returned with the dispatched
+        // ack and the bridge is still running independently (Fire-and-
+        // Forget), keep the Claude widget visually engaged with a 1Hz
+        // logo blink for the duration of the bridge turn.
         const tick = Math.floor(now / 1000) % 2;
         return tick === 0 ? "$(blank)" : "$(claude)";
       }
-      // Fall through to normal activeFrames below: Codex animates its
-      // native thinking during working/writing, and Claude under
-      // Fire-and-Forget behaves the same as a non-bridge turn.
+      // Codex widget, stages 1-2 (dispatched, received): the rollout
+      // file does not exist yet, so the native `turnInProgress` check
+      // below would leave the widget on its idle prefix. Run the same
+      // 1Hz debug-disconnect/connected alternation the ceremony used,
+      // so the post-ceremony handoff window reads as motion instead of
+      // a static glyph waiting for Codex's first rollout write.
+      if (
+        snapshot.latchedStage === "dispatched" ||
+        snapshot.latchedStage === "received"
+      ) {
+        const tick = Math.floor(now / 1000) % 2;
+        return tick === 0 ? "$(debug-disconnect)" : "$(debug-connected)";
+      }
+      // Stage 3+ (working/writing/complete): Codex starts writing
+      // its rollout, transcript mtime updates, `turnInProgress` flips
+      // true, and the native activeFrames cycle takes over below.
     }
 
     const turnInProgress =
@@ -399,7 +548,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
       case "ok": {
         const data = d.getRenderData(state as TState & { status: "ok" });
-        this.maybeLatchCacheMiss(data.claudeTurnInfo);
+        this.maybeLatchCacheBanner(data);
 
         const effectiveCeiling = Math.max(0, data.ceiling - data.baselineTokens);
         const effectiveUsed = Math.max(0, data.contextUsed - data.baselineTokens);

@@ -4,9 +4,10 @@ import { EPIC_HANDSHAKE_DIR } from "./constants";
 
 /**
  * Reader for the per-turn heartbeat file the dispatcher writes on
- * every TurnMonitor progress signal. Consumed by the status bar to
- * render the canonical 5-stage display + active-tool tooltip detail
- * during an in-flight bridge turn.
+ * every TurnMonitor progress signal. Consumed by `bridgeStageCoordinator`
+ * to compute the canonical 5-stage display + active-tool tooltip detail
+ * during an in-flight bridge turn, and by `statusBarItem` for the
+ * adaptive-mode glyph cycle.
  *
  * Heartbeat path: `~/.wat321/epic-handshake/turn-heartbeat.<envid>.json`.
  * Per-envelope (UUID), so multiple workspaces' concurrent turns each
@@ -15,6 +16,24 @@ import { EPIC_HANDSHAKE_DIR } from "./constants";
  */
 
 export type Stage = "dispatched" | "received" | "working" | "writing" | "complete";
+
+const VALID_STAGES: ReadonlySet<Stage> = new Set<Stage>([
+  "dispatched",
+  "received",
+  "working",
+  "writing",
+  "complete",
+]);
+
+/** Validate a string against the Stage union. Defends the coordinator
+ * against a heartbeat file containing an unknown stage value (CLI
+ * upgrade lag, manually-edited heartbeat for debugging, partial write
+ * landed before the writer rewrote the field). Without the guard, an
+ * unknown stage flows into `STAGE_ORDER.indexOf` which returns -1 and
+ * trips downstream `STAGE_LATCH_MS[stage]` lookups with `undefined`. */
+function isStage(value: unknown): value is Stage {
+  return typeof value === "string" && VALID_STAGES.has(value as Stage);
+}
 
 export interface TurnHeartbeat {
   envelopeId: string;
@@ -26,11 +45,9 @@ export interface TurnHeartbeat {
   elapsedMs: number;
   lastProgressAt: number;
   /** Timestamp (ms epoch) the dispatcher first entered each stage on
-   * this turn. Missing keys = stage not yet reached. Drives the
-   * static 5-stage tooltip block so each row can show "completed at
-   * HH:MM:SS (took 3.2s)" once passed. */
+   * this turn. Missing keys = stage not yet reached. */
   stageEnteredAt?: Partial<Record<Stage, number>>;
-  /** Wall-clock start of the turn so the tooltip can show a single
+  /** Wall-clock start of the turn so consumers can show a single
    * "wait time" counter that ticks up regardless of which stage is
    * active. Set when the dispatcher writes the very first heartbeat. */
   turnStartedAt?: number;
@@ -77,17 +94,13 @@ export function readNewestHeartbeat(wsHash: string | null): TurnHeartbeat | null
         continue;
       }
       if (parsed.workspaceHash !== wsHash) continue;
-      if (
-        typeof parsed.envelopeId !== "string" ||
-        typeof parsed.stage !== "string"
-      ) {
-        continue;
-      }
+      if (typeof parsed.envelopeId !== "string") continue;
+      if (!isStage(parsed.stage)) continue;
       const normalized: TurnHeartbeat = {
         envelopeId: parsed.envelopeId,
         workspacePath: parsed.workspacePath ?? "",
         workspaceHash: parsed.workspaceHash,
-        stage: parsed.stage as TurnHeartbeat["stage"],
+        stage: parsed.stage,
         activeTool: parsed.activeTool ?? null,
         toolCallCount:
           typeof parsed.toolCallCount === "number" ? parsed.toolCallCount : 0,
@@ -115,180 +128,10 @@ export function readNewestHeartbeat(wsHash: string | null): TurnHeartbeat | null
   }
 }
 
-/** Minimum display time per stage before the latch lets the widget
- * advance to the NEXT stage. The latch is a sequential walker: it
- * never skips stages even when the dispatcher's monitor jumps
- * (which happens routinely because Codex emits final_answer and
- * task_complete in the same 5s poll window, so stage 4 never gets
- * a heartbeat write of its own). The walker gives every stage its
- * minimum display time so the user can visually track progress.
- *
- * Per-stage tuning: 3s for all five stages. Under-10s turns stretch
- * the display to ~15s total; over-10s turns see real timing on the
- * longer stages (3/4) because min-hold elapses before we observe
- * the next heartbeat.
- */
-const STAGE_LATCH_MS: Record<Stage, number> = {
-  dispatched: 3000,
-  received: 3000,
-  working: 3000,
-  writing: 3000,
-  complete: 3000,
-};
-
-/** Per-stage maximum display time before the walker force-advances
- * one step even when the parser has NOT signaled a higher target
- * stage. Needed because tool-heavy Codex turns spend 80-95% of their
- * wall time emitting `function_call` / `web_search_call` interleaved
- * with `reasoning`, so `parseStageInfo` sits at `working` until the
- * very last `agent_message phase=final_answer`. Without a max-hold
- * the status-bar walker pins at stage 3 for a full minute+, leaving
- * stage 4 essentially invisible.
- *
- * Stages 1 (dispatched) and 5 (complete) are intentionally left at 0
- * (never force-advance): stage 1 is the send/init bookend and should
- * resolve naturally when `task_started` fires; stage 5 is reserved
- * for "reply coming back" and must be driven exclusively by
- * `task_complete` in the rollout so we never claim a turn is done
- * before Codex actually finishes.
- *
- * Stages 2-4 cover Codex's real workload. The max-hold evens out the
- * visible progression so a long turn walks 2 -> 3 -> 4 at reasonable
- * intervals instead of stalling at one stage.
- */
-const STAGE_MAX_HOLD_MS: Record<Stage, number> = {
-  dispatched: 0, // never force; resolves on task_started
-  received: 15_000,
-  working: 30_000,
-  writing: 0, // holds until task_complete, never force into stage 5
-  complete: 0,
-};
-
-const STAGE_ORDER_LIST: readonly Stage[] = [
-  "dispatched",
-  "received",
-  "working",
-  "writing",
-  "complete",
-];
-
-function stageIdx(s: Stage): number {
-  return STAGE_ORDER_LIST.indexOf(s);
-}
-
-interface LatchState {
-  envelopeId: string;
-  displayedStage: Stage;
-  displayedAt: number;
-}
-let latchState: LatchState | null = null;
-
-/** Apply the per-envelope stage latch. Walks the displayed stage
- * one step at a time toward the heartbeat's real stage, honoring
- * per-stage minimum display time. On a new envelope the walker
- * starts at `dispatched` regardless of what the first heartbeat
- * says, so stage 1 always gets visible time. */
-export function applyStageLatch(hb: TurnHeartbeat): TurnHeartbeat {
-  const now = Date.now();
-  if (!latchState || latchState.envelopeId !== hb.envelopeId) {
-    // New turn: always start the walker at `dispatched`, not at
-    // whatever stage the heartbeat is already at. The monitor often
-    // writes stage=received as the very first heartbeat (because the
-    // initial writeHeartbeat("dispatched") in turnRunner happens
-    // microseconds before turn/started RPC, and the widget reads the
-    // file on its own 1s refresh interval), which would skip the
-    // stage 1 display.
-    latchState = {
-      envelopeId: hb.envelopeId,
-      displayedStage: "dispatched",
-      displayedAt: now,
-    };
-    return { ...hb, stage: "dispatched" };
-  }
-  const displayedIdx = stageIdx(latchState.displayedStage);
-  const targetIdx = stageIdx(hb.stage);
-  const maxMs = STAGE_MAX_HOLD_MS[latchState.displayedStage];
-  const heldMs = now - latchState.displayedAt;
-  // Force-advance only when the parser hasn't already signaled a
-  // higher target (targetIdx <= displayedIdx), max-hold is set
-  // (stages 2-4), the max has elapsed, and a non-terminal next
-  // stage exists (never force into `complete`, stage 5 is reserved
-  // for reply-back and must be driven by task_complete alone).
-  const shouldForceAdvance =
-    targetIdx <= displayedIdx &&
-    maxMs > 0 &&
-    heldMs >= maxMs &&
-    displayedIdx + 1 < STAGE_ORDER_LIST.length - 1;
-  if (targetIdx <= displayedIdx && !shouldForceAdvance) {
-    // Real stage at or below displayed, no force-advance warranted.
-    // Keep showing current.
-    return { ...hb, stage: latchState.displayedStage };
-  }
-  // Either the parser's target is ahead, or the max-hold elapsed
-  // and a force-advance is due. Respect the min-hold floor so we
-  // never flip faster than intended.
-  const minMs = STAGE_LATCH_MS[latchState.displayedStage];
-  if (heldMs < minMs) {
-    return { ...hb, stage: latchState.displayedStage };
-  }
-  const next = STAGE_ORDER_LIST[displayedIdx + 1];
-  latchState = {
-    envelopeId: hb.envelopeId,
-    displayedStage: next,
-    displayedAt: now,
-  };
-  return { ...hb, stage: next };
-}
-
-/** Synthesize a heartbeat for the current envelope even when the
- * dispatcher's heartbeat file has been cleaned up (post-turn). The
- * widget calls this in addition to / instead of reading the file so
- * the stage walker can continue advancing after Codex completes - it
- * would otherwise stall at whatever stage was displayed when the
- * heartbeat file got deleted. Returns null if there's no active
- * envelope to walk. */
-export function latchTickNoHeartbeat(envelopeId: string | null): TurnHeartbeat | null {
-  if (!envelopeId || !latchState || latchState.envelopeId !== envelopeId) {
-    return null;
-  }
-  // Treat the turn as "complete" for walker target purposes so the
-  // latch advances through any remaining stages.
-  const synthetic: TurnHeartbeat = {
-    envelopeId,
-    workspacePath: "",
-    workspaceHash: "",
-    stage: "complete",
-    activeTool: null,
-    toolCallCount: 0,
-    elapsedMs: 0,
-    lastProgressAt: Date.now(),
-  };
-  return applyStageLatch(synthetic);
-}
-
-/** Map a dispatcher-reported stage to the canonical N/5 fraction the
- * status bar tooltip displays. Mirrors `BridgeStage` from
- * `shared/codex-rollout/types` without importing the type so the
- * status-bar layer stays decoupled from the rollout parser. */
-export function stageFraction(stage: TurnHeartbeat["stage"]): string {
-  switch (stage) {
-    case "dispatched":
-      return "1/5";
-    case "received":
-      return "2/5";
-    case "working":
-      return "3/5";
-    case "writing":
-      return "4/5";
-    case "complete":
-      return "5/5";
-  }
-}
-
 /** Numbered-square glyph for the stage. Drives the status bar icon
  * during adaptive-mode active turns. Matches package.json's
  * `wat321-square-{one..five}` icon font registrations. */
-export function stageGlyph(stage: TurnHeartbeat["stage"]): string {
+export function stageGlyph(stage: Stage): string {
   switch (stage) {
     case "dispatched":
       return "$(wat321-square-one)";
@@ -303,144 +146,35 @@ export function stageGlyph(stage: TurnHeartbeat["stage"]): string {
   }
 }
 
-/** Static description of what each stage represents. Drives the
- * "what are we waiting for" copy in the static 5-row tooltip block.
- * Plain prose; one short sentence per stage so the user can scan
- * at a glance without parsing technical terms. */
-/** One short line per stage so each tooltip row fits without wrapping. */
-const STAGE_DESCRIPTIONS: Record<Stage, string> = {
-  dispatched: "Bridge dispatching to Codex.",
-  received: "Codex accepted; reading your prompt.",
-  working: "Codex using tools - searches, files, reasoning.",
-  writing: "Codex wrapping up; streaming the reply.",
-  complete: "Reply delivered back to Claude.",
-};
-
-const STAGE_TITLES: Record<Stage, string> = {
-  dispatched: "Sending",
-  received: "Received",
-  working: "Working",
-  writing: "Finalizing",
-  complete: "Delivering",
-};
-
-const STAGE_ORDER: readonly Stage[] = [
-  "dispatched",
-  "received",
-  "working",
-  "writing",
-  "complete",
-];
-
-/** Build the static 5-row tooltip block. Every row renders regardless
- * of current stage, so the user can always see where the turn is and
- * how long each prior stage took. Format per row:
+/** 1Hz cycle frame for adaptive mode. Alternates the numbered stage
+ * glyph (even seconds) with a directional or neutral frame (odd
+ * seconds) so the status bar reads as motion + direction across the
+ * lifecycle:
  *
- *   1/5 Sending - elapsed 1.2s     (active stage)
- *     Envelope written; channel.mjs handed it to the dispatcher.
- *   2/5 Received - completed at 14:32:18 (took 0.8s)   (passed)
- *     Codex acknowledged the turn ...
- *   3/5 Working - pending           (not yet reached)
- *     Codex is doing the work ...
+ *   1 dispatched   square-one   <-> arrow-right   (outbound)
+ *   2 received     square-two   <-> arrow-right   (outbound)
+ *   3 working      square-three <-> blank         (Codex thinking)
+ *   4 writing      square-four  <-> blank         (still composing)
+ *   4 + returning  square-four  <-> arrow-left    (reply incoming)
+ *   5 complete     square-five  <-> arrow-left    (delivered back)
  *
- * Markdown-friendly; consumed by `vscode.MarkdownString` in the
- * status bar tooltip builder. */
-export function renderStageTooltipBlock(hb: TurnHeartbeat, now: number): string {
-  const lines: string[] = [];
-  const enteredAt = hb.stageEnteredAt ?? {};
-  const turnStarted = hb.turnStartedAt ?? hb.lastProgressAt;
-  const totalElapsed = formatDuration(now - turnStarted);
-  lines.push(`Wait time: ${totalElapsed}`);
-  lines.push("");
-
-  const currentIdx = STAGE_ORDER.indexOf(hb.stage);
-  for (let i = 0; i < STAGE_ORDER.length; i++) {
-    const stage = STAGE_ORDER[i];
-    const fraction = `${i + 1}/5`;
-    const title = STAGE_TITLES[stage];
-    const stageStart = enteredAt[stage];
-
-    let stateLine: string;
-    if (i < currentIdx) {
-      // Passed stage: show completion time + duration.
-      const stageEnd = enteredAt[STAGE_ORDER[i + 1]];
-      if (stageStart !== undefined && stageEnd !== undefined) {
-        const took = formatDuration(stageEnd - stageStart);
-        const at = new Date(stageEnd).toLocaleTimeString();
-        stateLine = `${fraction} ${title} - completed at ${at} (took ${took})`;
-      } else {
-        stateLine = `${fraction} ${title} - completed`;
-      }
-    } else if (i === currentIdx) {
-      // Active stage: elapsed-in-stage counter.
-      const inStage =
-        stageStart !== undefined ? formatDuration(now - stageStart) : "0s";
-      stateLine = `${fraction} ${title} - elapsed ${inStage} (active)`;
-    } else {
-      // Pending stage: just the title.
-      stateLine = `${fraction} ${title} - pending`;
-    }
-    lines.push(stateLine);
-    lines.push(`  ${STAGE_DESCRIPTIONS[stage]}`);
-  }
-  return lines.join("\n");
-}
-
-/** Coarse duration formatter for tooltip display. Bucket strategy
- * trades resolution for tooltip-blink reduction: every distinct
- * string the tooltip emits causes VS Code to flash the hover overlay
- * on the next refresh tick (a known MarkdownString limitation we
- * cannot suppress from our side). Buckets:
- *   - 0 ms              -> "0s"
- *   - 1 to 9 sec        -> per-second ("3s")
- *   - 10 to 59 sec      -> 5-second buckets ("15s", "20s")
- *   - 1 to 9 min        -> 30-second buckets ("1m 30s")
- *   - 10+ min           -> minute resolution ("12m")
- * Under 10s the user wants the per-second feedback that "something
- * is happening." Past that, slowdowns are what matter, not exact
- * seconds, so the wider buckets keep the tooltip stable. */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return "0s";
-  const totalSec = Math.floor(ms / 1000);
-  if (totalSec < 10) return `${totalSec}s`;
-  if (totalSec < 60) return `${Math.floor(totalSec / 5) * 5}s`;
-  const totalMin = Math.floor(totalSec / 60);
-  const remSec = totalSec % 60;
-  if (totalMin < 10) {
-    const bucketed = Math.floor(remSec / 30) * 30;
-    return bucketed === 0 ? `${totalMin}m` : `${totalMin}m ${bucketed}s`;
-  }
-  return `${totalMin}m`;
-}
-
-/** Human-readable label for the heartbeat's stage. Tool name wins
- * over generic "working" - reasoning is often interleaved with tool
- * prep, and the tool name is the more useful UI string. */
-export function labelForStage(hb: TurnHeartbeat): string {
-  switch (hb.stage) {
+ * The 4a/4b split uses the dispatcher's `returning.<wsHash>.flag` so
+ * we get a "delivery imminent" cue without a new heartbeat field. */
+export function adaptiveStageCycle(
+  stage: Stage,
+  oneHz: boolean,
+  returning: boolean
+): string {
+  if (oneHz) return stageGlyph(stage);
+  switch (stage) {
     case "dispatched":
-      return "Sending";
     case "received":
-      return "Received";
-    case "working": {
-      if (!hb.activeTool) return "Working";
-      switch (hb.activeTool) {
-        case "update_plan":
-          return "Planning";
-        case "shell_command":
-          return "Researching";
-        case "web_search":
-        case "web_search_call":
-          return "Searching";
-        case "read_file":
-          return "Reading";
-        default:
-          return `Using ${hb.activeTool.replace(/_call$/, "").replace(/_/g, " ")}`;
-      }
-    }
+      return "$(wat321-square-arrow-right)";
+    case "working":
+      return "$(wat321-square)";
     case "writing":
-      return "Finalizing";
+      return returning ? "$(wat321-square-arrow-left)" : "$(wat321-square)";
     case "complete":
-      return "Delivering";
+      return "$(wat321-square-arrow-left)";
   }
 }
