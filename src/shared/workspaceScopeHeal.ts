@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
+import { writeFileAtomic } from "./fs/atomicWrite";
 
 /**
  * Heal stale workspace-scoped values for `wat321.*` settings whose
@@ -31,6 +32,10 @@ const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.notificationsCodex}`,
   `wat321.${SETTING.epicHandshakeEnabled}`,
   `wat321.${SETTING.epicHandshakeSuppressCodexToasts}`,
+  `wat321.${SETTING.epicHandshakeDefaultWaitMode}`,
+  `wat321.${SETTING.epicHandshakeCodexSandboxDefault}`,
+  `wat321.${SETTING.epicHandshakeCodexModelDefault}`,
+  `wat321.${SETTING.epicHandshakeCodexEffortDefault}`,
 ] as const;
 
 /** Value-pattern fragments matched per JSONC value shape. Ordered
@@ -73,13 +78,8 @@ function stripApplicationScopeKeysFromFile(path: string): void {
   // would make the object invalid JSON. Fix up: `, \n}` -> `\n}`.
   next = next.replace(/,(\s*})/g, "$1");
 
-  try {
-    const tmp = `${path}.wat321-heal.tmp`;
-    writeFileSync(tmp, next, "utf8");
-    renameSync(tmp, path);
-  } catch {
-    // best-effort
-  }
+  // best-effort
+  writeFileAtomic(path, next, ".wat321-heal.tmp");
 }
 
 /** Drop a stuck workspace-scope value via the config API where

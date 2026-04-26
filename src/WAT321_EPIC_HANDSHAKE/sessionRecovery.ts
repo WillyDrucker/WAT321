@@ -2,13 +2,12 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
-  renameSync,
   statSync,
-  writeFileSync,
   type Dirent,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { readFirstLine } from "../shared/fs/fileReaders";
 import { bridgeThreadNamePattern } from "./threadNaming";
 import {
@@ -162,17 +161,10 @@ export function rewriteRolloutModelSlug(
   } catch {
     return false;
   }
-  const tmp = `${rolloutPath}.tmp`;
-  try {
-    writeFileSync(tmp, rewrittenFirstLine + remainder, "utf8");
-    renameSync(tmp, rolloutPath);
-    return true;
-  } catch {
-    // Windows may reject rename-over-open-file with EBUSY if Codex's
-    // app-server has the rollout open. Caller's job to advise the
-    // user to ensure no turn is mid-flight before retrying.
-    return false;
-  }
+  // Windows may reject rename-over-open-file with EBUSY if Codex's
+  // app-server has the rollout open. Caller's job to advise the user
+  // to ensure no turn is mid-flight before retrying.
+  return writeFileAtomic(rolloutPath, rewrittenFirstLine + remainder);
 }
 
 /** Compare two filesystem paths for workspace-identity purposes.

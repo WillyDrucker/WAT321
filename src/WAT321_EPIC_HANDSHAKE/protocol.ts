@@ -97,10 +97,15 @@ export type CodexApprovalPolicy =
   | "on-request";
 
 /** `thread/start` params. Creates a fresh Bridge thread owned by
- * this client. Defaults are `approvalPolicy: "never"` and
- * `sandbox: "read-only"` (safest), overridable via the
- * `wat321.epicHandshake.codexSandbox` and
- * `wat321.epicHandshake.codexApprovalPolicy` settings.
+ * this client. Always opens the thread at maximum capability
+ * ceiling (`approvalPolicy: "never"`, `sandbox: "danger-full-access"`)
+ * so any per-turn dial-down is reachable without a thread reset.
+ * Per-turn `model`, `effort`, and `sandboxPolicy` overrides are
+ * applied on every `turn/start` (see `TurnStartParams`); the
+ * `wat321.epicHandshake.codexSandboxDefault` /
+ * `codexModelDefault` / `codexEffortDefault` settings drive the
+ * on-activate values and the Codex Defaults menu picker overrides
+ * them until the next reload.
  * `sessionStartSource` is echoed into the rollout metadata and
  * helps distinguish bridge-spawned sessions from user-spawned ones
  * when inspecting history. */
@@ -133,11 +138,19 @@ export type TurnSandboxPolicy =
   | { type: "dangerFullAccess" };
 
 /** `turn/start` params. Begins a new turn with the given input.
+ *
  * `approvalPolicy` is always `"never"` - the bridge has no UI to
- * relay Codex's approval prompts back mid-turn. `sandboxPolicy` is
- * read from the `codex-full-access.flag` sentinel at every turn,
- * so toggling permissions in the sessions submenu takes effect on
- * the next prompt without needing a thread reset. */
+ * relay Codex's approval prompts back mid-turn.
+ *
+ * `sandboxPolicy`, `model`, and `effort` are read from per-session
+ * override flag files (`codex-full-access.flag`, `codex-model.flag`,
+ * `codex-effort.flag`) on every turn. Toggling any of them in the
+ * Codex Defaults picker takes effect on the next prompt - per-turn
+ * pass-through, no thread reset. `model` and `effort` accept null
+ * when no override is set; Codex falls back to the thread / config
+ * default in that case. Verified empirically that Codex enforces
+ * per-turn values (turn_context records them and the tool router
+ * blocks out-of-policy operations). */
 export interface TurnStartParams {
   threadId: string;
   /** Input content. We send a single text block constructed from
@@ -148,6 +161,10 @@ export interface TurnStartParams {
   approvalPolicy: "never";
   /** Resolved per-turn from the full-access flag. */
   sandboxPolicy: TurnSandboxPolicy;
+  /** Model override slug. Null = inherit thread / config default. */
+  model: string | null;
+  /** Reasoning effort override. Null = inherit thread / config default. */
+  effort: "low" | "medium" | "high" | "xhigh" | null;
 }
 
 /** Supported input item types in a `turn/start`. Bridge only sends

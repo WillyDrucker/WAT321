@@ -146,6 +146,19 @@ export class CodexDispatcher {
     });
   }
 
+  /** Force-kill the current app-server child process (SIGKILL) and
+   * drop the cached client. Next dispatch spawns a fresh app-server
+   * with whatever config.toml currently holds. Used by the "Restart
+   * Codex Bridge" main-menu action when the user needs the bridge's
+   * Codex process gone now (stale cached config, stuck state, etc.).
+   * Idempotent; no-ops when no client is connected. */
+  forceRestart(): void {
+    if (this.client === null) return;
+    this.client.forceKill();
+    this.client = null;
+    this.logger.info("codex app-server force-killed (bridge restart)");
+  }
+
   async stop(): Promise<void> {
     this.disposed = true;
     if (this.watcher) {
