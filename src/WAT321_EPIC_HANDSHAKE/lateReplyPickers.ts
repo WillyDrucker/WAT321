@@ -33,13 +33,9 @@ export async function discardAllLateReplies(
     replies.length > 1 ? "replies" : "reply"
   }?`;
   const confirm = await vscode.window.showWarningMessage(
-    label,
-    {
-      modal: true,
-      detail:
-        "Replies move out of the inbox unread, so nothing auto-delivers on your next Claude to Codex prompt. Files stay in sent/ until the 1-hour sweep if you change your mind.",
-    },
-    "Discard"
+    `${label} Replies move out of the inbox unread; files stay in sent/ until the 1-hour sweep.`,
+    "Discard",
+    "Cancel"
   );
   if (confirm !== "Discard") return;
 
@@ -105,8 +101,8 @@ export async function showLateRepliesPicker(
       { ...makeBackItem(), rowKind: "action" as const },
       ...replyItems,
       discardItem,
-      ...(pauseItem ? [{ ...pauseItem, rowKind: "action" as const }] : []),
-      ...(cancelItem ? [{ ...cancelItem, rowKind: "action" as const }] : []),
+      { ...pauseItem, rowKind: "action" as const },
+      { ...cancelItem, rowKind: "action" as const },
     ];
 
     const pick = await withMenuLifecycle(() =>

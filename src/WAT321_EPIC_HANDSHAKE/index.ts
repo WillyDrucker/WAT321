@@ -17,11 +17,6 @@ import {
 } from "./channelInstaller";
 import { CodexDispatcher } from "./codexDispatcher";
 import { registerEpicHandshakeCommands } from "./commandRegistration";
-import {
-  writeCodexEffortOverride,
-  writeCodexModelOverride,
-  writeCodexSandboxOverride,
-} from "./codexRuntimeOverrides";
 import { LateReplyInboxCoordinator } from "./lateReplyInboxCoordinator";
 import {
   EPIC_HANDSHAKE_DIR,
@@ -102,10 +97,11 @@ class EpicHandshakeTier {
     this.bridgeStage.start();
     this.lateReplyInbox.start();
     // One-time migration: any envelopes left in the un-partitioned
-    // `inbox/codex/*.md` or `inbox/claude/*.md` from a v1.2.0 install
-    // get moved into their envelope's workspace subfolder. Runs
-    // before clearStaleRuntimeFiles so a migrated reply for THIS
-    // workspace is then properly swept by the per-workspace cleanup.
+    // `inbox/codex/*.md` or `inbox/claude/*.md` (legacy layout before
+    // workspace partitioning) get moved into their envelope's
+    // workspace subfolder. Runs before clearStaleRuntimeFiles so a
+    // migrated reply for THIS workspace is then properly swept by
+    // the per-workspace cleanup.
     migrateLegacyEnvelopes(this.logger);
     // Clean stale state from a prior crash: an abandoned in-flight
     // flag would keep the widget animating forever, and stale mail
@@ -184,7 +180,6 @@ class EpicHandshakeTier {
       }
     }
     this.applyDefaultWaitModeSetting();
-    this.applyCodexDefaultsSettings();
   }
 
   /** Read the user's preferred default wait mode from settings and
@@ -209,52 +204,6 @@ class EpicHandshakeTier {
     }
   }
 
-  /** Sync the three Codex-defaults settings to their runtime override
-   * flag files. Called on activate + on settings change. The flags
-   * are read by `turnRunner` on every `turn/start`, so any change
-   * here takes effect on the next bridge prompt - no thread reset.
-   * Codex Defaults menu picker writes the flags directly during a
-   * session (overrides this until the next reload). */
-  private applyCodexDefaultsSettings(): void {
-    const cfg = vscode.workspace.getConfiguration("wat321");
-    try {
-      const sandboxRaw = cfg.get<string>(
-        SETTING.epicHandshakeCodexSandboxDefault,
-        "Read-Only"
-      );
-      writeCodexSandboxOverride(
-        sandboxRaw === "Full-Access" ? "full-access" : "read-only"
-      );
-    } catch {
-      // best-effort
-    }
-    try {
-      const modelRaw = cfg
-        .get<string>(SETTING.epicHandshakeCodexModelDefault, "")
-        .trim();
-      writeCodexModelOverride(modelRaw.length > 0 ? modelRaw : null);
-    } catch {
-      // best-effort
-    }
-    try {
-      const effortRaw = cfg
-        .get<string>(SETTING.epicHandshakeCodexEffortDefault, "")
-        .trim();
-      const validEfforts = new Set([
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-      ]);
-      writeCodexEffortOverride(
-        validEfforts.has(effortRaw)
-          ? (effortRaw as "low" | "medium" | "high" | "xhigh")
-          : null
-      );
-    } catch {
-      // best-effort
-    }
-  }
 
   deactivate(): void {
     if (this.refreshTimer !== null) {
@@ -308,6 +257,14 @@ class EpicHandshakeTier {
       clearBridgeRuntimeFlags(ws);
     }
     this.logger.info("bridge restarted via main-menu action");
+    // Pre-warm immediately so the user's next dispatch after the
+    // restart is fast. Without this, "Restart Codex Bridge" would
+    // re-introduce the cold-start the activate-time prewarm just
+    // saved them from.
+    const prewarmTimer = setTimeout(() => {
+      void this.dispatcher?.prewarm();
+    }, 500);
+    prewarmTimer.unref?.();
   }
 
   /** Reset hook: ensure cross-tool state is cleaned up synchronously
@@ -395,19 +352,6 @@ class EpicHandshakeTier {
           )
         ) {
           this.applyDefaultWaitModeSetting();
-        }
-        if (
-          e.affectsConfiguration(
-            `wat321.${SETTING.epicHandshakeCodexSandboxDefault}`
-          ) ||
-          e.affectsConfiguration(
-            `wat321.${SETTING.epicHandshakeCodexModelDefault}`
-          ) ||
-          e.affectsConfiguration(
-            `wat321.${SETTING.epicHandshakeCodexEffortDefault}`
-          )
-        ) {
-          this.applyCodexDefaultsSettings();
         }
         if (
           !e.affectsConfiguration(`wat321.${SETTING.epicHandshakeEnabled}`)
@@ -516,6 +460,17 @@ class EpicHandshakeTier {
     if (this.dispatcher !== null) return;
     this.dispatcher = new CodexDispatcher(ws, this.logger);
     this.dispatcher.start();
+    // Schedule a deferred pre-warm of the codex app-server child
+    // process. Eliminates the ~20s cold-start (spawn + Node init +
+    // config load + JSON-RPC handshake) that would otherwise pin
+    // stage 1 of the very first bridge dispatch after a VS Code
+    // reload. 500ms defer is short enough that returning users who
+    // dispatch quickly still get a warm channel, but long enough
+    // that the spawn cost lands after VS Code's window-open frame.
+    const prewarmTimer = setTimeout(() => {
+      void this.dispatcher?.prewarm();
+    }, 500);
+    prewarmTimer.unref?.();
   }
 
   private async stopEnabled(): Promise<void> {

@@ -22,7 +22,7 @@ import { workspaceHash } from "./workspaceHash";
  * 1h safety sweep, statusBarItem for the explicit retrieve path.
  */
 
-const LATE_REPLY_THRESHOLD_MS = 5_000;
+const LATE_REPLY_THRESHOLD_MS = 3_000;
 
 export interface LateReply {
   filename: string;

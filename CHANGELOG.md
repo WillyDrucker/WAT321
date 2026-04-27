@@ -5,6 +5,46 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2026-04-26
+
+### Added
+
+- **Every Claude-to-Codex bridge turn now visibly walks through all five stages.** The bridge widget previously dropped its stage walker mid-walk on fast turns, so stages 4 and 5 sometimes never displayed. The walker now keeps walking until it reaches stage 5 + the post-walk hold, regardless of how the underlying turn ends. Quick turns get a 500ms-per-stage flash through 3 and 4 so the churn always reads as motion rather than a skipped frame, and a 2000ms green check icon caps off the visual after the walker settles. Closes the long-standing "did stage 5 just not happen?" feeling.
+
+- **The Codex bridge process pre-warms in the background as soon as you open VS Code.** Previously the very first bridge prompt after a window reload paid a ~20-second cold start while the Codex app-server child process spawned and initialized - the bridge widget cycled stage 1 the entire time. The dispatcher now spawns the child process and completes its JSON-RPC handshake about half a second after activation, so your first dispatch is already warm by the time you ask. Same pre-warm runs after `RESTART CODEX BRIDGE` so the next dispatch after a manual restart is also fast.
+
+- **Cancel mid-turn now walks the bridge widget cleanly to stage 5 instead of leaving it stuck on whatever intermediate stage it last reached.** Cancel and error settle paths now write a final stage-complete heartbeat before tearing down, so the walker resolves naturally via the fast-walk path. The green check icon stays gated on actual successful delivery, so cancelled and errored turns end at idle silently - no spurious "delivered" flash.
+
+- **The Claude-to-Codex bridge no longer asks for permission on first use.** Claude Code's per-tool permission gate previously fired the first time you used `mcp__wat321__epic_handshake_ask` in any project, which interrupted the very first bridge prompt. Enabling Epic Handshake in the WAT321 settings now adds the two bridge tools to your `permissions.allow` allowlist alongside the MCP server registration we already write. Disabling Epic Handshake removes only those two entries; everything else in your allowlist is untouched.
+
+- **Stage-flow design doc.** The new `WDDOCS/EPIC_HANDSHAKE/STAGE_FLOW.md` is the canonical reference for what each square-N icon means, what Codex is doing during each stage, what triggers each transition, the fast-walk short-cut for quick turns, the cancel/error orphan path, and a full timing reference table covering every constant in the bridge UI.
+
+### Changed
+
+- **Bridge dropdown menu reordered + colored.** Most-frequent actions sit at the top (`RETRIEVE LATE REPLIES`, `SESSIONS`, `WAIT MODE`); restart and the always-present pause + cancel sit at the bottom. Pause + cancel are now visible in every submenu so you always have a one-click escape regardless of how deep you've navigated. Color circles distinguish the action rows: yellow PAUSE, red CANCEL, green RESUME (when paused), blue BACK. Restart no longer shows green - that hue is now reserved for resume.
+
+- **`MANAGE CODEX SESSION` is now `SESSIONS`** with a square-info icon, since the row covers more than just session management (it's the entry point to Codex Session Settings, recover, repair, etc.). `RESTART CODEX BRIDGE` trimmed to a single inline description and given a neutral sync icon instead of the green debug-restart glyph.
+
+- **Codex Session Settings menu reads cleanly.** The row label flips to `CODEX SESSION SETTINGS: Default` (capital `D`) when sandbox, model, and effort all match the platform baseline, otherwise just `CODEX SESSION SETTINGS`. The subline shows the current `Sandbox · Model · Effort` values dot-separated. Sandbox is now a one-click toggle directly from the settings picker (no more sub-menu for a binary). Model and effort pickers drop their explicit "use default" rows; default values are tagged inline as `*default*` next to the model name, and the active selection is tagged `(CURRENT)`. Tags sit between the value and its description so they stay visible if a narrow QuickPick column truncates the description.
+
+- **BACK navigation walks back one menu level instead of closing or jumping to the main menu.** Previously BACK from Codex Session Settings closed the entire menu stack, and BACK from Recover Sessions skipped past the sessions submenu straight to main. Both now reopen their direct parent.
+
+- **Session token activity icons read more accurately during a bridge turn.** The Claude widget shows its native thinking cycle during stage 1 instead of the debug-disconnect glyphs - Claude's MCP connection is established at that point, so the "connecting" flavor was misleading. The Codex widget drops the debug-disconnect fallback at stage 2 (was holding through stage 3) and switches to its native thinking cycle the moment the bridge confirms receipt.
+
+- **The cache LOAD / MISS banner pulses without shifting cell width.** The yellow LOAD and red MISS banners hold their text steady for the full 2-second flash window. Only the colored circle bullets blink between visible and invisible, like the Claude waiting cycle. No more layout shimmy on every frame transition.
+
+- **Bridge UI converged on a 3-second beat.** Five timing constants - the latch orphan grace, the returning-flag fallback, the mail-pulse window, the Claude active-thinking threshold, and the late-reply classification threshold - normalized to 3 seconds so the entire bridge UI rhythm aligns with the per-stage walker holds.
+
+### Fixed
+
+- **First bridge prompt after a VS Code reload no longer races the pre-warm.** The pre-warm defer dropped from 2 seconds to 500ms, so users dispatching a bridge prompt immediately after window-open consistently see the warm channel pay only `thread/start` + `turn/start` latency rather than the full cold-start chain.
+
+### Removed
+
+- **Three Codex-defaults settings retired from VS Code Settings.** `epicHandshake.codexSandboxDefault`, `codexModelDefault`, and `codexEffortDefault` are no longer settings entries. The Codex Session Settings menu picker remains the sole way to change those values; the picker writes runtime override flag files under `~/.wat321/` that persist across activations until Reset WAT321 wipes them. Simplifies the settings page and removes a sync layer that was never load-bearing.
+
+- **Modal confirmation dialogs replaced with non-modal toasts with action buttons.** Delete-all sessions, discard mail, repair sessions, and the force-repair flow all previously raised a blocking VS Code modal dialog. They now use the standard non-modal toast notification with the same action buttons, so the rest of the editor stays interactive while you decide.
+
 ## [1.2.5] - 2026-04-26
 
 ### Added

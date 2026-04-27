@@ -101,7 +101,17 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       info?: { activeTool?: { name: string } | null; toolCallCount: number; elapsedMs: number }
     ): void => {
       if (stageEnteredAt[stage] === undefined) {
-        stageEnteredAt[stage] = Date.now();
+        const enteredAt = Date.now();
+        stageEnteredAt[stage] = enteredAt;
+        // Log every first-time stage entry with elapsed-since-dispatch
+        // so post-mortem timing analysis can answer "why did the
+        // status bar pin on stage N for so long" without guessing.
+        // Subsequent writeHeartbeat calls at the same stage (RPC
+        // delta refreshes, rollout mtime bumps) are silent.
+        const ms = enteredAt - turnStartedAt;
+        logger.info(
+          `[stage] envelope=${env.id} -> ${stage} at +${ms}ms (tools=${info?.toolCallCount ?? 0})`
+        );
       }
       // Atomic tmp+rename so the status-bar reader never sees a
       // half-written JSON. A plain writeFileSync can be mid-flush
@@ -158,6 +168,19 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
     const settle = (fn: () => void): void => {
       if (settled) return;
       settled = true;
+      // Final heartbeat write at stage=complete so the bridge widget
+      // walker resolves cleanly via fast-walk no matter how the turn
+      // ended (success, cancel, stall, hard-cap, error). Without this
+      // the cancel / error paths leave the heartbeat at whatever
+      // intermediate stage the parser last reached, and the walker
+      // would sit on stage 1 / 2 / 3 until LATCH_ORPHAN_GRACE_MS
+      // expired (~3s post heartbeat unlink). On success the monitor
+      // already wrote stage=complete via forceStage, so this is a
+      // redundant idempotent write. The delivered-flash check icon
+      // gates on the bridge thread record's lastSuccessAt, which is
+      // ONLY set on the success path - so cancel and error walks
+      // still drop to idle without the spurious check.
+      writeHeartbeat("complete");
       cleanup();
       fn();
     };

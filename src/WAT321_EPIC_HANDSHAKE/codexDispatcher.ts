@@ -146,6 +146,29 @@ export class CodexDispatcher {
     });
   }
 
+  /** Eagerly spawn the codex app-server child process and complete
+   * the JSON-RPC `initialize` handshake without dispatching any turn.
+   * Idempotent - no-ops when a client is already alive. Called at
+   * tier activate (deferred 2s) and after `forceRestart()` so the
+   * first user-visible dispatch pays only `thread/start` + `turn/start`
+   * latency (~1-3s) instead of the full ~20s spawn + Node init +
+   * config load + handshake cold-start chain.
+   *
+   * Failures are logged and swallowed - if Codex CLI is missing or
+   * auth-broken, the user's first real dispatch surfaces the problem
+   * the normal way. Pre-warm never blocks activation. */
+  async prewarm(): Promise<void> {
+    if (this.client !== null) return;
+    try {
+      await this.ensureClient();
+      this.logger.info("codex app-server prewarmed and ready");
+      this.resetIdleTimer();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.info(`prewarm skipped: ${msg}`);
+    }
+  }
+
   /** Force-kill the current app-server child process (SIGKILL) and
    * drop the cached client. Next dispatch spawns a fresh app-server
    * with whatever config.toml currently holds. Used by the "Restart

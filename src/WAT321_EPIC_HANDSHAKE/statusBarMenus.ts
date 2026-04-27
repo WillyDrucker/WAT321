@@ -102,9 +102,9 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
         };
 
   const sessionsItem: Item = {
-    label: `MANAGE CODEX SESSION (S${sessionCounter})`,
-    description: "Reset, delete or recover.",
-    iconPath: new vscode.ThemeIcon("wat321-square-arrow-right"),
+    label: `SESSIONS (S${sessionCounter})`,
+    description: "Reset, delete, recover, or change defaults.",
+    iconPath: new vscode.ThemeIcon("wat321-square-info"),
     action: "manage-sessions",
   };
 
@@ -131,28 +131,25 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // value is exactly that it works when nothing else does.
   const restartBridgeItem: Item = {
     label: "RESTART CODEX BRIDGE",
-    description: "Cancel + clear bridge state + restart the Codex bridge process.",
-    detail:
-      "Resumes the active session (S" +
-      sessionCounter +
-      ") on next prompt. Does NOT restart the Codex VS Code extension; zero impact on your Claude session.",
-    iconPath: new vscode.ThemeIcon("debug-restart"),
+    description: `Cancel, clear and restart bridge. Resumes (S${sessionCounter}) on next prompt.`,
+    iconPath: new vscode.ThemeIcon("sync"),
     action: "restart-bridge",
   };
 
-  // Menu ordering: retrieve up top (always visible), wait-mode toggle,
-  // sessions submenu entry, conditional clear, pause, then the
-  // restart-bridge backup-net immediately above cancel so users
-  // recognize it as the heavier escalation when CANCEL alone would not
-  // be enough. CANCEL stays at the bottom for predictability.
+  // Menu ordering: retrieve up top, sessions immediately below it
+  // (most-frequent action grouping), wait-mode toggle, conditional
+  // clear, restart-bridge as the heavier escalation right above
+  // pause, then pause and cancel always at the bottom. Pause and
+  // cancel are visible in every menu (including submenus) for
+  // consistent escape paths regardless of where the user navigated.
   const items: Item[] = [
     retrieveItem,
-    ...(waitModeItem ? [waitModeItem] : []),
     sessionsItem,
+    ...(waitModeItem ? [waitModeItem] : []),
     ...(clearErrorItem ? [clearErrorItem] : []),
-    ...(pauseItem ? [pauseItem] : []),
     restartBridgeItem,
-    ...(cancelItem ? [cancelItem] : []),
+    pauseItem,
+    cancelItem,
   ];
 
   const pick = await withMenuLifecycle(() =>
@@ -265,7 +262,12 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
         );
         break;
       }
-      await showCodexDefaultsPicker();
+      await showCodexDefaultsPicker(handleAction, {
+        ws: ctx.ws,
+        lateReplies: [],
+        recoverable: ctx.recoverable,
+        inFlight: ctx.inFlight,
+      });
       break;
     case "wait-mode-toggle": {
       // Three-way cycle: Standard -> Adaptive -> Fire-and-Forget ->

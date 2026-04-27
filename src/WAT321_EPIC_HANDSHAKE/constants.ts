@@ -104,8 +104,9 @@ export const CODEX_FULL_ACCESS_FLAG_PATH = join(
  * override - per-turn, no thread reset. When absent, turn/start
  * passes `model: null` and Codex falls back to the thread default
  * (which itself comes from `~/.codex/config.toml`). User toggles
- * via the Codex Defaults picker; tier activate writes/clears
- * based on the `wat321.epicHandshake.codexModelDefault` setting. */
+ * via the Codex Session Settings picker. No persistent setting backs
+ * this - the override file is the source of truth and survives until
+ * Reset WAT321 wipes ~/.wat321/. */
 export const CODEX_MODEL_FLAG_PATH = join(
   EPIC_HANDSHAKE_DIR,
   "codex-model.flag"

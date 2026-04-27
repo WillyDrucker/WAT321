@@ -101,11 +101,10 @@ export type CodexApprovalPolicy =
  * ceiling (`approvalPolicy: "never"`, `sandbox: "danger-full-access"`)
  * so any per-turn dial-down is reachable without a thread reset.
  * Per-turn `model`, `effort`, and `sandboxPolicy` overrides are
- * applied on every `turn/start` (see `TurnStartParams`); the
- * `wat321.epicHandshake.codexSandboxDefault` /
- * `codexModelDefault` / `codexEffortDefault` settings drive the
- * on-activate values and the Codex Defaults menu picker overrides
- * them until the next reload.
+ * applied on every `turn/start` (see `TurnStartParams`). The Codex
+ * Session Settings menu picker writes runtime override flag files
+ * that turnRunner reads on every dispatch; the flags persist across
+ * activations and clear on Reset WAT321.
  * `sessionStartSource` is echoed into the rollout metadata and
  * helps distinguish bridge-spawned sessions from user-spawned ones
  * when inspecting history. */
