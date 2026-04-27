@@ -169,7 +169,7 @@ export function rewriteRolloutModelSlug(
 
 /** Compare two filesystem paths for workspace-identity purposes.
  * Normalizes Windows backslashes to forward slashes and strips a
- * trailing separator so `C:/Dev/WAT321` and `C:\Dev\WAT321\` match.
+ * trailing separator so `C:/Code/project` and `C:\Code\project\` match.
  * Case-insensitive on win32 because `C:\dev\...` and `C:\Dev\...`
  * name the same folder. */
 function pathsMatch(a: string, b: string): boolean {
