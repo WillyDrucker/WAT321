@@ -128,7 +128,7 @@ export function createEpicHandshakeStatusBarItem(
   let mailPulseCount = 0;
   let mailPulseStartedAt: number | null = null;
   const MAIL_PULSE_CAP = 3;
-  const MAIL_PULSE_DURATION_MS = 5_000;
+  const MAIL_PULSE_DURATION_MS = 3_000;
   const MAIL_VISIBLE_WINDOW_MS = 5 * 60 * 1_000;
 
   // Subscribe to the engine's response-complete event. Fires once per
@@ -152,10 +152,23 @@ export function createEpicHandshakeStatusBarItem(
     mailPulseCount++;
   });
 
-  // Delivered-flash tracking: records the success timestamp the flash
-  // locked onto so repeated refreshes during the 2s window render
-  // consistently even if lastSuccessAt jitters from a new prompt.
+  // Delivered-flash tracking. The flash kicks in on the
+  // walker-active -> walker-inactive transition (walker finished
+  // walking through stages 1-5 + post-walk hold). NOT on lastSuccessAt
+  // alone - that fires the moment the dispatcher marks success, which
+  // is mid-walk on fast turns and would leak the check icon while
+  // stage 4 / 5 were still rendering. Flash holds for 2000ms and
+  // requires a recent success record so it never fires after a
+  // cancel / error walk-down. */
   let deliveredShownAt: number | null = null;
+  let prevWalkerActive = false;
+  const DELIVERED_HOLD_MS = 2000;
+  /** lastSuccessAt freshness window for arming the flash. The flash
+   * only triggers when the walker just ended AND the dispatcher
+   * reported a successful delivery within this window. Wider than
+   * the hold itself so a slow walker (long turn) still arms the
+   * flash when it eventually settles. */
+  const DELIVERED_SUCCESS_WINDOW_MS = 60_000;
 
   // Sending-phase start tracker. Enforces a 3000ms floor on the
   // arrow-circle-right animation before the processing (comment-
@@ -204,9 +217,6 @@ export function createEpicHandshakeStatusBarItem(
     }
     const now = Date.now();
     const lastSuccessMs = rec?.lastSuccessAt ? new Date(rec.lastSuccessAt).getTime() : 0;
-    const justDelivered = lastSuccessMs > 0 && now - lastSuccessMs < 3000;
-    if (justDelivered && deliveredShownAt === null) deliveredShownAt = lastSuccessMs;
-    if (!justDelivered) deliveredShownAt = null;
 
     // State priority: paused > bridge-error > in-flight > delivered
     // flash > late-reply > error-sticky > idle. Animation frames use
@@ -227,6 +237,25 @@ export function createEpicHandshakeStatusBarItem(
     // numbered-stage override so existing visuals stay unchanged.
     const adaptive = isAdaptive();
     const walkerActive = adaptive && snapshot.latchedStage !== null;
+
+    // Walker-end transition: arms the delivered-flash on the falling
+    // edge of walkerActive. Requires a recent successful delivery on
+    // the bridge thread record so a cancel / bridge-error walk-down
+    // never produces a spurious check icon. Driven off lastSuccessMs
+    // freshness window rather than per-tick polling so the flash
+    // survives the natural ~1s between snapshot ticks.
+    if (
+      prevWalkerActive &&
+      !walkerActive &&
+      lastSuccessMs > 0 &&
+      now - lastSuccessMs < DELIVERED_SUCCESS_WINDOW_MS
+    ) {
+      deliveredShownAt = now;
+    }
+    prevWalkerActive = walkerActive;
+    const justDelivered =
+      deliveredShownAt !== null && now - deliveredShownAt < DELIVERED_HOLD_MS;
+    if (!justDelivered) deliveredShownAt = null;
 
     if (paused) {
       icon = "$(wat321-square-pause)";
@@ -265,27 +294,22 @@ export function createEpicHandshakeStatusBarItem(
         : oneHz
           ? "$(wat321-square-info)"
           : "$(wat321-square)";
+    } else if (justDelivered) {
+      // Solid check held for DELIVERED_HOLD_MS (2000ms). Walker has
+      // already finished its full 1-5 walk + post-walk hold by the
+      // time this branch runs (priority chain above gates on
+      // walkerActive). The check means "the entire turn including
+      // its visual handoff is done." Takes precedence over the
+      // returning flag so a fast turn does not show arrow-left
+      // briefly between walker-end and delivered-flash arming.
+      icon = "$(wat321-square-check)";
     } else if (returning) {
       // Post-turn latch: the dispatcher holds this flag for 5000ms so
-      // the return animation is visible before the delivered flash
-      // takes over. Keeps the user from missing what's happening
-      // during the reply-transfer phase (~100-500ms of physical travel).
+      // the return animation is visible if the walker did not already
+      // cover stage 5's arrow-left cycle (e.g., adaptive disabled).
+      // In adaptive mode the walker always reaches stage 5 with its
+      // own arrow-left cycle, so this branch is mostly a fallback.
       icon = oneHz ? "$(wat321-square-arrow-left)" : "$(wat321-square)";
-    } else if (justDelivered) {
-      // Delivered-flash cadence (3000ms total, driven off
-      // deliveredShownAt):
-      //   0-500   check
-      //   500-1000 square
-      //   1000-1500 check
-      //   1500-2000 square
-      //   2000-3000 check (held)
-      // After 3000ms, justDelivered clears and we fall through to idle.
-      const elapsed = deliveredShownAt !== null ? now - deliveredShownAt : 0;
-      const showCheck =
-        elapsed < 500 ||
-        (elapsed >= 1000 && elapsed < 1500) ||
-        elapsed >= 2000;
-      icon = showCheck ? "$(wat321-square-check)" : "$(wat321-square)";
     } else if (renderWaitModeFlash(now, wsHash)) {
       // User-initiated wait-mode toggle needs visible feedback, so
       // the flash preempts pendingCount / fail-count states that
