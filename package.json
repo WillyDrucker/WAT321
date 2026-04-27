@@ -339,49 +339,6 @@
             ],
             "order": 5,
             "markdownDescription": "Starting wait mode after a VS Code restart. The Epic Handshake menu toggles between Adaptive and Fire-and-Forget live; this setting picks the baseline that restores on activate."
-          },
-          "wat321.epicHandshake.codexSandboxDefault": {
-            "type": "string",
-            "default": "Read-Only",
-            "scope": "application",
-            "enum": [
-              "Full-Access",
-              "Read-Only"
-            ],
-            "enumDescriptions": [
-              "Codex can run shell commands and write files. Recommended on dev machines you own.",
-              "Codex can read files and reach the network at the per-turn level only. Conservative default."
-            ],
-            "order": 6,
-            "markdownDescription": "Codex sandbox state applied at every bridge prompt. The Codex Defaults picker can override this mid-session - the override lasts until the next VS Code reload, then this setting wins again."
-          },
-          "wat321.epicHandshake.codexModelDefault": {
-            "type": "string",
-            "default": "",
-            "scope": "application",
-            "markdownDescription": "Codex model slug (e.g. `gpt-5.5`, `gpt-5.4-mini`) used as the default at every bridge prompt. Leave empty to use whatever `~/.codex/config.toml` declares. Validated against `~/.codex/models_cache.json` at runtime; an unrecognized slug falls back silently to no override.",
-            "order": 7
-          },
-          "wat321.epicHandshake.codexEffortDefault": {
-            "type": "string",
-            "default": "",
-            "scope": "application",
-            "enum": [
-              "",
-              "low",
-              "medium",
-              "high",
-              "xhigh"
-            ],
-            "enumDescriptions": [
-              "Use whatever the model's own default effort is.",
-              "Fast responses with lighter reasoning.",
-              "Balanced speed and depth for everyday tasks.",
-              "Greater reasoning depth for complex problems.",
-              "Extra-high reasoning depth for the hardest problems."
-            ],
-            "order": 8,
-            "markdownDescription": "Codex reasoning-effort level applied at every bridge prompt. Empty uses the model's own default. The Codex Defaults picker can override this mid-session."
           }
         }
       },

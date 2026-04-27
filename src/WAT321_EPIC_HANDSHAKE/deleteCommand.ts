@@ -301,8 +301,7 @@ export async function deleteAllCodexSessions(
   }
 
   const confirmation = await vscode.window.showWarningMessage(
-    `Permanently delete ALL ${sessions.length} Codex bridge session${sessions.length === 1 ? "" : "s"} for this workspace? This removes every rollout file and strips the matching entries from Codex's session index. All past bridge conversations will be lost.`,
-    { modal: true, detail: sessions.map((s) => s.displayName).join("\n") },
+    `Permanently delete ALL ${sessions.length} Codex bridge session${sessions.length === 1 ? "" : "s"} for this workspace? This removes every rollout file and strips the matching entries from Codex's session index. Sessions: ${sessions.map((s) => s.displayName).join(", ")}.`,
     "Delete All",
     "Cancel"
   );
