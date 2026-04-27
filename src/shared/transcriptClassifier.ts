@@ -1,15 +1,20 @@
 /**
  * Classifier for the last parseable entry in a Claude transcript tail.
- * Consumed by the notification bridge in bootstrap.ts for
- * turn-completion gating AND by the session token widget's thinking
- * indicator.
+ * Consumed by the notification bridge in bootstrap.ts for turn-
+ * completion gating AND by the session token widget's thinking
+ * indicator. The two consumers want different shapes from the same
+ * tail, so the classifier distinguishes:
  *
- * Interrupt detection: Claude Code writes a user-type entry with
- * content `[Request interrupted by user]` when the user hits Escape
- * or Ctrl+C. Empirically verified by on-disk capture during interrupt
- * tests. The classifier recognizes this text and returns
- * `assistant-done` so the widget / notification gate treats it as
- * turn complete rather than "user waiting for a reply."
+ *   - `assistant-done`    - real model response complete (fires toast)
+ *   - `assistant-pending` - tool_use mid-turn (active, no toast)
+ *   - `user`              - prompt or tool_result waiting on the model
+ *   - `compact-end`       - auto-compact summary entry (idle, no toast)
+ *   - `interrupted`       - Esc / Ctrl+C abort (idle, no toast)
+ *   - `unknown`           - unparseable / empty (idle, suppress)
+ *
+ * `compact-end` and `interrupted` are idle for the widget but remain
+ * distinct from `assistant-done` so completion toasts only fire for
+ * a real model response.
  *
  * Lives in shared/ rather than the Claude session token tool because
  * cross-tool concerns belong in shared infrastructure.
@@ -54,8 +59,23 @@ export type LastEntryKind =
   /** Last entry is an assistant message containing an unresolved
    * `tool_use` block. Claude is waiting on tool execution. */
   | "assistant-pending"
-  /** Last entry is an assistant text-only message. Turn complete. */
+  /** Last entry is an assistant text-only message. Turn complete - a
+   * real model response landed. This is the only kind that should
+   * fire a "response complete" toast. */
   | "assistant-done"
+  /** Last entry is the auto-compact summary marker. Structurally a
+   * user-type entry, semantically the terminal state of an internal
+   * compaction event (the model is about to resume the same task on
+   * a fresh context window). The widget treats it as idle (same as
+   * assistant-done) so the thinking indicator stops spinning, but the
+   * toast notifier suppresses it - the user's task is not actually
+   * complete, the engine just rotated context behind the scenes. */
+  | "compact-end"
+  /** Last entry is the user-interrupt marker (Esc / Ctrl+C). The
+   * widget treats it as idle so the thinking indicator stops; the
+   * toast notifier suppresses it because the user explicitly aborted
+   * and a "Claude finished" toast would misrepresent that. */
+  | "interrupted"
   /** Could not classify (empty tail, unparseable, unknown type).
    * Treated as "idle" by callers so a broken scanner never blocks
    * permanently. */
@@ -80,12 +100,11 @@ export function classifyLastEntry(tail: string): LastEntryKind {
     }
 
     if (entry.type === "user") {
-      // An interrupt marker is a user-type entry in form but signals
-      // turn complete in meaning. Treat as assistant-done so callers
-      // that gate on "turn in progress" stop animating / firing.
-      // Same reasoning applies to auto-compact summary entries: the
-      // compact runs AFTER the assistant reply landed and the summary
-      // is the terminal state of that turn, not a fresh prompt.
+      // Interrupt and auto-compact entries arrive structurally as
+      // user-typed entries but semantically end the prior turn. Each
+      // gets its own kind so the widget can stop animating while the
+      // toast notifier still distinguishes "model finished" from
+      // "user aborted" / "engine compacted."
       const msg = entry.message as Record<string, unknown> | undefined;
       const content = msg?.content;
       const textBlobs: string[] = [];
@@ -101,8 +120,8 @@ export function classifyLastEntry(tail: string): LastEntryKind {
         }
       }
       for (const text of textBlobs) {
-        if (text.includes(INTERRUPT_MARKER)) return "assistant-done";
-        if (isCompactMarker(text)) return "assistant-done";
+        if (text.includes(INTERRUPT_MARKER)) return "interrupted";
+        if (isCompactMarker(text)) return "compact-end";
       }
       return "user";
     }

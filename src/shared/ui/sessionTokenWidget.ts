@@ -49,10 +49,11 @@ export interface ClaudeTurnInfo {
  * Active detection is a three-layer resolution:
  *   1. Classifier (primary end-state signal).
  *      `turnState` from the service's tail classification.
- *      `assistant-done` and `unknown` -> idle. Includes the
- *      interrupt marker `[Request interrupted by user]` which the
- *      classifier maps to `assistant-done`. Both graceful and
- *      interrupted turns resolve here reactively.
+ *      `assistant-done`, `compact-end`, `interrupted`, and `unknown`
+ *      -> idle. Only `user` and `assistant-pending` keep the
+ *      indicator active. Auto-compact entries and user interrupts
+ *      get their own kinds so the toast notifier can suppress them
+ *      while the widget still resolves to idle here.
  *   2. PID liveness (continuity signal during silent thinking).
  *      When classifier says in-progress AND the session has a PID
  *      AND the process is alive, the widget keeps animating even
@@ -166,10 +167,10 @@ function isPidAlive(pid: number): boolean {
 
 /** Cache-banner flash window. 2000ms total; the LOAD/MISS text
  * persists the entire window. Bullets blink at a 500ms cadence
- * between colored emoji (red MISS / yellow LOAD) and white emoji
- * (off frame). After 2000ms the widget returns to the normal token
- * readout. Widget's 250ms ticker samples the frame selector every
- * render so the bullet alternation lands visibly. */
+ * between colored emoji (red MISS / yellow LOAD) and ASCII-space
+ * blanks (off frame). After 2000ms the widget returns to the normal
+ * token readout. Widget's 250ms ticker samples the frame selector
+ * every render so the bullet alternation lands visibly. */
 const CACHE_BANNER_FLASH_MS = 2000;
 /** Cache-rebuild detection. Two paths qualify a turn as a rebuild
  * event the user paid input price for:
@@ -211,18 +212,21 @@ const CACHE_REBUILD_RATIO_DENOM = 2;
  *                 server-side fault); user paid again unexpectedly.
  *
  * Each banner has an "on" form (colored emoji bullets) and an "off"
- * form (ideographic-space placeholder, U+3000, which is ~1em wide
- * and matches emoji presentation width). Cell width stays constant
- * across frames - only the colored circles flash on and off, like
- * the Claude waiting cycle. The text label persists the whole 2000ms. */
+ * form (two ASCII spaces per side, sized to match the emoji's ~2-char
+ * render width in VS Code's status bar font). The text label persists
+ * the whole 2000ms; only the bullets flash between visible and blank,
+ * like the Claude waiting cycle. ASCII spaces are used over U+3000
+ * ideographic space because VS Code's status bar font does not honor
+ * the 1em pairing cleanly and the ideographic form leaves a residual
+ * width shift on every frame transition. */
 const CACHE_LOAD_BANNER_ON = "🟡LOAD🟡";
-const CACHE_LOAD_BANNER_OFF = "　LOAD　";
+const CACHE_LOAD_BANNER_OFF = "  LOAD  ";
 const CACHE_MISS_BANNER_ON = "🔴MISS🔴";
-const CACHE_MISS_BANNER_OFF = "　MISS　";
+const CACHE_MISS_BANNER_OFF = "  MISS  ";
 /** 500ms per frame, four frames per banner cycle. Pattern (using
  * MISS): on (0-500) / off (500-1000) / on (1000-1500) / off (1500-2000).
- * Width is constant - off state swaps colored circles for white ones,
- * not for blank space, so cell width never shifts. */
+ * Off frame swaps colored emoji bullets for ASCII spaces sized to the
+ * emoji's render width so the cell width stays constant across frames. */
 const CACHE_BANNER_FRAME_MS = 500;
 
 export class SessionTokenWidget<TState extends { status: string }> implements vscode.Disposable {
@@ -358,12 +362,13 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
   }
 
   /** Current cache-banner flash state, if any. Four 500ms frames
-   * across 2000ms, alternating colored bullets and white bullets:
+   * across 2000ms, alternating colored emoji bullets and ASCII-space
+   * blanks:
    *
    *   0-500    on   (colored emoji)
-   *   500-1000 off  (white emoji)
+   *   500-1000 off  (ASCII spaces)
    *   1000-1500 on  (colored emoji)
-   *   1500-2000 off (white emoji)
+   *   1500-2000 off (ASCII spaces)
    *
    * Text persists for the whole window so the user always sees LOAD
    * or MISS - only the bullets blink, like the Claude waiting cycle.
@@ -488,7 +493,17 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     // at the same wall-clock instant. Bridge error / pause / completion
     // all collapse the snapshot to idle, dropping us out of this branch.
     const snapshot = this.bridgeStage.snapshot();
-    if (snapshot.phase !== "idle") {
+    // Fire-and-Forget returns Claude's MCP call immediately, so Claude
+    // is not blocked on the bridge - it is free to do whatever it does
+    // next (idle, drafting, tool calls). The Claude widget therefore
+    // bypasses every bridge-driven prefix path under FaF and renders
+    // purely from its own transcript activity (the normal turnInProgress
+    // + activeFrames cycle below). The Codex widget still walks bridge
+    // ceremony / stage 1 fallback under FaF because Codex is doing the
+    // actual work regardless of which mode Claude waited in.
+    const claudeBypassesBridge =
+      d.provider === "Claude" && snapshot.waitMode === "fire-and-forget";
+    if (snapshot.phase !== "idle" && !claudeBypassesBridge) {
       if (snapshot.phase === "pre-ceremony") {
         const tick = Math.floor(now / 1000) % 2;
         return tick === 0 ? "$(blank)" : d.idlePrefix;
@@ -516,16 +531,10 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
       if (d.provider === "Claude") {
         // Adaptive (and legacy Standard) blocks Claude's MCP call on
         // the bridge reply, so the Claude widget renders a 1Hz logo
-        // blink to mark "Claude is waiting on Codex". Fire-and-Forget
-        // returned the MCP call immediately - Claude is free to keep
-        // working - so the waiting cycle would misrepresent state.
-        // Under Fire-and-Forget, fall through to the normal
-        // turnInProgress + activeFrames path below so the widget
-        // reflects whether Claude is actually thinking right now.
-        if (snapshot.waitMode !== "fire-and-forget") {
-          const tick = Math.floor(now / 1000) % 2;
-          return tick === 0 ? "$(blank)" : "$(claude)";
-        }
+        // blink to mark "Claude is waiting on Codex". FaF was already
+        // routed around above via claudeBypassesBridge.
+        const tick = Math.floor(now / 1000) % 2;
+        return tick === 0 ? "$(blank)" : "$(claude)";
       }
       // Codex widget, stage 1 only (dispatched): the rollout file
       // does not exist yet, so the native `turnInProgress` check
@@ -598,12 +607,13 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         const banner = this.currentCacheBanner();
         if (banner !== null) {
           // LOAD or MISS text persists for the full 2000ms flash
-          // window; only the bullet emojis blink between colored and
-          // white at a 500ms cadence (see currentCacheBanner). Prefix
-          // stays visible throughout so the brand icon and thinking
-          // indicator ride through the flash - only the tokens/percent
-          // portion gets replaced. Tooltip keeps showing real data so
-          // hovering during the flash still gives you session info.
+          // window; only the bullet positions blink between colored
+          // emoji and ASCII-space blanks at a 500ms cadence (see
+          // currentCacheBanner). Prefix stays visible throughout so
+          // the brand icon and thinking indicator ride through the
+          // flash - only the tokens/percent portion gets replaced.
+          // Tooltip keeps showing real data so hovering during the
+          // flash still gives you session info.
           this.item.text = `${prefix} ${banner}`;
         } else if (mode === "minimal" || mode === "compact") {
           this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}`;
