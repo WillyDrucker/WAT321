@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import { SETTING } from "../engine/settingsKeys";
 import {
   getCodexModelInfo,
   listSelectableCodexModels,
+  readCodexConfigModel,
 } from "../shared/codexModels";
 import {
   readCodexEffortOverride,
@@ -14,52 +14,45 @@ import {
   type CodexEffortLevel,
   type CodexSandboxState,
 } from "./codexRuntimeOverrides";
-import { makeBackItem, withMenuLifecycle } from "./menuCommon";
+import {
+  makeBackItem,
+  makeCancelItem,
+  makePauseResumeItem,
+  withMenuLifecycle,
+  type ActionContext,
+  type DispatchAction,
+} from "./menuCommon";
+import { isPaused, setPaused } from "./statusBarState";
 
 /**
- * Combined "Codex Defaults" picker - one entry point for all three
- * per-turn overrides the bridge passes on every `turn/start`:
+ * Combined "Codex Session Settings" picker - one entry point for all
+ * three per-turn overrides the bridge passes on every `turn/start`:
  *   - sandbox  (Full-Access | Read-Only)
  *   - model    (any visibility=list slug from `models_cache.json`)
  *   - effort   (low | medium | high | xhigh)
  *
- * Each row shows BOTH the user-persisted default (from settings) AND
- * the CURRENT live value (from the runtime override flag). Clicking a
- * row drills into a sub-picker; the sub-picker writes the runtime
- * override flag and `turnRunner` picks it up on the next `turn/start`.
+ * Each row shows the current value. `*default*` marks rows that match
+ * the platform baseline (sandbox=read-only, model=codex-config-default,
+ * effort=model's own default-effort). `(CURRENT)` marks the active
+ * selection inside sub-pickers.
  *
- * No thread reset, no app-server respawn, no Claude impact - the
- * `turn/start` per-turn parameters are authoritative (verified
- * end-to-end via probe). Settings drive the on-activate default;
- * menu picks override until the next reload.
+ * Sandbox is a direct toggle (no sub-picker) - one click flips between
+ * full-access and read-only. Model and effort open sub-pickers because
+ * each has multiple options.
  *
- * Silent-fail surfaces: the model row degrades gracefully when the
- * cache is unreadable (warning toast, no picker), or when a setting
- * references a slug that's not in the cache (label shows
- * "(no longer available)"; the next turn falls back to no override).
+ * No persistent settings: overrides live only in flag files under
+ * `~/.wat321/epic-handshake/`. Reset WAT321 wipes them, so "default"
+ * is the safe fallback after a reset. The codex config.toml supplies
+ * the model baseline, which means a user who only wants to follow
+ * their codex config never has to touch this picker - the absence of
+ * an override means codex uses its own config.
  */
 
-/** Sub-picker outcomes. `cancelled` = user pressed BACK or dismissed
- * (caller writes nothing); `picked` = user selected a row (caller
- * writes `value` to the override flag, where `null` means "clear the
- * override and use the model's own default"). */
 type PickResult<TValue> =
   | { kind: "cancelled" }
   | { kind: "picked"; value: TValue };
 
-/** Row kinds for sub-pickers. `back` returns to parent menu;
- * `default` clears the override; `value` carries the picked payload.
- * Optional payload fields rather than a true discriminated union -
- * TypeScript's contextual typing on object literals does not narrow
- * cleanly when intersection types meet QuickPickItem, so the
- * non-discriminated shape with `kind` as the test is the pragmatic
- * choice. The kind values stay distinct so the runtime branching is
- * still type-safe via switches, just without payload narrowing. */
-type RowKind = "back" | "default" | "value";
-interface SandboxRow extends vscode.QuickPickItem {
-  rowKind: RowKind;
-  state?: CodexSandboxState;
-}
+type RowKind = "back" | "value" | "pause" | "resume" | "cancel";
 interface ModelRow extends vscode.QuickPickItem {
   rowKind: RowKind;
   slug?: string;
@@ -69,126 +62,142 @@ interface EffortRow extends vscode.QuickPickItem {
   effort?: CodexEffortLevel;
 }
 
-/** Row kinds for the combined Codex Defaults picker. */
 type DefaultsRow = vscode.QuickPickItem & {
-  row: "sandbox" | "model" | "effort" | "back";
+  row: "sandbox" | "model" | "effort" | "back" | "pause" | "resume" | "cancel";
 };
 
-/** Read the current model + effort and return a one-line summary for
- * the row label in `showSessionsSubmenu`. Reads runtime override
- * (flag file) first; falls back to "default" labeling when no
- * override is set. */
-export function currentModelEffortLabel(): string {
-  const slug = readCodexModelOverride();
-  const effort = readCodexEffortOverride();
-  if (slug === null && effort === null) return "default";
-  const info = slug !== null ? getCodexModelInfo(slug) : null;
-  const modelLabel =
-    slug === null ? "default" : info?.displayName ?? `${slug} (unknown)`;
-  const effortLabel = effort ?? "default";
-  return `${modelLabel} (${effortLabel})`;
+/** Headline for the "CODEX SESSION SETTINGS" row in the sessions
+ * submenu. Capitalized "Default" suffix when every override matches
+ * the baseline; otherwise just "CODEX SESSION SETTINGS" so users can
+ * tell at a glance whether anything is overridden. */
+export function codexDefaultsHeadline(): string {
+  return everythingAtDefault()
+    ? "CODEX SESSION SETTINGS: Default"
+    : "CODEX SESSION SETTINGS";
 }
 
-export async function showCodexDefaultsPicker(): Promise<void> {
-  // Looped so each sub-picker returns to the combined picker, letting
-  // the user adjust multiple defaults in one session without re-clicking
-  // the bridge widget. Loop exits on BACK or QuickPick dismiss.
+/** Sub-line for the "CODEX SESSION SETTINGS" row in the sessions
+ * submenu. Lowercase "sandbox · model · effort" with the live current
+ * values. Lets the user verify what the bridge will send without
+ * opening the picker. */
+export function codexDefaultsSubline(): string {
+  const sandbox = readCodexSandboxOverride();
+  const model = readCodexModelOverride();
+  const effort = readCodexEffortOverride();
+  // Each segment uses its native casing: sandbox words like
+  // "Read-Only" / "Full-Access", model display name preserves its
+  // own capitalization (GPT-5.5), effort starts capital (Medium).
+  // Keeps the dot-separated subline scannable without a wall of
+  // lowercase that hides where one value ends and the next begins.
+  const sandboxLabel = sandbox === "full-access" ? "Full-Access" : "Read-Only";
+  const modelLabel =
+    model === null
+      ? configModelLabel()
+      : (getCodexModelInfo(model)?.displayName ?? model);
+  const effortLabel = capitalizeFirst(effort ?? baselineEffort() ?? "Medium");
+  return `${sandboxLabel} · ${modelLabel} · ${effortLabel}`;
+}
+
+function capitalizeFirst(s: string): string {
+  if (s.length === 0) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+export async function showCodexDefaultsPicker(
+  dispatch: DispatchAction,
+  ctx: ActionContext
+): Promise<void> {
+  // Looped so each sub-picker (model, effort) returns to the combined
+  // picker, letting the user adjust multiple defaults in one session
+  // without re-clicking the bridge widget. Loop exits on BACK or
+  // QuickPick dismiss. Sandbox is an inline toggle so it never opens
+  // a sub-picker - the loop just re-renders with the new state.
   while (true) {
     const sandbox = readCodexSandboxOverride();
     const model = readCodexModelOverride();
     const effort = readCodexEffortOverride();
 
-    const sandboxDefault = readSandboxDefaultSetting();
-    const modelDefault = readModelDefaultSetting();
-    const effortDefault = readEffortDefaultSetting();
+    const sandboxLabel = sandbox === "full-access" ? "FULL-ACCESS" : "READ-ONLY";
+    const sandboxNext = sandbox === "full-access" ? "READ-ONLY" : "FULL-ACCESS";
+
+    const paused = isPaused();
+    const pauseItem = makePauseResumeItem(paused, false);
+    const cancelItem = makeCancelItem(false);
 
     const items: DefaultsRow[] = [
       { ...makeBackItem(), row: "back" },
       {
-        label: `SANDBOX: ${sandbox === "full-access" ? "FULL-ACCESS" : "READ-ONLY"} (CURRENT)`,
-        description: `default: ${sandboxDefault === "full-access" ? "Full-Access" : "Read-Only"}`,
-        detail:
-          "Click to switch. Per-turn override - takes effect on the next prompt without a thread reset.",
+        label: `SANDBOX PERMISSION: ${sandboxLabel}${sandboxIsDefault(sandbox) ? " *default*" : ""}`,
+        description: `Click to switch to ${sandboxNext}.`,
         iconPath: new vscode.ThemeIcon("shield"),
         row: "sandbox",
       },
       {
         label: modelRowLabel(model),
-        description: `default: ${modelDefaultLabel(modelDefault)}`,
-        detail:
-          "Click to change. Applied per-turn; the active session resumes with the new model on the next prompt.",
+        description: "Click to change model.",
         iconPath: new vscode.ThemeIcon("symbol-method"),
         row: "model",
       },
       {
         label: effortRowLabel(effort),
-        description: `default: ${effortDefaultLabel(effortDefault)}`,
-        detail:
-          "Click to change. Applied per-turn; the active session resumes with the new effort on the next prompt.",
+        description: "Click to change effort.",
         iconPath: new vscode.ThemeIcon("dashboard"),
         row: "effort",
       },
+      { ...pauseItem, row: pauseItem.action === "resume" ? "resume" : "pause" },
+      { ...cancelItem, row: "cancel" },
     ];
 
     const pick = await withMenuLifecycle(() =>
       vscode.window.showQuickPick<DefaultsRow>(items, {
-        title: "Codex Defaults",
-        placeHolder: "Pick a default to change",
+        title: "Codex Session Settings",
+        placeHolder: "Pick a setting to change",
       })
     );
-    if (!pick || pick.row === "back") return;
+    if (!pick) return;
+    if (pick.row === "back") {
+      // Walk back to the sessions submenu (this picker's parent), not
+      // straight to main. Honors the user's expectation that BACK
+      // unwinds one menu level rather than closing the whole stack.
+      await dispatch("manage-sessions", ctx);
+      return;
+    }
 
     if (pick.row === "sandbox") {
-      const result = await pickSandbox(sandbox);
-      if (result.kind === "picked") writeCodexSandboxOverride(result.value);
-    } else if (pick.row === "model") {
+      // Direct toggle - no sub-picker needed. Loop re-renders with
+      // the new state on the next iteration.
+      writeCodexSandboxOverride(sandbox === "full-access" ? "read-only" : "full-access");
+      continue;
+    }
+    if (pick.row === "model") {
       const result = await pickModel(model);
       if (result.kind === "picked") writeCodexModelOverride(result.value);
-    } else if (pick.row === "effort") {
+      continue;
+    }
+    if (pick.row === "effort") {
       const result = await pickEffort(effort, model);
       if (result.kind === "picked") writeCodexEffortOverride(result.value);
+      continue;
+    }
+    if (pick.row === "pause") {
+      setPaused(true);
+      return;
+    }
+    if (pick.row === "resume") {
+      setPaused(false);
+      continue;
+    }
+    if (pick.row === "cancel") {
+      // Route cancel through the parent dispatch so the standard
+      // cancel handler runs (writes the cancel sentinel, etc).
+      // No turn can be in flight while this picker is open since
+      // the entry guard locks during in-flight, but we still go
+      // through the canonical flow so toasts and flag writes match
+      // every other CANCEL row in the menu vocabulary.
+      await dispatch("cancel", ctx);
+      return;
     }
   }
-}
-
-// -----------------------------------------------------------------
-// Sandbox sub-picker
-// -----------------------------------------------------------------
-
-async function pickSandbox(
-  current: CodexSandboxState
-): Promise<PickResult<CodexSandboxState>> {
-  const items: SandboxRow[] = [
-    { ...makeBackItem(), rowKind: "back" },
-    {
-      label: current === "full-access" ? "FULL-ACCESS (CURRENT)" : "FULL-ACCESS",
-      description: "Codex can run shell + write files.",
-      detail:
-        "Recommended on dev machines you own. Faster on research turns; tool calls do not get blocked at the sandbox layer.",
-      iconPath: new vscode.ThemeIcon("shield"),
-      rowKind: "value",
-      state: "full-access",
-    },
-    {
-      label: current === "read-only" ? "READ-ONLY (CURRENT)" : "READ-ONLY",
-      description: "Codex can read files; shell + writes are blocked.",
-      detail:
-        "Conservative default. Codex chains web searches when shell tools are blocked, so research turns can be slower.",
-      iconPath: new vscode.ThemeIcon("shield"),
-      rowKind: "value",
-      state: "read-only",
-    },
-  ];
-  const pick = await withMenuLifecycle(() =>
-    vscode.window.showQuickPick<SandboxRow>(items, {
-      title: "Codex sandbox",
-      placeHolder: "Pick a sandbox state",
-    })
-  );
-  if (!pick || pick.rowKind === "back" || pick.state === undefined) {
-    return { kind: "cancelled" };
-  }
-  return { kind: "picked", value: pick.state };
 }
 
 // -----------------------------------------------------------------
@@ -206,34 +215,59 @@ async function pickModel(
     return { kind: "cancelled" };
   }
 
+  const baseline = baselineModel();
+  const paused = isPaused();
+  const pauseItem = makePauseResumeItem(paused, false);
+  const cancelItem = makeCancelItem(false);
+
   const items: ModelRow[] = [
     { ...makeBackItem(), rowKind: "back" },
-    {
-      label: current === null ? "DEFAULT (use Codex's own default) (CURRENT)" : "DEFAULT (use Codex's own default)",
-      description: "No override. Codex picks the model from ~/.codex/config.toml.",
-      iconPath: new vscode.ThemeIcon("circle-slash"),
-      rowKind: "default",
-    },
-    ...models.map((m): ModelRow => ({
-      rowKind: "value",
-      slug: m.slug,
-      label: m.slug === current ? `${m.displayName} (CURRENT)` : m.displayName,
-      description: m.slug,
-      detail: m.description,
-      iconPath: new vscode.ThemeIcon("symbol-method"),
-    })),
+    ...models.map((m): ModelRow => {
+      const isDefault = m.slug === baseline;
+      const isCurrent = m.slug === current || (current === null && m.slug === baseline);
+      // Tag order: *default* first when applicable, then (CURRENT).
+      // Both flank the model name so they stay visible even when the
+      // description is truncated by a narrow QuickPick column.
+      const tags: string[] = [];
+      if (isDefault) tags.push("*default*");
+      if (isCurrent) tags.push("(CURRENT)");
+      const tagPrefix = tags.length > 0 ? ` ${tags.join(" ")}` : "";
+      // Description trimmed to the first sentence so the row label
+      // does not get truncated mid-word in narrow QuickPick layouts.
+      const shortDescription = shortenForRow(m.description);
+      const descSuffix = shortDescription ? ` - ${shortDescription}` : "";
+      return {
+        rowKind: "value",
+        slug: m.slug,
+        label: `${m.displayName.toUpperCase()}${tagPrefix}${descSuffix}`,
+        iconPath: new vscode.ThemeIcon("symbol-method"),
+      };
+    }),
+    { ...pauseItem, rowKind: pauseItem.action === "resume" ? "resume" : "pause" },
+    { ...cancelItem, rowKind: "cancel" },
   ];
 
   const pick = await withMenuLifecycle(() =>
     vscode.window.showQuickPick<ModelRow>(items, {
       title: "Codex model",
-      placeHolder: "Pick a model (or DEFAULT to clear the override)",
+      placeHolder: "Pick a model",
     })
   );
   if (!pick || pick.rowKind === "back") return { kind: "cancelled" };
-  if (pick.rowKind === "default") return { kind: "picked", value: null };
-  if (pick.slug === undefined) return { kind: "cancelled" };
-  return { kind: "picked", value: pick.slug };
+  if (pick.rowKind === "value" && pick.slug !== undefined) {
+    return { kind: "picked", value: pick.slug };
+  }
+  if (pick.rowKind === "pause") {
+    const { setPaused } = await import("./statusBarState");
+    setPaused(true);
+    return { kind: "cancelled" };
+  }
+  if (pick.rowKind === "resume") {
+    const { setPaused } = await import("./statusBarState");
+    setPaused(false);
+    return { kind: "cancelled" };
+  }
+  return { kind: "cancelled" };
 }
 
 // -----------------------------------------------------------------
@@ -245,7 +279,7 @@ async function pickEffort(
   modelSlug: string | null
 ): Promise<PickResult<CodexEffortLevel | null>> {
   // If a model override is set, list only that model's supported
-  // efforts. Otherwise list the standard four.
+  // efforts. Otherwise fall back to the standard four (low to xhigh).
   const modelInfo = modelSlug !== null ? getCodexModelInfo(modelSlug) : null;
   const supported: { effort: CodexEffortLevel; description: string }[] =
     modelInfo !== null && modelInfo.supportedEfforts.length > 0
@@ -261,33 +295,58 @@ async function pickEffort(
           { effort: "xhigh", description: "Extra-high reasoning depth." },
         ];
 
+  const baseline: CodexEffortLevel | null =
+    (modelInfo?.defaultEffort as CodexEffortLevel | undefined) ?? "medium";
+  const paused = isPaused();
+  const pauseItem = makePauseResumeItem(paused, false);
+  const cancelItem = makeCancelItem(false);
+
   const items: EffortRow[] = [
     { ...makeBackItem(), rowKind: "back" },
-    {
-      label: current === null ? "DEFAULT (use the model's own default) (CURRENT)" : "DEFAULT (use the model's own default)",
-      description: "No override. Codex picks the model's default effort.",
-      iconPath: new vscode.ThemeIcon("circle-slash"),
-      rowKind: "default",
-    },
-    ...supported.map((e): EffortRow => ({
-      rowKind: "value",
-      effort: e.effort,
-      label: e.effort === current ? `${e.effort} (CURRENT)` : e.effort,
-      description: e.description,
-      iconPath: new vscode.ThemeIcon("dashboard"),
-    })),
+    ...supported.map((e): EffortRow => {
+      const isDefault = e.effort === baseline;
+      const isCurrent = e.effort === current || (current === null && e.effort === baseline);
+      // Tag order: *default* first when applicable, then (CURRENT),
+      // both before the description so they stay visible if the
+      // description gets truncated.
+      const tags: string[] = [];
+      if (isDefault) tags.push("*default*");
+      if (isCurrent) tags.push("(CURRENT)");
+      const tagPrefix = tags.length > 0 ? ` ${tags.join(" ")}` : "";
+      const shortDescription = shortenForRow(e.description);
+      const descSuffix = shortDescription ? ` - ${shortDescription}` : "";
+      return {
+        rowKind: "value",
+        effort: e.effort,
+        label: `${e.effort.toUpperCase()}${tagPrefix}${descSuffix}`,
+        iconPath: new vscode.ThemeIcon("dashboard"),
+      };
+    }),
+    { ...pauseItem, rowKind: pauseItem.action === "resume" ? "resume" : "pause" },
+    { ...cancelItem, rowKind: "cancel" },
   ];
 
   const pick = await withMenuLifecycle(() =>
     vscode.window.showQuickPick<EffortRow>(items, {
       title: modelInfo !== null ? `Effort for ${modelInfo.displayName}` : "Codex effort",
-      placeHolder: "Pick an effort level (or DEFAULT to clear the override)",
+      placeHolder: "Pick an effort level",
     })
   );
   if (!pick || pick.rowKind === "back") return { kind: "cancelled" };
-  if (pick.rowKind === "default") return { kind: "picked", value: null };
-  if (pick.effort === undefined) return { kind: "cancelled" };
-  return { kind: "picked", value: pick.effort };
+  if (pick.rowKind === "value" && pick.effort !== undefined) {
+    return { kind: "picked", value: pick.effort };
+  }
+  if (pick.rowKind === "pause") {
+    const { setPaused } = await import("./statusBarState");
+    setPaused(true);
+    return { kind: "cancelled" };
+  }
+  if (pick.rowKind === "resume") {
+    const { setPaused } = await import("./statusBarState");
+    setPaused(false);
+    return { kind: "cancelled" };
+  }
+  return { kind: "cancelled" };
 }
 
 // -----------------------------------------------------------------
@@ -295,55 +354,82 @@ async function pickEffort(
 // -----------------------------------------------------------------
 
 function modelRowLabel(model: string | null): string {
-  if (model === null) return "MODEL: default (CURRENT)";
-  const info = getCodexModelInfo(model);
-  if (info === null) {
-    return `MODEL: ${model} (no longer available) (CURRENT)`;
+  const baseline = baselineModel();
+  const effective = model ?? baseline;
+  if (effective === null) {
+    return "MODEL: (codex config has no model set)";
   }
-  return `MODEL: ${info.displayName} (CURRENT)`;
+  const info = getCodexModelInfo(effective);
+  const label = (info?.displayName ?? effective).toUpperCase();
+  const isDefault = effective === baseline;
+  return `MODEL: ${label}${isDefault ? " *default*" : ""}`;
 }
 
 function effortRowLabel(effort: CodexEffortLevel | null): string {
-  if (effort === null) return "EFFORT: default (CURRENT)";
-  return `EFFORT: ${effort} (CURRENT)`;
-}
-
-function modelDefaultLabel(slug: string | null): string {
-  if (slug === null) return "use Codex's default";
-  const info = getCodexModelInfo(slug);
-  return info?.displayName ?? slug;
-}
-
-function effortDefaultLabel(effort: CodexEffortLevel | null): string {
-  return effort ?? "model's default";
-}
-
-// -----------------------------------------------------------------
-// Settings readers
-// -----------------------------------------------------------------
-
-function readSandboxDefaultSetting(): CodexSandboxState {
-  const raw = vscode.workspace
-    .getConfiguration("wat321")
-    .get<string>(SETTING.epicHandshakeCodexSandboxDefault, "Read-Only");
-  return raw === "Full-Access" ? "full-access" : "read-only";
-}
-
-function readModelDefaultSetting(): string | null {
-  const raw = vscode.workspace
-    .getConfiguration("wat321")
-    .get<string>(SETTING.epicHandshakeCodexModelDefault, "")
-    .trim();
-  return raw.length > 0 ? raw : null;
-}
-
-function readEffortDefaultSetting(): CodexEffortLevel | null {
-  const raw = vscode.workspace
-    .getConfiguration("wat321")
-    .get<string>(SETTING.epicHandshakeCodexEffortDefault, "")
-    .trim();
-  if (["low", "medium", "high", "xhigh"].includes(raw)) {
-    return raw as CodexEffortLevel;
+  const baseline = baselineEffort();
+  const effective = effort ?? baseline;
+  if (effective === null) {
+    return "EFFORT: (no default available)";
   }
-  return null;
+  const isDefault = effective === baseline;
+  return `EFFORT: ${effective.toUpperCase()}${isDefault ? " *default*" : ""}`;
+}
+
+function configModelLabel(): string {
+  const cfg = readCodexConfigModel();
+  if (cfg === null) return "default";
+  const info = getCodexModelInfo(cfg);
+  return info?.displayName ?? cfg;
+}
+
+/** Trim a row description so it survives narrow QuickPick columns
+ * without truncation. Splits on the first sentence boundary, falling
+ * back to a hard 60-char ceiling. The full description is still
+ * available in the model cache for callers that want it. */
+function shortenForRow(description: string): string {
+  if (!description) return "";
+  const trimmed = description.trim();
+  const firstSentence = trimmed.split(/\.\s/)[0]?.replace(/\.$/, "") ?? trimmed;
+  const candidate = firstSentence.length > 0 ? firstSentence : trimmed;
+  return candidate.length <= 60 ? candidate : `${candidate.slice(0, 57)}...`;
+}
+
+// -----------------------------------------------------------------
+// Baseline ("*default*") definitions
+// -----------------------------------------------------------------
+
+function sandboxIsDefault(state: CodexSandboxState): boolean {
+  return state === "read-only";
+}
+
+/** The "default" model is whatever Codex's own config.toml declares.
+ * If config has no model line, the picker has no `*default*` to mark.
+ * Picking the same slug as the baseline is functionally identical to
+ * having no override at all. */
+function baselineModel(): string | null {
+  return readCodexConfigModel();
+}
+
+/** The "default" effort is the model's own default effort from the
+ * cache. Falls back to `"medium"` when no model context applies. */
+function baselineEffort(): CodexEffortLevel | null {
+  const model = readCodexModelOverride() ?? baselineModel();
+  if (model === null) return "medium";
+  const info = getCodexModelInfo(model);
+  const cand = info?.defaultEffort;
+  if (cand === "low" || cand === "medium" || cand === "high" || cand === "xhigh") {
+    return cand;
+  }
+  return "medium";
+}
+
+function everythingAtDefault(): boolean {
+  const sandbox = readCodexSandboxOverride();
+  const modelOverride = readCodexModelOverride();
+  const effortOverride = readCodexEffortOverride();
+  if (!sandboxIsDefault(sandbox)) return false;
+  // No override means "use the baseline" - that counts as default.
+  if (modelOverride !== null && modelOverride !== baselineModel()) return false;
+  if (effortOverride !== null && effortOverride !== baselineEffort()) return false;
+  return true;
 }
