@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type * as vscode from "vscode";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { BIN_DIR, EPIC_HANDSHAKE_DIR } from "./constants";
 import type { EpicHandshakeLogger } from "./types";
 
@@ -153,9 +155,125 @@ function copyMcpSdk(context: vscode.ExtensionContext, logger: EpicHandshakeLogge
   logger.info(`node_modules copy complete: ${copied} prod packages copied`);
 }
 
+/** Path to Claude Code's user-level settings file. We write to
+ * `permissions.allow` here so the bridge MCP tools never trip the
+ * "Do you want to proceed with mcp__wat321__epic_handshake_ask?"
+ * prompt - WAT321 just installed the server, asking the user to
+ * re-authorize each tool would be redundant and confusing. */
+const CLAUDE_SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
+
+/** Tool names the bridge needs Claude Code to invoke without prompt.
+ * Both names are stable across Codex versions and the MCP SDK
+ * (`mcp__<server>__<tool>` form). Adding to `permissions.allow`
+ * skips the per-tool prompt for ONLY these two; every other tool
+ * still goes through the normal permission gate. */
+const BRIDGE_ALLOWED_TOOLS = [
+  "mcp__wat321__epic_handshake_ask",
+  "mcp__wat321__epic_handshake_inbox",
+] as const;
+
+interface ClaudeSettings {
+  permissions?: {
+    allow?: string[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/** Pre-allow the two bridge MCP tools in Claude Code's user-level
+ * settings so the user never sees the per-tool permission prompt
+ * for tools we just installed. Idempotent - already-present entries
+ * are skipped. Best-effort - parse failure (the file may be JSONC
+ * with comments that our plain JSON.parse rejects) downgrades to a
+ * log line and the user falls back to the standard "allow for this
+ * project" dialog click on first dispatch. */
+function preAllowBridgeTools(logger: EpicHandshakeLogger): void {
+  let settings: ClaudeSettings = {};
+  if (existsSync(CLAUDE_SETTINGS_PATH)) {
+    try {
+      settings = JSON.parse(
+        readFileSync(CLAUDE_SETTINGS_PATH, "utf8")
+      ) as ClaudeSettings;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `~/.claude/settings.json parse skipped (${msg}); user will see one-time permission prompt on first bridge call`
+      );
+      return;
+    }
+  }
+
+  if (!settings.permissions) settings.permissions = {};
+  if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
+
+  let added = 0;
+  for (const tool of BRIDGE_ALLOWED_TOOLS) {
+    if (!settings.permissions.allow.includes(tool)) {
+      settings.permissions.allow.push(tool);
+      added++;
+    }
+  }
+  if (added === 0) return;
+
+  try {
+    mkdirSync(dirname(CLAUDE_SETTINGS_PATH), { recursive: true });
+    const ok = writeFileAtomic(
+      CLAUDE_SETTINGS_PATH,
+      `${JSON.stringify(settings, null, 2)}\n`
+    );
+    if (ok) {
+      logger.info(
+        `pre-allowed ${added} bridge MCP tool(s) in ~/.claude/settings.json`
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`~/.claude/settings.json write skipped (${msg})`);
+  }
+}
+
+/** Reverse of preAllowBridgeTools - remove the two entries we added.
+ * Called from uninstallChannel + Reset WAT321 so disabling the bridge
+ * leaves the user's allowlist exactly as it was. Best-effort. */
+function unAllowBridgeTools(logger: EpicHandshakeLogger): void {
+  if (!existsSync(CLAUDE_SETTINGS_PATH)) return;
+  let settings: ClaudeSettings;
+  try {
+    settings = JSON.parse(
+      readFileSync(CLAUDE_SETTINGS_PATH, "utf8")
+    ) as ClaudeSettings;
+  } catch {
+    return;
+  }
+  const allow = settings.permissions?.allow;
+  if (!Array.isArray(allow)) return;
+  const before = allow.length;
+  const filtered = allow.filter(
+    (t): t is string =>
+      typeof t === "string" &&
+      !(BRIDGE_ALLOWED_TOOLS as readonly string[]).includes(t)
+  );
+  if (filtered.length === before) return;
+  if (settings.permissions === undefined) return;
+  settings.permissions.allow = filtered;
+  try {
+    writeFileAtomic(
+      CLAUDE_SETTINGS_PATH,
+      `${JSON.stringify(settings, null, 2)}\n`
+    );
+    logger.info(
+      `removed ${before - filtered.length} bridge MCP tool entry/entries from ~/.claude/settings.json`
+    );
+  } catch {
+    // best-effort
+  }
+}
+
 /** Register `wat321` as an MCP server with Claude Code, pointing at
  * the extracted channel.mjs. Idempotent: re-running replaces the
- * existing entry (removes first, then adds). */
+ * existing entry (removes first, then adds). Also pre-allows the
+ * two bridge MCP tools in `permissions.allow` so the user is not
+ * prompted on first bridge dispatch. */
 export async function installChannel(
   context: vscode.ExtensionContext,
   logger: EpicHandshakeLogger
@@ -193,10 +311,13 @@ export async function installChannel(
     return { ok: false, scriptPath, error: msg };
   }
   logger.info("claude mcp add wat321 succeeded");
+  preAllowBridgeTools(logger);
   return { ok: true, scriptPath };
 }
 
-/** Remove the MCP registration. Best-effort. */
+/** Remove the MCP registration AND the `permissions.allow` entries
+ * we wrote at install. Disabling the bridge leaves the user's
+ * Claude Code settings exactly as we found them. Best-effort. */
 export async function uninstallChannel(logger: EpicHandshakeLogger): Promise<void> {
   const res = await runClaudeCli(["mcp", "remove", "-s", "user", MCP_SERVER_NAME]);
   if (res.code === 0) {
@@ -204,6 +325,7 @@ export async function uninstallChannel(logger: EpicHandshakeLogger): Promise<voi
   } else {
     logger.warn(`claude mcp remove returned code ${res.code}: ${res.stderr.trim()}`);
   }
+  unAllowBridgeTools(logger);
 }
 
 /** Detect whether `claude` CLI is on PATH and reachable. Returns
