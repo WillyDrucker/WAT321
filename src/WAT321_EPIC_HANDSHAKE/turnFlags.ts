@@ -163,11 +163,12 @@ export function clearBridgeRuntimeFlags(workspacePath: string): void {
   removeIfExists(suppressCodexToastFlagPath(hash));
 }
 
-/** Write the returning flag and schedule its cleanup 5000ms later.
+/** Write the returning flag and schedule its cleanup 3000ms later.
  * The unref'd timer lets the dispatcher shut down without waiting.
- * 5s visibility makes the arrow-circle-left animation easy to
- * notice - the physical reply transfer is sub-500ms, and a shorter
- * latch was easy to miss when glancing away during a long turn. */
+ * 3s aligns with `STAGE_LATCH_MS["complete"]` and the walker's
+ * stage 5 + post-walk hold, so the returning-flag fallback (used in
+ * non-adaptive modes that bypass the walker) reads as the same
+ * 3-second beat the rest of the bridge UI uses. */
 export function writeReturningFlag(workspacePath: string): void {
   const path = returningFlagPath(workspaceHash(workspacePath));
   try {
@@ -178,7 +179,7 @@ export function writeReturningFlag(workspacePath: string): void {
       } catch {
         // best-effort
       }
-    }, 5_000);
+    }, 3_000);
     t.unref?.();
   } catch {
     // best-effort

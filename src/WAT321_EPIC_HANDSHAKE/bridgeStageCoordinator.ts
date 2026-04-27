@@ -40,6 +40,53 @@ import { workspaceHash } from "./workspaceHash";
  * cross-cutting. Engine owns the type contract + event surface
  * (`bridgeTypes.ts`, `eventHub.ts`); the EH tier owns the
  * implementation and lifecycle.
+ *
+ * Stage map - what each square-N cycle means:
+ *
+ *   1 dispatched   square-one   <-> arrow-right   outbound to Codex
+ *     Codex side:  app-server child spawning OR thread/start +
+ *                  turn/start being dialed in. Pre-warm at activate
+ *                  collapses the spawn portion to zero on first
+ *                  dispatch; without pre-warm this can run ~20s.
+ *     Entry:       writeHeartbeat("dispatched") fires immediately
+ *                  when turnRunner starts the turn.
+ *     Exit:        observeRpcProgress("turn-started") on JSON-RPC
+ *                  notification, OR pollRollout sees task_started.
+ *     Force-exit:  30s ceiling - if neither signal fires the walker
+ *                  synthetically advances so the user sees motion.
+ *
+ *   2 received     square-two   <-> arrow-right   prompt accepted
+ *     Codex side:  initial reasoning before any tool call - reading
+ *                  the prompt, planning approach. Pure-text "early
+ *                  reasoning" entries land here.
+ *     Entry:       task_started rollout event OR turn/started RPC.
+ *     Exit:        first function_call / web_search_call response
+ *                  item, OR force-advance after 15s.
+ *
+ *   3 working      square-three <-> blank          Codex working
+ *     Codex side:  active tool use (web_search_call, function_call,
+ *                  shell, file IO). 80-95% of wall time on tool-heavy
+ *                  research turns.
+ *     Entry:       first function_call or web_search_call entry.
+ *     Exit:        agent_message phase=final_answer OR post-tool
+ *                  reasoning threshold (>=2 reasoning entries after
+ *                  the last tool output) OR force-advance after 30s.
+ *
+ *   4 writing      square-four  <-> blank          composing answer
+ *   4 + returning  square-four  <-> arrow-left     reply imminent
+ *     Codex side:  final assistant message text being produced.
+ *     Entry:       agent_message phase=final_answer OR the post-tool
+ *                  reasoning heuristic.
+ *     Exit:        task_complete rollout event. No force-advance -
+ *                  stage 5 is reserved for genuine completion.
+ *
+ *   5 complete     square-five  <-> arrow-left     delivered back
+ *     Codex side:  turn done, bridge writing the reply envelope to
+ *                  Claude's inbox.
+ *     Entry:       task_complete rollout event OR turn/completed RPC.
+ *     Exit:        held 3s + COMPLETE_WALK_HOLD_MS so the user sees
+ *                  at least one full cycle, then widget transitions
+ *                  to the returning-arrow handoff animation.
  */
 
 /** Minimum display time per stage before the latch lets the walker
@@ -65,14 +112,17 @@ const STAGE_LATCH_MS: Record<BridgeStage, number> = {
  * phase=final_answer`. Without a max-hold the walker pins at stage 3
  * for a minute+, leaving stage 4 essentially invisible.
  *
- * Stages 1 (dispatched) and 5 (complete) intentionally left at 0
- * (never force-advance): stage 1 is the send/init bookend and should
- * resolve naturally when `task_started` fires; stage 5 is reserved
- * for "reply coming back" and must be driven by `task_complete` in
- * the rollout so we never claim a turn is done before Codex actually
- * finishes. */
+ * Stage 1 (dispatched) ceiling guards against codex app-server cold
+ * start where neither `turn/started` RPC nor a rollout file exists
+ * yet. Pre-warm at activate normally drops this to <2s, but the
+ * 30s ceiling stays as a defensive net so the user always sees the
+ * walker move past stage 1 on a turn that ultimately succeeds.
+ *
+ * Stage 5 (complete) intentionally left at 0: must be driven by
+ * `task_complete` in the rollout so we never claim a turn is done
+ * before Codex actually finishes. */
 const STAGE_MAX_HOLD_MS: Record<BridgeStage, number> = {
-  dispatched: 0,
+  dispatched: 30_000,
   received: 15_000,
   working: 30_000,
   writing: 0,
@@ -138,7 +188,41 @@ interface LatchState {
    * before clearing the envelope so the widget can render the
    * post-turn handoff animation cleanly. */
   completeWalkAt: number | null;
+  /** Highest stage seen on this envelope's heartbeat across all
+   * snapshot reads. Lets the walker keep advancing toward "complete"
+   * after the heartbeat file is unlinked or the in-flight flag is
+   * cleared - both of which the dispatcher does at turn end while
+   * the walker is still walking through stages. Without this field
+   * the walker's target signal disappears the moment the dispatcher
+   * declares the turn done, and stages 4-5 commonly never display. */
+  lastTargetStage: BridgeStage;
+  /** Wall-clock when the heartbeat file first became unreadable on
+   * this envelope. Drives the orphan-grace timeout: a latch whose
+   * heartbeat has been gone for LATCH_ORPHAN_GRACE_MS AND has not
+   * committed to a "complete" target is treated as an aborted turn
+   * (cancel, error) and dropped. Reset to null whenever a fresh
+   * heartbeat read succeeds. */
+  lostHeartbeatAt: number | null;
 }
+
+/** Grace window before dropping a latch whose heartbeat has gone
+ * missing AND whose lastTargetStage is not yet `complete`. Covers
+ * the cancel / bridge-error path where the dispatcher tears down
+ * the heartbeat without ever writing stage=complete. With a target
+ * of complete the walker honors it regardless of grace. */
+const LATCH_ORPHAN_GRACE_MS = 3000;
+
+/** Compressed min-hold for intermediate stages (received, working,
+ * writing) when Codex has already finished and the walker just needs
+ * to catch up to the actual end-state. Triggered when lastTargetStage
+ * reaches "complete" while the walker is still walking. Stage 1
+ * (dispatched) keeps its full 4s ceremony floor regardless - the
+ * debug ceremony on session-token widgets needs that window. Stage 5
+ * (complete) keeps its full 3s + COMPLETE_WALK_HOLD_MS so the
+ * delivery cycle reads cleanly. The 500ms intermediate lets stages
+ * 3 and 4 each get a visible flash on a sub-12s "fast" turn instead
+ * of being skipped invisibly under the latched walker pacing. */
+const FAST_WALK_INTERMEDIATE_MS = 500;
 
 const IDLE_SNAPSHOT: BridgeStageSnapshot = {
   workspacePath: null,
@@ -325,20 +409,116 @@ export class BridgeStageCoordinator
       };
     }
 
-    const busy = isBridgeBusy(workspacePath);
-    if (!busy) {
-      this.latchState = null;
-      return { ...IDLE_SNAPSHOT, workspacePath };
-    }
-
     const wsHash = workspaceHash(workspacePath);
     const returning = existsSync(returningFlagPath(wsHash));
     const rawHeartbeat = readNewestHeartbeat(wsHash);
+    const busy = isBridgeBusy(workspacePath);
+    const now = Date.now();
 
-    if (rawHeartbeat === null) {
-      // Bridge is busy but the dispatcher has not yet written its
-      // first heartbeat. Pre-ceremony - widgets render queue-latency
-      // animations (logo blink on session tokens, etc.).
+    // Walker-owned phase. An active latch has its own life cycle
+    // independent of the in-flight flag and the heartbeat file -
+    // both of which the dispatcher tears down at turn-end while the
+    // walker may still have stages to display. The latch persists
+    // until the walker has either:
+    //   (a) reached `complete` and held for COMPLETE_WALK_HOLD_MS
+    //       (natural end - applyLatch returns null and clears latch
+    //       internally), or
+    //   (b) been orphaned (no heartbeat AND target < complete) for
+    //       LATCH_ORPHAN_GRACE_MS (cancel / bridge-error path).
+    if (this.latchState !== null) {
+      // Refresh target tracking from the current heartbeat read.
+      if (
+        rawHeartbeat !== null &&
+        rawHeartbeat.envelopeId === this.latchState.envelopeId
+      ) {
+        const hbIdx = stageIdx(rawHeartbeat.stage);
+        const tgtIdx = stageIdx(this.latchState.lastTargetStage);
+        if (hbIdx > tgtIdx) {
+          this.latchState.lastTargetStage = rawHeartbeat.stage;
+        }
+        this.latchState.lostHeartbeatAt = null;
+      } else if (this.latchState.lostHeartbeatAt === null) {
+        this.latchState.lostHeartbeatAt = now;
+      }
+
+      // Orphan-grace check: if no heartbeat and target hasn't reached
+      // complete after the grace window, this is a cancelled / errored
+      // turn - drop the latch and fall through to idle.
+      const orphaned =
+        this.latchState.lostHeartbeatAt !== null &&
+        this.latchState.lastTargetStage !== "complete" &&
+        now - this.latchState.lostHeartbeatAt >= LATCH_ORPHAN_GRACE_MS;
+      if (orphaned) {
+        this.latchState = null;
+      } else {
+        // Walker continues. Synthesize a heartbeat from cached state
+        // when the real one is unreadable so applyLatch always has a
+        // target (the lastTargetStage tracked above).
+        const hbForLatch: TurnHeartbeat =
+          rawHeartbeat !== null &&
+          rawHeartbeat.envelopeId === this.latchState.envelopeId
+            ? rawHeartbeat
+            : {
+                envelopeId: this.latchState.envelopeId,
+                workspacePath,
+                workspaceHash: wsHash,
+                stage: this.latchState.lastTargetStage,
+                activeTool: null,
+                toolCallCount: 0,
+                elapsedMs: now - this.latchState.turnStartedAt,
+                lastProgressAt: now,
+                turnStartedAt: this.latchState.turnStartedAt,
+              };
+
+        const latched = this.applyLatch(hbForLatch);
+        if (latched !== null) {
+          const turnStartedAt = this.latchState
+            ? this.latchState.turnStartedAt
+            : (hbForLatch.turnStartedAt ?? now);
+          const ceremonyActive = now - turnStartedAt < CEREMONY_MS;
+          return {
+            workspacePath,
+            phase: ceremonyActive ? "ceremony" : "stage",
+            latchedStage: latched,
+            msInStage: this.latchState
+              ? now - this.latchState.displayedAt
+              : 0,
+            ceremonyActive,
+            returning,
+            paused: false,
+            heartbeat: rawHeartbeat,
+          };
+        }
+        // applyLatch returned null - walker fully done, latch already
+        // cleared. Fall through to the post-walk path.
+      }
+    }
+
+    // No active latch. If a fresh heartbeat is in for a busy bridge,
+    // start a new latch at stage 1.
+    if (busy && rawHeartbeat !== null) {
+      const latched = this.applyLatch(rawHeartbeat);
+      if (latched !== null) {
+        const turnStartedAt = this.latchState?.turnStartedAt ?? now;
+        const ceremonyActive = now - turnStartedAt < CEREMONY_MS;
+        return {
+          workspacePath,
+          phase: ceremonyActive ? "ceremony" : "stage",
+          latchedStage: latched,
+          msInStage: this.latchState
+            ? now - this.latchState.displayedAt
+            : 0,
+          ceremonyActive,
+          returning,
+          paused: false,
+          heartbeat: rawHeartbeat,
+        };
+      }
+    }
+
+    if (busy) {
+      // Bridge busy but no heartbeat yet. Pre-ceremony window where
+      // session-token widgets render queue-latency animations.
       return {
         workspacePath,
         phase: "pre-ceremony",
@@ -351,42 +531,11 @@ export class BridgeStageCoordinator
       };
     }
 
-    const latched = this.applyLatch(rawHeartbeat);
-    if (latched === null) {
-      // Walker reached complete and the post-walk hold expired.
-      // Treat as idle for display - the bridge widget transitions to
-      // the returning / delivered animations on its own.
-      return {
-        workspacePath,
-        phase: "idle",
-        latchedStage: null,
-        msInStage: 0,
-        ceremonyActive: false,
-        returning,
-        paused: false,
-        heartbeat: rawHeartbeat,
-      };
-    }
-
-    const now = Date.now();
-    const turnStartedAt =
-      this.latchState?.turnStartedAt ??
-      rawHeartbeat.turnStartedAt ??
-      now;
-    const ceremonyActive = now - turnStartedAt < CEREMONY_MS;
-    const phase: BridgePhase = ceremonyActive ? "ceremony" : "stage";
-    const msInStage = this.latchState
-      ? now - this.latchState.displayedAt
-      : 0;
-
+    // Idle: no walker, no busy flag.
     return {
+      ...IDLE_SNAPSHOT,
       workspacePath,
-      phase,
-      latchedStage: latched,
-      msInStage,
-      ceremonyActive,
       returning,
-      paused: false,
       heartbeat: rawHeartbeat,
     };
   }
@@ -409,6 +558,8 @@ export class BridgeStageCoordinator
         displayedAt: now,
         turnStartedAt: hb.turnStartedAt ?? now,
         completeWalkAt: null,
+        lastTargetStage: hb.stage,
+        lostHeartbeatAt: null,
       };
       return "dispatched";
     }
@@ -455,17 +606,39 @@ export class BridgeStageCoordinator
     // Either the parser's target is ahead, or the max-hold elapsed
     // and a force-advance is due. Respect the min-hold floor so we
     // never flip faster than intended.
-    if (heldMs < minMs) {
+    //
+    // Fast-walk: when the walker knows the turn is fully done
+    // (lastTargetStage === complete) but is still walking through
+    // intermediate stages 2/3/4, compress their min-hold to 500ms
+    // so the user reaches stage 5 in ~1.5s instead of ~9s. Stages 1
+    // and 5 keep their full holds so the bookend ceremonies read
+    // cleanly even on a fast turn.
+    const targetIsComplete =
+      stageIdx(this.latchState.lastTargetStage) ===
+      stageIdx("complete");
+    const fastWalkApplies =
+      targetIsComplete &&
+      (this.latchState.displayedStage === "received" ||
+        this.latchState.displayedStage === "working" ||
+        this.latchState.displayedStage === "writing");
+    const effectiveMinMs = fastWalkApplies ? FAST_WALK_INTERMEDIATE_MS : minMs;
+    if (heldMs < effectiveMinMs) {
       return this.latchState.displayedStage;
     }
 
     const next = STAGE_ORDER[displayedIdx + 1];
+    const tgtIdx = stageIdx(hb.stage);
+    const carriedTargetIdx = stageIdx(this.latchState.lastTargetStage);
+    const newLastTarget =
+      tgtIdx > carriedTargetIdx ? hb.stage : this.latchState.lastTargetStage;
     this.latchState = {
       envelopeId: hb.envelopeId,
       displayedStage: next,
       displayedAt: now,
       turnStartedAt: this.latchState.turnStartedAt,
       completeWalkAt: null,
+      lastTargetStage: newLastTarget,
+      lostHeartbeatAt: this.latchState.lostHeartbeatAt,
     };
     return next;
   }
