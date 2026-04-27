@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
-import { currentModelEffortLabel } from "./codexDefaultsPicker";
+import {
+  codexDefaultsHeadline,
+  codexDefaultsSubline,
+} from "./codexDefaultsPicker";
 import {
   makeBackItem,
   makeCancelItem,
@@ -167,17 +170,11 @@ export async function showSessionsSubmenu(opts: {
   // mean the in-flight envelope used different values than the user
   // expected.
   const inFlight = isBridgeBusy(opts.ws);
-  const defaultsLabel = currentModelEffortLabel();
+  const headline = codexDefaultsHeadline();
+  const subline = codexDefaultsSubline();
   const codexDefaultsItem: Item = {
-    label: inFlight
-      ? `CODEX DEFAULTS: ${defaultsLabel} (locked during turn)`
-      : `CODEX DEFAULTS: ${defaultsLabel}`,
-    description: inFlight
-      ? "Defaults selection is locked while a bridge turn is running."
-      : "Click to change sandbox, model, and effort.",
-    detail: inFlight
-      ? undefined
-      : "Per-turn overrides applied at every bridge prompt. The active session resumes with the new values; no thread reset, zero Claude impact.",
+    label: inFlight ? `${headline} (locked during turn)` : headline,
+    description: subline,
     iconPath: new vscode.ThemeIcon("symbol-method"),
     action: "codex-defaults",
   };
@@ -243,8 +240,11 @@ export async function showSessionsSubmenu(opts: {
 
   // Ordering: BACK at top, then the unified Codex Defaults entry
   // (sandbox + model + effort live there), then session-management
-  // actions. PAUSE/CANCEL are not repeated in the submenu - they
-  // live in the main menu.
+  // actions. PAUSE/CANCEL repeat at the bottom of every menu so the
+  // user always has a one-click escape path regardless of where they
+  // navigated.
+  const pauseItem = makePauseResumeItem(paused, opts.inFlight);
+  const cancelItem = makeCancelItem(opts.inFlight);
   const items: Item[] = [
     makeBackItem(),
     codexDefaultsItem,
@@ -253,6 +253,8 @@ export async function showSessionsSubmenu(opts: {
     deleteAllItem,
     ...(recoverItem ? [recoverItem] : []),
     ...(repairItem ? [repairItem] : []),
+    pauseItem,
+    cancelItem,
   ];
 
   const pick = await withMenuLifecycle(() =>
@@ -303,10 +305,13 @@ export async function showRecoverSessionPicker(
   });
 
   const items: RecoverPick[] = [
-    { ...makeBackItem(), rowKind: "action" as const },
+    // BACK from this picker walks back to the sessions submenu
+    // (its parent), not straight to main. Override the action so
+    // the dispatch handler routes correctly.
+    { ...makeBackItem(), action: "manage-sessions" as Action, rowKind: "action" as const },
     ...sessionItems,
-    ...(pauseItem ? [{ ...pauseItem, rowKind: "action" as const }] : []),
-    ...(cancelItem ? [{ ...cancelItem, rowKind: "action" as const }] : []),
+    { ...pauseItem, rowKind: "action" as const },
+    { ...cancelItem, rowKind: "action" as const },
   ];
 
   const pick = await withMenuLifecycle(() =>
@@ -398,10 +403,16 @@ export async function showRepairSessionsPicker(
 
     const choice = await vscode.window.showInformationMessage(
       `Epic Handshake: all ${scan.length} bridge session${scan.length === 1 ? "" : "s"} look valid by cache check, but your prompts may still be failing.`,
-      { modal: true, detail },
       "Force Repair",
+      "View details",
       "Cancel"
     );
+    if (choice === "View details") {
+      void vscode.window.showInformationMessage(
+        detail.length > 1500 ? `${detail.slice(0, 1500)}...` : detail
+      );
+      return;
+    }
     if (choice !== "Force Repair") return;
 
     const configDefault = readCodexConfigModel();
@@ -427,11 +438,7 @@ export async function showRepairSessionsPicker(
       )
       .join("\n");
     const forceConfirm = await vscode.window.showWarningMessage(
-      `Force-repair ${scan.length} Codex session${scan.length === 1 ? "" : "s"} to "${forcedTarget}"?`,
-      {
-        modal: true,
-        detail: `Each session's stored model slug will be rewritten to "${forcedTarget}" without validating against the models cache. Use this only when you know the slug is correct.\n\n${forceSummary}`,
-      },
+      `Force-repair ${scan.length} Codex session${scan.length === 1 ? "" : "s"} to "${forcedTarget}"? Bypasses cache validation. Targets: ${forceSummary.replace(/\n/g, "; ")}`,
       "Force Repair",
       "Cancel"
     );
@@ -472,11 +479,7 @@ export async function showRepairSessionsPicker(
   const confirm = await vscode.window.showWarningMessage(
     `Repair ${repairable.length} Codex session${
       repairable.length === 1 ? "" : "s"
-    }?`,
-    {
-      modal: true,
-      detail: `Each session's stored model slug will be rewritten to your current Codex default. The conversation history was produced by the old model; after repair, new turns on these sessions will be answered by the new model.\n\n${summary}\n\nOnly bridge-owned rollouts for this workspace are touched. Codex's own cache and index files stay untouched.`,
-    },
+    }? Each session's stored model slug will be rewritten to "${target}". Targets: ${summary.replace(/\n/g, "; ")}.`,
     "Repair all",
     "Cancel"
   );

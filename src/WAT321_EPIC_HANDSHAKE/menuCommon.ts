@@ -67,23 +67,25 @@ export async function withMenuLifecycle<T>(fn: () => Thenable<T>): Promise<T> {
   return fn();
 }
 
-/** Pause/Resume factory. Hidden when a turn is in-flight so the user
- * can't pause mid-dispatch - they have to Cancel first. The status bar
- * widget conveys color via icon, so the menu rows stay text-only. */
+/** Pause/Resume factory. Always shown so the user can pause future
+ * dispatches mid-turn (only blocks NEW prompts; the in-flight turn
+ * keeps running). RESUME shows when the bridge is currently paused.
+ * Color circle prefix (yellow for pause, green for resume) reads at
+ * a glance even when the icon glyph is monochrome - VS Code's
+ * QuickPickItem icon API does not honor per-row tinting. */
 export function makePauseResumeItem(
   paused: boolean,
-  inFlight: boolean
-): Item | null {
-  if (!paused && inFlight) return null;
+  _inFlight: boolean
+): Item {
   return paused
     ? {
-        label: "RESUME",
+        label: "🟢 RESUME",
         description: "Re-enables Claude to Codex prompts.",
         iconPath: new vscode.ThemeIcon("wat321-square-play"),
         action: "resume",
       }
     : {
-        label: "PAUSE",
+        label: "🟡 PAUSE",
         description: "Blocks new prompts until you resume.",
         iconPath: new vscode.ThemeIcon("wat321-square-pause"),
         action: "pause",
@@ -93,20 +95,24 @@ export function makePauseResumeItem(
 /** Cancel factory. Always shown - the action handler checks
  * `isBridgeBusy` at click time and shows a "nothing to cancel" toast
  * when there's no active turn rather than writing a stale cancel flag
- * that would interrupt the next dispatch. */
+ * that would interrupt the next dispatch. Red circle prefix marks it
+ * as the destructive option in any menu. */
 export function makeCancelItem(_inFlight: boolean): Item {
   return {
-    label: "CANCEL",
+    label: "🔴 CANCEL",
     description: "Request to stop current turn.",
     iconPath: new vscode.ThemeIcon("wat321-square-error"),
     action: "cancel",
   };
 }
 
-/** Back-to-main-menu navigation item for sub-menus. */
+/** Back-to-main-menu navigation item for sub-menus. Blue circle
+ * prefix matches the colored-bullet vocabulary the bottom row uses
+ * (yellow pause, red cancel, green resume) - blue is reserved for
+ * "navigation" rather than "action". */
 export function makeBackItem(): Item {
   return {
-    label: "BACK",
+    label: "🔵 BACK",
     iconPath: new vscode.ThemeIcon("wat321-square-arrow-left"),
     action: "back",
   };
