@@ -5,13 +5,21 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.8] - unreleased
+## [1.2.8] - 2026-04-27
 
 ### Added
 
 ### Changed
 
+- **The cache LOAD / MISS banner no longer shifts cell width while it pulses.** The off-frame placeholder used to be a CJK-style ideographic space, which was meant to match the colored circle emoji width but never quite did in VS Code's status bar font - every flash transition left a tiny but visible cell-width shimmy. The off-frame is now plain ASCII spaces sized to the emoji's render width, so the cell stays put across the whole 2-second flash window. Only the colored bullets blink.
+
 ### Fixed
+
+- **The Claude session token widget no longer pretends to be waiting under Fire-and-Forget.** The previous gate only covered one of three bridge-prefix paths the widget can take during a bridge turn; the pre-ceremony idle blink and the stage-1 debug-disconnect alternation were both still firing for Claude under FaF. The widget now bypasses every bridge-driven prefix path under FaF and renders purely from its own transcript activity, exactly like a non-bridge turn. Adaptive and Standard still drive the waiting cycle as before.
+
+- **No more spurious "Claude finished" toast after auto-compact or after pressing Esc.** Auto-compact summary entries and the user-interrupt marker were both being classified as a finished assistant turn, which fired a toast every time the engine compacted context mid-turn or you aborted a turn yourself. Both now route through their own classifier kinds; the widget treats them as idle (so the spinner still stops), but the toast notifier suppresses them. The completion toast only fires for a real model response.
+
+- **The bridge dropdown row label is back to `MANAGE CODEX SESSIONS (S#)`.** A v1.2.6 menu redesign accidentally shortened it to `SESSIONS (S#)`. Restored.
 
 ### Removed
 
