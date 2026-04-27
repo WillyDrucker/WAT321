@@ -82,44 +82,40 @@ export function suppressCodexToastFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `suppress-codex-toast.${wsHash}.flag`);
 }
 
-/** User-scope toggle for Codex bridge sandbox. When present, Codex
- * sessions run with `danger-full-access` instead of the default
- * `read-only`. Toggled live via the sessions submenu so the user can
- * experiment with permissions without touching settings. Read in two
- * places:
- *   - `threadLifecycle.spawnFreshThread` at `thread/start` (kebab
- *     string form, `sandbox` param)
- *   - `turnRunner.runTurnOnce` at every `turn/start` (camelCase
- *     object form, `sandboxPolicy.type`)
- * Because the flag is read on every turn, toggling takes effect on
- * the next prompt without needing a thread reset. */
-export const CODEX_FULL_ACCESS_FLAG_PATH = join(
-  EPIC_HANDSHAKE_DIR,
-  "codex-full-access.flag"
-);
+/** Per-workspace toggle for Codex bridge sandbox. When present, Codex
+ * sessions in this workspace run with `danger-full-access` instead of
+ * the default `read-only`. Toggled live via the Codex Session Settings
+ * picker. Read on every `turn/start` so toggling takes effect on the
+ * next prompt without a thread reset.
+ *
+ * Workspace-scoped so two VS Code windows on the same machine can
+ * carry different sandbox preferences for different projects (test
+ * instance + main dev, project A vs project B, etc.). Mirrors the
+ * partitioning of in-flight / processing / paused flags. */
+export function codexSandboxFlagPath(wsHash: string): string {
+  return join(EPIC_HANDSHAKE_DIR, `codex-sandbox.${wsHash}.flag`);
+}
 
-/** Optional per-session model override. Body is the bare slug
- * (e.g. `gpt-5.4-mini`). When present, `turnRunner` passes
- * `model` on every `turn/start` so the running thread uses the
- * override - per-turn, no thread reset. When absent, turn/start
- * passes `model: null` and Codex falls back to the thread default
- * (which itself comes from `~/.codex/config.toml`). User toggles
- * via the Codex Session Settings picker. No persistent setting backs
- * this - the override file is the source of truth and survives until
- * Reset WAT321 wipes ~/.wat321/. */
-export const CODEX_MODEL_FLAG_PATH = join(
-  EPIC_HANDSHAKE_DIR,
-  "codex-model.flag"
-);
+/** Per-workspace model override. Body is the bare slug (e.g.
+ * `gpt-5.4-mini`). When present, `turnRunner` passes `model` on every
+ * `turn/start` so the running thread uses the override - per-turn,
+ * no thread reset. When absent, turn/start passes `model: null` and
+ * Codex falls back to the thread default (which itself comes from
+ * `~/.codex/config.toml`). User toggles via the Codex Session Settings
+ * picker. No persistent setting backs this - the override file is the
+ * source of truth and survives until Reset WAT321 wipes ~/.wat321/.
+ * Workspace-scoped (same rationale as the sandbox flag). */
+export function codexModelFlagPath(wsHash: string): string {
+  return join(EPIC_HANDSHAKE_DIR, `codex-model.${wsHash}.flag`);
+}
 
-/** Optional per-session reasoning-effort override. Body is the
- * bare effort level (e.g. `xhigh`). Same semantics as the model
- * override above - per-turn pass-through with null fallback to
- * Codex's thread default. */
-export const CODEX_EFFORT_FLAG_PATH = join(
-  EPIC_HANDSHAKE_DIR,
-  "codex-effort.flag"
-);
+/** Per-workspace reasoning-effort override. Body is the bare effort
+ * level (e.g. `xhigh`). Same semantics as the model override above -
+ * per-turn pass-through with null fallback to Codex's thread default.
+ * Workspace-scoped. */
+export function codexEffortFlagPath(wsHash: string): string {
+  return join(EPIC_HANDSHAKE_DIR, `codex-effort.${wsHash}.flag`);
+}
 
 /** Legacy root-level flag paths from before workspace partitioning.
  * Only referenced by the one-time activate-time migration sweep
