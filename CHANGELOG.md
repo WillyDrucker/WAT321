@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Claude session token widget no longer pretends to be waiting under Fire-and-Forget.** Fire-and-Forget returns Claude's MCP call immediately so Claude is free to keep working while Codex runs in the background. The Claude waiting cycle (1Hz logo blink) now only renders under Adaptive mode where Claude's MCP call is genuinely blocked on the bridge reply. Under Fire-and-Forget, the Claude widget falls through to its normal activity detection - idle when the transcript is silent, thinking icons when Claude is actually doing something.
+
 ### Fixed
 
 ### Removed

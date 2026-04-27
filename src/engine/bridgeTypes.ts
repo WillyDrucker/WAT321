@@ -34,6 +34,14 @@ export interface BridgeHeartbeatInfo {
   turnStartedAt?: number;
 }
 
+/** Active wait mode at snapshot time. Drives downstream widget
+ * behavior that depends on whether Claude's MCP call is blocked
+ * waiting for the bridge reply (`adaptive` / `standard`) or already
+ * returned (`fire-and-forget`). Surfaced through the bridge stage
+ * snapshot so widgets in shared/ui don't have to import from the
+ * EH tier to read it. */
+export type BridgeWaitMode = "standard" | "adaptive" | "fire-and-forget";
+
 export interface BridgeStageSnapshot {
   workspacePath: string | null;
   phase: BridgePhase;
@@ -43,6 +51,7 @@ export interface BridgeStageSnapshot {
   returning: boolean;
   paused: boolean;
   heartbeat: BridgeHeartbeatInfo | null;
+  waitMode: BridgeWaitMode;
 }
 
 /** Reader contract widgets consume. Implemented by the EH-tier
