@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Epic Handshake checks for Codex before installing anything.** Enabling the bridge previously would write its MCP server registration into Claude's settings even if you didn't have the Codex CLI installed - the next dispatch would fail and you'd be left with bridge artifacts you didn't need. The enable flow now verifies the `codex` CLI is on your PATH before any install side-effect runs, mirroring the existing `claude` CLI check. If Codex isn't found, the setting flips back off with a friendly toast saying to install Codex and re-enable when ready. Nothing is written until both CLIs are present.
+
 ### Changed
 
 ### Fixed

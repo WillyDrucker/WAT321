@@ -334,3 +334,23 @@ export async function isClaudeAvailable(): Promise<boolean> {
   const res = await runClaudeCli(["--version"]);
   return res.code === 0;
 }
+
+/** Detect whether `codex` CLI is on PATH and reachable. Mirror of
+ * `isClaudeAvailable` - the bridge spawns `codex app-server` as a
+ * child process, so a missing binary breaks every dispatch. We check
+ * before installChannel runs so users without Codex CLI never get
+ * MCP registration / permissions.allow entries / channel.mjs extracted.
+ * Codex CLI is independent from the Codex VS Code extension; users
+ * can have one without the other. The CLI is what matters here. */
+export async function isCodexAvailable(): Promise<boolean> {
+  const useShell = process.platform === "win32";
+  return new Promise((resolve) => {
+    const child = spawn("codex", ["--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      shell: useShell,
+    });
+    child.on("error", () => resolve(false));
+    child.on("exit", (code) => resolve(code === 0));
+  });
+}
