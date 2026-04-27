@@ -164,15 +164,12 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-/** Cache-banner flash window. Three-frame cycle over 2000ms:
- *
- *   0-500    banner
- *   500-1000 normal tokens
- *   1000-2000 banner (held)
- *
- * After 2000ms the widget returns to the normal readout permanently.
- * Widget's 250ms ticker samples the frame selector every render so the
- * alternation lands visibly despite each half-cycle being short. */
+/** Cache-banner flash window. 2000ms total; the LOAD/MISS text
+ * persists the entire window. Bullets blink at a 500ms cadence
+ * between colored emoji (red MISS / yellow LOAD) and white emoji
+ * (off frame). After 2000ms the widget returns to the normal token
+ * readout. Widget's 250ms ticker samples the frame selector every
+ * render so the bullet alternation lands visibly. */
 const CACHE_BANNER_FLASH_MS = 2000;
 /** Cache-rebuild detection. Two paths qualify a turn as a rebuild
  * event the user paid input price for:
@@ -211,9 +208,22 @@ const CACHE_REBUILD_RATIO_DENOM = 2;
  *                 paid the input cost as part of an intentional
  *                 cache-load action.
  *   red    MISS = involuntary mid-session cache eviction (TTL,
- *                 server-side fault); user paid again unexpectedly. */
-const CACHE_LOAD_BANNER = "🟡LOAD🟡";
-const CACHE_MISS_BANNER = "🔴MISS🔴";
+ *                 server-side fault); user paid again unexpectedly.
+ *
+ * Each banner has an "on" form (colored emoji bullets) and an "off"
+ * form (ideographic-space placeholder, U+3000, which is ~1em wide
+ * and matches emoji presentation width). Cell width stays constant
+ * across frames - only the colored circles flash on and off, like
+ * the Claude waiting cycle. The text label persists the whole 2000ms. */
+const CACHE_LOAD_BANNER_ON = "🟡LOAD🟡";
+const CACHE_LOAD_BANNER_OFF = "　LOAD　";
+const CACHE_MISS_BANNER_ON = "🔴MISS🔴";
+const CACHE_MISS_BANNER_OFF = "　MISS　";
+/** 500ms per frame, four frames per banner cycle. Pattern (using
+ * MISS): on (0-500) / off (500-1000) / on (1000-1500) / off (1500-2000).
+ * Width is constant - off state swaps colored circles for white ones,
+ * not for blank space, so cell width never shifts. */
+const CACHE_BANNER_FRAME_MS = 500;
 
 export class SessionTokenWidget<TState extends { status: string }> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
@@ -347,29 +357,32 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     }
   }
 
-  /** Current cache-banner flash state, if any. Three-frame sequence
-   * over 2000ms, identical cadence for LOAD (yellow) and MISS (red):
+  /** Current cache-banner flash state, if any. Four 500ms frames
+   * across 2000ms, alternating colored bullets and white bullets:
    *
-   *   0-500    banner
-   *   500-1000 tokens
-   *   1000-2000 banner (held)
+   *   0-500    on   (colored emoji)
+   *   500-1000 off  (white emoji)
+   *   1000-1500 on  (colored emoji)
+   *   1500-2000 off (white emoji)
    *
-   * After 2000ms the flash window ends. Widget's 250ms ticker samples
-   * this every frame so the alternation lands visibly despite each
-   * half-cycle being short. Returns which banner (if any) the current
-   * frame should show so the render path can swap in the right emoji. */
+   * Text persists for the whole window so the user always sees LOAD
+   * or MISS - only the bullets blink, like the Claude waiting cycle.
+   * Returns the exact banner string to render (or null when no flash
+   * is active). */
   private currentCacheBanner(): string | null {
     const now = Date.now();
     if (this.cacheLoadFlashStartedAt !== null) {
       const elapsed = now - this.cacheLoadFlashStartedAt;
-      if (elapsed < CACHE_BANNER_FLASH_MS && (elapsed < 500 || elapsed >= 1000)) {
-        return CACHE_LOAD_BANNER;
+      if (elapsed < CACHE_BANNER_FLASH_MS) {
+        const onFrame = Math.floor(elapsed / CACHE_BANNER_FRAME_MS) % 2 === 0;
+        return onFrame ? CACHE_LOAD_BANNER_ON : CACHE_LOAD_BANNER_OFF;
       }
     }
     if (this.cacheMissFlashStartedAt !== null) {
       const elapsed = now - this.cacheMissFlashStartedAt;
-      if (elapsed < CACHE_BANNER_FLASH_MS && (elapsed < 500 || elapsed >= 1000)) {
-        return CACHE_MISS_BANNER;
+      if (elapsed < CACHE_BANNER_FLASH_MS) {
+        const onFrame = Math.floor(elapsed / CACHE_BANNER_FRAME_MS) % 2 === 0;
+        return onFrame ? CACHE_MISS_BANNER_ON : CACHE_MISS_BANNER_OFF;
       }
     }
     return null;
@@ -481,6 +494,21 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         return tick === 0 ? "$(blank)" : d.idlePrefix;
       }
       if (snapshot.ceremonyActive) {
+        if (d.provider === "Claude") {
+          // Claude is the side that just composed and dispatched the
+          // bridge tool call - native thinking cycle reads as "still
+          // working" without the debug ceremony's "connecting" flavor
+          // (Claude's MCP connection is established, nothing to
+          // re-handshake). Falls into the same activeFrames it would
+          // use for normal in-session thinking, picked by elapsed
+          // ceremony time so the frame index is deterministic.
+          const elapsed = now - (snapshot.heartbeat?.turnStartedAt ?? now);
+          const index = Math.floor(elapsed / d.activeStepMs) % d.activeFrames.length;
+          return d.activeFrames[index];
+        }
+        // Codex side: debug-disconnect / debug-connected ceremony
+        // covers the window before codex has acknowledged the bridge
+        // turn and started writing its rollout file.
         const elapsed = now - (snapshot.heartbeat?.turnStartedAt ?? now);
         const frame = Math.floor(elapsed / 1000);
         return frame % 2 === 0 ? "$(debug-disconnect)" : "$(debug-connected)";
@@ -494,21 +522,25 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         const tick = Math.floor(now / 1000) % 2;
         return tick === 0 ? "$(blank)" : "$(claude)";
       }
-      // Codex widget, stages 1-2 (dispatched, received): the rollout
-      // file does not exist yet, so the native `turnInProgress` check
+      // Codex widget, stage 1 only (dispatched): the rollout file
+      // does not exist yet, so the native `turnInProgress` check
       // below would leave the widget on its idle prefix. Run the same
       // 1Hz debug-disconnect/connected alternation the ceremony used,
       // so the post-ceremony handoff window reads as motion instead of
       // a static glyph waiting for Codex's first rollout write.
-      if (
-        snapshot.latchedStage === "dispatched" ||
-        snapshot.latchedStage === "received"
-      ) {
+      //
+      // Stage 2 (received) and beyond: Codex has written task_started
+      // to its rollout, the transcript mtime is fresh, and the native
+      // activeFrames cycle takes over below. Holding the debug-disconnect
+      // glyph past stage 2 contradicts the bridge widget's stage walk
+      // (which has confirmed receipt) and reads as "still connecting"
+      // when codex is actually thinking.
+      if (snapshot.latchedStage === "dispatched") {
         const tick = Math.floor(now / 1000) % 2;
         return tick === 0 ? "$(debug-disconnect)" : "$(debug-connected)";
       }
-      // Stage 3+ (working/writing/complete): Codex starts writing
-      // its rollout, transcript mtime updates, `turnInProgress` flips
+      // Stage 2+ (received/working/writing/complete): Codex's rollout
+      // is alive, transcript mtime updates, `turnInProgress` flips
       // true, and the native activeFrames cycle takes over below.
     }
 
@@ -560,8 +592,9 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         const prefix = this.currentPrefix(data);
         const banner = this.currentCacheBanner();
         if (banner !== null) {
-          // LOAD or MISS alternates with tokens across the 2000ms flash
-          // window (see currentCacheBanner for the cadence). Prefix
+          // LOAD or MISS text persists for the full 2000ms flash
+          // window; only the bullet emojis blink between colored and
+          // white at a 500ms cadence (see currentCacheBanner). Prefix
           // stays visible throughout so the brand icon and thinking
           // indicator ride through the flash - only the tokens/percent
           // portion gets replaced. Tooltip keeps showing real data so

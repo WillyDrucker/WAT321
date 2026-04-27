@@ -16,7 +16,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
   idlePrefix: "$(claude)",
   activeFrames: ["$(comment)", "$(comment-discussion-quote)"],
   activeStepMs: 1000,
-  activeThresholdMs: 5_000,
+  activeThresholdMs: 3_000,
   getRenderData: (state) => {
     const { session } = state;
     // Bars, percent, and the "N/M" numerator all use the effective
