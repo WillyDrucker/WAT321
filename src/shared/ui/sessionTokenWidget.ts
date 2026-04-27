@@ -514,13 +514,18 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         return frame % 2 === 0 ? "$(debug-disconnect)" : "$(debug-connected)";
       }
       if (d.provider === "Claude") {
-        // Whether Claude's MCP call is blocking on the reply
-        // (Standard/Adaptive) or already returned with the dispatched
-        // ack and the bridge is still running independently (Fire-and-
-        // Forget), keep the Claude widget visually engaged with a 1Hz
-        // logo blink for the duration of the bridge turn.
-        const tick = Math.floor(now / 1000) % 2;
-        return tick === 0 ? "$(blank)" : "$(claude)";
+        // Adaptive (and legacy Standard) blocks Claude's MCP call on
+        // the bridge reply, so the Claude widget renders a 1Hz logo
+        // blink to mark "Claude is waiting on Codex". Fire-and-Forget
+        // returned the MCP call immediately - Claude is free to keep
+        // working - so the waiting cycle would misrepresent state.
+        // Under Fire-and-Forget, fall through to the normal
+        // turnInProgress + activeFrames path below so the widget
+        // reflects whether Claude is actually thinking right now.
+        if (snapshot.waitMode !== "fire-and-forget") {
+          const tick = Math.floor(now / 1000) % 2;
+          return tick === 0 ? "$(blank)" : "$(claude)";
+        }
       }
       // Codex widget, stage 1 only (dispatched): the rollout file
       // does not exist yet, so the native `turnInProgress` check

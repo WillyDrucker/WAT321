@@ -22,7 +22,18 @@ import {
   type ActionContext,
   type DispatchAction,
 } from "./menuCommon";
-import { isPaused, setPaused } from "./statusBarState";
+import { currentWorkspacePath, isPaused, setPaused } from "./statusBarState";
+import { workspaceHash } from "./workspaceHash";
+
+/** Resolve the current workspace's hash for flag-file partitioning. The
+ * three Codex override flags are workspace-scoped so two VS Code windows
+ * on different projects don't share sandbox/model/effort settings. When
+ * no workspace is open we fall back to a sentinel hash that still
+ * partitions the flag away from any real workspace. */
+function currentWsHash(): string {
+  const ws = currentWorkspacePath();
+  return workspaceHash(ws ?? "no-workspace");
+}
 
 /**
  * Combined "Codex Session Settings" picker - one entry point for all
@@ -81,9 +92,10 @@ export function codexDefaultsHeadline(): string {
  * values. Lets the user verify what the bridge will send without
  * opening the picker. */
 export function codexDefaultsSubline(): string {
-  const sandbox = readCodexSandboxOverride();
-  const model = readCodexModelOverride();
-  const effort = readCodexEffortOverride();
+  const wsHash = currentWsHash();
+  const sandbox = readCodexSandboxOverride(wsHash);
+  const model = readCodexModelOverride(wsHash);
+  const effort = readCodexEffortOverride(wsHash);
   // Each segment uses its native casing: sandbox words like
   // "Read-Only" / "Full-Access", model display name preserves its
   // own capitalization (GPT-5.5), effort starts capital (Medium).
@@ -112,10 +124,11 @@ export async function showCodexDefaultsPicker(
   // without re-clicking the bridge widget. Loop exits on BACK or
   // QuickPick dismiss. Sandbox is an inline toggle so it never opens
   // a sub-picker - the loop just re-renders with the new state.
+  const wsHash = currentWsHash();
   while (true) {
-    const sandbox = readCodexSandboxOverride();
-    const model = readCodexModelOverride();
-    const effort = readCodexEffortOverride();
+    const sandbox = readCodexSandboxOverride(wsHash);
+    const model = readCodexModelOverride(wsHash);
+    const effort = readCodexEffortOverride(wsHash);
 
     const sandboxLabel = sandbox === "full-access" ? "FULL-ACCESS" : "READ-ONLY";
     const sandboxNext = sandbox === "full-access" ? "READ-ONLY" : "FULL-ACCESS";
@@ -166,17 +179,17 @@ export async function showCodexDefaultsPicker(
     if (pick.row === "sandbox") {
       // Direct toggle - no sub-picker needed. Loop re-renders with
       // the new state on the next iteration.
-      writeCodexSandboxOverride(sandbox === "full-access" ? "read-only" : "full-access");
+      writeCodexSandboxOverride(wsHash, sandbox === "full-access" ? "read-only" : "full-access");
       continue;
     }
     if (pick.row === "model") {
       const result = await pickModel(model);
-      if (result.kind === "picked") writeCodexModelOverride(result.value);
+      if (result.kind === "picked") writeCodexModelOverride(wsHash, result.value);
       continue;
     }
     if (pick.row === "effort") {
       const result = await pickEffort(effort, model);
-      if (result.kind === "picked") writeCodexEffortOverride(result.value);
+      if (result.kind === "picked") writeCodexEffortOverride(wsHash, result.value);
       continue;
     }
     if (pick.row === "pause") {
@@ -413,7 +426,7 @@ function baselineModel(): string | null {
 /** The "default" effort is the model's own default effort from the
  * cache. Falls back to `"medium"` when no model context applies. */
 function baselineEffort(): CodexEffortLevel | null {
-  const model = readCodexModelOverride() ?? baselineModel();
+  const model = readCodexModelOverride(currentWsHash()) ?? baselineModel();
   if (model === null) return "medium";
   const info = getCodexModelInfo(model);
   const cand = info?.defaultEffort;
@@ -424,9 +437,10 @@ function baselineEffort(): CodexEffortLevel | null {
 }
 
 function everythingAtDefault(): boolean {
-  const sandbox = readCodexSandboxOverride();
-  const modelOverride = readCodexModelOverride();
-  const effortOverride = readCodexEffortOverride();
+  const wsHash = currentWsHash();
+  const sandbox = readCodexSandboxOverride(wsHash);
+  const modelOverride = readCodexModelOverride(wsHash);
+  const effortOverride = readCodexEffortOverride(wsHash);
   if (!sandboxIsDefault(sandbox)) return false;
   // No override means "use the baseline" - that counts as default.
   if (modelOverride !== null && modelOverride !== baselineModel()) return false;

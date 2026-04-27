@@ -1,18 +1,24 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import {
-  CODEX_EFFORT_FLAG_PATH,
-  CODEX_FULL_ACCESS_FLAG_PATH,
-  CODEX_MODEL_FLAG_PATH,
+  codexEffortFlagPath,
+  codexModelFlagPath,
+  codexSandboxFlagPath,
 } from "./constants";
 
 /**
  * Read/write helpers for the three runtime override flags that
  * `turnRunner` passes through on every `turn/start`:
  *
- *   - sandbox        (CODEX_FULL_ACCESS_FLAG_PATH, presence-only)
- *   - model          (CODEX_MODEL_FLAG_PATH, body = slug)
- *   - effort         (CODEX_EFFORT_FLAG_PATH, body = level)
+ *   - sandbox        (codex-sandbox.<wsHash>.flag, presence-only)
+ *   - model          (codex-model.<wsHash>.flag, body = slug)
+ *   - effort         (codex-effort.<wsHash>.flag, body = level)
+ *
+ * All three are workspace-scoped: each VS Code workspace carries its
+ * own preferences so two windows on the same machine (test instance
+ * + main dev, project A + project B) do not bleed settings into each
+ * other. The wsHash partitioning mirrors the existing in-flight /
+ * processing / paused flags.
  *
  * Per-turn override is the entire mechanism. `thread/start` passes
  * permissive defaults so the thread itself never restricts; the
@@ -21,10 +27,10 @@ import {
  * per-turn (verified via probe: turn_context records the override AND
  * the tool router rejects out-of-policy operations).
  *
- * Settings drive the default flag-file state on tier activate. The
- * Codex Defaults menu picker writes flags directly (overrides until
- * next reload). All flags are best-effort I/O - missed reads/writes
- * fall back to "no override" which is safe (Codex thread default).
+ * No persistent settings back these. The Codex Session Settings menu
+ * picker writes flags directly. All flags are best-effort I/O - missed
+ * reads/writes fall back to "no override" which is safe (Codex thread
+ * default).
  */
 
 // -----------------------------------------------------------------
@@ -33,19 +39,20 @@ import {
 
 export type CodexSandboxState = "full-access" | "read-only";
 
-export function readCodexSandboxOverride(): CodexSandboxState {
-  return existsSync(CODEX_FULL_ACCESS_FLAG_PATH) ? "full-access" : "read-only";
+export function readCodexSandboxOverride(wsHash: string): CodexSandboxState {
+  return existsSync(codexSandboxFlagPath(wsHash)) ? "full-access" : "read-only";
 }
 
-export function writeCodexSandboxOverride(state: CodexSandboxState): void {
+export function writeCodexSandboxOverride(
+  wsHash: string,
+  state: CodexSandboxState
+): void {
+  const path = codexSandboxFlagPath(wsHash);
   try {
     if (state === "full-access") {
-      writeFileAtomic(
-        CODEX_FULL_ACCESS_FLAG_PATH,
-        new Date().toISOString()
-      );
-    } else if (existsSync(CODEX_FULL_ACCESS_FLAG_PATH)) {
-      unlinkSync(CODEX_FULL_ACCESS_FLAG_PATH);
+      writeFileAtomic(path, new Date().toISOString());
+    } else if (existsSync(path)) {
+      unlinkSync(path);
     }
   } catch {
     // best-effort
@@ -58,22 +65,27 @@ export function writeCodexSandboxOverride(state: CodexSandboxState): void {
 
 /** Read the active model override slug, or null when no override is
  * set (Codex uses the thread / config.toml default in that case). */
-export function readCodexModelOverride(): string | null {
-  if (!existsSync(CODEX_MODEL_FLAG_PATH)) return null;
+export function readCodexModelOverride(wsHash: string): string | null {
+  const path = codexModelFlagPath(wsHash);
+  if (!existsSync(path)) return null;
   try {
-    const raw = readFileSync(CODEX_MODEL_FLAG_PATH, "utf8").trim();
+    const raw = readFileSync(path, "utf8").trim();
     return raw.length > 0 ? raw : null;
   } catch {
     return null;
   }
 }
 
-export function writeCodexModelOverride(slug: string | null): void {
+export function writeCodexModelOverride(
+  wsHash: string,
+  slug: string | null
+): void {
+  const path = codexModelFlagPath(wsHash);
   try {
     if (slug === null || slug.length === 0) {
-      if (existsSync(CODEX_MODEL_FLAG_PATH)) unlinkSync(CODEX_MODEL_FLAG_PATH);
+      if (existsSync(path)) unlinkSync(path);
     } else {
-      writeFileAtomic(CODEX_MODEL_FLAG_PATH, slug);
+      writeFileAtomic(path, slug);
     }
   } catch {
     // best-effort
@@ -96,24 +108,31 @@ const VALID_EFFORTS: ReadonlySet<string> = new Set<string>([
 /** Read the active effort override, or null when unset. Validates
  * against the known enum so a stale flag with garbage content does
  * not flow through to `turn/start`. */
-export function readCodexEffortOverride(): CodexEffortLevel | null {
-  if (!existsSync(CODEX_EFFORT_FLAG_PATH)) return null;
+export function readCodexEffortOverride(
+  wsHash: string
+): CodexEffortLevel | null {
+  const path = codexEffortFlagPath(wsHash);
+  if (!existsSync(path)) return null;
   try {
-    const raw = readFileSync(CODEX_EFFORT_FLAG_PATH, "utf8").trim();
+    const raw = readFileSync(path, "utf8").trim();
     return VALID_EFFORTS.has(raw) ? (raw as CodexEffortLevel) : null;
   } catch {
     return null;
   }
 }
 
-export function writeCodexEffortOverride(level: CodexEffortLevel | null): void {
+export function writeCodexEffortOverride(
+  wsHash: string,
+  level: CodexEffortLevel | null
+): void {
+  const path = codexEffortFlagPath(wsHash);
   try {
     if (level === null) {
-      if (existsSync(CODEX_EFFORT_FLAG_PATH)) {
-        unlinkSync(CODEX_EFFORT_FLAG_PATH);
+      if (existsSync(path)) {
+        unlinkSync(path);
       }
     } else {
-      writeFileAtomic(CODEX_EFFORT_FLAG_PATH, level);
+      writeFileAtomic(path, level);
     }
   } catch {
     // best-effort

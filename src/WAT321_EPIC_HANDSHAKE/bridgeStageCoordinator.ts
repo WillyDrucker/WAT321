@@ -15,6 +15,7 @@ import {
   readNewestHeartbeat,
   type TurnHeartbeat,
 } from "./turnHeartbeat";
+import { currentWaitMode } from "./waitMode";
 import { workspaceHash } from "./workspaceHash";
 
 /**
@@ -233,6 +234,7 @@ const IDLE_SNAPSHOT: BridgeStageSnapshot = {
   returning: false,
   paused: false,
   heartbeat: null,
+  waitMode: "adaptive",
 };
 
 export class BridgeStageCoordinator
@@ -413,6 +415,7 @@ export class BridgeStageCoordinator
     const returning = existsSync(returningFlagPath(wsHash));
     const rawHeartbeat = readNewestHeartbeat(wsHash);
     const busy = isBridgeBusy(workspacePath);
+    const waitMode = currentWaitMode();
     const now = Date.now();
 
     // Walker-owned phase. An active latch has its own life cycle
@@ -487,6 +490,7 @@ export class BridgeStageCoordinator
             returning,
             paused: false,
             heartbeat: rawHeartbeat,
+            waitMode,
           };
         }
         // applyLatch returned null - walker fully done, latch already
@@ -512,6 +516,7 @@ export class BridgeStageCoordinator
           returning,
           paused: false,
           heartbeat: rawHeartbeat,
+          waitMode,
         };
       }
     }
@@ -528,6 +533,7 @@ export class BridgeStageCoordinator
         returning,
         paused: false,
         heartbeat: null,
+        waitMode,
       };
     }
 
@@ -537,6 +543,7 @@ export class BridgeStageCoordinator
       workspacePath,
       returning,
       heartbeat: rawHeartbeat,
+      waitMode,
     };
   }
 

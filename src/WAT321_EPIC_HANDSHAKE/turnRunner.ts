@@ -377,7 +377,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
     // `never`; the bridge has no UI to relay Codex's approval prompts
     // back mid-turn.
     const sandboxPolicy =
-      readCodexSandboxOverride() === "full-access"
+      readCodexSandboxOverride(wsHash) === "full-access"
         ? ({ type: "dangerFullAccess" } as const)
         : ({ type: "readOnly" } as const);
     const turnStartParams: TurnStartParams = {
@@ -385,8 +385,8 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       input: [{ type: "text", text: env.body }],
       sandboxPolicy,
       approvalPolicy: "never",
-      model: readCodexModelOverride(),
-      effort: readCodexEffortOverride(),
+      model: readCodexModelOverride(wsHash),
+      effort: readCodexEffortOverride(wsHash),
     };
     client
       .sendRequest("turn/start", turnStartParams)

@@ -13,6 +13,7 @@ import {
   extractChannelScript,
   installChannel,
   isClaudeAvailable,
+  isCodexAvailable,
   uninstallChannel,
 } from "./channelInstaller";
 import { CodexDispatcher } from "./codexDispatcher";
@@ -380,10 +381,19 @@ class EpicHandshakeTier {
       },
       async (progress) => {
         progress.report({ message: "checking Claude Code install..." });
-        const available = await isClaudeAvailable();
-        if (!available) {
+        const claudeAvailable = await isClaudeAvailable();
+        if (!claudeAvailable) {
           await this.unflipAndWarn(
             "Epic Handshake needs the Claude Code CLI on your PATH. Install Claude Code (claude.ai/code) and re-enable when ready."
+          );
+          return;
+        }
+
+        progress.report({ message: "checking Codex install..." });
+        const codexAvailable = await isCodexAvailable();
+        if (!codexAvailable) {
+          await this.unflipAndWarn(
+            "Epic Handshake needs the Codex CLI on your PATH. Install Codex and re-enable when ready."
           );
           return;
         }

@@ -5,6 +5,22 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2026-04-26
+
+### Added
+
+- **Epic Handshake checks for Codex before installing anything.** Enabling the bridge previously would write its MCP server registration into Claude's settings even if you didn't have the Codex CLI installed - the next dispatch would fail and you'd be left with bridge artifacts you didn't need. The enable flow now verifies the `codex` CLI is on your PATH before any install side-effect runs, mirroring the existing `claude` CLI check. If Codex isn't found, the setting flips back off with a friendly toast saying to install Codex and re-enable when ready. Nothing is written until both CLIs are present.
+
+### Changed
+
+- **The Claude session token widget no longer pretends to be waiting under Fire-and-Forget.** Fire-and-Forget returns Claude's MCP call immediately so Claude is free to keep working while Codex runs in the background. The Claude waiting cycle (1Hz logo blink) now only renders under Adaptive mode where Claude's MCP call is genuinely blocked on the bridge reply. Under Fire-and-Forget, the Claude widget falls through to its normal activity detection - idle when the transcript is silent, thinking icons when Claude is actually doing something.
+
+- **Codex Session Settings are now per-workspace instead of shared across every VS Code window.** Sandbox, model, and effort overrides previously lived in a single set of files at the root of `~/.wat321/epic-handshake/`, so flipping sandbox to FULL-ACCESS in one project silently flipped it in every other workspace too. Each VS Code window now writes its own workspace-scoped flag files alongside the bridge's existing per-workspace state, so two windows on different projects carry independent settings. Reset WAT321 still wipes them all in one shot.
+
+### Fixed
+
+### Removed
+
 ## [1.2.6] - 2026-04-26
 
 ### Added
