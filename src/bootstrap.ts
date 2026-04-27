@@ -66,9 +66,14 @@ function watchProviderAvailability(
 }
 
 /** Claude turn-completion classifier. Only `assistant-done` fires a
- * notification - `unknown` (system / summary / compact markers) and
- * `assistant-pending` (tool_use in flight) are suppressed so mid-turn
- * writes and post-response bookkeeping do not duplicate notifications. */
+ * notification. The classifier deliberately distinguishes:
+ *   - `assistant-pending` (tool_use in flight) - mid-turn, suppress
+ *   - `compact-end` (auto-compact summary marker) - engine rotated
+ *     context behind the scenes; the user's task isn't done, suppress
+ *   - `interrupted` (user hit Esc / Ctrl+C) - user aborted, suppress
+ *   - `unknown` (system / summary / unparseable) - suppress
+ * so mid-turn writes, compaction events, and aborts do not all
+ * masquerade as the same "Claude finished" notification. */
 function isClaudeTurnComplete(tail: string): boolean {
   return classifyLastEntry(tail) === "assistant-done";
 }

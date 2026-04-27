@@ -102,7 +102,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
         };
 
   const sessionsItem: Item = {
-    label: `SESSIONS (S${sessionCounter})`,
+    label: `MANAGE CODEX SESSIONS (S${sessionCounter})`,
     description: "Reset, delete, recover, or change defaults.",
     iconPath: new vscode.ThemeIcon("wat321-square-info"),
     action: "manage-sessions",
