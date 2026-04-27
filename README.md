@@ -25,7 +25,7 @@ WAT321 ships with **six read-only widgets** - three for Claude, three for Codex 
 
 ### Claude Usage
 
-Live progress bars showing your 5-hour session utilization and weekly limits. Simple hover for information breakdown.
+Live progress bars showing your 5-hour session utilization and weekly limits.
 
 <p>
 <img src="images/screenshots/CLAUDE_USAGE_TOOLTIP_HOVER.png" alt="Claude usage tooltip" width="190"><br>
@@ -66,7 +66,7 @@ Get notified when Claude or Codex finishes a response. Works on Windows, Linux, 
 
 <img src="images/screenshots/EPIC_HANDSHAKE_STATUS_BAR.png" alt="Epic Handshake status bar" width="140">
 
-Lets you say things like *"Ask Codex to review this..."* using natural language in any Claude session and have Codex actually answer! Think of it like a subagent on performance-enhancing code. Both the Claude and Codex widgets must be enabled. *Very useful for offloading token load.*
+Lets you say things like *"Ask Codex to review this..."* using natural language in any Claude session and have Codex actually answer! Think of it like a subagent on performance-enhancing code. Both the Claude and Codex widgets must be enabled. *Handy for offloading token usage.*
 
 ---
 
