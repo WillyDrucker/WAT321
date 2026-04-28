@@ -11,7 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Cold-launching VS Code no longer pre-spawns the Codex bridge daemon.** The Epic Handshake bridge used to spawn Codex's app-server child process 500 milliseconds after VS Code activated, purely as a UX shortcut to eliminate the ~20 second cold-start the first time you fired a bridge prompt. The spawn was structurally inert (no Codex API call, just a JSON-RPC handshake with the local daemon), but reducing the audit surface matters more than saving 20 seconds once. The first bridge dispatch after a fresh launch now pays the cold-start, which the bridge widget's stage-1 ceremony already covers visually. Restart Codex Bridge from the menu still leaves the bridge warm afterward because that's a deliberate user action.
+
 ### Fixed
+
+- **The Claude session token LOAD banner no longer fires against incremental cache writes.** Even after the 1.2.10 fix, the first new assistant turn after attaching to an existing Claude session would fire the yellow LOAD banner whenever cache-creation tokens crossed the 5000 floor - which happens routinely during normal turn work, not just on real rebuilds. The widget now arms its "deliberate rebuild incoming" latch only when one is genuinely incoming: a brand-new Claude session whose first turn IS the first cache build, or a fresh compact event observed live. Existing-session attaches leave the latch off, so the banner stays quiet until something real happens. To be doubly clear: the LOAD banner is purely a display read on transcript files Claude itself wrote; it never triggered any API activity, just made it look like the widget might have. That misleading display is gone.
 
 ### Removed
 
