@@ -15,6 +15,7 @@ import {
   readNewestHeartbeat,
   type TurnHeartbeat,
 } from "./turnHeartbeat";
+import { readCodexEffortOverride } from "./codexRuntimeOverrides";
 import { currentWaitMode } from "./waitMode";
 import { workspaceHash } from "./workspaceHash";
 
@@ -235,6 +236,7 @@ const IDLE_SNAPSHOT: BridgeStageSnapshot = {
   paused: false,
   heartbeat: null,
   waitMode: "adaptive",
+  codexEffort: null,
 };
 
 export class BridgeStageCoordinator
@@ -384,6 +386,26 @@ export class BridgeStageCoordinator
     return this.lastSnapshot;
   }
 
+  /** Push notification on phase or stage transition. Bridges the gap
+   * for consumers (session-token widgets) that gate their own ticker
+   * on bridge state but don't poll fast enough to catch the very first
+   * dispatch after a cold launch. Wraps the existing
+   * `bridge.phaseChanged` + `bridge.stageChanged` event emissions on
+   * EventHub - one fire per transition is enough for the consumer to
+   * re-render and re-evaluate its animation state, regardless of which
+   * field changed. Returns a disposer. */
+  onChange(handler: () => void): { dispose(): void } {
+    const subs = [
+      this.events.on("bridge.phaseChanged", () => handler()),
+      this.events.on("bridge.stageChanged", () => handler()),
+    ];
+    return {
+      dispose: () => {
+        for (const s of subs) s.dispose();
+      },
+    };
+  }
+
   dispose(): void {
     this.suspendTimer();
     this.detachWatcher();
@@ -416,6 +438,7 @@ export class BridgeStageCoordinator
     const rawHeartbeat = readNewestHeartbeat(wsHash);
     const busy = isBridgeBusy(workspacePath);
     const waitMode = currentWaitMode();
+    const codexEffort = readCodexEffortOverride(wsHash);
     const now = Date.now();
 
     // Walker-owned phase. An active latch has its own life cycle
@@ -491,6 +514,7 @@ export class BridgeStageCoordinator
             paused: false,
             heartbeat: rawHeartbeat,
             waitMode,
+            codexEffort,
           };
         }
         // applyLatch returned null - walker fully done, latch already
@@ -517,6 +541,7 @@ export class BridgeStageCoordinator
           paused: false,
           heartbeat: rawHeartbeat,
           waitMode,
+          codexEffort,
         };
       }
     }
@@ -534,6 +559,7 @@ export class BridgeStageCoordinator
         paused: false,
         heartbeat: null,
         waitMode,
+        codexEffort,
       };
     }
 
@@ -544,6 +570,7 @@ export class BridgeStageCoordinator
       returning,
       heartbeat: rawHeartbeat,
       waitMode,
+      codexEffort,
     };
   }
 

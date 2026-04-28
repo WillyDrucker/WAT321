@@ -14,9 +14,7 @@ export type BridgePhase =
   | "idle"
   | "pre-ceremony"
   | "ceremony"
-  | "stage"
-  | "returning"
-  | "delivered";
+  | "stage";
 
 export type BridgeStage =
   | "dispatched"
@@ -42,6 +40,13 @@ export interface BridgeHeartbeatInfo {
  * EH tier to read it. */
 export type BridgeWaitMode = "standard" | "adaptive" | "fire-and-forget";
 
+/** Codex per-turn effort override (workspace-scoped). Null means
+ * "no override set" - Codex falls back to the model's
+ * `default_reasoning_level`. Surfaced through the snapshot so the
+ * Codex session-tokens tooltip can render the effective effort
+ * without importing from the EH tier. */
+export type CodexEffortOverride = "low" | "medium" | "high" | "xhigh" | null;
+
 export interface BridgeStageSnapshot {
   workspacePath: string | null;
   phase: BridgePhase;
@@ -52,6 +57,7 @@ export interface BridgeStageSnapshot {
   paused: boolean;
   heartbeat: BridgeHeartbeatInfo | null;
   waitMode: BridgeWaitMode;
+  codexEffort: CodexEffortOverride;
 }
 
 /** Reader contract widgets consume. Implemented by the EH-tier
@@ -60,4 +66,12 @@ export interface BridgeStageSnapshot {
  * does not import from a tool tier. */
 export interface BridgeStageReader {
   snapshot(): BridgeStageSnapshot;
+  /** Subscribe to phase + stage transitions. Widgets that gate their
+   * own animation ticker on bridge state need this push signal because
+   * they only re-evaluate `animationsActive()` inside their `update()`
+   * path, which fires on the underlying service's poll cadence (15s).
+   * Without a push, the very first bridge dispatch after a cold launch
+   * lands between service polls and the widget never starts ticking
+   * for the ceremony / stage walk. Returns a disposer. */
+  onChange(handler: () => void): { dispose(): void };
 }
