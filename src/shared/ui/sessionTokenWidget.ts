@@ -257,12 +257,20 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    * we've already classified. Adopted (not fired) on session change so
    * historical compacts visible in the tail don't fire spurious LOADs. */
   private lastSeenCompactTimestamp: number | null = null;
-  /** True until the next qualifying cache-rebuild event fires the
-   * yellow LOAD banner. Set true on widget mount, on session change,
-   * and on detection of a new compact summary. The next qualifying
-   * rebuild flips it back to false; subsequent rebuilds in the same
-   * "epoch" fire red MISS instead. */
-  private awaitingFirstLoad = true;
+  /** True only when a deliberate rebuild is expected on the next
+   * qualifying turn. Two events arm it:
+   *   - Brand-new session attach (no usage in tail) - the first
+   *     assistant turn IS the first cache build, fires LOAD.
+   *   - `newCompactObserved` mid-session - the trailing turn after
+   *     a compact event fires LOAD.
+   *
+   * Default false. Attaching to an existing session whose history
+   * already contains usage means the first cache build happened in
+   * a prior epoch we did not observe; LOAD must not fire on it.
+   * The next qualifying rebuild flips this back to false; subsequent
+   * rebuilds in the same epoch fire red MISS via the strict ratio
+   * gate (cacheCreation >= cachedInput * 2). */
+  private awaitingFirstLoad = false;
   /** Push subscription to bridge phase + stage transitions. Without
    * this, the very first bridge dispatch after a cold launch lands
    * between service polls and the widget's ticker never starts -
@@ -300,17 +308,18 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    *      `cacheCreation >= CACHE_REBUILD_CREATION_MIN`
    *      AND `cacheCreation >= cachedInput * CACHE_REBUILD_RATIO_DENOM`.
    *      Catches mid-session full rebuilds (TTL expiry, server-side
-   *      eviction) without firing on user-pasted big content where
-   *      reads stay large.
+   *      eviction) without firing on normal incremental caching where
+   *      reads dominate.
    *   2. Compact-driven rule (deliberate rebuild).
-   *      A new `isCompactSummary` user entry has been observed since
-   *      last poll, which sets `awaitingFirstLoad`. The trailing
-   *      rebuild qualifies on creation alone (`>= CREATION_MIN`) since
-   *      we already know a compact happened.
+   *      `awaitingFirstLoad` AND `cacheCreation >= CREATION_MIN`.
+   *      `awaitingFirstLoad` is armed only by an event that proves a
+   *      deliberate rebuild is incoming: brand-new session attach (no
+   *      usage in tail) or a fresh compact event observed live.
    *
    *   Banner choice:
    *     awaitingFirstLoad = true  -> yellow LOAD (deliberate event)
-   *     awaitingFirstLoad = false -> red MISS (involuntary event)
+   *     awaitingFirstLoad = false -> red MISS via strict ratio gate
+   *                                  only (involuntary event)
    *
    * Codex path (no token-level cache breakdown in rollouts):
    *   Marker-only. A new `compacted` / `context_compacted` rollout
@@ -318,36 +327,58 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    *   detection - Codex doesn't surface eviction signals. */
   private maybeLatchCacheBanner(data: SessionTokenRenderData): void {
     if (data.sessionId !== this.lastSeenSessionId) {
+      // Session attach: adopt watermarks without firing on history
+      // we never observed live. Three watermarks pinned here:
+      //   - lastSeenSessionId tracks the current attachment target
+      //   - lastSeenCompactTimestamp pins the compact watermark; future
+      //     compacts must exceed it to count as "new"
+      //   - lastUsageSignature pins the usage watermark to the existing
+      //     tail's most recent assistant turn so the next poll sees no
+      //     change and short-circuits before the gate
+      //
+      // awaitingFirstLoad gets armed only when a deliberate rebuild is
+      // genuinely incoming. Two cases qualify:
+      //   - Brand-new session with no prior usage in tail. The next
+      //     assistant turn IS the first cache build, fire LOAD on it.
+      //   - (Handled below) `newCompactObserved` while attached to an
+      //     existing session - a compact lands and the trailing turn
+      //     fires LOAD.
+      // Attaching to an existing session whose history already has
+      // usage does NOT arm the latch; the historical first cache
+      // build belongs to an epoch we did not observe live.
       this.lastSeenSessionId = data.sessionId;
-      this.awaitingFirstLoad = true;
-      // Adopt the new session's compact watermark without firing.
-      // Historical compacts visible in the tail belong to a prior
-      // epoch we never observed live; the next compact AFTER this
-      // adoption is the one we react to.
       this.lastSeenCompactTimestamp = data.lastCompactTimestamp;
-      // Adopt the current usage signature too. On Claude, the tail's
-      // most recent assistant turn typically carries the cache_creation
-      // tokens from a real rebuild that already happened in a prior
-      // epoch we did not observe live. Resetting the signature to null
-      // would treat that historical turn as a fresh signal on the next
-      // poll and fire a false LOAD against a session attach (cold
-      // launch, session switch via menu, cwd-based re-pick) that we
-      // did not cause. Adopting the signature here means LOAD only
-      // fires on a NEW assistant turn whose usage we have not seen.
+
       const info = data.claudeTurnInfo;
-      this.lastUsageSignature = info
-        ? `${info.outputTokens}:${info.totalInputTokens}:${info.cachedInputTokens}:${info.cacheCreationTokens}`
-        : null;
+      const hasExistingUsage =
+        info !== undefined &&
+        (info.totalInputTokens > 0 ||
+          info.cacheCreationTokens > 0 ||
+          info.cachedInputTokens > 0);
+
+      if (info !== undefined && hasExistingUsage) {
+        this.lastUsageSignature = `${info.outputTokens}:${info.totalInputTokens}:${info.cachedInputTokens}:${info.cacheCreationTokens}`;
+        this.awaitingFirstLoad = false;
+      } else {
+        this.lastUsageSignature = null;
+        // Brand-new Claude session arms the latch so its first turn
+        // fires LOAD as the genuine first cache build. Codex (info
+        // undefined) leaves the latch off; the Codex path uses
+        // newCompactObserved exclusively as its LOAD trigger.
+        this.awaitingFirstLoad = info !== undefined;
+      }
     }
 
     // Provider-agnostic compact detection. A newer compact timestamp
     // than what we adopted on session attach means a fresh compact
-    // happened in this session epoch.
+    // happened in this session epoch. Allow null watermark to permit
+    // a session that had no compacts at attach time to still detect
+    // its first-ever compact.
     const compactTs = data.lastCompactTimestamp;
     const newCompactObserved =
       compactTs !== null &&
-      this.lastSeenCompactTimestamp !== null &&
-      compactTs > this.lastSeenCompactTimestamp;
+      (this.lastSeenCompactTimestamp === null ||
+        compactTs > this.lastSeenCompactTimestamp);
 
     if (newCompactObserved) {
       this.lastSeenCompactTimestamp = compactTs;
