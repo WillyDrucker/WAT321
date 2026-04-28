@@ -46,11 +46,8 @@ export const BIN_DIR = join(EPIC_HANDSHAKE_DIR, "bin");
 
 /** Per-workspace turn flag path helpers. Each flag is partitioned by
  * workspace hash so one workspace's in-flight turn does not light up
- * the Epic Handshake status bar in a sibling VS Code instance. The
- * older shared `<name>.flag` files were the bleed source caught
- * during isolated-instance testing: primary and test windows both
- * read the same file, both rendered "busy" regardless of which
- * workspace's dispatcher actually owned the turn.
+ * the Epic Handshake status bar in a sibling VS Code instance on the
+ * same machine.
  *
  * Kept user-scope on purpose:
  *   - `paused.flag` - pausing the bridge applies to all workspaces.
