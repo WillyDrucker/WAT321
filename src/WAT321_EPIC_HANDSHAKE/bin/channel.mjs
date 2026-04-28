@@ -136,7 +136,6 @@ const mcp = new Server(
   { name: "wat321", version: "1.0.0" },
   {
     capabilities: {
-      experimental: { "claude/channel": {} }, // dormant; forward-compat
       // listChanged: we push tools/list_changed whenever the pause
       // flag flips. Clients that honor it refetch and see either the
       // full tools (unpaused) or an empty list (paused), zeroing the

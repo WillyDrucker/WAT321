@@ -5,6 +5,26 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.11] - 2026-04-28
+
+### Added
+
+### Changed
+
+- **Cold-launching VS Code no longer pre-spawns the Codex bridge daemon.** The Epic Handshake bridge used to spawn Codex's app-server child process 500 milliseconds after VS Code activated, purely as a UX shortcut to eliminate the ~20 second cold-start the first time you fired a bridge prompt. The spawn was structurally inert (no Codex API call, just a JSON-RPC handshake with the local daemon), but reducing the audit surface matters more than saving 20 seconds once. The first bridge dispatch after a fresh launch now pays the cold-start, which the bridge widget's stage-1 ceremony already covers visually. Restart Codex Bridge from the menu still leaves the bridge warm afterward because that's a deliberate user action.
+
+- **The bridge waits longer for Codex to flush a late reply before giving up.** When a Codex turn hit its internal timeout, the bridge interrupted Codex and gave it three seconds to write its final reply to disk before falling back to a synthetic error message. Three seconds wasn't enough headroom for long replies that Codex was still streaming when the interrupt landed, and you'd get the error reply when Codex actually had a real reply one or two seconds later. The bridge now polls for the late reply for up to thirty seconds at one-second intervals, so a real Codex finish that lands shortly after interrupt comes through correctly instead of being replaced by the timeout text.
+
+- **The bridge MCP script is now installed atomically.** When you upgrade WAT321, the bundled bridge script gets refreshed in `~/.wat321/epic-handshake/bin/`. The previous install copied the script directly over the old one, leaving a brief window where Claude Code spawning the script mid-copy could read torn bytes and fail to parse. The new install writes to a temp file then renames, so Claude Code always sees either the prior script or the fully-written new one - never a partial.
+
+### Fixed
+
+- **The Claude session token LOAD banner no longer fires against incremental cache writes.** Even after the 1.2.10 fix, the first new assistant turn after attaching to an existing Claude session would fire the yellow LOAD banner whenever cache-creation tokens crossed the 5000 floor - which happens routinely during normal turn work, not just on real rebuilds. The widget now arms its "deliberate rebuild incoming" latch only when one is genuinely incoming: a brand-new Claude session whose first turn IS the first cache build, or a fresh compact event observed live. Existing-session attaches leave the latch off, so the banner stays quiet until something real happens. To be doubly clear: the LOAD banner is purely a display read on transcript files Claude itself wrote; it never triggered any API activity, just made it look like the widget might have. That misleading display is gone.
+
+### Removed
+
+- **Dropped a dormant capability declaration in the bridge MCP server.** The script declared a forward-compatibility experimental capability that no client has ever consumed. Carrying speculative surface "just in case" violates our anti-spec rule; if a real consumer ever ships, the capability comes back at the same time, not before.
+
 ## [1.2.10] - 2026-04-27
 
 ### Added

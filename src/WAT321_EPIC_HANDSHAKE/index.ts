@@ -470,17 +470,18 @@ class EpicHandshakeTier {
     if (this.dispatcher !== null) return;
     this.dispatcher = new CodexDispatcher(ws, this.logger);
     this.dispatcher.start();
-    // Schedule a deferred pre-warm of the codex app-server child
-    // process. Eliminates the ~20s cold-start (spawn + Node init +
-    // config load + JSON-RPC handshake) that would otherwise pin
-    // stage 1 of the very first bridge dispatch after a VS Code
-    // reload. 500ms defer is short enough that returning users who
-    // dispatch quickly still get a warm channel, but long enough
-    // that the spawn cost lands after VS Code's window-open frame.
-    const prewarmTimer = setTimeout(() => {
-      void this.dispatcher?.prewarm();
-    }, 500);
-    prewarmTimer.unref?.();
+    // No activate-time codex daemon spawn. The dispatcher is now
+    // entirely lazy: the codex app-server is spawned on-demand by
+    // `ensureClient()` inside `runTurnOnce` the first time a bridge
+    // envelope actually lands. The trade-off is that the first bridge
+    // dispatch after a VS Code launch pays the ~20s cold-start chain
+    // (spawn + Node init + config load + JSON-RPC handshake); the
+    // bridge widget's stage-1 ceremony covers the wait visually. The
+    // benefit is that cold launching VS Code spawns zero CLI
+    // subprocesses on our behalf, keeping the audit surface clean.
+    // The post-`Restart Codex Bridge` prewarm in `restartBridge`
+    // remains because that command is a deliberate user action whose
+    // whole point is to leave the bridge ready for the next dispatch.
   }
 
   private async stopEnabled(): Promise<void> {

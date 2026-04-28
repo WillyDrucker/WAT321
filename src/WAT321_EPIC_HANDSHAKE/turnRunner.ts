@@ -24,8 +24,9 @@ import type { WaitMode } from "./waitMode";
 /**
  * One-shot Codex turn execution. Subscribes to the JSON-RPC progress
  * stream, drives a `TurnMonitor` for stall + hard-cap detection with a
- * 3s grace window, polls a cancel sentinel, writes per-turn heartbeats
- * for the status bar, and resolves with the aggregated assistant text.
+ * polling rollout-recovery window, polls a cancel sentinel, writes
+ * per-turn heartbeats for the status bar, and resolves with the
+ * aggregated assistant text.
  *
  * Lazy rollout-path resolution is critical: Codex creates the rollout
  * file slightly after `thread/start` returns, so an eager call at
@@ -33,11 +34,28 @@ import type { WaitMode } from "./waitMode";
  * glyph at stage 2/5. The monitor re-asks for the path on every poll
  * tick until it gets one.
  *
- * Stall recovery flow: send turn/interrupt, wait 3s for any final
- * task_complete + agent_message to flush, then read the rollout one
- * more time. If Codex secretly finished in the grace window, surface
- * the recovered text instead of an error.
+ * Stall / hard-cap recovery: send turn/interrupt, then poll the
+ * rollout for up to ROLLOUT_RECOVERY_WINDOW_MS at ROLLOUT_RECOVERY_POLL_MS
+ * cadence. Codex's flush latency after interrupt can substantially
+ * exceed a single short grace window for long replies that were
+ * mid-stream when we cut them off, so a polling loop catches the late
+ * task_complete + agent_message that a single setTimeout would miss.
+ * If a final assistant message ever lands during the window, surface
+ * the recovered text instead of the synthetic error reply.
  */
+
+/** Total wall-clock budget for rollout recovery after an interrupt.
+ * Long bridge prompts (multi-thousand-token audits, deep code reads)
+ * can need substantially longer than the original 3s flush window
+ * before Codex commits its final assistant message, especially when
+ * the interrupt arrives mid-stream. 30s is generous enough to catch
+ * realistic post-interrupt flushes without keeping the bridge UI
+ * frozen indefinitely on a turn that is genuinely stuck. */
+const ROLLOUT_RECOVERY_WINDOW_MS = 30_000;
+/** Poll cadence inside the recovery window. 1s balances reactivity
+ * (recovery resolves within a second of Codex finishing its flush)
+ * against I/O cost (one stat + tail read per poll, cheap). */
+const ROLLOUT_RECOVERY_POLL_MS = 1_000;
 
 interface AgentMessageDelta {
   itemId: string;
@@ -213,42 +231,42 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
         writeHeartbeat(stage, info);
       },
       onStall: (reason) => {
-        // Grace window: Codex often completes a turn within a couple
-        // seconds of a stall. Send the interrupt first so any in-flight
-        // tool stops, then wait 3s for any late flush, then read the
-        // rollout one more time before giving up. Without the grace
-        // window we report "Error state, no message" on turns where
-        // Codex actually finished seconds after the stall fired.
         sendInterrupt();
-        setTimeout(() => {
-          if (settled) return;
-          const recovered = tryRolloutRecovery(resolveRolloutPath());
-          if (recovered) {
+        recoverOrRejectViaRolloutPolling({
+          deadlineMs: ROLLOUT_RECOVERY_WINDOW_MS,
+          pollMs: ROLLOUT_RECOVERY_POLL_MS,
+          getRolloutPath: resolveRolloutPath,
+          isSettled: () => settled,
+          onRecovered: (text) => {
             logger.info(
-              `[monitor] stall recovered via rollout fallback after 3s grace (len=${recovered.length})`
+              `[monitor] stall recovered via rollout fallback (len=${text.length})`
             );
             writeSuppressCodexToast(workspacePath);
-            settle(() => resolve(recovered));
-            return;
-          }
-          settle(() => reject(new Error(reason)));
-        }, 3_000);
+            settle(() => resolve(text));
+          },
+          onTimeout: () => {
+            settle(() => reject(new Error(reason)));
+          },
+        });
       },
       onHardCap: () => {
         sendInterrupt();
-        setTimeout(() => {
-          if (settled) return;
-          const recovered = tryRolloutRecovery(resolveRolloutPath());
-          if (recovered) {
+        recoverOrRejectViaRolloutPolling({
+          deadlineMs: ROLLOUT_RECOVERY_WINDOW_MS,
+          pollMs: ROLLOUT_RECOVERY_POLL_MS,
+          getRolloutPath: resolveRolloutPath,
+          isSettled: () => settled,
+          onRecovered: (text) => {
             logger.info(
-              `[monitor] hard cap recovered via rollout fallback after 3s grace (len=${recovered.length})`
+              `[monitor] hard cap recovered via rollout fallback (len=${text.length})`
             );
             writeSuppressCodexToast(workspacePath);
-            settle(() => resolve(recovered));
-            return;
-          }
-          settle(() => reject(new Error("Codex exceeded max turn duration")));
-        }, 3_000);
+            settle(() => resolve(text));
+          },
+          onTimeout: () => {
+            settle(() => reject(new Error("Codex exceeded max turn duration")));
+          },
+        });
       },
     });
     monitor.start();
@@ -422,4 +440,38 @@ function tryRolloutRecovery(rolloutPath: string | null): string | null {
   const text = parseLastAssistantText(scoped);
   if (!text || text.trim().length === 0) return null;
   return text;
+}
+
+interface RecoveryPollOptions {
+  deadlineMs: number;
+  pollMs: number;
+  getRolloutPath: () => string | null;
+  isSettled: () => boolean;
+  onRecovered: (text: string) => void;
+  onTimeout: () => void;
+}
+
+/** Poll the rollout for a final assistant message until either recovery
+ * succeeds or the deadline elapses. Replaces the previous single-shot
+ * setTimeout grace window: a long Codex reply that was mid-stream when
+ * the interrupt fired can take longer than a fixed window to flush, and
+ * a single short wait would miss it - producing a synthetic
+ * "max turn duration" error reply when Codex actually had a real reply
+ * one second later. The polling loop catches that late commit. */
+function recoverOrRejectViaRolloutPolling(opts: RecoveryPollOptions): void {
+  const startedAt = Date.now();
+  const tick = (): void => {
+    if (opts.isSettled()) return;
+    const recovered = tryRolloutRecovery(opts.getRolloutPath());
+    if (recovered !== null) {
+      opts.onRecovered(recovered);
+      return;
+    }
+    if (Date.now() - startedAt >= opts.deadlineMs) {
+      opts.onTimeout();
+      return;
+    }
+    setTimeout(tick, opts.pollMs);
+  };
+  setTimeout(tick, opts.pollMs);
 }
