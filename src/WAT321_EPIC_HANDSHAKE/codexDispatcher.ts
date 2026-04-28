@@ -260,9 +260,12 @@ export class CodexDispatcher {
       this.resetIdleTimer();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // Full error text goes to the EH output channel for diagnostics;
+      // the user-facing reply that lands back in Claude's inbox stays
+      // brief and never echoes raw lower-layer messages.
       this.logger.error(`dispatch failed for ${env.id}: ${msg}`);
       this.writeReply(env, {
-        body: `Codex bridge error: ${msg}`,
+        body: `The Codex bridge couldn't complete this turn. Open the WAT321: Epic Handshake output channel for details, or pick Restart Codex Bridge from the bridge menu to recover.`,
         intent: "blocker",
       });
       moveToSent(path, this.sentCodex);
@@ -347,7 +350,7 @@ export class CodexDispatcher {
       // Catch it here before any side effect lands.
       const configDefault = readCodexConfigModel();
       if (configDefault !== null && !isKnownCodexModel(configDefault)) {
-        const msg = `Your Codex config default model "${configDefault}" is not in your installed Codex CLI's models cache. Every bridge session would be born broken. Fix \`~/.codex/config.toml\` to a valid slug (see \`codex --help\` for supported models) or remove the \`model\` line entirely to use Codex's built-in default, then try again.`;
+        const msg = `Codex's default model "${configDefault}" isn't in the installed Codex's known set. The bridge can't start a session on a slug Codex doesn't recognize. Update Codex's config to a valid slug, or clear the model line so Codex picks its own default.`;
         this.logger.warn(`[preflight] ${msg}`);
         noteFailure(record, msg);
         throw new Error(msg);
@@ -373,7 +376,7 @@ export class CodexDispatcher {
       const rolloutPath = findRolloutPath(threadId);
       const storedSlug = rolloutPath ? readRolloutModelSlug(rolloutPath) : null;
       if (storedSlug !== null && !isKnownCodexModel(storedSlug)) {
-        const msg = `Codex session S${record.sessionCounter} stores model "${storedSlug}" which your installed Codex CLI does not recognize. Open the bridge menu and pick "Manage Codex Sessions" then "Repair sessions" to fix, or "Reset Codex Session" to roll to a fresh thread.`;
+        const msg = `Codex session S${record.sessionCounter} stores a model slug "${storedSlug}" that the installed Codex doesn't recognize. The Repair Sessions option in the bridge menu can rewrite the slug; Reset Codex Session rolls to a fresh thread.`;
         this.logger.warn(`[preflight] ${msg}`);
         noteFailure(record, msg);
         throw new Error(msg);

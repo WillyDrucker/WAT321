@@ -370,7 +370,7 @@ export async function showRepairSessionsPicker(
 
     if (knownSlugs.length === 0) {
       void vscode.window.showWarningMessage(
-        "Epic Handshake: can't validate session models. Your Codex `models_cache.json` at `~/.codex/models_cache.json` is missing or empty. Run any Codex command to refresh the cache, then retry Repair."
+        "Epic Handshake: Codex's local models cache is empty, so session models can't be validated yet. The cache populates whenever Codex runs; Repair will work once it's available."
       );
       return;
     }
@@ -465,7 +465,7 @@ export async function showRepairSessionsPicker(
   const target = preferredRepairSlug();
   if (target === null) {
     void vscode.window.showErrorMessage(
-      "Epic Handshake: can't auto-pick a repair target. Your Codex `models_cache.json` is missing or empty. Run any Codex command to refresh the cache, then try again."
+      "Epic Handshake: Codex's local models cache is empty, so a repair target can't be auto-picked. The cache populates whenever Codex runs."
     );
     return;
   }
