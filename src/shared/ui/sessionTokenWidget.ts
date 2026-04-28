@@ -167,8 +167,8 @@ function isPidAlive(pid: number): boolean {
 
 /** Cache-banner flash window. 2000ms total; the LOAD/MISS text
  * persists the entire window. Bullets blink at a 500ms cadence
- * between colored emoji (red MISS / yellow LOAD) and ASCII-space
- * blanks (off frame). After 2000ms the widget returns to the normal
+ * between colored emoji (red MISS / yellow LOAD) and black-circle
+ * emoji (off frame). After 2000ms the widget returns to the normal
  * token readout. Widget's 250ms ticker samples the frame selector
  * every render so the bullet alternation lands visibly. */
 const CACHE_BANNER_FLASH_MS = 2000;
@@ -212,21 +212,23 @@ const CACHE_REBUILD_RATIO_DENOM = 2;
  *                 server-side fault); user paid again unexpectedly.
  *
  * Each banner has an "on" form (colored emoji bullets) and an "off"
- * form (two ASCII spaces per side, sized to match the emoji's ~2-char
- * render width in VS Code's status bar font). The text label persists
- * the whole 2000ms; only the bullets flash between visible and blank,
- * like the Claude waiting cycle. ASCII spaces are used over U+3000
- * ideographic space because VS Code's status bar font does not honor
- * the 1em pairing cleanly and the ideographic form leaves a residual
- * width shift on every frame transition. */
+ * form (black circle bullets, U+26AB). Same emoji rendering family for
+ * both frames, which is the only reliable way to keep the cell width
+ * steady - mixing emoji with ASCII spaces or with codicons crosses
+ * font tables and shifts the text by an unpredictable fraction on
+ * every transition. The black circle reads as a quiet contrast pulse
+ * against the colored on-frame; on dark themes it nearly disappears
+ * for a "fades to blank" feel, on light themes it stays visible but
+ * still pulses cleanly. Geometry is the load-bearing property either
+ * way. */
 const CACHE_LOAD_BANNER_ON = "🟡LOAD🟡";
-const CACHE_LOAD_BANNER_OFF = "  LOAD  ";
+const CACHE_LOAD_BANNER_OFF = "⚫LOAD⚫";
 const CACHE_MISS_BANNER_ON = "🔴MISS🔴";
-const CACHE_MISS_BANNER_OFF = "  MISS  ";
+const CACHE_MISS_BANNER_OFF = "⚫MISS⚫";
 /** 500ms per frame, four frames per banner cycle. Pattern (using
  * MISS): on (0-500) / off (500-1000) / on (1000-1500) / off (1500-2000).
- * Off frame swaps colored emoji bullets for ASCII spaces sized to the
- * emoji's render width so the cell width stays constant across frames. */
+ * Off frame swaps the colored circle for a black circle - same emoji
+ * family means guaranteed equal width across frames. */
 const CACHE_BANNER_FRAME_MS = 500;
 
 export class SessionTokenWidget<TState extends { status: string }> implements vscode.Disposable {
@@ -261,6 +263,15 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    * rebuild flips it back to false; subsequent rebuilds in the same
    * "epoch" fire red MISS instead. */
   private awaitingFirstLoad = true;
+  /** Push subscription to bridge phase + stage transitions. Without
+   * this, the very first bridge dispatch after a cold launch lands
+   * between service polls and the widget's ticker never starts -
+   * the ceremony / stage walk plays for the bridge widget but the
+   * session-token widgets stay frozen on their idle prefix. The
+   * subscription fires `render()` + `ensureTicker()` so the widget
+   * picks up the transition immediately instead of waiting up to
+   * the service's next 15s poll. */
+  private bridgeSub: { dispose(): void } | null = null;
 
   constructor(
     descriptor: SessionTokenWidgetDescriptor<TState>,
@@ -275,6 +286,10 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     this.item.name = `WAT321: ${descriptor.provider} Session Tokens`;
     this.item.text = `${descriptor.idlePrefix} ${descriptor.provider} -`;
     this.item.tooltip = `No active ${descriptor.provider} session`;
+    this.bridgeSub = bridgeStage.onChange(() => {
+      this.render();
+      this.ensureTicker();
+    });
   }
 
   /** Detect cache-rebuild events and latch the appropriate banner.
@@ -362,13 +377,13 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
   }
 
   /** Current cache-banner flash state, if any. Four 500ms frames
-   * across 2000ms, alternating colored emoji bullets and ASCII-space
-   * blanks:
+   * across 2000ms, alternating colored emoji bullets and black-circle
+   * emoji (off frame):
    *
    *   0-500    on   (colored emoji)
-   *   500-1000 off  (ASCII spaces)
+   *   500-1000 off  (black circle)
    *   1000-1500 on  (colored emoji)
-   *   1500-2000 off (ASCII spaces)
+   *   1500-2000 off (black circle)
    *
    * Text persists for the whole window so the user always sees LOAD
    * or MISS - only the bullets blink, like the Claude waiting cycle.
@@ -608,7 +623,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         if (banner !== null) {
           // LOAD or MISS text persists for the full 2000ms flash
           // window; only the bullet positions blink between colored
-          // emoji and ASCII-space blanks at a 500ms cadence (see
+          // emoji and black-circle emoji at a 500ms cadence (see
           // currentCacheBanner). Prefix stays visible throughout so
           // the brand icon and thinking indicator ride through the
           // flash - only the tokens/percent portion gets replaced.
@@ -637,6 +652,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           claudeTurnInfo: data.claudeTurnInfo,
           turnState: data.turnState,
           autoCompactEffectiveTokens: data.autoCompactEffectiveTokens,
+          codexEffort: this.bridgeStage.snapshot().codexEffort,
         });
         this.item.show();
         return;
@@ -649,6 +665,8 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
       clearInterval(this.ticker);
       this.ticker = null;
     }
+    this.bridgeSub?.dispose();
+    this.bridgeSub = null;
     this.item.dispose();
   }
 }

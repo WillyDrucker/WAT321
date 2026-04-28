@@ -223,7 +223,7 @@ async function pickModel(
   const models = listSelectableCodexModels();
   if (models.length === 0) {
     void vscode.window.showWarningMessage(
-      "Epic Handshake: no models available in `~/.codex/models_cache.json`. Run any Codex command to refresh the cache, then try again."
+      "Epic Handshake: Codex's local models cache is empty, so the model picker has nothing to list yet. The cache populates whenever Codex runs."
     );
     return { kind: "cancelled" };
   }

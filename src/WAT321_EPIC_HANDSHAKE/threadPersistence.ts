@@ -1,13 +1,12 @@
 /**
- * Barrel re-export. Real implementations live in:
+ * Barrel re-export for the bridge thread record. Real implementations
+ * live in:
  *   - `threadRecord.ts`     - record IO + reset / clear-error operations
  *   - `threadNaming.ts`     - display-name + collision-free counter policy
  *   - `sessionRecovery.ts`  - Codex `~/.codex/sessions/` walks + recover
  *
- * Kept as a single import surface so callers don't need to reach into
- * three files for what conceptually is "everything about the bridge
- * thread record." Splitting was driven by file-size pressure, not by
- * a callsite seam.
+ * Single import surface so callers don't reach into three files for
+ * what conceptually is "everything about the bridge thread record."
  */
 
 export {

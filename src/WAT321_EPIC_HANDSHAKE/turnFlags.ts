@@ -47,9 +47,7 @@ const SUPPRESS_CODEX_TOAST_FRESHNESS_MS = 30_000;
  *                               5000ms later
  *
  * All flags are per-workspace so a turn in workspace A never makes
- * workspace B's status bar render "busy." Before partitioning, the
- * shared root-level flags were the source of the cross-window bleed
- * caught during isolated-instance testing.
+ * workspace B's status bar render "busy" on the same machine.
  *
  * All flags are best-effort. A missed write only costs a missed
  * animation frame; never block the turn on flag I/O.
@@ -100,9 +98,10 @@ export function clearProcessingFlag(workspacePath: string): void {
  * recovery resolution) so the toast notifier can suppress the Codex
  * "response complete" toast that arrives moments later from Codex's
  * own transcript watcher - the user already saw the bridge result in
- * Claude and a second toast about the same thing is noise. Replaces
- * the older 5s `returning` flag heuristic which missed slow transcript
- * writes. */
+ * Claude and a second toast about the same thing is noise. The
+ * sentinel is consume-on-read with a 30s freshness window, so a slow
+ * transcript write that lands long after RPC completion still
+ * suppresses correctly. */
 export function writeSuppressCodexToast(workspacePath: string): void {
   try {
     writeFileAtomic(

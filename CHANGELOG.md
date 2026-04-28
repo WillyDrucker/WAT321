@@ -5,6 +5,28 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.9] - 2026-04-27
+
+### Added
+
+- **Reasoning effort now shows up next to the model name in session token tooltips.** Hover the Codex session token widget and the model line reads `GPT-5.5 · High (272K context)` or whichever effort is currently in play. The override you pick from the bridge menu wins; otherwise the tooltip shows the model's own default reasoning level pulled from Codex's local cache, so you always see what Codex will actually run rather than what you happened to override. The Claude tooltip gets the same treatment using its closest analog: when extended thinking is firing in your recent turns, the model line reads `Sonnet 4.6 · Thinking (200K context)`, and the segment is omitted when Claude's running normally.
+
+### Changed
+
+### Fixed
+
+- **Fire-and-Forget really keeps the Claude waiting cycle off this time.** The 1.2.8 fix only covered one of three places where the Claude session token widget could render bridge-driven activity, so under Fire-and-Forget you'd still see the pre-ceremony idle blink and the stage-1 debug-disconnect alternation before the widget settled. The widget now bypasses every bridge-driven prefix path under Fire-and-Forget and renders purely from your own Claude transcript activity, exactly as if the bridge weren't running. Adaptive and Standard still drive the waiting cycle as before.
+
+- **The very first bridge dispatch after a fresh VS Code launch no longer skips the Codex session token ceremony animation.** The widget's animation ticker only re-evaluated bridge state on its own 15-second poll cadence, so a bridge prompt fired within seconds of opening VS Code landed in a window where the ticker was idle and never started. The bridge widget itself walked the ceremony correctly, but the Codex session token widget stayed frozen on its idle prefix. The session token widget now subscribes to bridge state changes directly, so it picks up the very first dispatch's ceremony without waiting for its next scheduled poll.
+
+- **The cache LOAD / MISS banner finally pulses without shifting cell width.** The 1.2.8 attempt swapped the off-frame placeholder from an ideographic space to two ASCII spaces; both still shifted because emoji and non-emoji characters live in different font tables in VS Code's status bar with no width contract between them. The off-frame is now a black-circle emoji from the same Unicode block as the colored circles, which makes the swap pixel-perfect by construction. On dark themes the off-frame nearly disappears for a "fades to blank" feel; on light themes it stays visible but still pulses cleanly. Geometry holds either way.
+
+- **The bridge's "auto-compact just finished" and "you pressed Esc" events no longer fire a misleading "Claude finished" toast.** This shipped in 1.2.8 but was incomplete in some classifier paths; the remaining drift is now swept and the toast notifier suppresses both events cleanly while the spinner still stops correctly.
+
+- **Bridge config-error messages are friendlier and don't leak file paths.** When Codex's local config points at a model Codex doesn't recognize, or when a stored session slug has been retired by a Codex CLI upgrade, the error reply that lands back in Claude is now passive and brief - it points at the right bridge menu action when one exists, and routes full error text to the WAT321: Epic Handshake output channel instead of echoing it into your transcript. The actionable info you need is still there; the noise isn't.
+
+### Removed
+
 ## [1.2.8] - 2026-04-27
 
 ### Added
