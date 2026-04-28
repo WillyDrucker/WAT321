@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type * as vscode from "vscode";
@@ -66,7 +74,13 @@ export function extractChannelScript(context: vscode.ExtensionContext): string {
   }
   const dir = dirname(INSTALLED_SCRIPT_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  copyFileSync(source, INSTALLED_SCRIPT_PATH);
+  // Atomic copy: write to <path>.tmp then rename. A direct copyFileSync
+  // overwrites in place, which leaves a window where Claude Code
+  // spawning `node channel.mjs` mid-overwrite could read torn bytes
+  // and parse-fail. Temp+rename closes that window - the rename is
+  // atomic on the same filesystem and Claude Code either gets the
+  // old script or the fully-written new one, never a partial.
+  atomicCopy(source, INSTALLED_SCRIPT_PATH);
   // Also extract helper scripts (e.g. stage-clipboard.mjs) so Claude
   // can invoke them via Bash by absolute path. Skipped silently per
   // script if not present in the vsix - helper scripts are optional
@@ -78,10 +92,29 @@ export function extractChannelScript(context: vscode.ExtensionContext): string {
     ];
     const helperSource = helperCandidates.find((c) => existsSync(c));
     if (helperSource !== undefined) {
-      copyFileSync(helperSource, join(BIN_DIR, name));
+      atomicCopy(helperSource, join(BIN_DIR, name));
     }
   }
   return INSTALLED_SCRIPT_PATH;
+}
+
+/** Copy a file via temp + rename so an in-flight reader (e.g. Claude
+ * Code spawning `node <target>` while we overwrite) cannot observe a
+ * torn copy. Same atomic-write contract as `shared/fs/atomicWrite.ts`,
+ * scoped to a copy operation. */
+function atomicCopy(source: string, target: string): void {
+  const tmp = `${target}.tmp`;
+  copyFileSync(source, tmp);
+  try {
+    renameSync(tmp, target);
+  } catch (err) {
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp);
+    } catch {
+      // best-effort
+    }
+    throw err;
+  }
 }
 
 /** Run `claude mcp add <name> -- <command> <args...>`. Returns the
