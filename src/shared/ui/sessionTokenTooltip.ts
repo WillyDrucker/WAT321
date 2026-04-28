@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { isKnownCodexModel } from "../codexModels";
+import { getCodexModelInfo, isKnownCodexModel } from "../codexModels";
 import { formatModelDisplayName } from "../../engine/contracts";
 import { renderStageDisplay } from "../codex-rollout/phaseRender";
 import type { StageInfo } from "../codex-rollout/types";
@@ -65,6 +65,12 @@ export interface SessionTokenTooltipInput {
    * signal approximate, matching the Codex pattern. Falls back to
    * `ceiling` when absent (older callers, Codex path). */
   autoCompactEffectiveTokens?: number;
+  /** Codex-only: per-turn effort override (low / medium / high /
+   * xhigh). Sourced from the bridge snapshot. Null means no override
+   * is set; the tooltip falls back to the model's
+   * `default_reasoning_level` so the user always sees what Codex will
+   * actually run. */
+  codexEffort?: "low" | "medium" | "high" | "xhigh" | null;
 }
 
 export function buildSessionTokenTooltip(
@@ -84,6 +90,7 @@ export function buildSessionTokenTooltip(
     claudeTurnInfo,
     turnState,
     autoCompactEffectiveTokens,
+    codexEffort,
   } = input;
 
   const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
@@ -126,7 +133,14 @@ export function buildSessionTokenTooltip(
     const codexModelInvalid =
       provider === "Codex" && !isKnownCodexModel(modelId);
     const prefix = codexModelInvalid ? "⚠ " : "";
-    md.appendMarkdown(`${prefix}${modelName}${windowLabel}  \n`);
+    // Effort tag dot-separated between model and context window.
+    // Codex: per-turn override > model's default_reasoning_level.
+    // Claude: the persistent equivalent is whether extended thinking
+    // is firing in recent turns (Claude has no UI knob like Codex's
+    // effort, but the thinking-block presence is its closest analog).
+    const effortLabel = resolveEffortLabel(provider, modelId, codexEffort, claudeTurnInfo);
+    const effortSegment = effortLabel ? ` · ${effortLabel}` : "";
+    md.appendMarkdown(`${prefix}${modelName}${effortSegment}${windowLabel}  \n`);
     if (codexModelInvalid) {
       md.appendMarkdown(
         `_Model not in your installed Codex's known set. The next prompt will fail; repair via the bridge menu._  \n`
@@ -248,9 +262,43 @@ function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
 }
 
 /** True while the session is mid-turn - stage-info tooltip lines
- * only make sense during an in-flight response. `user` (waiting on
- * Codex) and `assistant-pending` (Codex actively working) qualify;
- * `assistant-done` and `unknown` are idle. */
+ * only make sense during an in-flight response. Only `user` (waiting
+ * on the model) and `assistant-pending` (model actively working)
+ * qualify; `assistant-done`, `compact-end`, `interrupted`, and
+ * `unknown` all read as idle. */
 function turnStateIsActive(turnState: LastEntryKind | undefined): boolean {
   return turnState === "user" || turnState === "assistant-pending";
+}
+
+/** Effort label that goes after the model name in the tooltip header.
+ *
+ * Codex: explicit reasoning level. The bridge per-turn override wins
+ * when set; otherwise fall back to the model's
+ * `default_reasoning_level` from `~/.codex/models_cache.json` so the
+ * user always sees what Codex will actually run, not just what was
+ * overridden.
+ *
+ * Claude: there is no UI-level effort knob like Codex's. The closest
+ * persistent analog is whether the most recent assistant turns
+ * actually used extended thinking (the model emitting `thinking`
+ * content blocks). Read this from `claudeTurnInfo.hasThinkingRecent`
+ * rather than from a setting; on/off is the only signal we have.
+ *
+ * Returns null when there is nothing useful to display (Codex with no
+ * effort and no model default; Claude not currently using thinking). */
+function resolveEffortLabel(
+  provider: "Claude" | "Codex",
+  modelId: string,
+  codexEffort: "low" | "medium" | "high" | "xhigh" | null | undefined,
+  claudeTurnInfo: ClaudeTurnInfo | undefined
+): string | null {
+  if (provider === "Codex") {
+    const effective =
+      codexEffort ?? (getCodexModelInfo(modelId)?.defaultEffort ?? null);
+    if (effective === null) return null;
+    return effective.charAt(0).toUpperCase() + effective.slice(1);
+  }
+  // Claude
+  if (claudeTurnInfo?.hasThinkingRecent === true) return "Thinking";
+  return null;
 }
