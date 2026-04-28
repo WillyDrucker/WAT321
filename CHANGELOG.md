@@ -5,6 +5,18 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.10] - 2026-04-27
+
+### Added
+
+### Changed
+
+### Fixed
+
+- **Cold-launching VS Code or switching Claude projects no longer fires a misleading LOAD banner against history.** When the Claude session token widget attached to a new session, it reset its usage tracking and then immediately read the existing transcript's most recent assistant turn - which on any healthy Claude session has cache-creation tokens left over from a real rebuild that already happened. That historical reading was firing the yellow LOAD banner against work the widget didn't observe live, so it could look like opening VS Code itself had caused a cache rebuild. The widget now adopts the existing usage state on attach, so LOAD only fires on a brand-new assistant turn that lands while the widget is actually watching. To be clear, the widgets only ever read transcript files and never trigger anything on the CLI side; this just removes the false visual signal that suggested otherwise.
+
+### Removed
+
 ## [1.2.9] - 2026-04-27
 
 ### Added

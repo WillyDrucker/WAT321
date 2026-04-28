@@ -3,7 +3,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import type {
-  BridgePhase,
   BridgeStage,
   BridgeStageReader,
   BridgeStageSnapshot,

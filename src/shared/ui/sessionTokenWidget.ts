@@ -319,13 +319,25 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
   private maybeLatchCacheBanner(data: SessionTokenRenderData): void {
     if (data.sessionId !== this.lastSeenSessionId) {
       this.lastSeenSessionId = data.sessionId;
-      this.lastUsageSignature = null;
       this.awaitingFirstLoad = true;
       // Adopt the new session's compact watermark without firing.
       // Historical compacts visible in the tail belong to a prior
       // epoch we never observed live; the next compact AFTER this
       // adoption is the one we react to.
       this.lastSeenCompactTimestamp = data.lastCompactTimestamp;
+      // Adopt the current usage signature too. On Claude, the tail's
+      // most recent assistant turn typically carries the cache_creation
+      // tokens from a real rebuild that already happened in a prior
+      // epoch we did not observe live. Resetting the signature to null
+      // would treat that historical turn as a fresh signal on the next
+      // poll and fire a false LOAD against a session attach (cold
+      // launch, session switch via menu, cwd-based re-pick) that we
+      // did not cause. Adopting the signature here means LOAD only
+      // fires on a NEW assistant turn whose usage we have not seen.
+      const info = data.claudeTurnInfo;
+      this.lastUsageSignature = info
+        ? `${info.outputTokens}:${info.totalInputTokens}:${info.cachedInputTokens}:${info.cacheCreationTokens}`
+        : null;
     }
 
     // Provider-agnostic compact detection. A newer compact timestamp
