@@ -8,6 +8,27 @@ import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
 import { getSessionTokenColor } from "./textColors";
 import { formatPct, formatTokens } from "./tokenFormatters";
 
+/** Cache-event classification surfaced in the Claude session-token
+ * tooltip. Defined here in shared/ui rather than in the Claude tool
+ * folder so the generic widget can reference the type without inverting
+ * the shared -> tool dependency direction. The Claude parser module
+ * re-exports both names. */
+export type CacheEventKind =
+  | "HIT-clean"
+  | "LOAD-compact"
+  | "MISS-TTL"
+  | "MISS-large-payload"
+  | "MISS-unknown";
+
+export interface CacheEvent {
+  kind: CacheEventKind;
+  /** Human-readable one-line description for the tooltip. */
+  description: string;
+  /** Timestamp (ms) of the assistant turn where the event was
+   * detected. Null when no qualifying event was found. */
+  ts: number | null;
+}
+
 /** Rich turn-state snapshot for the Claude session token tooltip.
  * Defined here (shared/ui) rather than in the Claude tool folder so
  * the generic widget can reference it without inverting the
@@ -39,6 +60,11 @@ export interface ClaudeTurnInfo {
    * rather than red MISS (involuntary eviction). Null when the latest
    * turn is not preceded by a compact summary. */
   lastCompactTimestamp: number | null;
+  /** Most recent classified cache event in the lookback window.
+   * Tooltip-only readout; does not drive the banner. Read-only -
+   * derived purely from the same transcript tail every other parser
+   * field comes from. See `parseMostRecentCacheEvent`. */
+  mostRecentCacheEvent: CacheEvent | null;
 }
 
 /**
@@ -302,6 +328,19 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
   /** Detect cache-rebuild events and latch the appropriate banner.
    * Two provider-specific paths converge on the same banner state.
+   *
+   * **Read-only contract (load-bearing).** This function and every
+   * upstream parser it depends on are purely transcript-derived and
+   * have **zero side effects** that could activate Claude or Codex.
+   * No HTTP calls. No process spawns. No file writes outside the
+   * widget's in-memory state. No notifications that fire CLI hooks.
+   * The only outputs are widget state mutations (sig watermarks,
+   * flash-start timestamps) that drive a 2-second visual pulse on
+   * the status bar item. Opening VS Code with Claude installed does
+   * NOT cause the cache banner detection to trigger any Anthropic-
+   * side activity even if a LOAD or MISS happens to fire on the
+   * first poll. Thresholds (CACHE_REBUILD_*) are validated and
+   * stable; do not loosen them without a fresh false-fire audit.
    *
    * Claude path (cc/cr tokens available):
    *   1. Strict ratio rule (involuntary eviction).

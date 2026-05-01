@@ -34,10 +34,13 @@ import { workspaceHash } from "./workspaceHash";
  *     forever - subsequent activates find nothing in the root.
  *
  *   - `clearStaleRuntimeFiles`: deletes per-workspace runtime flags
- *     left behind by a prior crash + sweeps the per-workspace inbox
- *     into sent/. Also drops the user-scope fire-and-forget sentinel
- *     so activation restores the configured default wait mode. Paused
- *     and adaptive flags intentionally survive (user preference).
+ *     left behind by a prior crash (in-flight, processing, returning,
+ *     cancel, wait-mode flash, suppress-codex-toast) and drops the
+ *     user-scope fire-and-forget sentinel so activation restores the
+ *     configured default wait mode. Pending inbox replies are
+ *     deliberately preserved (the 1h TTL inside `sweepStaleInboxMail`
+ *     handles genuinely-stale entries on subsequent dispatches).
+ *     Paused and adaptive flags intentionally survive across restarts.
  */
 
 /** Move root-level legacy envelopes into the partitioned workspace
@@ -111,9 +114,20 @@ function migrateLegacyDir(
 
 /** Sweep any orphan runtime files left behind by a prior crash or
  * abrupt VS Code exit. Called once on activate. The 1h safety TTL
- * for in-inbox mail is a separate path in the dispatcher; this is
- * just the activate-time clean slate the user chose over trying to
- * preserve possibly-stale late replies across sessions. */
+ * for in-inbox mail (`sweepStaleInboxMail` in mailbox.ts, fires on
+ * every bridge dispatch) handles genuinely-stale replies; this
+ * function only clears short-lived sentinels (in-flight, processing,
+ * returning, cancel, wait-mode flash) that a prior crash could have
+ * left in a misleading state.
+ *
+ * **Pending late replies in inbox/claude/ are preserved.** Issue #64:
+ * a Codex reply that landed in the inbox immediately before VS Code
+ * restarted (long-running fire-and-forget scrape, mid-flight close)
+ * must survive activation so the next `epic_handshake_inbox` /
+ * `epic_handshake_ask` call can deliver it. The earlier "clean slate"
+ * sweep that moved every pending reply to sent/ on activate caused
+ * silent reply loss; the 1h TTL on subsequent dispatches catches truly
+ * stale entries without stranding fresh ones. */
 export function clearStaleRuntimeFiles(): void {
   const ws0 = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const hash = ws0 ? workspaceHash(ws0) : null;
@@ -150,30 +164,12 @@ export function clearStaleRuntimeFiles(): void {
   } catch {
     // best-effort
   }
-  // Per-workspace inbox sweep. Only this workspace's subfolder is
-  // touched; sibling workspaces (other VS Code instances) own their
-  // own subfolders. Without the partition the sweep would clear the
-  // shared inbox for every workspace, not just this one.
-  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!ws) return;
-  const wsHash = workspaceHash(ws);
-  const myInboxClaude = inboxClaudeDir(wsHash);
-  const mySentClaude = sentClaudeDir(wsHash);
-  try {
-    if (!existsSync(myInboxClaude)) return;
-    if (!existsSync(mySentClaude)) mkdirSync(mySentClaude, { recursive: true });
-    for (const f of readdirSync(myInboxClaude)) {
-      if (!f.endsWith(".md")) continue;
-      try {
-        const src = join(myInboxClaude, f);
-        const dst = join(mySentClaude, f);
-        writeFileAtomic(dst, readFileSync(src));
-        unlinkSync(src);
-      } catch {
-        // best-effort per file
-      }
-    }
-  } catch {
-    // best-effort sweep
-  }
+  // Per-workspace inbox sweep is intentionally NOT performed here.
+  // Issue #64: archiving fresh inbox replies on activate caused silent
+  // reply loss when VS Code restarted while a Codex turn was finishing
+  // (Codex writes the reply to inbox -> VS Code restarts -> activate
+  // moves the reply to sent/ -> next inbox check returns empty even
+  // though the work completed). The 1h TTL inside `sweepStaleInboxMail`
+  // (mailbox.ts) runs on every subsequent bridge dispatch and handles
+  // genuinely-stale entries without racing fresh ones.
 }

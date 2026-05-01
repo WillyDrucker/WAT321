@@ -35,6 +35,7 @@ export type Action =
   | "codex-defaults"
   | "manage-sessions"
   | "repair-sessions"
+  | "in-flight-info"
   | "back";
 
 export type Item = vscode.QuickPickItem & { action: Action };

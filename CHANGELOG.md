@@ -5,6 +5,24 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.12] - 2026-05-01
+
+### Added
+
+- **Tooltip on the Claude session token widget now explains the most recent cache event.** Hover the widget and look for the `Most recent:` line - it tells you whether the prior turn was a clean cache HIT, a deliberate LOAD after a compact, or a MISS, and when there's a MISS it names the likely cause (TTL expiration with how big the gap was, large tool result that pushed past the cache window, or "prefix change, cause unclear" when neither obvious cause fit). The thresholds match what already drives the banner flash so the two surfaces never disagree, but the tooltip is always-on so you see cache cadence between flashes too. Pure transcript read - no API calls, no spawns. Issue #66 (and the visibility gap behind #65).
+
+- **Epic Handshake menu shows stage age and last-activity time during an in-flight turn.** When you click the bridge widget while a Codex turn is running, a new BRIDGE STATUS row at the top of the menu tells you what stage Codex is in, how long it's been there, and how long since the dispatcher last heard from it. When the writing stage has held for over three minutes with no activity for over a minute, the row explicitly says "looks stuck on flush - consider CANCEL" so you can abort and retry without waiting out the ten-minute auto-abort. Issue #67.
+
+### Changed
+
+### Fixed
+
+- **Opening a second VS Code window no longer flips the wait mode in your other windows.** The Epic Handshake adaptive / fire-and-forget flag files live at one shared path under `~/.wat321/`, so the activation handler that wrote your default-wait-mode preference was overwriting whatever flag the menu had set in another window. The activate-time and enable-flow paths now respect any flag already on disk and only seed when none exists; only an explicit settings change forces an override. Menu toggles continue to take effect immediately. Issue #68.
+
+- **Pending Epic Handshake replies survive a VS Code restart.** A Codex reply that landed in the inbox while VS Code was closing or restarting used to get archived to `sent/` on the next activation before the inbox check could surface it - the work was done and the envelope was right there in `sent/`, but `epic_handshake_inbox` returned empty. The activate-time inbox sweep is gone; the existing one-hour TTL on subsequent bridge dispatches still cleans up genuinely stale entries without racing fresh ones. Issue #64.
+
+### Removed
+
 ## [1.2.11] - 2026-04-28
 
 ### Added

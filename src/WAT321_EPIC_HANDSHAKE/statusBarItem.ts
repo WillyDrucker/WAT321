@@ -16,7 +16,11 @@ import { workspaceHash } from "./workspaceHash";
 // module only owns the widget shell + refresh loop. Re-export the
 // wait mode setters that index.ts wires at activate time so callers
 // outside this folder still have a single import path.
-export { applyDefaultWaitMode, parseDefaultWaitMode } from "./waitMode";
+export {
+  applyDefaultWaitMode,
+  currentWaitMode,
+  parseDefaultWaitMode,
+} from "./waitMode";
 
 import { isAdaptive } from "./waitMode";
 import { adaptiveStageCycle } from "./turnHeartbeat";
