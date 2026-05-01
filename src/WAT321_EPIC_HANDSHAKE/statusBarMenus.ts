@@ -31,6 +31,7 @@ import {
   listRecoverableSessions,
   loadBridgeThreadRecord,
 } from "./threadPersistence";
+import { readNewestHeartbeat, type Stage } from "./turnHeartbeat";
 import { writeCancelFlag } from "./turnFlags";
 import {
   applyWaitMode,
@@ -39,6 +40,82 @@ import {
   waitModeLabel,
 } from "./waitMode";
 import { workspaceHash } from "./workspaceHash";
+
+/** Format a millisecond duration as `HhMmSs` / `MmSs` / `Ss` for menu
+ * detail rendering. Stays compact - QuickPick's `detail` line truncates
+ * around 60 chars on most themes. */
+function formatStageDuration(ms: number): string {
+  if (ms < 1000) return "0s";
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const remSec = sec % 60;
+  if (min < 60) return `${min}m ${remSec}s`;
+  return `${Math.floor(min / 60)}h ${min % 60}m`;
+}
+
+const STAGE_LABELS: Record<Stage, string> = {
+  dispatched: "1/5 dispatched",
+  received: "2/5 received",
+  working: "3/5 working",
+  writing: "4/5 writing",
+  complete: "5/5 complete",
+};
+
+/** Stuck-on-flush threshold for the writing stage. The bridge auto-
+ * abort fires at 10 minutes of no heartbeat updates (issue #61); this
+ * lower bar surfaces a warning hint in the menu well before that so
+ * the operator can cancel + retry instead of waiting out the full
+ * 10-minute window. Any-stage activity gap > 60s triggers; writing-
+ * stage age > 3 minutes piles on the "likely stuck" copy.
+ *
+ * Read-only: this only changes what string the cancel item shows. The
+ * actual cancel + auto-abort timing is unchanged. */
+const STAGE_AGE_WARN_MS = 3 * 60_000;
+const ACTIVITY_GAP_WARN_MS = 60_000;
+
+/** Build the in-flight status item. Returns null when no fresh
+ * heartbeat exists for this workspace (no live turn to describe).
+ * Surfacing stage + time-in-stage + time-since-last-activity addresses
+ * issue #67: the operator can distinguish "still doing tool work"
+ * from "finished work, stuck on flush" and decide to cancel earlier
+ * rather than waiting for the 10-minute auto-abort. */
+function makeInFlightStatusItem(ws: string | null): Item | null {
+  if (!ws) return null;
+  const wsHash = workspaceHash(ws);
+  const hb = readNewestHeartbeat(wsHash);
+  if (!hb) return null;
+
+  const now = Date.now();
+  const stageEnteredAt = hb.stageEnteredAt?.[hb.stage] ?? hb.lastProgressAt;
+  const stageAgeMs = now - stageEnteredAt;
+  const sinceActivityMs = now - hb.lastProgressAt;
+
+  const stuckInWriting =
+    hb.stage === "writing" &&
+    stageAgeMs > STAGE_AGE_WARN_MS &&
+    sinceActivityMs > ACTIVITY_GAP_WARN_MS;
+  const generallyStalled =
+    !stuckInWriting && sinceActivityMs > ACTIVITY_GAP_WARN_MS;
+
+  const lines: string[] = [
+    `${STAGE_LABELS[hb.stage]} for ${formatStageDuration(stageAgeMs)}`,
+    `last update ${formatStageDuration(sinceActivityMs)} ago`,
+  ];
+  if (hb.activeTool) lines.push(`tool: ${hb.activeTool}`);
+  if (stuckInWriting) lines.push("looks stuck on flush - consider CANCEL");
+  else if (generallyStalled) lines.push("no recent activity - watching");
+
+  return {
+    label: "BRIDGE STATUS",
+    description: stuckInWriting
+      ? "Stage 4/5 has not advanced - reply may be stuck on flush"
+      : "Live snapshot of the in-flight Codex turn",
+    detail: lines.join(" | "),
+    iconPath: new vscode.ThemeIcon("wat321-square-info"),
+    action: "in-flight-info",
+  };
+}
 
 /**
  * Main QuickPick entry point + dispatch surface for the Epic Handshake
@@ -136,13 +213,21 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     action: "restart-bridge",
   };
 
-  // Menu ordering: retrieve up top, sessions immediately below it
-  // (most-frequent action grouping), wait-mode toggle, conditional
-  // clear, restart-bridge as the heavier escalation right above
-  // pause, then pause and cancel always at the bottom. Pause and
-  // cancel are visible in every menu (including submenus) for
-  // consistent escape paths regardless of where the user navigated.
+  // In-flight status appears at the top when a turn is active so the
+  // operator sees stage + age + activity gap before scanning down to
+  // the action items. Issue #67: distinguishes "still working" from
+  // "stuck on flush" without waiting for the 10-minute auto-abort.
+  const inFlightStatusItem = opts.inFlight ? makeInFlightStatusItem(ws) : null;
+
+  // Menu ordering: in-flight status (when active), retrieve up top,
+  // sessions immediately below it (most-frequent action grouping),
+  // wait-mode toggle, conditional clear, restart-bridge as the heavier
+  // escalation right above pause, then pause and cancel always at the
+  // bottom. Pause and cancel are visible in every menu (including
+  // submenus) for consistent escape paths regardless of where the
+  // user navigated.
   const items: Item[] = [
+    ...(inFlightStatusItem ? [inFlightStatusItem] : []),
     retrieveItem,
     sessionsItem,
     ...(waitModeItem ? [waitModeItem] : []),
@@ -304,6 +389,12 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       void vscode.window.showInformationMessage(
         "Epic Handshake: wait mode is locked while a bridge turn is running. It will unlock automatically when the turn finishes."
       );
+      break;
+    case "in-flight-info":
+      // Informational only. Re-open the menu so the operator can act
+      // on what they just saw (Cancel / Restart Bridge / etc.) without
+      // a second click on the widget.
+      void showMainMenu({ inFlight: isBridgeBusy(ctx.ws) });
       break;
     case "manage-sessions":
       await showSessionsSubmenu({
