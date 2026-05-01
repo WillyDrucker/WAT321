@@ -34,10 +34,13 @@ import { workspaceHash } from "./workspaceHash";
  *     forever - subsequent activates find nothing in the root.
  *
  *   - `clearStaleRuntimeFiles`: deletes per-workspace runtime flags
- *     left behind by a prior crash + sweeps the per-workspace inbox
- *     into sent/. Also drops the user-scope fire-and-forget sentinel
- *     so activation restores the configured default wait mode. Paused
- *     and adaptive flags intentionally survive (user preference).
+ *     left behind by a prior crash (in-flight, processing, returning,
+ *     cancel, wait-mode flash, suppress-codex-toast) and drops the
+ *     user-scope fire-and-forget sentinel so activation restores the
+ *     configured default wait mode. Pending inbox replies are
+ *     deliberately preserved (the 1h TTL inside `sweepStaleInboxMail`
+ *     handles genuinely-stale entries on subsequent dispatches).
+ *     Paused and adaptive flags intentionally survive across restarts.
  */
 
 /** Move root-level legacy envelopes into the partitioned workspace

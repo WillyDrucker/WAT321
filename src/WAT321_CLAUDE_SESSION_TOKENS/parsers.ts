@@ -236,10 +236,14 @@ export function parseMostRecentCacheEvent(
   for (let i = 0; i < turns.length; i++) {
     const t = turns[i];
     if (t.cc < REBUILD_CC_FLOOR) continue;
-    if (t.cc < t.cr * REBUILD_RATIO_DENOM) continue;
-
     const ago = describeTurnsAgo(i);
 
+    // Compact-driven rebuilds qualify on the creation floor alone -
+    // mirrors the banner's `meetsCompact` exception. Compact bundles
+    // a fresh summary alongside surviving system prompt + tools, so
+    // creation is meaningful but reads can be non-trivial; the strict
+    // ratio gate would miss most compact LOADs and let the tooltip
+    // disagree with the banner. Check this before the ratio gate.
     if (t.isPostCompact) {
       return {
         kind: "LOAD-compact",
@@ -247,6 +251,8 @@ export function parseMostRecentCacheEvent(
         ts: t.assistantTs,
       };
     }
+
+    if (t.cc < t.cr * REBUILD_RATIO_DENOM) continue;
     const prior = turns[i + 1];
     if (prior !== undefined && t.userTs !== null) {
       const gapMs = t.userTs - prior.assistantTs;

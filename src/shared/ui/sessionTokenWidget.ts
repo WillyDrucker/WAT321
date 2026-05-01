@@ -336,13 +336,11 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    * widget's in-memory state. No notifications that fire CLI hooks.
    * The only outputs are widget state mutations (sig watermarks,
    * flash-start timestamps) that drive a 2-second visual pulse on
-   * the status bar item. Confirmed structurally during the v1.2.10 /
-   * v1.2.11 audit and reinforced in v1.2.12 - opening VS Code with
-   * Claude installed does NOT cause the cache banner detection to
-   * trigger any Anthropic-side activity, even if a LOAD or MISS
-   * happens to fire on the first poll. Thresholds (CACHE_REBUILD_*)
-   * are validated and stable; do not loosen them without a fresh
-   * false-fire audit.
+   * the status bar item. Opening VS Code with Claude installed does
+   * NOT cause the cache banner detection to trigger any Anthropic-
+   * side activity even if a LOAD or MISS happens to fire on the
+   * first poll. Thresholds (CACHE_REBUILD_*) are validated and
+   * stable; do not loosen them without a fresh false-fire audit.
    *
    * Claude path (cc/cr tokens available):
    *   1. Strict ratio rule (involuntary eviction).

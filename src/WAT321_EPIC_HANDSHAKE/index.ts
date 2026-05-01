@@ -101,14 +101,13 @@ class EpicHandshakeTier {
     // One-time migration: any envelopes left in the un-partitioned
     // `inbox/codex/*.md` or `inbox/claude/*.md` (legacy layout before
     // workspace partitioning) get moved into their envelope's
-    // workspace subfolder. Runs before clearStaleRuntimeFiles so a
-    // migrated reply for THIS workspace is then properly swept by
-    // the per-workspace cleanup.
+    // workspace subfolder so subsequent reads find them by hash.
     migrateLegacyEnvelopes(this.logger);
-    // Clean stale state from a prior crash: an abandoned in-flight
-    // flag would keep the widget animating forever, and stale mail
-    // envelopes from a prior session are noise the user hasn't opted
-    // into seeing. Both clears are best-effort.
+    // Clean stale runtime sentinels from a prior crash: an abandoned
+    // in-flight flag would keep the widget animating forever. Pending
+    // inbox replies are NOT cleared - a Codex reply that landed
+    // mid-shutdown must survive activation so the next inbox check
+    // delivers it. Best-effort.
     clearStaleRuntimeFiles();
     // Clipboard-staging dir is a separate folder for screenshot
     // attachments the user wants Codex to see. Sweep anything older

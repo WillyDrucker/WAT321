@@ -13,9 +13,13 @@ import { ADAPTIVE_FLAG_PATH, FIRE_AND_FORGET_FLAG_PATH } from "./constants";
  *                         returns immediately; reply lands in inbox.
  *
  * Exactly one flag (or neither) at a time under `applyWaitMode`'s
- * clear-then-set discipline. Persisted across VS Code restarts; the
+ * clear-then-set discipline. Persisted across VS Code restarts. The
  * tier's activate hook applies the user's `defaultWaitMode` setting
- * once on startup.
+ * only when no flag is currently on disk (Standard / fresh install).
+ * An existing flag (set by this window's prior session, this window's
+ * menu click, or another VS Code window) is respected; the global
+ * flag-file location means clobbering it would silently flip another
+ * window's mode. Explicit settings-change events force-apply.
  */
 
 export type WaitMode = "standard" | "adaptive" | "fire-and-forget";
