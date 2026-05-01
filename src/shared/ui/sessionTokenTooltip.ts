@@ -208,6 +208,17 @@ export function buildSessionTokenTooltip(
     md.appendMarkdown(`\n\n${lines.join("  \n")}`);
   }
 
+  // Claude cache-event readout (always shown when claudeTurnInfo is
+  // present, regardless of turn state). Surfaces classified LOAD/MISS/
+  // HIT info that previously was only visible via the banner flash -
+  // tooltip is the always-on layer for cadence visibility.
+  // Read-only: derived purely from the same transcript tail. No HTTP,
+  // no spawns, no file writes. See parseMostRecentCacheEvent.
+  if (provider === "Claude" && claudeTurnInfo?.mostRecentCacheEvent) {
+    const ev = claudeTurnInfo.mostRecentCacheEvent;
+    md.appendMarkdown(`\n\nMost recent: ${ev.description}`);
+  }
+
   // Claude mid-turn richness. Analog of the Codex block above, shaped
   // to Claude's transcript signals. Rendered only when actively mid-
   // turn so the tooltip stays short on idle sessions.
