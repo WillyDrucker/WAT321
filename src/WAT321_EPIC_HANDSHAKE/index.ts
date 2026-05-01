@@ -38,6 +38,7 @@ import {
 import {
   applyDefaultWaitMode,
   createEpicHandshakeStatusBarItem,
+  currentWaitMode,
   parseDefaultWaitMode,
 } from "./statusBarItem";
 import type { BridgeThreadRecord } from "./threadPersistence";
@@ -186,14 +187,34 @@ class EpicHandshakeTier {
   /** Read the user's preferred default wait mode from settings and
    * write the matching flag files. Called from three places so the
    * setting cannot get stranded:
-   *   - tier construct (initial activate)
-   *   - settings change watcher (live edit)
-   *   - enable flow (flipping EH on after a settings change)
-   * Subsequent menu toggles override this until one of those fires
-   * again. The flag-file readers in the widget/menu pick up the
-   * change on the next refresh tick. */
-  private applyDefaultWaitModeSetting(): void {
+   *   - tier construct (initial activate) - respect existing flag
+   *   - settings change watcher (live edit) - force apply
+   *   - enable flow (flipping EH on after a settings change) - respect existing flag
+   *
+   * The flag files (`adaptive.flag` / `fire-and-forget.flag`) live at
+   * a single global path under `~/.wat321/epic-handshake/`. They are
+   * shared across every running VS Code window. Activating a fresh
+   * window must NOT silently rewrite a flag another window already
+   * set via menu click - doing so flips that other window's mode
+   * mid-session. Only an explicit settings-change event has the
+   * authority to override; otherwise we respect whatever flag is
+   * already on disk and only seed when none exists (Standard /
+   * fresh install).
+   *
+   * Subsequent menu toggles always override this; menu writes go
+   * direct via `applyWaitMode`. The flag-file readers in the widget /
+   * menu pick up the change on the next refresh tick. */
+  private applyDefaultWaitModeSetting(opts: { force?: boolean } = {}): void {
     try {
+      if (!opts.force && currentWaitMode() !== "standard") {
+        // A flag is already on disk - either this window set it
+        // earlier in the activate cycle, this window's menu click
+        // set it during the prior session, or another VS Code window
+        // has it set right now. In all three cases, leaving it alone
+        // is correct: the user's "default" is what applies on a clean
+        // launch, not on every activation.
+        return;
+      }
       const raw = vscode.workspace
         .getConfiguration("wat321")
         .get<string>(SETTING.epicHandshakeDefaultWaitMode, "Adaptive");
@@ -352,7 +373,10 @@ class EpicHandshakeTier {
             `wat321.${SETTING.epicHandshakeDefaultWaitMode}`
           )
         ) {
-          this.applyDefaultWaitModeSetting();
+          // Settings change event = explicit user intent to switch the
+          // default. Force-apply even if a flag already exists; the
+          // user just edited the setting expecting it to take effect.
+          this.applyDefaultWaitModeSetting({ force: true });
         }
         if (
           !e.affectsConfiguration(`wat321.${SETTING.epicHandshakeEnabled}`)
