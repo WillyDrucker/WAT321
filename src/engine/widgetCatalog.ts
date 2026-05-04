@@ -25,6 +25,7 @@ const WIDGETS = [
   { id: "wat321.sessionTokens",         name: "Claude Session Tokens",        provider: "claude", slot: 4 },
   { id: "wat321.epicHandshake",         name: "Epic Handshake",               provider: "engine", slot: 5 },
   { id: "wat321.codexSessionTokens",    name: "Codex Session Tokens",         provider: "codex",  slot: 6 },
+  { id: "wat321.modelBridge",           name: "Model Bridge",                 provider: "engine", slot: 7 },
 ] as const satisfies readonly WidgetDescriptor[];
 
 /** Every widget ID registered in the catalog. Used by Reset WAT321
@@ -59,6 +60,7 @@ export const WIDGET_SLOT = {
   claudeSessionTokens: 4,
   epicHandshake: 5,
   codexSessionTokens: 6,
+  modelBridge: 7,
 } as const;
 
 /** Derived reverse map: slot number -> widget ID. Built from

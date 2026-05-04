@@ -191,6 +191,8 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes(SETTING.epicHandshakeEnabled, undefined),
     updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexToasts, undefined),
     updateSettingAllScopes(SETTING.epicHandshakeDefaultWaitMode, undefined),
+    updateSettingAllScopes(SETTING.modelBridgeEnabled, undefined),
+    updateSettingAllScopes(SETTING.modelBridgeLocalEndpoint, undefined),
     resetStatusBarItemVisibility(),
   ]);
 

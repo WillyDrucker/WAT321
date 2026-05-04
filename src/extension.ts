@@ -12,6 +12,7 @@ import {
 } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
 import { activateEpicHandshake } from "./WAT321_EPIC_HANDSHAKE";
+import { activateModelBridge } from "./WAT321_MODEL_BRIDGE";
 
 /**
  * Top-level entry point. Creates the engine context, registers
@@ -45,6 +46,23 @@ export function activate(context: vscode.ExtensionContext) {
   const epicHandshake = activateEpicHandshake(context, ctx.events);
   context.subscriptions.push(epicHandshake);
 
+  // Model Bridge tier (local + cloud LLMs). Independent of Epic
+  // Handshake - the two MCP servers register under different names
+  // (`wat321` and `wat321-model-bridge`) and never share runtime
+  // state. Wrapped in try/catch so a fatal bug in this tier never
+  // takes down the core Claude / Codex widgets - the Model Bridge is
+  // optional, the usage widgets are not.
+  let modelBridge: { resetCleanup: () => Promise<void>; dispose: () => void } | null = null;
+  try {
+    modelBridge = activateModelBridge(context);
+    context.subscriptions.push(modelBridge);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showWarningMessage(
+      `WAT321 Model Bridge failed to activate; usage widgets continue working. (${msg})`
+    );
+  }
+
   context.subscriptions.push(
     ...registerProviders(ctx, epicHandshake.bridgeStage)
   );
@@ -75,6 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
     ctx?.providers.resetAllTokenServices();
     ctx?.events.emit("engine.reset", {});
     await epicHandshake.resetCleanup();
+    if (modelBridge) await modelBridge.resetCleanup();
   });
   registerHealthCommand(context, () => ctx);
 }
