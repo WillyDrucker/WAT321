@@ -123,9 +123,9 @@ const CACHE_TTL_GAP_MS = 5 * 60 * 1000;
 /** Tool-result content size threshold flagged as "large payload". */
 const LARGE_TOOL_RESULT_BYTES = 50_000;
 /** Cache-rebuild detection mirrors `maybeLatchCacheBanner` thresholds.
- * Do not adjust these without a fresh false-fire audit - they were
- * dialed in across the v1.2.10 / v1.2.11 work to suppress spurious
- * fires on normal incremental cache writes. */
+ * Do not adjust these without a fresh false-fire audit - they suppress
+ * spurious fires on normal incremental cache writes. Loosening either
+ * value re-introduces the LOAD-against-incremental-write bug. */
 const REBUILD_CC_FLOOR = 5_000;
 const REBUILD_RATIO_DENOM = 2;
 

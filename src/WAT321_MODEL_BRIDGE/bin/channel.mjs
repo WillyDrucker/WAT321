@@ -400,7 +400,7 @@ function formatPhaseTrace(trace) {
   const rows = trace.map((p) => {
     const elapsed =
       typeof p.elapsedMs === "number" ? `${(p.elapsedMs / 1000).toFixed(1)}s` : "?";
-    const summary = p.summary ? ` — ${p.summary}` : "";
+    const summary = p.summary ? ` - ${p.summary}` : "";
     return `  ${p.phase.padEnd(11)} ${elapsed}${summary}`;
   });
   return `[phase trace]\n${rows.join("\n")}\n`;

@@ -173,7 +173,7 @@ function buildLiveTooltip(
   md.isTrusted = false;
   md.supportThemeIcons = true;
   const alias = hb.alias || idleAlias;
-  md.appendMarkdown(`**${alias}** — calling\n\n`);
+  md.appendMarkdown(`**${alias}** - calling\n\n`);
   if (retention) md.appendMarkdown(`Retention: ${retentionPhrase(retention)}\n\n`);
   if (hb.model) md.appendMarkdown(`Model: \`${hb.model}\`\n\n`);
   const phaseTrace = hb.phaseTrace || [];
@@ -181,7 +181,7 @@ function buildLiveTooltip(
     md.appendMarkdown(`**Phase trace**\n\n`);
     for (const p of phaseTrace) {
       const elapsed = `${(p.elapsedMs / 1000).toFixed(1)}s`;
-      const summary = p.summary ? ` — *${p.summary.replace(/\*/g, "")}*` : "";
+      const summary = p.summary ? ` - *${p.summary.replace(/\*/g, "")}*` : "";
       md.appendMarkdown(`- \`${p.phase.padEnd(11)}\` ${elapsed}${summary}\n`);
     }
     md.appendMarkdown(`\n`);
@@ -206,7 +206,7 @@ function buildIdleTooltip(
   const md = new vscode.MarkdownString();
   md.isTrusted = false;
   md.supportThemeIcons = true;
-  md.appendMarkdown(`**${idleAlias}** — idle\n\n`);
+  md.appendMarkdown(`**${idleAlias}** - idle\n\n`);
   if (needsKey) {
     md.appendMarkdown(`Needs API key. Click for menu -> OpenCode Zen API Key.\n\n`);
   }

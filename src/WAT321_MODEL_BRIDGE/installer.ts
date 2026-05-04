@@ -133,12 +133,11 @@ export async function isClaudeAvailable(): Promise<boolean> {
   return result.code === 0;
 }
 
-/** Sweep any legacy MCP entry left over from an older WAT321 build
- * (the v1.3.0 pre-release used `wat321-local-llm`). Best-effort -
- * non-zero exits are normal when the entry was never registered or
- * already removed. Always runs before the new entry is added so the
- * user never ends up with both registrations advertising overlapping
- * tools. */
+/** Sweep any legacy MCP entry from `LEGACY_MCP_SERVER_NAMES` so the
+ * user never ends up with both an old-named and new-named registration
+ * advertising overlapping tools. Best-effort - non-zero exits are
+ * normal when the entry was never registered or already removed.
+ * Always runs before the new entry is added. */
 async function sweepLegacyMcpEntries(logger: ModelBridgeLogger): Promise<void> {
   for (const legacyName of LEGACY_MCP_SERVER_NAMES) {
     const result = await runClaudeCli(["mcp", "remove", "-s", "user", legacyName]);

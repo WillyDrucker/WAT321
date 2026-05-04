@@ -49,9 +49,11 @@ export const SESSIONS_DIR = join(MODEL_BRIDGE_DIR, "sessions");
  * stepping on each other's tool registrations. */
 export const MCP_SERVER_NAME = "wat321-model-bridge";
 
-/** Legacy MCP server name from v1.3.0 pre-release. The installer
- * sweeps any leftover entry on activate so test-instance users who
- * tried the older shape don't end up with a stale registration. */
+/** Legacy MCP server names this tier should sweep from
+ * `~/.claude/settings.json` on every install. The current registration
+ * is `wat321-model-bridge`; any stale earlier-named entry pointing at
+ * the same channel.mjs path is removed before the new add to keep the
+ * user's allow-list and registration table clean. */
 export const LEGACY_MCP_SERVER_NAMES = ["wat321-local-llm"] as const;
 
 /** Bundled MCP server script. Extracted to BIN_DIR on enable; Claude
