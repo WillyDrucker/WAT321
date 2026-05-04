@@ -1,17 +1,10 @@
 import { spawn } from "node:child_process";
-import {
-  copyFileSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-} from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type * as vscode from "vscode";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { atomicCopy } from "../shared/fs/atomicCopy";
+import { copyProdModules } from "../shared/mcp/copyProdModules";
+import { preAllowMcpTools, unAllowMcpTools } from "../shared/mcp/preAllowTools";
 import { BIN_DIR, EPIC_HANDSHAKE_DIR } from "./constants";
 import type { EpicHandshakeLogger } from "./types";
 
@@ -98,25 +91,6 @@ export function extractChannelScript(context: vscode.ExtensionContext): string {
   return INSTALLED_SCRIPT_PATH;
 }
 
-/** Copy a file via temp + rename so an in-flight reader (e.g. Claude
- * Code spawning `node <target>` while we overwrite) cannot observe a
- * torn copy. Same atomic-write contract as `shared/fs/atomicWrite.ts`,
- * scoped to a copy operation. */
-function atomicCopy(source: string, target: string): void {
-  const tmp = `${target}.tmp`;
-  copyFileSync(source, tmp);
-  try {
-    renameSync(tmp, target);
-  } catch (err) {
-    try {
-      if (existsSync(tmp)) unlinkSync(tmp);
-    } catch {
-      // best-effort
-    }
-    throw err;
-  }
-}
-
 /** Run `claude mcp add <name> -- <command> <args...>`. Returns the
  * process's exit code and captured stderr for diagnostics. */
 function runClaudeCli(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -142,165 +116,15 @@ function runClaudeCli(args: string[]): Promise<{ code: number; stdout: string; s
   });
 }
 
-/** Copy only the runtime (non-dev) packages from the extension's
- * `node_modules` into `~/.wat321/epic-handshake/bin/node_modules/`
- * so the channel.mjs subprocess can resolve its deps without
- * dragging in the dev-only footprint (eslint / typescript / etc.).
- *
- * Reads the bundled `out/WAT321_EPIC_HANDSHAKE/prod-modules.json`
- * manifest emitted at build time from `package-lock.json`. This
- * keeps the runtime free of any dependency on a shipped lockfile
- * and avoids bundling the full lockfile metadata into the VSIX. */
-function copyMcpSdk(context: vscode.ExtensionContext, logger: EpicHandshakeLogger): void {
-  const manifestPath = join(
-    context.extensionPath,
-    "out",
-    "WAT321_EPIC_HANDSHAKE",
-    "prod-modules.json"
-  );
-  if (!existsSync(manifestPath)) {
-    logger.warn(`prod-modules.json not found at ${manifestPath}; channel may fail to import`);
-    return;
-  }
-  let prodKeys: string[];
-  try {
-    prodKeys = JSON.parse(readFileSync(manifestPath, "utf8")) as string[];
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error(`prod-modules.json parse failed: ${msg}`);
-    return;
-  }
-
-  let copied = 0;
-  for (const key of prodKeys) {
-    const srcPath = join(context.extensionPath, key);
-    const dstPath = join(BIN_DIR, key);
-    if (!existsSync(srcPath)) continue;
-    try {
-      mkdirSync(dirname(dstPath), { recursive: true });
-      cpSync(srcPath, dstPath, { recursive: true, force: true });
-      copied++;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`copy failed for ${key}: ${msg}`);
-    }
-  }
-  logger.info(`node_modules copy complete: ${copied} prod packages copied`);
-}
-
-/** Path to Claude Code's user-level settings file. We write to
- * `permissions.allow` here so the bridge MCP tools never trip the
- * "Do you want to proceed with mcp__wat321__epic_handshake_ask?"
- * prompt - WAT321 just installed the server, asking the user to
- * re-authorize each tool would be redundant and confusing. */
-const CLAUDE_SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
-
 /** Tool names the bridge needs Claude Code to invoke without prompt.
  * Both names are stable across Codex versions and the MCP SDK
- * (`mcp__<server>__<tool>` form). Adding to `permissions.allow`
- * skips the per-tool prompt for ONLY these two; every other tool
- * still goes through the normal permission gate. */
+ * (`mcp__<server>__<tool>` form). Adding to `permissions.allow` via
+ * `preAllowMcpTools` skips the per-tool prompt for ONLY these two;
+ * every other tool still goes through the normal permission gate. */
 const BRIDGE_ALLOWED_TOOLS = [
   "mcp__wat321__epic_handshake_ask",
   "mcp__wat321__epic_handshake_inbox",
 ] as const;
-
-interface ClaudeSettings {
-  permissions?: {
-    allow?: string[];
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-}
-
-/** Pre-allow the two bridge MCP tools in Claude Code's user-level
- * settings so the user never sees the per-tool permission prompt
- * for tools we just installed. Idempotent - already-present entries
- * are skipped. Best-effort - parse failure (the file may be JSONC
- * with comments that our plain JSON.parse rejects) downgrades to a
- * log line and the user falls back to the standard "allow for this
- * project" dialog click on first dispatch. */
-function preAllowBridgeTools(logger: EpicHandshakeLogger): void {
-  let settings: ClaudeSettings = {};
-  if (existsSync(CLAUDE_SETTINGS_PATH)) {
-    try {
-      settings = JSON.parse(
-        readFileSync(CLAUDE_SETTINGS_PATH, "utf8")
-      ) as ClaudeSettings;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        `~/.claude/settings.json parse skipped (${msg}); user will see one-time permission prompt on first bridge call`
-      );
-      return;
-    }
-  }
-
-  if (!settings.permissions) settings.permissions = {};
-  if (!Array.isArray(settings.permissions.allow)) settings.permissions.allow = [];
-
-  let added = 0;
-  for (const tool of BRIDGE_ALLOWED_TOOLS) {
-    if (!settings.permissions.allow.includes(tool)) {
-      settings.permissions.allow.push(tool);
-      added++;
-    }
-  }
-  if (added === 0) return;
-
-  try {
-    mkdirSync(dirname(CLAUDE_SETTINGS_PATH), { recursive: true });
-    const ok = writeFileAtomic(
-      CLAUDE_SETTINGS_PATH,
-      `${JSON.stringify(settings, null, 2)}\n`
-    );
-    if (ok) {
-      logger.info(
-        `pre-allowed ${added} bridge MCP tool(s) in ~/.claude/settings.json`
-      );
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`~/.claude/settings.json write skipped (${msg})`);
-  }
-}
-
-/** Reverse of preAllowBridgeTools - remove the two entries we added.
- * Called from uninstallChannel + Reset WAT321 so disabling the bridge
- * leaves the user's allowlist exactly as it was. Best-effort. */
-function unAllowBridgeTools(logger: EpicHandshakeLogger): void {
-  if (!existsSync(CLAUDE_SETTINGS_PATH)) return;
-  let settings: ClaudeSettings;
-  try {
-    settings = JSON.parse(
-      readFileSync(CLAUDE_SETTINGS_PATH, "utf8")
-    ) as ClaudeSettings;
-  } catch {
-    return;
-  }
-  const allow = settings.permissions?.allow;
-  if (!Array.isArray(allow)) return;
-  const before = allow.length;
-  const filtered = allow.filter(
-    (t): t is string =>
-      typeof t === "string" &&
-      !(BRIDGE_ALLOWED_TOOLS as readonly string[]).includes(t)
-  );
-  if (filtered.length === before) return;
-  if (settings.permissions === undefined) return;
-  settings.permissions.allow = filtered;
-  try {
-    writeFileAtomic(
-      CLAUDE_SETTINGS_PATH,
-      `${JSON.stringify(settings, null, 2)}\n`
-    );
-    logger.info(
-      `removed ${before - filtered.length} bridge MCP tool entry/entries from ~/.claude/settings.json`
-    );
-  } catch {
-    // best-effort
-  }
-}
 
 /** Register `wat321` as an MCP server with Claude Code, pointing at
  * the extracted channel.mjs. Idempotent: re-running replaces the
@@ -315,7 +139,7 @@ export async function installChannel(
   try {
     scriptPath = extractChannelScript(context);
     logger.info(`channel script extracted to ${scriptPath}`);
-    copyMcpSdk(context, logger);
+    copyProdModules(context, BIN_DIR, logger);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, scriptPath: INSTALLED_SCRIPT_PATH, error: msg };
@@ -344,7 +168,7 @@ export async function installChannel(
     return { ok: false, scriptPath, error: msg };
   }
   logger.info("claude mcp add wat321 succeeded");
-  preAllowBridgeTools(logger);
+  preAllowMcpTools(BRIDGE_ALLOWED_TOOLS, logger);
   return { ok: true, scriptPath };
 }
 
@@ -358,7 +182,7 @@ export async function uninstallChannel(logger: EpicHandshakeLogger): Promise<voi
   } else {
     logger.warn(`claude mcp remove returned code ${res.code}: ${res.stderr.trim()}`);
   }
-  unAllowBridgeTools(logger);
+  unAllowMcpTools(BRIDGE_ALLOWED_TOOLS, logger);
 }
 
 /** Detect whether `claude` CLI is on PATH and reachable. Returns
