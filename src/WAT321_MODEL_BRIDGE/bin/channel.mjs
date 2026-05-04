@@ -120,6 +120,12 @@ function log(level, msg) {
 
 function writeJsonAtomic(targetPath, payload) {
   try {
+    // Reset WAT321 wipes ~/.wat321/, and a sibling Claude session
+    // calling from a never-before-seen workspace can hit a missing
+    // subdir on first write. Defensive recreate - cheap and always
+    // safe within our own dir tree.
+    const dir = join(targetPath, "..");
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const tmp = `${targetPath}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(payload)}\n`);
     renameSync(tmp, targetPath);

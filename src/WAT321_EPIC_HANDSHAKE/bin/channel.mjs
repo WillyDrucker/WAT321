@@ -39,7 +39,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
 const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
@@ -710,6 +710,14 @@ function parseEnvelope(raw) {
 }
 
 function writeAtomic(path, content) {
+  // Defensive: Reset WAT321 wipes ~/.wat321/, so a sibling Claude
+  // session calling the bridge from a never-before-seen workspace
+  // hits a missing inbox subdir on its first dispatch. Recreate the
+  // parent on every write rather than assuming it exists - mkdir
+  // recursive is cheap and the path always lives under our own dir
+  // tree.
+  const dir = dirname(path);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, content, "utf8");
   renameSync(tmp, path);
