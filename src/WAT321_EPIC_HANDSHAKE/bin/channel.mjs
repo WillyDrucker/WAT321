@@ -61,8 +61,17 @@ const ATTACHMENTS_TTL_MS = 5 * 60 * 1000;
 /** Threshold beyond which an in-flight turn with no heartbeat updates
  * is treated as stuck. The bridge auto-aborts and writes a synthetic
  * "stale heartbeat" reply into the inbox so the next prompt or inbox
- * check surfaces the failure instead of polling forever. Issue #61. */
-const STALE_HEARTBEAT_MS = 10 * 60 * 1000;
+ * check surfaces the failure instead of polling forever. Issue #61.
+ *
+ * 7 minutes balances "long enough for a legitimate slow Codex run that
+ * paused on a single tool call" against "short enough that a genuinely
+ * stuck turn surfaces actionable failure quickly". Original 10 minutes
+ * felt sluggish during the bridge severance debugging session in #69 -
+ * the operator was waiting that full window before concluding the
+ * bridge was hung. Sub-7-minute Codex turns rarely stall on a single
+ * tool boundary; if a real run hits this, restart-bridge is the
+ * recovery and the next dispatch starts fresh. */
+const STALE_HEARTBEAT_MS = 7 * 60 * 1000;
 
 /** Per-workspace identity. Mirrors `src/WAT321_EPIC_HANDSHAKE/
  * workspaceHash.ts` so envelopes written here land in the same
@@ -716,7 +725,10 @@ function reportInFlightOrAbortStale() {
       ``,
       `The previous Claude to Codex turn (envelope ${envelopeId}) stalled in stage \`${stage}\` with no heartbeat updates for ~${minutes} minute(s). The bridge has cleaned up the stuck state so the next prompt starts fresh.`,
       ``,
-      `If this happens repeatedly on long-running Codex tasks, consider switching to Fire-and-Forget mode via the Epic Handshake menu so Claude returns immediately and replies land in the inbox when ready.`,
+      `Recovery options:`,
+      `- Re-dispatch the same prompt; the next turn starts on a clean state.`,
+      `- If retries keep stalling, pick "Restart Codex Bridge" from the Epic Handshake menu to force-kill the codex app-server child and spawn a fresh one.`,
+      `- For long-running Codex tasks (multi-minute scrapes, large audits), switching to Fire-and-Forget mode lets Claude return immediately and the reply lands in the inbox when ready.`,
     ].join("\n");
     const envelope = buildEnvelope({
       id: abortId,

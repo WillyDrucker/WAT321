@@ -5,6 +5,11 @@ import type { EventHub } from "../engine/eventHub";
 import { registerHealthSection } from "../engine/healthCommand";
 import { SETTING } from "../engine/settingsKeys";
 import {
+  peekResolvedClaudeCli,
+  peekResolvedCodexCli,
+  type ResolvedCli,
+} from "../shared/mcp/cliBinaryResolver";
+import {
   setBridgeActiveProbe,
   setRecentCodexCompletionConsumer,
 } from "../engine/toastNotifier";
@@ -561,6 +566,21 @@ export function appendEpicHandshakeHealth(lines: string[]): void {
   lines.push("-".repeat(30));
   lines.push(`  enabled: ${enabled}`);
   lines.push("  architecture: sync MCP bridge (Claude -> Codex forward direction)");
+
+  // CLI binary resolution surface. Helps the user diagnose "where is
+  // my claude/codex coming from?" - especially relevant now that the
+  // bridge can fall back to the marketplace extension's bundled binary
+  // when nothing is on PATH. peek* returns undefined when no probe has
+  // run yet (rare in practice; isClaudeAvailable runs at activate).
+  const claude = peekResolvedClaudeCli();
+  const codex = peekResolvedCodexCli();
+  const renderResolved = (label: string, r: ResolvedCli | null | undefined): string => {
+    if (r === undefined) return `  ${label}: not yet probed`;
+    if (r === null) return `  ${label}: not found (install Marketplace extension or standalone CLI)`;
+    return `  ${label}: ${r.source} (${r.command})`;
+  };
+  lines.push(renderResolved("claude CLI", claude));
+  lines.push(renderResolved("codex CLI ", codex));
 
   if (!enabled) return;
 

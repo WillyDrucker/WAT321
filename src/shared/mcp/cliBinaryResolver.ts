@@ -132,3 +132,16 @@ export function resetCliResolverCache(): void {
   claudeCache = undefined;
   codexCache = undefined;
 }
+
+/** Sync read of the cached resolution state. Returns:
+ *   - The ResolvedCli when resolution succeeded
+ *   - null when probing ran and found nothing
+ *   - undefined when no probe has run yet
+ * Useful for surfaces (health command, status bar) that need to render
+ * the current state without triggering a new probe. */
+export function peekResolvedClaudeCli(): ResolvedCli | null | undefined {
+  return claudeCache;
+}
+export function peekResolvedCodexCli(): ResolvedCli | null | undefined {
+  return codexCache;
+}
