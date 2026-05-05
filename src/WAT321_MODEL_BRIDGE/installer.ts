@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type * as vscode from "vscode";
 import { atomicCopy } from "../shared/fs/atomicCopy";
+import { resolveClaudeCli } from "../shared/mcp/cliBinaryResolver";
 import { copyProdModules } from "../shared/mcp/copyProdModules";
 import { preAllowMcpTools, unAllowMcpTools } from "../shared/mcp/preAllowTools";
 import {
@@ -90,21 +91,30 @@ export function extractChannelScript(context: vscode.ExtensionContext): string {
   return INSTALLED_SCRIPT_PATH;
 }
 
-/** Run `claude mcp <subcommand> ...`. Same pattern as the Epic
- * Handshake installer - shells out on Windows because the `claude`
- * binary is a `.cmd` shim that can't be exec'd directly. Returns
- * exit code + captured streams for diagnostics. */
-function runClaudeCli(args: string[]): Promise<{
+/** Run `claude mcp <subcommand> ...`. Resolves the Claude binary
+ * path via `resolveClaudeCli` so users with only the Claude Code VS
+ * Code extension (no global CLI install) hit the extension-bundled
+ * binary instead of failing on a PATH miss. The `needsShell` hint
+ * from the resolver is honored: bare command names need shell on
+ * Windows for .cmd shims; absolute paths to .exe spawn directly. */
+async function runClaudeCli(args: string[]): Promise<{
   code: number;
   stdout: string;
   stderr: string;
 }> {
+  const resolved = await resolveClaudeCli();
+  if (resolved === null) {
+    return {
+      code: -1,
+      stdout: "",
+      stderr: "claude CLI not found on PATH or in the Claude Code VS Code extension",
+    };
+  }
   return new Promise((resolve) => {
-    const useShell = process.platform === "win32";
-    const child = spawn("claude", args, {
+    const child = spawn(resolved.command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      shell: useShell,
+      shell: resolved.needsShell,
     });
     let stdout = "";
     let stderr = "";
@@ -125,12 +135,10 @@ function runClaudeCli(args: string[]): Promise<{
   });
 }
 
-/** Probe for `claude` CLI availability. Same predicate as Epic
- * Handshake's installer; duplicated so the Model Bridge tier can
- * decide independently whether to attempt registration. */
+/** Probe for `claude` CLI availability. Resolves via PATH first,
+ * then via the Claude Code VS Code extension's bundled binary. */
 export async function isClaudeAvailable(): Promise<boolean> {
-  const result = await runClaudeCli(["--version"]);
-  return result.code === 0;
+  return (await resolveClaudeCli()) !== null;
 }
 
 /** Sweep any legacy MCP entry from `LEGACY_MCP_SERVER_NAMES` so the

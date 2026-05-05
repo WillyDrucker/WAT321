@@ -3,6 +3,10 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type * as vscode from "vscode";
 import { atomicCopy } from "../shared/fs/atomicCopy";
+import {
+  resolveClaudeCli,
+  resolveCodexCli,
+} from "../shared/mcp/cliBinaryResolver";
 import { copyProdModules } from "../shared/mcp/copyProdModules";
 import { preAllowMcpTools, unAllowMcpTools } from "../shared/mcp/preAllowTools";
 import { BIN_DIR, EPIC_HANDSHAKE_DIR } from "./constants";
@@ -92,14 +96,24 @@ export function extractChannelScript(context: vscode.ExtensionContext): string {
 }
 
 /** Run `claude mcp add <name> -- <command> <args...>`. Returns the
- * process's exit code and captured stderr for diagnostics. */
-function runClaudeCli(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+ * process's exit code and captured stderr for diagnostics. Resolves
+ * the Claude binary path via `resolveClaudeCli` so users with only
+ * the Claude Code VS Code extension (no global CLI install) hit the
+ * extension-bundled binary instead of failing on a PATH miss. */
+async function runClaudeCli(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  const resolved = await resolveClaudeCli();
+  if (resolved === null) {
+    return {
+      code: -1,
+      stdout: "",
+      stderr: "claude CLI not found on PATH or in the Claude Code VS Code extension",
+    };
+  }
   return new Promise((resolve) => {
-    const useShell = process.platform === "win32";
-    const child = spawn("claude", args, {
+    const child = spawn(resolved.command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      shell: useShell,
+      shell: resolved.needsShell,
     });
     let stdout = "";
     let stderr = "";
@@ -185,29 +199,17 @@ export async function uninstallChannel(logger: EpicHandshakeLogger): Promise<voi
   unAllowMcpTools(BRIDGE_ALLOWED_TOOLS, logger);
 }
 
-/** Detect whether `claude` CLI is on PATH and reachable. Returns
- * true if a version check succeeds. */
+/** Detect whether `claude` CLI is reachable via PATH or via the
+ * Claude Code VS Code extension's bundled binary. Returns true when
+ * either source resolves to a working binary. */
 export async function isClaudeAvailable(): Promise<boolean> {
-  const res = await runClaudeCli(["--version"]);
-  return res.code === 0;
+  return (await resolveClaudeCli()) !== null;
 }
 
-/** Detect whether `codex` CLI is on PATH and reachable. Mirror of
- * `isClaudeAvailable` - the bridge spawns `codex app-server` as a
- * child process, so a missing binary breaks every dispatch. We check
- * before installChannel runs so users without Codex CLI never get
- * MCP registration / permissions.allow entries / channel.mjs extracted.
- * Codex CLI is independent from the Codex VS Code extension; users
- * can have one without the other. The CLI is what matters here. */
+/** Detect whether `codex` CLI is reachable via PATH or via the OpenAI
+ * Codex VS Code extension's bundled binary. We check before
+ * installChannel runs so users without either source never get MCP
+ * registration / permissions.allow entries / channel.mjs extracted. */
 export async function isCodexAvailable(): Promise<boolean> {
-  const useShell = process.platform === "win32";
-  return new Promise((resolve) => {
-    const child = spawn("codex", ["--version"], {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      shell: useShell,
-    });
-    child.on("error", () => resolve(false));
-    child.on("exit", (code) => resolve(code === 0));
-  });
+  return (await resolveCodexCli()) !== null;
 }

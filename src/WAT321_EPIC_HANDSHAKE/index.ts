@@ -418,7 +418,7 @@ class EpicHandshakeTier {
         const claudeAvailable = await isClaudeAvailable();
         if (!claudeAvailable) {
           await this.unflipAndWarn(
-            "Epic Handshake needs the Claude Code CLI on your PATH. Install Claude Code (claude.ai/code) and re-enable when ready."
+            "Epic Handshake needs the Claude Code CLI. Either install the Claude Code VS Code extension from the Marketplace, or install the standalone CLI (claude.ai/code), then re-enable."
           );
           return;
         }
@@ -427,7 +427,7 @@ class EpicHandshakeTier {
         const codexAvailable = await isCodexAvailable();
         if (!codexAvailable) {
           await this.unflipAndWarn(
-            "Epic Handshake needs the Codex CLI on your PATH. Install Codex and re-enable when ready."
+            "Epic Handshake needs the Codex CLI. Either install the OpenAI Codex VS Code extension from the Marketplace, or install the standalone CLI, then re-enable."
           );
           return;
         }

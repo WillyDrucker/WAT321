@@ -163,7 +163,7 @@ async function reconcileInstall(
 ): Promise<void> {
   if (!(await isClaudeAvailable())) {
     logger.info(
-      "Claude CLI not found in PATH; deferring MCP registration until Claude Code is installed."
+      "Claude CLI not found on PATH or in the Claude Code VS Code extension; deferring MCP registration until Claude Code is installed."
     );
     return;
   }
