@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.2.12",
+  "version": "1.3.0",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -77,6 +77,22 @@
       {
         "command": "wat321.epicHandshake.restartCodexBridge",
         "title": "WAT321: Epic Handshake - Restart Codex Bridge"
+      },
+      {
+        "command": "wat321.modelBridge.show",
+        "title": "WAT321: Model Bridge - Show Output"
+      },
+      {
+        "command": "wat321.modelBridge.menu",
+        "title": "WAT321: Model Bridge - Menu"
+      },
+      {
+        "command": "wat321.modelBridge.setZenApiKey",
+        "title": "WAT321: Model Bridge - Set OpenCode Zen API Key"
+      },
+      {
+        "command": "wat321.modelBridge.clearZenApiKey",
+        "title": "WAT321: Model Bridge - Clear OpenCode Zen API Key"
       }
     ],
     "icons": {
@@ -324,21 +340,26 @@
             "scope": "application",
             "order": 4,
             "markdownDescription": "Suppress Codex completion notifications while the Epic Handshake bridge is active. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
-          },
-          "wat321.epicHandshake.defaultWaitMode": {
-            "type": "string",
-            "default": "Adaptive",
+          }
+        }
+      },
+      {
+        "title": "Model Bridge (Local + Cloud LLMs for Claude)",
+        "order": 6,
+        "properties": {
+          "wat321.modelBridge.enabled": {
+            "type": "boolean",
+            "default": false,
             "scope": "application",
-            "enum": [
-              "Adaptive",
-              "Fire-and-Forget"
-            ],
-            "enumDescriptions": [
-              "Claude waits while Codex is demonstrably working. Heartbeat-driven, cuts on stall.",
-              "Claude's tool returns immediately. Reply lands in the inbox when ready."
-            ],
-            "order": 5,
-            "markdownDescription": "Starting wait mode after a VS Code restart. The Epic Handshake menu toggles between Adaptive and Fire-and-Forget live; this setting picks the baseline that restores on activate."
+            "order": 1,
+            "markdownDescription": "**Enable the Model Bridge** - Wires Claude up to either a local OpenAI-compatible LLM (llama.cpp, Ollama, vLLM, LM Studio) or one of OpenCode Zen's free routes (Big Pickle, GPT 5 Nano, Ling, Hy3, Nemotron, MiniMax M2.5). Click the **Model Bridge** status-bar widget after enabling to pick the active instance, set the OpenCode Zen API key (only needed for cloud instances), tune sampling, and configure the OpenCode harness."
+          },
+          "wat321.modelBridge.localEndpoint": {
+            "type": "string",
+            "default": "http://10.0.0.91:8080",
+            "scope": "application",
+            "order": 2,
+            "markdownDescription": "Base URL for your local LLM server (e.g. `http://10.0.0.91:8080` for a llama.cpp `--jinja` server on the LAN, `http://localhost:11434` for Ollama). The bridge appends `/v1/chat/completions` per call. Whichever model is loaded on that server is what the `Local LLM` instance answers with - swap models freely via the LLMs desktop shortcuts; WAT321 auto-follows."
           }
         }
       },
@@ -360,15 +381,16 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "lint": "eslint src/",
-    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');const srcDir=p.join('src','WAT321_EPIC_HANDSHAKE','bin');const dstDir=p.join('out','WAT321_EPIC_HANDSHAKE','bin');fs.mkdirSync(dstDir,{recursive:true});for(const f of ['channel.mjs','stage-clipboard.mjs']){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}\"",
-    "emit-prod-modules-manifest": "node -e \"const fs=require('fs');const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));const prod=Object.entries(lock.packages||{}).filter(([k,m])=>k.startsWith('node_modules/')&&m.dev!==true).map(([k])=>k);fs.mkdirSync('out/WAT321_EPIC_HANDSHAKE',{recursive:true});fs.writeFileSync('out/WAT321_EPIC_HANDSHAKE/prod-modules.json',JSON.stringify(prod,null,2));console.log('prod-modules manifest:',prod.length,'entries');\"",
+    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');function copy(srcDir,dstDir,files){fs.mkdirSync(dstDir,{recursive:true});for(const f of files){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}}copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin'),p.join('out','WAT321_EPIC_HANDSHAKE','bin'),['channel.mjs','stage-clipboard.mjs']);copy(p.join('src','WAT321_MODEL_BRIDGE','bin'),p.join('out','WAT321_MODEL_BRIDGE','bin'),['channel.mjs']);\"",
+    "emit-prod-modules-manifest": "node -e \"const fs=require('fs');const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));const prod=Object.entries(lock.packages||{}).filter(([k,m])=>k.startsWith('node_modules/')&&m.dev!==true).map(([k])=>k);fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/prod-modules.json',JSON.stringify(prod,null,2));console.log('prod-modules manifest:',prod.length,'entries');\"",
     "icons": "node scripts/buildIcons.mjs",
     "build": "npm run clean && npm run lint && tsc && npm run copy-assets && npm run emit-prod-modules-manifest",
     "watch": "tsc -w",
     "package": "npm run build && npm prune --omit=dev && npx vsce package && npm install"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "undici": "^8.2.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

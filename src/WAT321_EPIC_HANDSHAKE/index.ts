@@ -5,6 +5,11 @@ import type { EventHub } from "../engine/eventHub";
 import { registerHealthSection } from "../engine/healthCommand";
 import { SETTING } from "../engine/settingsKeys";
 import {
+  peekResolvedClaudeCli,
+  peekResolvedCodexCli,
+  type ResolvedCli,
+} from "../shared/mcp/cliBinaryResolver";
+import {
   setBridgeActiveProbe,
   setRecentCodexCompletionConsumer,
 } from "../engine/toastNotifier";
@@ -179,6 +184,17 @@ class EpicHandshakeTier {
       } else {
         void this.startEnabled();
       }
+    } else {
+      // Activate-time reconciliation when disabled. A sibling VS Code
+      // instance running with EH enabled writes a user-scope MCP entry
+      // into ~/.claude.json; that entry is global and persists across
+      // VS Code restarts. Without this blind uninstall an instance
+      // that has EH disabled in its own settings would still see the
+      // bridge tools advertised on every Claude session, paying the
+      // catalog token cost for a feature it never opted into. The
+      // CLI call is idempotent and best-effort - cheap when nothing is
+      // registered, no-op if Claude CLI is missing.
+      void uninstallChannel(this.logger);
     }
     this.applyDefaultWaitModeSetting();
   }
@@ -407,7 +423,7 @@ class EpicHandshakeTier {
         const claudeAvailable = await isClaudeAvailable();
         if (!claudeAvailable) {
           await this.unflipAndWarn(
-            "Epic Handshake needs the Claude Code CLI on your PATH. Install Claude Code (claude.ai/code) and re-enable when ready."
+            "Epic Handshake needs the Claude Code CLI. Either install the Claude Code VS Code extension from the Marketplace, or install the standalone CLI (claude.ai/code), then re-enable."
           );
           return;
         }
@@ -416,7 +432,7 @@ class EpicHandshakeTier {
         const codexAvailable = await isCodexAvailable();
         if (!codexAvailable) {
           await this.unflipAndWarn(
-            "Epic Handshake needs the Codex CLI on your PATH. Install Codex and re-enable when ready."
+            "Epic Handshake needs the Codex CLI. Either install the OpenAI Codex VS Code extension from the Marketplace, or install the standalone CLI, then re-enable."
           );
           return;
         }
@@ -550,6 +566,21 @@ export function appendEpicHandshakeHealth(lines: string[]): void {
   lines.push("-".repeat(30));
   lines.push(`  enabled: ${enabled}`);
   lines.push("  architecture: sync MCP bridge (Claude -> Codex forward direction)");
+
+  // CLI binary resolution surface. Helps the user diagnose "where is
+  // my claude/codex coming from?" - especially relevant now that the
+  // bridge can fall back to the marketplace extension's bundled binary
+  // when nothing is on PATH. peek* returns undefined when no probe has
+  // run yet (rare in practice; isClaudeAvailable runs at activate).
+  const claude = peekResolvedClaudeCli();
+  const codex = peekResolvedCodexCli();
+  const renderResolved = (label: string, r: ResolvedCli | null | undefined): string => {
+    if (r === undefined) return `  ${label}: not yet probed`;
+    if (r === null) return `  ${label}: not found (install Marketplace extension or standalone CLI)`;
+    return `  ${label}: ${r.source} (${r.command})`;
+  };
+  lines.push(renderResolved("claude CLI", claude));
+  lines.push(renderResolved("codex CLI ", codex));
 
   if (!enabled) return;
 

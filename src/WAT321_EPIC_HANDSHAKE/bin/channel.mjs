@@ -39,7 +39,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
 const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
@@ -61,8 +61,17 @@ const ATTACHMENTS_TTL_MS = 5 * 60 * 1000;
 /** Threshold beyond which an in-flight turn with no heartbeat updates
  * is treated as stuck. The bridge auto-aborts and writes a synthetic
  * "stale heartbeat" reply into the inbox so the next prompt or inbox
- * check surfaces the failure instead of polling forever. Issue #61. */
-const STALE_HEARTBEAT_MS = 10 * 60 * 1000;
+ * check surfaces the failure instead of polling forever. Issue #61.
+ *
+ * 7 minutes balances "long enough for a legitimate slow Codex run that
+ * paused on a single tool call" against "short enough that a genuinely
+ * stuck turn surfaces actionable failure quickly". Original 10 minutes
+ * felt sluggish during the bridge severance debugging session in #69 -
+ * the operator was waiting that full window before concluding the
+ * bridge was hung. Sub-7-minute Codex turns rarely stall on a single
+ * tool boundary; if a real run hits this, restart-bridge is the
+ * recovery and the next dispatch starts fresh. */
+const STALE_HEARTBEAT_MS = 7 * 60 * 1000;
 
 /** Per-workspace identity. Mirrors `src/WAT321_EPIC_HANDSHAKE/
  * workspaceHash.ts` so envelopes written here land in the same
@@ -263,10 +272,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       inFlightLine = reportInFlightOrAbortStale();
       preamble = collectLateReplies();
     }
-    const text = preamble
+    // Queue summary: pending dispatched envelopes, our SESSION's late
+    // replies still on disk, dispatcher state. Surfacing this in the
+    // inbox response lets Claude (and the user) see when the bridge
+    // is busy or backed up rather than guessing from a single empty
+    // result.
+    const queueLine = formatQueueSummary();
+    const baseText = preamble
       ? preamble
       : inFlightLine ||
         "No pending replies from Codex. The Epic Handshake inbox is empty.";
+    const text = queueLine ? `${baseText}\n\n${queueLine}` : baseText;
     log(
       "info",
       `inbox tool invoked; ${
@@ -277,6 +293,46 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
   if (req.params.name !== "epic_handshake_ask") {
     throw new Error(`unknown tool: ${req.params.name}`);
+  }
+
+  // Schema validation up front. Claude Code occasionally forwards
+  // arguments under the wrong key (e.g. `prompt` from the Model Bridge
+  // tool's schema), or omits `text` entirely. Without validation the
+  // bridge would dispatch an empty envelope, wait the full timeout,
+  // and surface a generic "no reply" failure that masks the real
+  // problem (the call never had a body). Reject fast with a specific
+  // message so the caller can correct the next attempt instead of
+  // burning budget on a doomed dispatch.
+  const validateArgs = (rawArgs) => {
+    const args = rawArgs || {};
+    if (typeof args.text !== "string" || args.text.trim().length === 0) {
+      // Use `'prompt' in args` rather than `args.prompt` so an empty
+      // string still surfaces the alias hint - the caller passed the
+      // wrong key with whatever value, the body content is irrelevant
+      // to diagnosing the schema mistake.
+      if ("prompt" in args) {
+        return "Expected a non-empty `text` argument. Received `prompt`; resend using `text` for Epic Handshake. (The Model Bridge tool uses `prompt`; double-check which bridge you intended.)";
+      }
+      const otherKeys = Object.keys(args).filter((k) => k !== "text" && k !== "timeout_sec");
+      if (otherKeys.length > 0) {
+        return `Expected a non-empty \`text\` argument. Received unrecognized keys: ${otherKeys.join(", ")}. This tool only accepts \`text\` and \`timeout_sec\`.`;
+      }
+      return "Expected a non-empty `text` argument.";
+    }
+    if (
+      args.timeout_sec !== undefined &&
+      (typeof args.timeout_sec !== "number" || !Number.isFinite(args.timeout_sec))
+    ) {
+      return `Expected \`timeout_sec\` as a finite number of seconds (e.g. 120). Received: ${JSON.stringify(args.timeout_sec)}.`;
+    }
+    return null;
+  };
+  const schemaError = validateArgs(req.params.arguments);
+  if (schemaError !== null) {
+    log("warn", `schema validation rejected dispatch: ${schemaError}`);
+    return {
+      content: [{ type: "text", text: schemaError }],
+    };
   }
 
   // Pause check: file-based sentinel written by the VS Code status
@@ -418,7 +474,36 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (replyContent === null) {
     const elapsedMs = Date.now() - startedAt;
     log("warn", `timeout on codex/${id} after ${elapsedMs}ms (adaptive=${adaptive})`);
-    const timeoutMsg = `Claude to Codex prompt timed out after ${Math.round(elapsedMs / 1000)}s. No reply received yet.`;
+    // Final-tick rescue: look for THIS prompt's exact reply that may
+    // have landed between our last poll and now. Must check by id
+    // before falling back to late-reply collection - otherwise an
+    // unrelated old reply that crossed the late-reply threshold mid-
+    // wait would be returned as if it were our prompt's answer.
+    const finalMatch = findReplyEnvelope(id);
+    if (finalMatch !== null) {
+      try {
+        renameSync(
+          join(INBOX_CLAUDE, finalMatch.filename),
+          join(SENT_CLAUDE, finalMatch.filename)
+        );
+      } catch {
+        // best-effort
+      }
+      log("info", `final-tick rescue: reply for codex/${id} landed before timeout returned`);
+      return {
+        content: [
+          {
+            type: "text",
+            text: latePreamble
+              ? `${latePreamble}\n\n---\n\n${finalMatch.body}`
+              : finalMatch.body,
+          },
+        ],
+      };
+    }
+    const queueLine = formatQueueSummary();
+    const timeoutBody = `Claude to Codex prompt timed out after ${Math.round(elapsedMs / 1000)}s. Codex may still be working - if a reply lands later it will appear in the inbox on your next call.`;
+    const timeoutMsg = queueLine ? `${timeoutBody}\n\n${queueLine}` : timeoutBody;
     return {
       content: [
         {
@@ -446,6 +531,69 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     content: [{ type: "text", text: finalText }],
   };
 });
+
+/** Single-line queue summary surfaced in the `epic_handshake_inbox`
+ * response. Pulls the count of envelopes the dispatcher hasn't
+ * processed yet, the count of late replies waiting from THIS bridge
+ * session, and the size of the "stranded" set (late replies from
+ * prior bridge sessions that the current SESSION_FP can't claim).
+ * Returns "" when everything is empty so the caller can append it
+ * conditionally without producing trailing whitespace. */
+function formatQueueSummary() {
+  let pendingCount = 0;
+  let lateOursCount = 0;
+  let strandedCount = 0;
+  const cutoff = Date.now() - 5_000;
+  try {
+    pendingCount = readdirSync(INBOX_CODEX).filter((f) => f.endsWith(".md")).length;
+  } catch {
+    // best-effort
+  }
+  try {
+    for (const f of readdirSync(INBOX_CLAUDE)) {
+      if (!f.endsWith(".md")) continue;
+      const p = join(INBOX_CLAUDE, f);
+      let st;
+      let raw;
+      try {
+        st = statSync(p);
+        if (st.mtimeMs >= cutoff) continue;
+        raw = readFileSync(p, "utf8");
+      } catch {
+        continue;
+      }
+      const parsed = parseEnvelope(raw);
+      if (!parsed) continue;
+      if (parsed.fields.source_session_fp === SESSION_FP) {
+        lateOursCount++;
+      } else {
+        strandedCount++;
+      }
+    }
+  } catch {
+    // best-effort
+  }
+  if (pendingCount === 0 && lateOursCount === 0 && strandedCount === 0) return "";
+  const parts = [];
+  if (pendingCount > 0) {
+    // Counts every envelope still in inbox/codex/. The dispatcher
+    // leaves the active envelope in place until its turn finishes
+    // and only then moves it to sent/, so this count includes the
+    // in-flight prompt as well as anything queued behind it. Wording
+    // reflects that; subtracting the active id would need a heartbeat
+    // join we don't otherwise need here.
+    parts.push(`${pendingCount} prompt(s) in flight or queued`);
+  }
+  if (lateOursCount > 0) {
+    parts.push(`${lateOursCount} late repl${lateOursCount === 1 ? "y" : "ies"} from this session pending`);
+  }
+  if (strandedCount > 0) {
+    parts.push(
+      `${strandedCount} late repl${strandedCount === 1 ? "y" : "ies"} from a prior bridge session - retrieve via the status bar's RETRIEVE LATE REPLIES action`
+    );
+  }
+  return `Queue: ${parts.join("; ")}.`;
+}
 
 /** Find any reply envelopes in inbox/claude/ tagged with our
  * fingerprint that are older than ~5 seconds (active prompts
@@ -577,7 +725,10 @@ function reportInFlightOrAbortStale() {
       ``,
       `The previous Claude to Codex turn (envelope ${envelopeId}) stalled in stage \`${stage}\` with no heartbeat updates for ~${minutes} minute(s). The bridge has cleaned up the stuck state so the next prompt starts fresh.`,
       ``,
-      `If this happens repeatedly on long-running Codex tasks, consider switching to Fire-and-Forget mode via the Epic Handshake menu so Claude returns immediately and replies land in the inbox when ready.`,
+      `Recovery options:`,
+      `- Re-dispatch the same prompt; the next turn starts on a clean state.`,
+      `- If retries keep stalling, pick "Restart Codex Bridge" from the Epic Handshake menu to force-kill the codex app-server child and spawn a fresh one.`,
+      `- For long-running Codex tasks (multi-minute scrapes, large audits), switching to Fire-and-Forget mode lets Claude return immediately and the reply lands in the inbox when ready.`,
     ].join("\n");
     const envelope = buildEnvelope({
       id: abortId,
@@ -710,6 +861,14 @@ function parseEnvelope(raw) {
 }
 
 function writeAtomic(path, content) {
+  // Defensive: Reset WAT321 wipes ~/.wat321/, so a sibling Claude
+  // session calling the bridge from a never-before-seen workspace
+  // hits a missing inbox subdir on its first dispatch. Recreate the
+  // parent on every write rather than assuming it exists - mkdir
+  // recursive is cheap and the path always lives under our own dir
+  // tree.
+  const dir = dirname(path);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, content, "utf8");
   renameSync(tmp, path);

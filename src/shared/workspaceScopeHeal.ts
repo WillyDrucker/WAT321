@@ -33,6 +33,8 @@ const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.epicHandshakeEnabled}`,
   `wat321.${SETTING.epicHandshakeSuppressCodexToasts}`,
   `wat321.${SETTING.epicHandshakeDefaultWaitMode}`,
+  `wat321.${SETTING.modelBridgeEnabled}`,
+  `wat321.${SETTING.modelBridgeLocalEndpoint}`,
 ] as const;
 
 /** Value-pattern fragments matched per JSONC value shape. Ordered

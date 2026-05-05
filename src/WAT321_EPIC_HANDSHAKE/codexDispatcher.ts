@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { resolveCodexCli } from "../shared/mcp/cliBinaryResolver";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { AppServerClient } from "./appServerClient";
 import {
@@ -464,6 +465,14 @@ export class CodexDispatcher {
       // by user" back to Claude cleanly.
       if (msg !== "cancelled by user") {
         noteFailure(record, msg);
+      } else {
+        // Cancel is best-effort: turn/interrupt may not have delivered
+        // if the codex child was wedged in inference or stuck on a
+        // tool call. Force-restart the app-server so the NEXT dispatch
+        // starts on a fresh process instead of inheriting a half-
+        // killed connection. Cheap (SIGKILL of one node child),
+        // idempotent if the child already exited cleanly.
+        this.forceRestart();
       }
       clearProcessingFlag(this.workspacePath);
       clearInFlightFlag(this.workspacePath);
@@ -474,7 +483,22 @@ export class CodexDispatcher {
   private async ensureClient(): Promise<AppServerClient> {
     if (this.client) return this.client;
     const spawnStart = Date.now();
-    const client = new AppServerClient({ logger: this.logger, instanceId: "codexDispatcher" });
+    // Resolve the codex binary path with PATH-then-extension-bundled
+    // fallback. Lets users who only installed the OpenAI Codex VS Code
+    // extension (no global codex CLI on PATH) still drive the bridge.
+    // resolveCodexCli probes once per process and caches the result,
+    // so repeated dispatches don't re-probe.
+    const resolved = await resolveCodexCli();
+    const client = new AppServerClient({
+      logger: this.logger,
+      instanceId: "codexDispatcher",
+      executable: resolved?.command,
+    });
+    if (resolved !== null) {
+      this.logger.info(
+        `[client] codex binary resolved via ${resolved.source}: ${resolved.command}`
+      );
+    }
     client.spawn();
     // Bracket each stage so cold-start latency breaks down into spawn
     // time, initialize handshake time, and post-initialize ack time.
