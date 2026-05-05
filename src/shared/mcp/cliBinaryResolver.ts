@@ -59,6 +59,15 @@ const CODEX_SPEC: CliSpec = {
   bundledRelPath: (platform) => {
     if (platform === "win32") return join("bin", "windows-x86_64", "codex.exe");
     if (platform === "linux") return join("bin", "linux-x86_64", "codex");
+    if (platform === "darwin") {
+      // Apple Silicon vs Intel - resolve via process.arch. Mirrors the
+      // naming pattern observed in the linux-x86_64 / windows-x86_64
+      // folders the marketplace ships. existsSync downstream gracefully
+      // handles "extension installed but folder missing" so a guess
+      // here doesn't break Mac users with a single-arch extension.
+      const arch = process.arch === "arm64" ? "darwin-arm64" : "darwin-x86_64";
+      return join("bin", arch, "codex");
+    }
     return null;
   },
 };

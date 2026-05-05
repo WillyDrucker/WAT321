@@ -171,11 +171,16 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
     // onProgress at the same stage shouldn't bump the timestamp).
     const stageEnteredAt: Partial<Record<string, number>> = {};
     const turnStartedAt = Date.now();
+    // Tracks the most recent stage writeHeartbeat saw, so the periodic
+    // liveness refresh re-emits the same stage instead of regressing
+    // to "dispatched" every minute when the child is alive but quiet.
+    let lastObservedStage = "dispatched";
 
     const writeHeartbeat = (
       stage: string,
       info?: { activeTool?: { name: string } | null; toolCallCount: number; elapsedMs: number }
     ): void => {
+      lastObservedStage = stage;
       if (stageEnteredAt[stage] === undefined) {
         const enteredAt = Date.now();
         stageEnteredAt[stage] = enteredAt;
@@ -221,6 +226,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       itemCompletedSub.dispose();
       clearInterval(cancelWatch);
       clearInterval(silentCompletionWatch);
+      clearInterval(livenessHeartbeat);
       monitor.stop();
       // Delete the heartbeat file on a 15s latch rather than right
       // away. The status bar's stage walker needs to see the file
@@ -478,6 +484,25 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       writeSuppressCodexToast(workspacePath);
       settle(() => resolve(combined));
     });
+
+    // Liveness heartbeat. Codex tool calls (web fetch, file ops, MCP
+    // tools) can take minutes between item/started and item/completed
+    // without emitting any RPC progress in between. With only RPC
+    // events refreshing the heartbeat, a long single tool call would
+    // trip the channel.mjs stale-heartbeat threshold even though
+    // Codex is genuinely working. Periodically re-emit the heartbeat
+    // when the child process is alive: a fresh app-server child means
+    // SOMETHING is still working server-side, even if no RPC event
+    // has fired recently. If the child died, isAlive flips false and
+    // the heartbeat goes stale on its own - auto-abort still fires
+    // for the genuinely-dead case.
+    const LIVENESS_HEARTBEAT_MS = 60_000;
+    const livenessHeartbeat = setInterval(() => {
+      if (settled) return;
+      if (!client.isAlive) return;
+      writeHeartbeat(lastObservedStage);
+    }, LIVENESS_HEARTBEAT_MS);
+    livenessHeartbeat.unref?.();
 
     // Background silent-completion watcher. Closes the gap when
     // Codex finishes the turn on disk but the JSON-RPC notification

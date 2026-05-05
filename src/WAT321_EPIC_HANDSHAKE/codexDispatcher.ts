@@ -465,6 +465,14 @@ export class CodexDispatcher {
       // by user" back to Claude cleanly.
       if (msg !== "cancelled by user") {
         noteFailure(record, msg);
+      } else {
+        // Cancel is best-effort: turn/interrupt may not have delivered
+        // if the codex child was wedged in inference or stuck on a
+        // tool call. Force-restart the app-server so the NEXT dispatch
+        // starts on a fresh process instead of inheriting a half-
+        // killed connection. Cheap (SIGKILL of one node child),
+        // idempotent if the child already exited cleanly.
+        this.forceRestart();
       }
       clearProcessingFlag(this.workspacePath);
       clearInFlightFlag(this.workspacePath);
