@@ -5,7 +5,7 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.0] - unreleased
+## [1.3.0] - 2026-05-05
 
 ### Added
 
@@ -35,9 +35,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Settings page slimmed from 13 flat keys to 3.** `wat321.modelBridge.enabled`, `wat321.modelBridge.instances` (the array of identity entries), and `wat321.modelBridge.useOpenCodeHarness`. Everything tunable per task - active instance id, sampling, system prompt, phased protocol, auto-compact threshold, OpenCode URL - lives in `~/.wat321/model-bridge/preferences.json` driven by the click menu. API keys live in SecretStorage. Settings.json never carries secrets and only carries identity.
 
+- **WAT321 now works whether you installed the standalone CLI or the marketplace extension.** Epic Handshake used to refuse to enable when `claude` or `codex` weren't on your shell PATH, even if you had the Claude Code or OpenAI Codex VS Code extensions installed (both extensions ship a working CLI binary inside their install dir). The bridge now probes PATH first, then falls back to the extension-bundled binary at `vscode.extensions.getExtension('anthropic.claude-code').extensionUri/resources/native-binary/claude` (and the equivalent for Codex). Marketplace-only users get a working install with no `npm i -g` step; PATH-installed users see no behavior change. Per-platform mapping covers Windows, Linux, and macOS (both Apple Silicon and Intel).
+
 ### Changed
 
+- **Codex bridge no longer loses replies that Codex actually finished.** When Codex completed work on disk but the bridge's `turn/completed` notification arrived empty, hit a non-success status, or never landed at all, the bridge used to declare "couldn't complete this turn" and discard the reply. The bridge now reads the rollout file on every failure path - if it shows the current turn complete with fresh assistant text, that text comes through to you instead of the synthetic failure message. A background watcher polls every two seconds during in-flight turns so silent severance recovers within seconds rather than waiting on the auto-abort timeout. Strict freshness gating ensures recovery never returns text from a prior turn; recovery only fires when our turn was observed starting AND the rollout has either new text or new bytes since dispatch. Closes the bridge severance class documented in #69 / #72 / #73.
+
+- **Bridge gives you actionable feedback ~3 minutes sooner when Codex hangs.** The auto-abort threshold for stale heartbeats dropped from 10 minutes to 7 minutes, and the auto-abort message now explicitly names "Restart Codex Bridge" as a recovery option alongside re-dispatch and switching to fire-and-forget mode. Sub-7-minute Codex turns rarely stall on a single tool boundary; if a real run hits this, a bridge restart is the recovery and the next dispatch starts on a fresh app-server.
+
+- **Long Codex tool calls no longer trip the stale-heartbeat threshold.** Codex tool calls (web fetch, file ops, MCP tools) can run minutes between events without emitting RPC progress in between. The bridge now refreshes its heartbeat every 60 seconds while the codex child process is alive, so a single long tool call no longer auto-aborts a turn that's genuinely working. If the child died, the refresh stops and auto-abort still fires on the now-genuine staleness - alive-but-quiet and dead are distinguished without false positives.
+
+- **Switching VS Code instances no longer leaves a stranded MCP entry advertising tools you never opted into.** A sibling VS Code instance enabling Epic Handshake or Model Bridge writes a user-scope entry to `~/.claude.json` that's global and persists across restarts. An instance with the bridge disabled in its own settings used to inherit that registration silently. Both bridges now reconcile to their own settings on activate - a disabled instance always uninstalls any leftover entry. State converges to current settings instead of inheriting whatever sibling instance touched the registration last.
+
+- **`epic_handshake_inbox` shows you what's queued, what's pending, and what landed late from prior bridge sessions.** When the inbox is empty, the response now appends a single-line queue summary like `Queue: 1 prompt(s) in flight or queued; 2 late repl(ies) from this session pending.` so backlog is visible from Claude's side without poking at status-bar widgets. Timeout messages append the same summary so you see what's still in flight when a single dispatch fails.
+
+- **`epic_handshake_ask` now rejects malformed argument shapes fast instead of waiting the full timeout.** The bridge used to dispatch an empty envelope when Claude passed `prompt` (the Model Bridge tool's key) instead of `text`, then sit through the 120-second wait before declaring no reply. Schema validation now returns an actionable hint within milliseconds when `text` is missing, when `prompt` was used by mistake, or when `timeout_sec` arrives as a non-number. Saves the full timeout cost on a doomed dispatch.
+
+- **Provider Health output now shows you which CLI binary the bridge is actually driving.** The `WAT321: Show Provider Health` panel adds two lines under Epic Handshake telling you whether `claude` and `codex` resolved via PATH or via the marketplace extension's bundled binary, with the absolute path so you can verify which version is in use. Helps diagnose "why does Claude Code feel different across my two VS Code installs" when one is using a newer extension-bundled CLI than the other.
+
 ### Fixed
+
+- **`model_bridge_task` no longer asks Codex's harness to use an agent that doesn't exist.** The tool description told Claude to set `agent: "wat321-coder"` for a minimal read/write/bash surface on small models - but that agent was never actually deployed to the OpenCode server config. Every `model_bridge_task` call that followed the description hint produced an "Agent not found: wat321-coder" rejection from OpenCode. The description now names OpenCode's actual built-in agents (`build` is the default, plus `explore`, `general`, `plan`) and tells Claude to omit the field unless a custom agent has been configured on the OpenCode server.
+
+- **Cancelling a Codex turn now reliably restarts the codex app-server.** `turn/interrupt` is best-effort - if the codex child was wedged in inference or stuck on an unresponsive tool call, the interrupt RPC may never deliver and the child kept running with a now-rejected turn. The next dispatch then tried to drive a hung connection and broke too. Cancel now also force-kills the child via the dispatcher's `forceRestart()` path so the next dispatch starts on a fresh app-server.
+
+- **Reset WAT321 no longer breaks subsequent bridge dispatches from sibling workspaces.** Reset wipes `~/.wat321/`, which is correct (it's global state), but `channel.mjs` in both bridges wrote to per-workspace subdirs assuming they exist. After a reset, only the workspace that re-activated the bridge recreated its own subdir; a sibling Claude session calling the bridge from a never-before-seen workspace then hit ENOENT on the first dispatch. Both bridges now defensively recreate the parent directory on every atomic write.
 
 ### Removed
 
