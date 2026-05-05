@@ -1,4 +1,4 @@
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, statSync, unlinkSync } from "node:fs";
 import { parseLastAssistantText } from "../shared/codex-rollout/assistantTextParser";
 import { extractCurrentTurn, parseStageInfo } from "../shared/codex-rollout/phaseParser";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
@@ -52,6 +52,13 @@ import type { WaitMode } from "./waitMode";
  * realistic post-interrupt flushes without keeping the bridge UI
  * frozen indefinitely on a turn that is genuinely stuck. */
 const ROLLOUT_RECOVERY_WINDOW_MS = 30_000;
+/** Tighter recovery window for `turn/completed` failure paths
+ * (non-success status, empty items). The notification already arrived,
+ * so any rollout-recovery either succeeds quickly or never will - long
+ * polling adds latency without payoff. 5s catches the common "items
+ * array missing but task_complete already on disk" race without
+ * stretching the user's wait. */
+const ROLLOUT_RECOVERY_FAST_WINDOW_MS = 5_000;
 /** Poll cadence inside the recovery window. 1s balances reactivity
  * (recovery resolves within a second of Codex finishing its flush)
  * against I/O cost (one stat + tail read per poll, cheap). */
@@ -101,6 +108,57 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       if (cachedRolloutPath) return cachedRolloutPath;
       cachedRolloutPath = findRolloutPath(threadId);
       return cachedRolloutPath;
+    };
+    // Seed assistant text captured BEFORE this turn dispatches. Used as
+    // a baseline so rollout-recovery only resolves with text that is
+    // demonstrably new (i.e. produced by THIS turn). Without this gate
+    // a recovery path could return the prior turn's final answer when
+    // our turn produced none of its own - exactly the stale-recovery
+    // hazard for resumed threads.
+    const seedAssistantText = (() => {
+      const seedPath = cachedRolloutPath;
+      if (!seedPath) return "";
+      try {
+        return tryRolloutRecovery(seedPath) ?? "";
+      } catch {
+        return "";
+      }
+    })();
+    // Companion baseline: rollout file size at dispatch time. The size
+    // gate is the secondary freshness proof for the rare case where
+    // our turn legitimately produced an answer byte-identical to the
+    // prior turn's answer (text equality alone would false-negative).
+    // Any rollout growth past this offset is unambiguous evidence of
+    // new content for this thread, since each thread owns its rollout
+    // file and only the app-server writes to it.
+    const seedRolloutSize = (() => {
+      const seedPath = cachedRolloutPath;
+      if (!seedPath) return 0;
+      try {
+        return statSync(seedPath).size;
+      } catch {
+        return 0;
+      }
+    })();
+    // Tracks whether Codex acknowledged our turn (via `turn/started`
+    // notification, first streaming delta, or any item lifecycle
+    // event). Recovery paths gate on this so a turn/completed-shaped
+    // error that fires before any of our turn-lifecycle notifications
+    // can never reach for stale text in the rollout.
+    let ourTurnObserved = false;
+    /** Combined freshness gate for recovery callbacks. Passes when
+     * EITHER the recovered text differs from the seed OR the rollout
+     * has grown past the seed size (meaning new bytes for our thread,
+     * even if those bytes happen to render the same final answer). */
+    const isFreshRecovery = (text: string): boolean => {
+      if (text !== seedAssistantText) return true;
+      const path = resolveRolloutPath();
+      if (!path) return false;
+      try {
+        return statSync(path).size > seedRolloutSize;
+      } catch {
+        return false;
+      }
     };
     const heartbeatFile = turnHeartbeatPath(env.id);
     let settled = false;
@@ -162,6 +220,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       itemStartedSub.dispose();
       itemCompletedSub.dispose();
       clearInterval(cancelWatch);
+      clearInterval(silentCompletionWatch);
       monitor.stop();
       // Delete the heartbeat file on a 15s latch rather than right
       // away. The status bar's stage walker needs to see the file
@@ -237,6 +296,8 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
           pollMs: ROLLOUT_RECOVERY_POLL_MS,
           getRolloutPath: resolveRolloutPath,
           isSettled: () => settled,
+          isFreshText: isFreshRecovery,
+          requireTurnObserved: () => ourTurnObserved,
           onRecovered: (text) => {
             logger.info(
               `[monitor] stall recovered via rollout fallback (len=${text.length})`
@@ -256,6 +317,8 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
           pollMs: ROLLOUT_RECOVERY_POLL_MS,
           getRolloutPath: resolveRolloutPath,
           isSettled: () => settled,
+          isFreshText: isFreshRecovery,
+          requireTurnObserved: () => ourTurnObserved,
           onRecovered: (text) => {
             logger.info(
               `[monitor] hard cap recovered via rollout fallback (len=${text.length})`
@@ -279,17 +342,27 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
     writeHeartbeat("dispatched");
 
     const turnStartedSub = client.onNotification("turn/started", () => {
+      ourTurnObserved = true;
       monitor.observeRpcProgress("turn-started");
     });
+    // item/started + item/completed are also unambiguous current-turn
+    // RPC proof: the app-server only emits them for the active turn.
+    // Setting the gate here too means a turn whose `turn/started`
+    // notification was lost (transport hiccup) but whose tool calls
+    // streamed normally still allows recovery to resolve, instead of
+    // blocking on a false-negative gate.
     const itemStartedSub = client.onNotification("item/started", () => {
+      ourTurnObserved = true;
       monitor.observeRpcProgress("item-started");
     });
     const itemCompletedSub = client.onNotification("item/completed", () => {
+      ourTurnObserved = true;
       monitor.observeRpcProgress("item-completed");
     });
 
     let processingSignaled = false;
     const deltaSub = client.onNotification("item/agentMessage/delta", (params) => {
+      ourTurnObserved = true;
       if (!processingSignaled) {
         // First streaming delta = Codex has accepted the turn and is
         // actively producing output. Flip the status bar from the
@@ -320,13 +393,32 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       monitor.forceStage("complete");
 
       if (c.turn.status !== "completed") {
-        // Non-success terminal status (interrupted/failed). Do NOT
-        // write the suppress-toast sentinel - if the bridge could not
-        // deliver a real reply, the user should still see the Codex
-        // toast for whatever Codex did produce so they know the turn
-        // ended without a proper handoff.
+        // Non-success terminal status (interrupted/failed). Codex may
+        // still have completed work on disk before the failure
+        // surfaced - try a tight rollout recovery before declaring
+        // failure so a legitimate reply is never lost to a transient
+        // RPC-layer hiccup. No suppress-toast sentinel on the failure
+        // path: if rollout recovery also misses, the user should still
+        // see the Codex toast for whatever Codex did produce.
         const errMsg = c.turn.error?.message ?? `turn ${c.turn.status}`;
-        settle(() => reject(new Error(errMsg)));
+        recoverOrRejectViaRolloutPolling({
+          deadlineMs: ROLLOUT_RECOVERY_FAST_WINDOW_MS,
+          pollMs: ROLLOUT_RECOVERY_POLL_MS,
+          getRolloutPath: resolveRolloutPath,
+          isSettled: () => settled,
+          isFreshText: isFreshRecovery,
+          requireTurnObserved: () => ourTurnObserved,
+          onRecovered: (text) => {
+            logger.info(
+              `[recover] turn/completed status=${c.turn.status} but rollout has fresh reply (len=${text.length}); delivering recovered text`
+            );
+            writeSuppressCodexToast(workspacePath);
+            settle(() => resolve(text));
+          },
+          onTimeout: () => {
+            settle(() => reject(new Error(errMsg)));
+          },
+        });
         return;
       }
 
@@ -344,18 +436,36 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       const combined = chunks.join("\n").trim();
       if (combined.length === 0) {
         // Empty completed turn: Codex's TCP round ended cleanly but
-        // produced no agentMessage items. No real reply to hand back
-        // to Claude, so we reject with a "degraded thread" error.
-        // Same rule as above - no suppress sentinel, the user should
-        // see whatever Codex toast fires so they can tell something
-        // is off.
-        settle(() =>
-          reject(
-            new Error(
-              "empty reply from Codex (thread may be in a degraded state; will rotate after threshold or pick \"Reset Codex Session\" from the menu)"
-            )
-          )
-        );
+        // produced no agentMessage items in the notification AND no
+        // deltas streamed. Try the rollout once - the
+        // task_complete + agent_message may have landed on disk a
+        // beat before the RPC notification reached us with stale
+        // items. If recovery misses, surface the degraded-thread
+        // error so the user sees something is off.
+        recoverOrRejectViaRolloutPolling({
+          deadlineMs: ROLLOUT_RECOVERY_FAST_WINDOW_MS,
+          pollMs: ROLLOUT_RECOVERY_POLL_MS,
+          getRolloutPath: resolveRolloutPath,
+          isSettled: () => settled,
+          isFreshText: isFreshRecovery,
+          requireTurnObserved: () => ourTurnObserved,
+          onRecovered: (text) => {
+            logger.info(
+              `[recover] turn/completed empty items but rollout has fresh reply (len=${text.length}); delivering recovered text`
+            );
+            writeSuppressCodexToast(workspacePath);
+            settle(() => resolve(text));
+          },
+          onTimeout: () => {
+            settle(() =>
+              reject(
+                new Error(
+                  "empty reply from Codex (thread may be in a degraded state; will rotate after threshold or pick \"Reset Codex Session\" from the menu)"
+                )
+              )
+            );
+          },
+        });
         return;
       }
       // Success path: real reply on its way to Claude. Drop the
@@ -368,6 +478,33 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       writeSuppressCodexToast(workspacePath);
       settle(() => resolve(combined));
     });
+
+    // Background silent-completion watcher. Closes the gap when
+    // Codex finishes the turn on disk but the JSON-RPC notification
+    // chain drops the `turn/completed` event - documented in the
+    // session-severance log as the most damaging failure class. Polls
+    // the rollout every SILENT_COMPLETION_POLL_MS while the turn is
+    // in flight; resolves the promise as soon as the rollout shows
+    // the current turn complete with fresh assistant text. Strictly
+    // gated on ourTurnObserved + fresh-vs-seed so a stale prior turn
+    // can never be returned. Without this watcher the bridge has to
+    // wait for the stall window to expire (60s+ default) before any
+    // recovery attempt fires, which is exactly the multi-minute UX
+    // delay we're closing.
+    const SILENT_COMPLETION_POLL_MS = 2_000;
+    const silentCompletionWatch = setInterval(() => {
+      if (settled) return;
+      if (!ourTurnObserved) return;
+      const recovered = tryRolloutRecovery(resolveRolloutPath());
+      if (recovered === null) return;
+      if (!isFreshRecovery(recovered)) return;
+      logger.info(
+        `[recover] silent-completion watcher: rollout shows current turn complete with fresh text (len=${recovered.length}); delivering before stall window`
+      );
+      writeSuppressCodexToast(workspacePath);
+      settle(() => resolve(recovered));
+    }, SILENT_COMPLETION_POLL_MS);
+    silentCompletionWatch.unref?.();
 
     // User-cancel sentinel. Status bar's "Cancel in-flight prompt"
     // action writes the workspace cancel flag; we poll every 500ms,
@@ -413,6 +550,13 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
         // for turn/completed notification (above)
       })
       .catch((err) => {
+        // turn/start rejected at the request layer - our turn never
+        // started. The rollout's "current turn" slice belongs to a
+        // prior turn (or doesn't exist), so rollout-recovery here
+        // would deliver stale text. Surface the error directly. The
+        // background rollout-complete watcher (below) only resolves
+        // when ourTurnObserved is true, so it cannot rescue the user
+        // with stale text either.
         settle(() => reject(err));
       });
   });
@@ -447,6 +591,20 @@ interface RecoveryPollOptions {
   pollMs: number;
   getRolloutPath: () => string | null;
   isSettled: () => boolean;
+  /** Optional gate: only resolve with recovered text when it differs
+   * from a baseline captured before this turn dispatched. Without
+   * this gate, a thread that resumed an earlier completed turn would
+   * happily "recover" the prior turn's final answer when our turn
+   * never produced one. Treat undefined as "always fresh" so existing
+   * stall / hard-cap callers keep their pre-gate behavior unless they
+   * opt in. */
+  isFreshText?: (text: string) => boolean;
+  /** Optional gate: refuse to resolve until our turn was observed
+   * starting (via `turn/started` or first delta). Same purpose as
+   * `isFreshText` but anchors on the RPC notifications instead of
+   * rollout content - belts and suspenders against transport-layer
+   * reorderings. Undefined = no constraint. */
+  requireTurnObserved?: () => boolean;
   onRecovered: (text: string) => void;
   onTimeout: () => void;
 }
@@ -464,8 +622,16 @@ function recoverOrRejectViaRolloutPolling(opts: RecoveryPollOptions): void {
     if (opts.isSettled()) return;
     const recovered = tryRolloutRecovery(opts.getRolloutPath());
     if (recovered !== null) {
-      opts.onRecovered(recovered);
-      return;
+      const turnObserved = opts.requireTurnObserved?.() ?? true;
+      const fresh = opts.isFreshText?.(recovered) ?? true;
+      if (turnObserved && fresh) {
+        opts.onRecovered(recovered);
+        return;
+      }
+      // Recovery skipped: the rollout's "current turn" slice belongs
+      // to a prior turn that completed before our dispatch (seed text
+      // matches, or our turn never started). Keep polling - a fresh
+      // turn might still land before the deadline.
     }
     if (Date.now() - startedAt >= opts.deadlineMs) {
       opts.onTimeout();
