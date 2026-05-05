@@ -53,6 +53,13 @@ export function activateModelBridge(
   context.subscriptions.push({ dispose: () => statusBar.dispose() });
 
   let lastInstallable = false;
+  // First-pass guard. Without this, the activate-time call short-
+  // circuits when desired state is `false` because lastInstallable is
+  // already `false` - leaving any stale MCP entry from a sibling VS
+  // Code instance (or from a prior crash) registered in Claude's user
+  // scope. Forcing the first reconcile to actually run install or
+  // uninstall closes that leakage path.
+  let everReconciled = false;
 
   const applyCurrentConfig = async (): Promise<void> => {
     const config = await readConfigFromSettings(context);
@@ -62,10 +69,11 @@ export function activateModelBridge(
     }
 
     const installable = isConfigInstallable(config);
-    if (installable === lastInstallable) {
+    if (everReconciled && installable === lastInstallable) {
       return;
     }
     lastInstallable = installable;
+    everReconciled = true;
 
     if (installable) {
       await reconcileInstall(context, config, logger);

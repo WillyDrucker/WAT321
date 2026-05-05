@@ -179,6 +179,17 @@ class EpicHandshakeTier {
       } else {
         void this.startEnabled();
       }
+    } else {
+      // Activate-time reconciliation when disabled. A sibling VS Code
+      // instance running with EH enabled writes a user-scope MCP entry
+      // into ~/.claude.json; that entry is global and persists across
+      // VS Code restarts. Without this blind uninstall an instance
+      // that has EH disabled in its own settings would still see the
+      // bridge tools advertised on every Claude session, paying the
+      // catalog token cost for a feature it never opted into. The
+      // CLI call is idempotent and best-effort - cheap when nothing is
+      // registered, no-op if Claude CLI is missing.
+      void uninstallChannel(this.logger);
     }
     this.applyDefaultWaitModeSetting();
   }
