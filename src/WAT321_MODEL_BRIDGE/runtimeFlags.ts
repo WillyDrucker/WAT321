@@ -1,6 +1,6 @@
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { clearFlag, setFlag } from "../shared/fs/flagFile";
 import { MODEL_BRIDGE_DIR } from "./constants";
 
 /**
@@ -28,17 +28,10 @@ export function isPaused(): boolean {
 }
 
 export function setPaused(paused: boolean): void {
-  if (paused) {
-    writeFileAtomic(PAUSED_FLAG_PATH, new Date().toISOString());
-  } else if (existsSync(PAUSED_FLAG_PATH)) {
-    try {
-      unlinkSync(PAUSED_FLAG_PATH);
-    } catch {
-      // best-effort
-    }
-  }
+  if (paused) setFlag(PAUSED_FLAG_PATH);
+  else clearFlag(PAUSED_FLAG_PATH);
 }
 
 export function writeCancelFlag(): void {
-  writeFileAtomic(CANCEL_FLAG_PATH, new Date().toISOString());
+  setFlag(CANCEL_FLAG_PATH);
 }
