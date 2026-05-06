@@ -67,7 +67,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private tpsPrevOutputTokens = 0;
   private tpsPrevMtimeMs = 0;
   private tpsLastValue: number | null = null;
-  /** Rolling 5-second window of accepted samples. See the Claude
+  /** Rolling 60-second window of accepted samples. See the Claude
    * service's matching field for the smoothing rationale - same
    * shape, same paused-interval rejection, applied to Codex's
    * stageInfo.outputTokens delta. */
@@ -242,7 +242,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     });
   }
 
-  /** Compute smoothed TPS over a rolling 5-second window. Mirrors
+  /** Compute smoothed TPS over a rolling 60-second window. Mirrors
    * the Claude service's smoothing implementation: rejects samples
    * whose individual gap > 30s as paused (tool wait, agent loop, idle
    * reasoning) so a long-paused turn that suddenly flushes a large
@@ -254,7 +254,12 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     mtimeMs: number
   ): number | null {
     const TPS_MAX = 999;
-    const TPS_WINDOW_MS = 5_000;
+    // 60s window holds ~12 samples on the 5s safety-net cadence and
+    // stays smooth across long Codex turns (often 30-90s on high
+    // effort). Same reasoning as the Claude service - keep the two
+    // providers in lockstep on smoothing posture so the user reads
+    // both widgets the same way.
+    const TPS_WINDOW_MS = 60_000;
     const TPS_PAUSE_THRESHOLD_MS = 30_000;
 
     if (sessionId !== this.tpsPrevSessionId) {
