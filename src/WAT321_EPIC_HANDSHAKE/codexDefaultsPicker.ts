@@ -68,13 +68,8 @@ interface ModelRow extends vscode.QuickPickItem {
   rowKind: RowKind;
   slug?: string;
 }
-interface EffortRow extends vscode.QuickPickItem {
-  rowKind: RowKind;
-  effort?: CodexEffortLevel;
-}
-
 type DefaultsRow = vscode.QuickPickItem & {
-  row: "sandbox" | "model" | "effort" | "back" | "pause" | "resume" | "cancel";
+  row: "model" | "effort" | "back" | "pause" | "resume" | "cancel";
 };
 
 /** Headline for the "CODEX SESSION SETTINGS" row in the sessions
@@ -126,12 +121,8 @@ export async function showCodexDefaultsPicker(
   // a sub-picker - the loop just re-renders with the new state.
   const wsHash = currentWsHash();
   while (true) {
-    const sandbox = readCodexSandboxOverride(wsHash);
     const model = readCodexModelOverride(wsHash);
     const effort = readCodexEffortOverride(wsHash);
-
-    const sandboxLabel = sandbox === "full-access" ? "FULL-ACCESS" : "READ-ONLY";
-    const sandboxNext = sandbox === "full-access" ? "READ-ONLY" : "FULL-ACCESS";
 
     const paused = isPaused();
     const pauseItem = makePauseResumeItem(paused, false);
@@ -140,12 +131,6 @@ export async function showCodexDefaultsPicker(
     const items: DefaultsRow[] = [
       { ...makeBackItem(), row: "back" },
       {
-        label: `SANDBOX PERMISSION: ${sandboxLabel}${sandboxIsDefault(sandbox) ? " *default*" : ""}`,
-        description: `Click to switch to ${sandboxNext}.`,
-        iconPath: new vscode.ThemeIcon("shield"),
-        row: "sandbox",
-      },
-      {
         label: modelRowLabel(model),
         description: "Click to change model.",
         iconPath: new vscode.ThemeIcon("symbol-method"),
@@ -153,7 +138,7 @@ export async function showCodexDefaultsPicker(
       },
       {
         label: effortRowLabel(effort),
-        description: "Click to change effort.",
+        description: "Click to change effort or sandbox permission.",
         iconPath: new vscode.ThemeIcon("dashboard"),
         row: "effort",
       },
@@ -176,19 +161,13 @@ export async function showCodexDefaultsPicker(
       return;
     }
 
-    if (pick.row === "sandbox") {
-      // Direct toggle - no sub-picker needed. Loop re-renders with
-      // the new state on the next iteration.
-      writeCodexSandboxOverride(wsHash, sandbox === "full-access" ? "read-only" : "full-access");
-      continue;
-    }
     if (pick.row === "model") {
       const result = await pickModel(model);
       if (result.kind === "picked") writeCodexModelOverride(wsHash, result.value);
       continue;
     }
     if (pick.row === "effort") {
-      const result = await pickEffort(effort, model);
+      const result = await pickEffort(effort, model, wsHash);
       if (result.kind === "picked") writeCodexEffortOverride(wsHash, result.value);
       continue;
     }
@@ -287,12 +266,27 @@ async function pickModel(
 // Effort sub-picker
 // -----------------------------------------------------------------
 
+type EffortRowKind = RowKind | "sandbox";
+interface EffortPickerRow extends vscode.QuickPickItem {
+  rowKind: EffortRowKind;
+  effort?: CodexEffortLevel;
+}
+
+/** Effort + sandbox combined sub-picker. Sandbox lives here (rather than
+ * the top-level Codex Session Settings menu) because effort and sandbox
+ * are both "how Codex acts on your task" axes, while model is "which
+ * Codex." Pairing the two action axes keeps the parent menu to two rows
+ * and lets a user adjust both in one visit without re-clicking back to
+ * the parent.
+ *
+ * Looped so the sandbox toggle re-renders the picker without closing
+ * it. Effort picks return immediately to the parent so the current
+ * value re-renders there. */
 async function pickEffort(
   current: CodexEffortLevel | null,
-  modelSlug: string | null
+  modelSlug: string | null,
+  wsHash: string
 ): Promise<PickResult<CodexEffortLevel | null>> {
-  // If a model override is set, list only that model's supported
-  // efforts. Otherwise fall back to the standard four (low to xhigh).
   const modelInfo = modelSlug !== null ? getCodexModelInfo(modelSlug) : null;
   const supported: { effort: CodexEffortLevel; description: string }[] =
     modelInfo !== null && modelInfo.supportedEfforts.length > 0
@@ -310,56 +304,68 @@ async function pickEffort(
 
   const baseline: CodexEffortLevel | null =
     (modelInfo?.defaultEffort as CodexEffortLevel | undefined) ?? "medium";
-  const paused = isPaused();
-  const pauseItem = makePauseResumeItem(paused, false);
-  const cancelItem = makeCancelItem(false);
 
-  const items: EffortRow[] = [
-    { ...makeBackItem(), rowKind: "back" },
-    ...supported.map((e): EffortRow => {
-      const isDefault = e.effort === baseline;
-      const isCurrent = e.effort === current || (current === null && e.effort === baseline);
-      // Tag order: *default* first when applicable, then (CURRENT),
-      // both before the description so they stay visible if the
-      // description gets truncated.
-      const tags: string[] = [];
-      if (isDefault) tags.push("*default*");
-      if (isCurrent) tags.push("(CURRENT)");
-      const tagPrefix = tags.length > 0 ? ` ${tags.join(" ")}` : "";
-      const shortDescription = shortenForRow(e.description);
-      const descSuffix = shortDescription ? ` - ${shortDescription}` : "";
-      return {
-        rowKind: "value",
-        effort: e.effort,
-        label: `${e.effort.toUpperCase()}${tagPrefix}${descSuffix}`,
-        iconPath: new vscode.ThemeIcon("dashboard"),
-      };
-    }),
-    { ...pauseItem, rowKind: pauseItem.action === "resume" ? "resume" : "pause" },
-    { ...cancelItem, rowKind: "cancel" },
-  ];
+  while (true) {
+    const sandbox = readCodexSandboxOverride(wsHash);
+    const sandboxLabel = sandbox === "full-access" ? "FULL-ACCESS" : "READ-ONLY";
+    const sandboxNext = sandbox === "full-access" ? "READ-ONLY" : "FULL-ACCESS";
 
-  const pick = await withMenuLifecycle(() =>
-    vscode.window.showQuickPick<EffortRow>(items, {
-      title: modelInfo !== null ? `Effort for ${modelInfo.displayName}` : "Codex effort",
-      placeHolder: "Pick an effort level",
-    })
-  );
-  if (!pick || pick.rowKind === "back") return { kind: "cancelled" };
-  if (pick.rowKind === "value" && pick.effort !== undefined) {
-    return { kind: "picked", value: pick.effort };
-  }
-  if (pick.rowKind === "pause") {
-    const { setPaused } = await import("./statusBarState");
-    setPaused(true);
+    const paused = isPaused();
+    const pauseItem = makePauseResumeItem(paused, false);
+    const cancelItem = makeCancelItem(false);
+
+    const items: EffortPickerRow[] = [
+      { ...makeBackItem(), rowKind: "back" },
+      {
+        rowKind: "sandbox",
+        label: `SANDBOX PERMISSION: ${sandboxLabel}${sandboxIsDefault(sandbox) ? " *default*" : ""}`,
+        description: `Click to switch to ${sandboxNext}.`,
+        iconPath: new vscode.ThemeIcon("shield"),
+      },
+      ...supported.map((e): EffortPickerRow => {
+        const isDefault = e.effort === baseline;
+        const isCurrent = e.effort === current || (current === null && e.effort === baseline);
+        const tags: string[] = [];
+        if (isDefault) tags.push("*default*");
+        if (isCurrent) tags.push("(CURRENT)");
+        const tagPrefix = tags.length > 0 ? ` ${tags.join(" ")}` : "";
+        const shortDescription = shortenForRow(e.description);
+        const descSuffix = shortDescription ? ` - ${shortDescription}` : "";
+        return {
+          rowKind: "value",
+          effort: e.effort,
+          label: `${e.effort.toUpperCase()}${tagPrefix}${descSuffix}`,
+          iconPath: new vscode.ThemeIcon("dashboard"),
+        };
+      }),
+      { ...pauseItem, rowKind: pauseItem.action === "resume" ? "resume" : "pause" },
+      { ...cancelItem, rowKind: "cancel" },
+    ];
+
+    const pick = await withMenuLifecycle(() =>
+      vscode.window.showQuickPick<EffortPickerRow>(items, {
+        title: modelInfo !== null ? `Effort & Sandbox for ${modelInfo.displayName}` : "Codex effort & sandbox",
+        placeHolder: "Pick an effort level or toggle sandbox permission",
+      })
+    );
+    if (!pick || pick.rowKind === "back") return { kind: "cancelled" };
+    if (pick.rowKind === "sandbox") {
+      writeCodexSandboxOverride(wsHash, sandbox === "full-access" ? "read-only" : "full-access");
+      continue;
+    }
+    if (pick.rowKind === "value" && pick.effort !== undefined) {
+      return { kind: "picked", value: pick.effort };
+    }
+    if (pick.rowKind === "pause") {
+      setPaused(true);
+      return { kind: "cancelled" };
+    }
+    if (pick.rowKind === "resume") {
+      setPaused(false);
+      continue;
+    }
     return { kind: "cancelled" };
   }
-  if (pick.rowKind === "resume") {
-    const { setPaused } = await import("./statusBarState");
-    setPaused(false);
-    return { kind: "cancelled" };
-  }
-  return { kind: "cancelled" };
 }
 
 // -----------------------------------------------------------------
