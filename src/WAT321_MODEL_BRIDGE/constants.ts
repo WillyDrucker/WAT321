@@ -23,6 +23,14 @@ export const CONFIG_PATH = join(MODEL_BRIDGE_DIR, "config.json");
  * in-flight state. Absence = idle. */
 export const HEARTBEAT_PATH = join(MODEL_BRIDGE_DIR, "heartbeat.json");
 
+/** Sidecar the unified bridge writes after every successful dispatch
+ * with the instance that just ran. The widget consults this file
+ * AFTER the heartbeat clears so a user who just hit Big Pickle keeps
+ * seeing "Big Pickle" in idle state instead of the user's preferred
+ * activeInstanceId default. Distinct concerns: activeInstanceId is
+ * the routing default; last-used is the "what just ran" view. */
+export const LAST_USED_PATH = join(MODEL_BRIDGE_DIR, "last-used.json");
+
 /** Runtime preferences file. Active instance, harness toggle,
  * sampling, system prompt, phased protocol, OpenCode URL -
  * everything the click menu tunes lives here. VS Code settings.json

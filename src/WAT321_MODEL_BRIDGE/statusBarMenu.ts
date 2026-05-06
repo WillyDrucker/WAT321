@@ -212,7 +212,7 @@ async function resetSessionTotals(): Promise<void> {
   }
 }
 
-async function pickActiveInstance(
+export async function pickActiveInstance(
   context: vscode.ExtensionContext
 ): Promise<void> {
   const config = await readConfigFromSettings(context);

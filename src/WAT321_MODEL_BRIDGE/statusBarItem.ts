@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import * as vscode from "vscode";
 import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
-import { CONFIG_PATH, HEARTBEAT_PATH, USAGE_PATH } from "./constants";
+import { CONFIG_PATH, HEARTBEAT_PATH, LAST_USED_PATH, USAGE_PATH } from "./constants";
 import type { ModelBridgeLogger } from "./outputChannel";
 import { showModelBridgeMenu, showModelBridgeSessions } from "./statusBarMenu";
 
@@ -151,7 +151,35 @@ function appendUsageBlock(
   md.appendMarkdown(`\n`);
 }
 
+/** Read the unified bridge's last-used sidecar. Returns the recorded
+ * instance id when a successful dispatch has happened this session;
+ * `null` otherwise. Best-effort - missing or malformed files fall
+ * through silently and the widget reverts to the user's
+ * activeInstanceId preference. */
+function readLastUsedInstanceId(): string | null {
+  try {
+    if (!existsSync(LAST_USED_PATH)) return null;
+    const raw = readFileSync(LAST_USED_PATH, "utf8");
+    const parsed = JSON.parse(raw) as { instanceId?: unknown };
+    return typeof parsed.instanceId === "string" && parsed.instanceId.length > 0
+      ? parsed.instanceId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function activeInstanceFrom(snap: ConfigSnapshot): ConfigSnapshot["instances"][number] | null {
+  // Last-used takes priority over activeInstanceId for DISPLAY so
+  // the widget reflects the most recent dispatch (e.g. user just
+  // ran Big Pickle, widget shows Big Pickle even if their default
+  // routing is local-llm). Routing decisions still consult
+  // activeInstanceId - this only affects what label/stats render.
+  const lastUsedId = readLastUsedInstanceId();
+  if (lastUsedId) {
+    const lastUsed = snap.instances.find((i) => i.id === lastUsedId);
+    if (lastUsed) return lastUsed;
+  }
   const found = snap.instances.find((i) => i.id === snap.activeInstanceId);
   if (found) return found;
   return snap.instances[0] ?? null;
