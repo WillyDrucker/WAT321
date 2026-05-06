@@ -226,6 +226,29 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
         }
       : null;
 
+  // Recovery row for users stuck on the v1.4.x experimental unified
+  // bridge. The install command flips wat321.bridge.useUnified=true and
+  // sweeps the legacy `wat321` (Epic Handshake) and `wat321-model-bridge`
+  // MCP entries; once on, the flag persists across reloads and the user
+  // is locked into the minimal-v1 unified handlers. This row only shows
+  // when the flag is true so it's invisible to the 99% who never opted
+  // in. Clicking flips the flag back, uninstalls the unified MCP entry,
+  // and prompts a reload - on reload, EH and MB reconcileInstall paths
+  // re-register the legacy two-server topology.
+  const useUnified = vscode.workspace
+    .getConfiguration("wat321")
+    .get<boolean>("bridge.useUnified", false);
+  const uninstallUnifiedItem: Item | null = useUnified
+    ? {
+        label: "UNINSTALL UNIFIED BRIDGE",
+        description: "Roll back to legacy two-server bridge topology.",
+        detail:
+          "Removes the experimental unified `wat321` MCP entry and re-registers `wat321` (Epic Handshake) + `wat321-model-bridge` on next reload.",
+        iconPath: new vscode.ThemeIcon("wat321-square-bolt"),
+        action: "uninstall-unified-bridge",
+      }
+    : null;
+
   const clearErrorItem: Item | null =
     hasError && !paused
       ? {
@@ -275,6 +298,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     ...(localLlmSessionsItem ? [localLlmSessionsItem] : []),
     ...(waitModeItem ? [waitModeItem] : []),
     ...(clearErrorItem ? [clearErrorItem] : []),
+    ...(uninstallUnifiedItem ? [uninstallUnifiedItem] : []),
     restartBridgeItem,
     pauseItem,
     cancelItem,
@@ -463,6 +487,14 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       void vscode.window.showInformationMessage(
         "Epic Handshake: bridge restarted. The active session resumes on your next prompt."
       );
+      break;
+    case "uninstall-unified-bridge":
+      // Bridge tier owns the actual uninstall command; this row is just
+      // a discoverable surface for users who got trapped on the v1.4.x
+      // experimental flag. The command flips wat321.bridge.useUnified
+      // back to false and sweeps the unified MCP entry; on reload, EH
+      // and MB reconcileInstall paths re-register the legacy topology.
+      await vscode.commands.executeCommand("wat321.bridge.uninstallUnified");
       break;
     case "back":
       // Sub-menus invoke this to return to the main menu so the user
