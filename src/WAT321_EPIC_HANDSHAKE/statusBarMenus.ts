@@ -185,6 +185,21 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     action: "manage-sessions",
   };
 
+  // Cross-tier entry into the Model Bridge's session management. Only
+  // shown when the bridge is enabled - keeps the menu lean for users
+  // running EH without OpenCode.
+  const modelBridgeEnabled = vscode.workspace
+    .getConfiguration("wat321")
+    .get<boolean>("modelBridge.enabled", false);
+  const opencodeSessionsItem: Item | null = modelBridgeEnabled
+    ? {
+        label: "MANAGE OPENCODE SESSIONS",
+        description: "List or erase Model Bridge rollouts.",
+        iconPath: new vscode.ThemeIcon("wat321-square-info"),
+        action: "manage-opencode-sessions",
+      }
+    : null;
+
   const clearErrorItem: Item | null =
     hasError && !paused
       ? {
@@ -230,6 +245,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     ...(inFlightStatusItem ? [inFlightStatusItem] : []),
     retrieveItem,
     sessionsItem,
+    ...(opencodeSessionsItem ? [opencodeSessionsItem] : []),
     ...(waitModeItem ? [waitModeItem] : []),
     ...(clearErrorItem ? [clearErrorItem] : []),
     restartBridgeItem,
@@ -403,6 +419,9 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
         recoverable: ctx.recoverable,
         dispatch: handleAction,
       });
+      break;
+    case "manage-opencode-sessions":
+      await vscode.commands.executeCommand("wat321.modelBridge.manageSessions");
       break;
     case "repair-sessions":
       await showRepairSessionsPicker(ctx.ws, ctx.recoverable, ctx.inFlight);

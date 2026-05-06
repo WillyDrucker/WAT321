@@ -6,12 +6,10 @@ import {
   readConfigFromSettings,
 } from "./config";
 import { SESSIONS_DIR, USAGE_PATH } from "./constants";
+import { isPaused, setPaused, writeCancelFlag } from "./runtimeFlags";
+import { makeBackItem, makeCancelItem, makePauseResumeItem, makeSeparator } from "./menuCommon";
 import type { ModelBridgeLogger } from "./outputChannel";
-import {
-  readPreferences,
-  resolveOpenCodeServerUrl,
-  updatePreference,
-} from "./preferences";
+import { readPreferences, updatePreference } from "./preferences";
 import {
   clearZenApiKey,
   promptAndStoreZenApiKey,
@@ -20,20 +18,75 @@ import {
 } from "./secrets";
 
 /**
- * Click-menu surface for the Model Bridge widget. Top-level menu is
- * shallow (active instance, common actions, configure submenu); each
- * row that drives a runtime preference opens a quickpick or input
- * box. Mirrors the Epic Handshake "click for menu, write to file,
- * channel.mjs picks up next call" pattern.
+ * Click-menu surface for the Model Bridge widget. Layout follows the
+ * Epic Handshake convention so users learning one menu carry the
+ * vocabulary to the other:
+ *
+ *   - Structured rows for state and configuration (Active Instance,
+ *     Phased Protocol, Auto-Compact, Sampling, etc.)
+ *   - Submenus for grouped actions (Manage Sessions, Sampling Config,
+ *     Harness, Zen API Key)
+ *   - 🔵 BACK at the top of every submenu
+ *   - 🟡 PAUSE / 🟢 RESUME and 🔴 CANCEL at the bottom of every menu
  *
  * Settings.json carries instance identity (`instances[]`) and tier-
  * wide flags (`enabled`, `useOpenCodeHarness`). Everything tunable
- * per task - active instance, sampling, system prompt, phased
- * protocol, OpenCode server URL - lives in preferences.json and is
- * reachable from this menu.
+ * per task lives in preferences.json and is reachable from this
+ * menu. Pause/Cancel are flag files under `~/.wat321/model-bridge/`
+ * that `channel.mjs` observes per call.
  */
 
 const TEMPERATURE_PRESETS = [0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0, 1.2];
+
+/** llama-server's `/props` endpoint reports the server's actual
+ * `n_ctx`. The click menu surfaces it as a read-only row so users
+ * can see what KV cache size the local LLM is running with without
+ * having to SSH in and read the launcher script. Mutation needs a
+ * server restart and is deferred to a future lifecycle slice.
+ *
+ * Cached for 30s per endpoint so a flurry of menu opens does not
+ * pound /props. The cache invalidates after the TTL; if the user
+ * restarts the server with a different `-c`, the next menu open
+ * after the TTL picks up the new value. */
+const N_CTX_CACHE_TTL_MS = 30_000;
+const nCtxCache = new Map<string, { at: number; nCtx: number | null }>();
+
+async function probeLocalNCtx(endpoint: string): Promise<number | null> {
+  const cached = nCtxCache.get(endpoint);
+  if (cached && Date.now() - cached.at < N_CTX_CACHE_TTL_MS) return cached.nCtx;
+  let nCtx: number | null = null;
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 1500);
+    const res = await fetch(`${endpoint.replace(/\/+$/, "")}/props`, {
+      signal: ac.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const j = (await res.json()) as {
+        default_generation_settings?: { n_ctx?: number; n_ctx_train?: number };
+        n_ctx?: number;
+      };
+      const n =
+        j?.default_generation_settings?.n_ctx ??
+        j?.default_generation_settings?.n_ctx_train ??
+        j?.n_ctx ??
+        null;
+      if (typeof n === "number" && n > 0) nCtx = n;
+    }
+  } catch {
+    // probe failure is non-fatal - row falls back to "(unknown)"
+  }
+  nCtxCache.set(endpoint, { at: Date.now(), nCtx });
+  return nCtx;
+}
+
+function formatKvCache(nCtx: number | null): string {
+  if (nCtx === null) return "(unknown)";
+  if (nCtx >= 1024) return `${Math.round(nCtx / 1024)}K`;
+  return String(nCtx);
+}
+
 const MAX_TOKENS_PRESETS = [500, 1000, 2000, 4000, 8000, 16000, 32000];
 const TIMEOUT_PRESETS = [30, 60, 120, 180, 300, 600];
 const AUTO_COMPACT_PRESETS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95];
@@ -111,7 +164,6 @@ interface UsageSummary {
   totalCalls: number;
   totalInput: number;
   totalOutput: number;
-  sinceMs: number;
   perInstance: Array<{ id: string; input: number; output: number; calls: number }>;
 }
 
@@ -120,7 +172,6 @@ function readUsageSummary(): UsageSummary | null {
   try {
     const raw = readFileSync(USAGE_PATH, "utf8");
     const data = JSON.parse(raw) as {
-      sinceMs?: number;
       instances?: Record<string, { input?: number; output?: number; calls?: number }>;
     };
     const instances = data.instances ?? {};
@@ -134,7 +185,6 @@ function readUsageSummary(): UsageSummary | null {
       totalCalls: perInstance.reduce((a, b) => a + b.calls, 0),
       totalInput: perInstance.reduce((a, b) => a + b.input, 0),
       totalOutput: perInstance.reduce((a, b) => a + b.output, 0),
-      sinceMs: data.sinceMs ?? Date.now(),
       perInstance,
     };
   } catch {
@@ -167,35 +217,34 @@ async function pickActiveInstance(
 ): Promise<void> {
   const config = await readConfigFromSettings(context);
 
-  // The catalog is hardcoded; every instance is always pickable.
-  // Cloud instances with no API key get a "needs API key" hint and
-  // route into the SecretStorage prompt on pick.
-  const items: vscode.QuickPickItem[] = config.instances.map((inst) => {
-    const star = inst.id === config.activeInstanceId ? "$(star-full) " : "";
-    const status =
-      inst.kind === "remote" && inst.apiKeyMissing
-        ? "needs Zen API key"
-        : `${inst.kind} - ${retentionLabel(inst)}`;
-    return {
-      label: `${star}${inst.alias}`,
-      description: status,
-      detail: `${inst.endpoint}${inst.model ? `  ·  model=${inst.model}` : ""}`,
-    };
-  });
+  const items: vscode.QuickPickItem[] = [
+    makeBackItem(),
+    makeSeparator(),
+    ...config.instances.map((inst) => {
+      const star = inst.id === config.activeInstanceId ? "$(star-full) " : "";
+      const status =
+        inst.kind === "remote" && inst.apiKeyMissing
+          ? "needs Zen API key"
+          : `${inst.kind} - ${retentionLabel(inst)}`;
+      return {
+        label: `${star}${inst.alias}`,
+        description: status,
+        detail: `${inst.endpoint}${inst.model ? `  ·  model=${inst.model}` : ""}`,
+      };
+    }),
+  ];
 
   const pick = await vscode.window.showQuickPick(items, {
     title: "Active Model Bridge instance",
     placeHolder: "Pick which instance handles tool calls by default",
   });
-  if (!pick) return;
+  if (!pick || pick.label === "🔵 BACK") return;
   const stripped = pick.label.replace(/^\$\(star-full\) /, "");
   const found = config.instances.find((i) => i.alias === stripped);
   if (!found) return;
 
   updatePreference("activeInstanceId", found.id);
 
-  // Cloud instance with no key: walk the user straight into the
-  // SecretStorage prompt rather than just toasting the gap.
   if (found.kind === "remote" && found.apiKeyMissing) {
     const stored = await promptAndStoreZenApiKey(context);
     if (!stored) {
@@ -275,15 +324,19 @@ async function pickFromPresets<T extends number | string>(
   presets: readonly T[],
   format: (v: T) => string
 ): Promise<T | undefined> {
-  const items: vscode.QuickPickItem[] = presets.map((v) => ({
-    label: format(v),
-    description: v === current ? "(current)" : undefined,
-  }));
+  const items: vscode.QuickPickItem[] = [
+    makeBackItem(),
+    makeSeparator(),
+    ...presets.map((v) => ({
+      label: format(v),
+      description: v === current ? "(current)" : undefined,
+    })),
+  ];
   const pick = await vscode.window.showQuickPick(items, {
     title,
     placeHolder: `Pick a value (current: ${format(current)})`,
   });
-  if (!pick) return undefined;
+  if (!pick || pick.label === "🔵 BACK") return undefined;
   const idx = presets.findIndex((v) => format(v) === pick.label);
   return idx >= 0 ? presets[idx] : undefined;
 }
@@ -356,39 +409,93 @@ async function editSystemPrompt(): Promise<void> {
   if (typeof v === "string") updatePreference("systemPrompt", v);
 }
 
-async function togglePhasedProtocol(): Promise<void> {
-  const prefs = readPreferences();
-  const next = prefs.phasedProtocol === "off" ? "markers-v1" : "off";
-  updatePreference("phasedProtocol", next);
-  void vscode.window.showInformationMessage(
-    `Model Bridge: phased protocol set to ${next}.`
-  );
-}
-
-async function editOpenCodeServerUrl(
-  context: vscode.ExtensionContext
-): Promise<void> {
-  const prefs = readPreferences();
-  const config = await readConfigFromSettings(context);
-  const active = config.instances.find((i) => i.id === config.activeInstanceId);
-  const sourceEndpoint = active?.kind === "local" ? active.endpoint : "";
-  const derived = resolveOpenCodeServerUrl(prefs, sourceEndpoint) ?? "";
-  const v = await vscode.window.showInputBox({
-    title: "OpenCode server URL",
-    prompt:
-      "URL of the `opencode serve` instance. Leave blank to auto-derive from the active local instance's endpoint host (default port 4096).",
-    value: prefs.openCodeServerUrl,
-    placeHolder:
-      prefs.openCodeServerUrl.length === 0
-        ? `Auto: ${derived || "(none)"}`
-        : undefined,
-  });
-  if (typeof v === "string") updatePreference("openCodeServerUrl", v.trim());
-}
-
-async function configureModelMenu(): Promise<void> {
+async function pickDefaultAgent(): Promise<void> {
   const prefs = readPreferences();
   const items: vscode.QuickPickItem[] = [
+    makeBackItem(),
+    makeSeparator(),
+    {
+      label: "build",
+      description: prefs.defaultAgent === "build" ? "(current)" : undefined,
+      detail: "OpenCode's default. Full file r/w + shell + web tools.",
+    },
+    {
+      label: "explore",
+      description: prefs.defaultAgent === "explore" ? "(current)" : undefined,
+      detail: "Read-only investigation. No writes; no shell side effects.",
+    },
+    {
+      label: "general",
+      description: prefs.defaultAgent === "general" ? "(current)" : undefined,
+      detail: "Mixed; lighter than build.",
+    },
+    {
+      label: "plan",
+      description: prefs.defaultAgent === "plan" ? "(current)" : undefined,
+      detail: "Proposes work without executing. Read-only.",
+    },
+  ];
+  const pick = await vscode.window.showQuickPick(items, {
+    title: "Default OpenCode Agent",
+    placeHolder: `Current: ${prefs.defaultAgent}. Per-call agent argument always wins.`,
+  });
+  if (!pick || pick.label === "🔵 BACK") return;
+  if (
+    pick.label === "build" ||
+    pick.label === "explore" ||
+    pick.label === "general" ||
+    pick.label === "plan"
+  ) {
+    updatePreference("defaultAgent", pick.label);
+  }
+}
+
+async function pickPhasedProtocol(): Promise<void> {
+  const prefs = readPreferences();
+  const items: vscode.QuickPickItem[] = [
+    makeBackItem(),
+    makeSeparator(),
+    {
+      label: "auto",
+      description: prefs.phasedProtocol === "auto" ? "(current)" : undefined,
+      detail: "Gated 5-step for local instances, off for cloud. Recommended.",
+    },
+    {
+      label: "gated-v1",
+      description: prefs.phasedProtocol === "gated-v1" ? "(current)" : undefined,
+      detail: "5 separate round-trips: RESTATE > PLAN > SOLVE > REVIEW > ANSWER. Best for small local models.",
+    },
+    {
+      label: "markers-v1",
+      description: prefs.phasedProtocol === "markers-v1" ? "(current)" : undefined,
+      detail: "Single-shot marker prompt. Model emits all phases inline in one streaming response.",
+    },
+    {
+      label: "off",
+      description: prefs.phasedProtocol === "off" ? "(current)" : undefined,
+      detail: "No phase scaffolding. Fastest; capable models often do not benefit from gating.",
+    },
+  ];
+  const pick = await vscode.window.showQuickPick(items, {
+    title: "Phased Protocol",
+    placeHolder: `Current: ${prefs.phasedProtocol}`,
+  });
+  if (!pick || pick.label === "🔵 BACK") return;
+  if (
+    pick.label === "off" ||
+    pick.label === "markers-v1" ||
+    pick.label === "gated-v1" ||
+    pick.label === "auto"
+  ) {
+    updatePreference("phasedProtocol", pick.label);
+  }
+}
+
+async function samplingMenu(): Promise<void> {
+  const prefs = readPreferences();
+  const items: vscode.QuickPickItem[] = [
+    makeBackItem(),
+    makeSeparator(),
     {
       label: "$(thermometer) Temperature",
       description: prefs.temperature.toFixed(1),
@@ -411,62 +518,52 @@ async function configureModelMenu(): Promise<void> {
     },
   ];
   const pick = await vscode.window.showQuickPick(items, {
-    title: "Configure runtime tunables",
-    placeHolder: "Pick a setting to change. Model id is per-instance (settings.json).",
+    title: "Sampling",
+    placeHolder: "Pick a setting to change",
   });
-  if (!pick) return;
+  if (!pick || pick.label === "🔵 BACK") return;
   if (pick.label.includes("Temperature")) await pickTemperature();
   else if (pick.label.includes("Max tokens")) await pickMaxTokens();
   else if (pick.label.includes("Timeout")) await pickTimeout();
   else if (pick.label.includes("System prompt")) await editSystemPrompt();
 }
 
-async function harnessMenu(context: vscode.ExtensionContext): Promise<void> {
+async function harnessMenu(): Promise<void> {
   const prefs = readPreferences();
   const harnessOn = prefs.useOpenCodeHarness;
-  const config = await readConfigFromSettings(context);
-  const active = config.instances.find((i) => i.id === config.activeInstanceId);
-  const sourceEndpoint = active?.kind === "local" ? active.endpoint : "";
-  const url = resolveOpenCodeServerUrl(prefs, sourceEndpoint) ?? "(unset)";
 
   const items: vscode.QuickPickItem[] = [
+    makeBackItem(),
+    makeSeparator(),
     {
       label: harnessOn
         ? "$(check) OpenCode harness: enabled"
         : "$(circle-large-outline) OpenCode harness: disabled",
       description: "Click to toggle",
       detail:
-        "Exposes model_bridge_task when on AND active instance is local AND OpenCode is reachable",
-    },
-    {
-      label: "$(server) OpenCode server URL",
-      description: prefs.openCodeServerUrl || `(auto: ${url})`,
-      detail: "Override the auto-derived URL when OpenCode runs on a different host or port",
+        "Exposes model_bridge_task when on AND the managed OpenCode server is reachable",
     },
   ];
   const pick = await vscode.window.showQuickPick(items, {
     title: "OpenCode Harness",
     placeHolder: harnessOn
-      ? "Harness on - configure server URL or toggle off"
+      ? "Harness on - toggle off to hide model_bridge_task"
       : "Harness off - enable to expose model_bridge_task",
   });
-  if (!pick) return;
+  if (!pick || pick.label === "🔵 BACK") return;
   if (pick.label.includes("OpenCode harness:")) {
     updatePreference("useOpenCodeHarness", !harnessOn);
     void vscode.window.showInformationMessage(
       `OpenCode harness ${!harnessOn ? "enabled" : "disabled"}.`
     );
-    return;
-  }
-  if (pick.label.includes("OpenCode server URL")) {
-    await editOpenCodeServerUrl(context);
-    return;
   }
 }
 
 async function zenKeyMenu(context: vscode.ExtensionContext): Promise<void> {
   const existing = await readSecret(context, ZEN_API_KEY_SECRET);
   const items: vscode.QuickPickItem[] = [
+    makeBackItem(),
+    makeSeparator(),
     {
       label: existing
         ? "$(key) Update OpenCode Zen API Key"
@@ -485,7 +582,7 @@ async function zenKeyMenu(context: vscode.ExtensionContext): Promise<void> {
     title: "OpenCode Zen API Key",
     placeHolder: existing ? "Update or clear the stored key" : "Store your Zen API key",
   });
-  if (!pick) return;
+  if (!pick || pick.label === "🔵 BACK") return;
   if (pick.label.includes("Clear")) {
     await clearZenApiKey(context);
     return;
@@ -508,8 +605,10 @@ async function manageThreadsMenu(): Promise<void> {
     detail: "Removes every rollout in ~/.wat321/model-bridge/sessions/",
   };
   const items: vscode.QuickPickItem[] = [
+    makeBackItem(),
+    makeSeparator(),
     eraseAllItem,
-    { label: "", kind: vscode.QuickPickItemKind.Separator },
+    makeSeparator(),
     ...threads.map((t) => ({
       label: t.id,
       description: `${t.alias} · ${t.turns} turn${t.turns === 1 ? "" : "s"}${
@@ -520,10 +619,10 @@ async function manageThreadsMenu(): Promise<void> {
   ];
 
   const pick = await vscode.window.showQuickPick(items, {
-    title: "Model Bridge Threads",
+    title: "Manage OpenCode Sessions",
     placeHolder: "Pick a thread to erase, or 'Erase all'",
   });
-  if (!pick) return;
+  if (!pick || pick.label === "🔵 BACK") return;
 
   if (pick === eraseAllItem) {
     const confirm = await vscode.window.showWarningMessage(
@@ -562,6 +661,14 @@ async function manageThreadsMenu(): Promise<void> {
   }
 }
 
+/** Public entry point for the Manage OpenCode Sessions submenu.
+ * Invoked directly by the Epic Handshake click menu's "Manage
+ * OpenCode Sessions" row so users can reach bridge session
+ * management from either widget. */
+export async function showModelBridgeSessions(): Promise<void> {
+  await manageThreadsMenu();
+}
+
 export async function showModelBridgeMenu(
   context: vscode.ExtensionContext,
   logger: ModelBridgeLogger
@@ -569,10 +676,20 @@ export async function showModelBridgeMenu(
   const config = await readConfigFromSettings(context);
   const prefs = readPreferences();
   const harnessOn = prefs.useOpenCodeHarness;
-  const phasedSummary = prefs.phasedProtocol === "markers-v1" ? "on" : "off";
+  const phasedSummary = prefs.phasedProtocol === "off" ? "off" : prefs.phasedProtocol;
   const compactSummary = `${Math.round(prefs.autoCompactThreshold * 100)}%`;
   const active = config.instances.find((i) => i.id === config.activeInstanceId);
   const usage = readUsageSummary();
+  const paused = isPaused();
+
+  // Probe llama-server's /props for the active local instance so the
+  // menu can surface its actual `n_ctx`. The probe has a tight 1.5s
+  // ceiling and a 30s cache; if the server is unreachable the row
+  // falls back to "(unknown)" instead of blocking the menu open.
+  const localKvNCtx =
+    active?.kind === "local"
+      ? await probeLocalNCtx(active.endpoint)
+      : null;
 
   const activeSummary = active
     ? `${active.alias} (${active.kind} - ${retentionLabel(active)})`
@@ -588,62 +705,97 @@ export async function showModelBridgeMenu(
       description: activeSummary,
       detail: "Pick the local LLM, Big Pickle, or any other Zen route",
     },
-    { label: "$(output) Open Output Channel", description: "WAT321: Model Bridge log" },
-    { label: "$(plug) Test Connection", description: active ? `Probe ${active.alias} /v1/models` : "(no active instance)" },
-    { label: "$(list-tree) Manage Threads", description: "List or erase rollouts" },
-    {
-      label: "$(graph) Reset Session Totals",
-      description: usageDescription,
-      detail: "Zero the per-instance token + call counters shown in the widget tooltip",
-    },
-    { label: "", kind: vscode.QuickPickItemKind.Separator },
-    {
-      label: "$(symbol-property) Configure runtime…",
-      description: `Temp ${prefs.temperature.toFixed(1)} · Max ${prefs.maxTokens.toLocaleString()} · Timeout ${prefs.timeoutSec}s`,
-      detail: "Sampling, max tokens, timeout, system prompt",
-    },
     {
       label: "$(beaker) Phased Protocol",
       description: phasedSummary,
-      detail: prefs.phasedProtocol === "markers-v1"
-        ? "Click to disable marker prompt + phase trace"
-        : "Click to enable marker prompt + phase trace",
+      detail: "Marker scaffolding that walks small models through reasoning phases",
     },
     {
       label: "$(zap) Auto-Compact",
       description: compactSummary,
       detail: "Fraction of n_ctx that triggers model_bridge_thread auto-compact",
     },
-    { label: "", kind: vscode.QuickPickItemKind.Separator },
+    {
+      label: "$(symbol-property) Sampling",
+      description: `T ${prefs.temperature.toFixed(1)} · ${prefs.maxTokens.toLocaleString()} max · ${prefs.timeoutSec}s`,
+      detail: "Temperature, max tokens, timeout, system prompt",
+    },
+    {
+      label: "$(person) Default Agent",
+      description: prefs.defaultAgent,
+      detail: "OpenCode agent used for model_bridge_task when the caller omits agent",
+    },
+    ...(active?.kind === "local"
+      ? [{
+          label: "$(database) KV Cache",
+          description: `${formatKvCache(localKvNCtx)} (read-only)`,
+          detail: "n_ctx reported by llama-server's /props endpoint. Mutation requires a server restart - edit the launcher script and re-Start LLM.",
+        }]
+      : []),
+    makeSeparator(),
+    {
+      label: "$(list-tree) Manage OpenCode Sessions",
+      description: "List or erase rollouts",
+    },
+    {
+      label: "$(graph) Reset Session Totals",
+      description: usageDescription,
+      detail: "Zero the per-instance token + call counters",
+    },
+    {
+      label: "$(plug) Test Connection",
+      description: active ? `Probe ${active.alias} /v1/models` : "(no active instance)",
+    },
+    { label: "$(output) Open Output Channel", description: "WAT321: Model Bridge log" },
+    makeSeparator(),
     {
       label: "$(key) OpenCode Zen API Key",
       description: "Set / update / clear the shared Zen secret",
-      detail: "Used by Big Pickle, GPT 5 Nano, Ling, Hy3, Nemotron, MiniMax M2.5",
     },
     {
       label: harnessOn
         ? "$(rocket) OpenCode Harness: enabled"
         : "$(circle-large-outline) OpenCode Harness: disabled",
       description: harnessOn
-        ? (prefs.openCodeServerUrl || "auto from active local endpoint")
+        ? "managed at 127.0.0.1:4096"
         : "Click to enable model_bridge_task",
-      detail: "Click to toggle or configure server URL",
     },
+    makeSeparator(),
+    makePauseResumeItem(paused),
+    makeCancelItem(),
   ];
 
   const pick = await vscode.window.showQuickPick(items, {
-    title: "Model Bridge",
-    placeHolder: "Pick an action",
+    title: paused ? "Model Bridge (paused)" : "Model Bridge",
+    placeHolder: paused ? "Paused - new tool calls refused until you Resume" : "Pick an action",
   });
   if (!pick) return;
+
+  if (pick.label === "🟡 PAUSE") {
+    setPaused(true);
+    void vscode.window.showInformationMessage("Model Bridge paused. New tool calls will be refused until you Resume.");
+    return;
+  }
+  if (pick.label === "🟢 RESUME") {
+    setPaused(false);
+    void vscode.window.showInformationMessage("Model Bridge resumed.");
+    return;
+  }
+  if (pick.label === "🔴 CANCEL") {
+    writeCancelFlag();
+    void vscode.window.showInformationMessage("Model Bridge: cancel requested. The in-flight call will abort.");
+    return;
+  }
+
   if (pick.label.includes("Active Instance")) { await pickActiveInstance(context); return; }
   if (pick.label.includes("Open Output")) { logger.show(); return; }
   if (pick.label.includes("Test Connection")) { await testConnection(context, logger); return; }
-  if (pick.label.includes("Manage Threads")) { await manageThreadsMenu(); return; }
+  if (pick.label.includes("Manage OpenCode Sessions")) { await manageThreadsMenu(); return; }
   if (pick.label.includes("Reset Session Totals")) { await resetSessionTotals(); return; }
-  if (pick.label.includes("Configure runtime")) { await configureModelMenu(); return; }
-  if (pick.label.includes("Phased Protocol")) { await togglePhasedProtocol(); return; }
+  if (pick.label.includes("Sampling")) { await samplingMenu(); return; }
+  if (pick.label.includes("Default Agent")) { await pickDefaultAgent(); return; }
+  if (pick.label.includes("Phased Protocol")) { await pickPhasedProtocol(); return; }
   if (pick.label.includes("Auto-Compact")) { await pickAutoCompact(); return; }
   if (pick.label.includes("OpenCode Zen API Key")) { await zenKeyMenu(context); return; }
-  if (pick.label.includes("Harness")) { await harnessMenu(context); return; }
+  if (pick.label.includes("Harness")) { await harnessMenu(); return; }
 }

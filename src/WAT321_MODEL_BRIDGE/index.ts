@@ -13,7 +13,8 @@ import {
   uninstallModelBridge,
 } from "./installer";
 import { createModelBridgeLogger, type ModelBridgeLogger } from "./outputChannel";
-import { clearZenApiKey, promptAndStoreZenApiKey, ZEN_API_KEY_SECRET } from "./secrets";
+import { createOpenCodeManager } from "./openCodeManager";
+import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
 import { createModelBridgeStatusBarItem } from "./statusBarItem";
 
 /**
@@ -52,6 +53,9 @@ export function activateModelBridge(
   const statusBar = createModelBridgeStatusBarItem(context, logger);
   context.subscriptions.push({ dispose: () => statusBar.dispose() });
 
+  const openCodeManager = createOpenCodeManager(logger);
+  context.subscriptions.push({ dispose: () => void openCodeManager.dispose() });
+
   let lastInstallable = false;
   // First-pass guard. Without this, the activate-time call short-
   // circuits when desired state is `false` because lastInstallable is
@@ -62,7 +66,24 @@ export function activateModelBridge(
   let everReconciled = false;
 
   const applyCurrentConfig = async (): Promise<void> => {
-    const config = await readConfigFromSettings(context);
+    const cfg = vscode.workspace.getConfiguration("wat321");
+    const enabled = cfg.get<boolean>(SETTING.modelBridgeEnabled, false);
+    const localEndpoint = cfg
+      .get<string>(SETTING.modelBridgeLocalEndpoint, "http://127.0.0.1:8080")
+      .trim()
+      .replace(/\/+$/, "");
+    const zenKey = (await readSecret(context, ZEN_API_KEY_SECRET)) ?? "";
+
+    // Managed local opencode-serve is the only harness target now;
+    // when OpenCode is enabled, reconcile spawns it. Disabling
+    // OpenCode kills the subprocess.
+    const managedUrl = await openCodeManager.reconcile({
+      enabled,
+      localEndpoint,
+      zenApiKey: zenKey,
+    });
+
+    const config = await readConfigFromSettings(context, managedUrl);
     const written = writeConfigFile(config);
     if (!written) {
       logger.warn("config.json write failed; channel.mjs will see prior values");
@@ -143,10 +164,12 @@ export function activateModelBridge(
       } catch {
         // best-effort
       }
+      await openCodeManager.dispose();
       lastInstallable = false;
     },
     dispose(): void {
       watcher.dispose();
+      void openCodeManager.dispose();
       logger.dispose();
     },
   };

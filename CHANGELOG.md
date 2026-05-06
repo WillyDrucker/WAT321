@@ -5,6 +5,39 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-05-05
+
+### Added
+
+- **OpenCode is now its own top-level setting alongside Claude and Codex.** Turn it on once and Big Pickle, GPT 5 Nano, Ling, Hy3, Nemotron, and MiniMax M2.5 light up as routable models in your Claude sessions, plus your local LLM if you've pointed WAT321 at one. WAT321 spawns and manages a private `opencode serve` on your dev box automatically when you turn it on, so the tool-using harness operates against your real workspace instead of a remote machine.
+- **Live tokens-per-second now show on the bridge widget during tool-using runs.** Previously the widget went silent for 30+ seconds while the harness chewed through tools; now you see real token motion the whole time. The same readout that worked for direct chat completions now works for everything.
+- **Cumulative session tokens appear right on the Model Bridge widget label.** Glance and see "Big Pickle 12.4k" - what the active instance has cost you so far this session.
+- **Pause and Cancel show up at the bottom of the Model Bridge click menu** with the same color vocabulary as Epic Handshake. Pause blocks new tool calls without interrupting whatever's running; Cancel aborts the active call. Click the widget, scroll to the bottom.
+- **A read-only KV Cache row in the click menu** tells you what context size your local LLM is running with, probed from llama-server's own properties. No more SSH'ing in to read the launcher script.
+- **A Default Agent picker** lets you choose which OpenCode agent (build, explore, general, or plan) the harness uses by default. Most folks want `build`; switch to `explore` when you only want the model reading your code, not editing it.
+- **Manage OpenCode Sessions row in Epic Handshake's menu** so all your bridge session management lives in one dropdown.
+- **The wait-mode setting is now visible in the Settings UI.** It used to be runtime-only and editable only via settings.json by hand.
+
+### Changed
+
+- **The Model Bridge settings page is now just two fields instead of five.** Empty out the local LLM endpoint to disable local routing; fill it in to enable. No more separate boolean toggles to keep in sync. We commit to running OpenCode locally rather than letting users point it at remote machines - simpler to reason about, faster, no LAN hop.
+- **Phased protocol default is single-shot markers.** The plan was for gated 5-step to be the default, but it makes every local LLM call do five sequential round-trips, which blew the timeout on anything past simple math. Gated mode is still available - flip it on via the click menu when you want it.
+- **Click menu rebuilt to match Epic Handshake's structured layout.** Every submenu has a BACK row at the top; pause / resume / cancel always live at the bottom. Less scrolling, more muscle memory between the two bridges.
+- **The local LLM box no longer needs OpenCode installed.** WAT321 spawns OpenCode on your dev box now. Your inference box just runs llama.cpp.
+
+### Fixed
+
+- **A class of "the bridge swallowed my reply" failures in Epic Handshake** where transport hiccups would lose the right notifications and block the rollout-recovery branches that exist for exactly that case. Recovery now triggers on either rollout-poller progress or `turn/completed` arrival, not just on every prior RPC notification surviving.
+- **The OpenCode harness rejecting "model not found"** for whatever local model you had loaded. The wire identifier is now decoupled from the actual model - llama.cpp ignores the model field anyway.
+- **The OpenCode subprocess outliving VS Code on close.** When you quit VS Code, our managed subprocess now actually dies with it.
+- **A subtle race where canceling one tool call could interrupt a different one.** The cancel signal now scopes to the call it was meant for.
+- **Gated phased mode correctly holds the busy-gate** across all five round-trips so a parallel call can't slip in between phases.
+
+### Removed
+
+- **Three Model Bridge settings keys: localEnabled, useManagedOpenCode, externalOpenCodeUrl.** They were redundant booleans on top of the URL fields. If you had `useManagedOpenCode: false` + an `externalOpenCodeUrl` set, you'll silently move to managed local OpenCode on upgrade.
+- **OpenCode hosting from the LLM box.** No more `Start OpenCode Server` shortcut, no `start-ai-stack.ps1`, no `~/opencode/` package install on the inference machine. Pure llama.cpp.
+
 ## [1.3.0] - 2026-05-05
 
 ### Added

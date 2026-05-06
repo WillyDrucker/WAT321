@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
 import { CONFIG_PATH, HEARTBEAT_PATH, USAGE_PATH } from "./constants";
 import type { ModelBridgeLogger } from "./outputChannel";
-import { showModelBridgeMenu } from "./statusBarMenu";
+import { showModelBridgeMenu, showModelBridgeSessions } from "./statusBarMenu";
 
 /**
  * Model Bridge status bar widget. Renders to the right of the Codex
@@ -192,7 +192,7 @@ function buildLiveTooltip(
     );
   }
   appendUsageBlock(md, snap, usage);
-  md.appendMarkdown(`*Click for menu (Active Instance, Test Connection, Manage Threads, ...).*`);
+  md.appendMarkdown(`*Click for menu (Active Instance, Phased Protocol, Manage OpenCode Sessions, ...).*`);
   return md;
 }
 
@@ -232,6 +232,15 @@ export function createModelBridgeStatusBarItem(
   const menuCommand = vscode.commands.registerCommand(COMMAND_ID, async () => {
     await showModelBridgeMenu(context, logger);
   });
+  // Cross-tier hook: Epic Handshake dispatches to this command from
+  // its "Manage OpenCode Sessions" row so users can reach bridge
+  // session management without leaving the EH dropdown.
+  const sessionsCommand = vscode.commands.registerCommand(
+    "wat321.modelBridge.manageSessions",
+    async () => {
+      await showModelBridgeSessions();
+    }
+  );
   // Keep the legacy `wat321.modelBridge.show` so settings descriptions
   // and external integrations that still reference it keep working.
   const showCommand = vscode.commands.registerCommand(
@@ -272,6 +281,20 @@ export function createModelBridgeStatusBarItem(
           .join("|")
       : "";
 
+    // Cumulative session tokens for the active instance. Surfaced
+    // inline in the idle label so the user sees "what has this
+    // instance cost me" at a glance, parallel to how Claude / Codex
+    // session-token widgets show their running totals. Carries across
+    // resume because usage.json accumulates per-instance lifetime
+    // counts; reset via the click-menu's Reset Session Totals row.
+    const activeUsage = usage?.instances[active.id];
+    const activeTotalTokens =
+      typeof activeUsage?.input === "number" && typeof activeUsage?.output === "number"
+        ? activeUsage.input + activeUsage.output
+        : 0;
+    const activeTokensSuffix =
+      activeTotalTokens > 0 ? ` ${formatTokens(activeTotalTokens)}` : "";
+
     const heartbeat = readHeartbeat();
     let text: string;
     let tooltipSig: string;
@@ -283,7 +306,7 @@ export function createModelBridgeStatusBarItem(
         Number.isFinite(startedMs) &&
         elapsedMs > heartbeat.timeoutMs * STALE_HEARTBEAT_MULTIPLIER;
       if (stale) {
-        text = `$(wat321-square) ${idleAlias}`;
+        text = `$(wat321-square) ${idleAlias}${activeTokensSuffix}`;
         tooltipSig = `idle:${idleAlias}:${needsKey}:${usageSig}`;
         tooltip = buildIdleTooltip(idleAlias, retention, needsKey, snap, usage);
       } else {
@@ -305,7 +328,7 @@ export function createModelBridgeStatusBarItem(
       }
     } else {
       const badge = needsKey ? " $(wat321-square-alert)" : "";
-      text = `$(wat321-square) ${idleAlias}${badge}`;
+      text = `$(wat321-square) ${idleAlias}${activeTokensSuffix}${badge}`;
       tooltipSig = `idle:${idleAlias}:${needsKey}:${usageSig}`;
       tooltip = buildIdleTooltip(idleAlias, retention, needsKey, snap, usage);
     }
@@ -324,7 +347,7 @@ export function createModelBridgeStatusBarItem(
   refresh();
   const timer = setInterval(refresh, REFRESH_INTERVAL_MS);
 
-  context.subscriptions.push(menuCommand, showCommand, item);
+  context.subscriptions.push(menuCommand, sessionsCommand, showCommand, item);
 
   return {
     dispose: (): void => {

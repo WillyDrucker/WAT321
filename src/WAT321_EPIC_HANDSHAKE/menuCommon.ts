@@ -34,6 +34,7 @@ export type Action =
   | "wait-mode-locked"
   | "codex-defaults"
   | "manage-sessions"
+  | "manage-opencode-sessions"
   | "repair-sessions"
   | "in-flight-info"
   | "back";

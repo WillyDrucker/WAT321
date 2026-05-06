@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -249,8 +249,28 @@
         }
       },
       {
-        "title": "Notifications",
+        "title": "OpenCode",
         "order": 3,
+        "properties": {
+          "wat321.modelBridge.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "order": 1,
+            "markdownDescription": "Adds Big Pickle, GPT 5 Nano, Ling 2.6 Flash, Hy3 Preview, Nemotron 3 Super, and MiniMax M2.5 to Claude as routable models. When on, WAT321 auto-spawns a managed `opencode serve` on `127.0.0.1:4096` so the tool-using harness (`model_bridge_task`) works against any catalog instance, including your local LLM. Direct chat completions (`model_bridge_ask`, `model_bridge_thread`) keep working whether this is on or off. Hidden automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\n**Enable OpenCode**"
+          },
+          "wat321.modelBridge.localEndpoint": {
+            "type": "string",
+            "default": "http://127.0.0.1:8080",
+            "scope": "application",
+            "order": 2,
+            "markdownDescription": "Base URL for your local LLM server (e.g. `http://127.0.0.1:8080` for a llama.cpp `--jinja` server on the dev box, `http://10.0.0.91:8080` for a separate LLM box on the LAN, `http://localhost:11434` for Ollama). The bridge appends `/v1/chat/completions` per call. **Filled:** Local LLM appears as a catalog instance; the harness routes to it when OpenCode is enabled. **Empty:** Local LLM is hidden from the catalog; only Zen routes are available."
+          }
+        }
+      },
+      {
+        "title": "Notifications",
+        "order": 4,
         "properties": {
           "wat321.notifications.mode": {
             "type": "string",
@@ -289,7 +309,7 @@
       },
       {
         "title": "General",
-        "order": 4,
+        "order": 5,
         "properties": {
           "wat321.displayMode": {
             "type": "string",
@@ -325,7 +345,7 @@
       },
       {
         "title": "Epic Handshake (Claude to Codex Only)",
-        "order": 5,
+        "order": 6,
         "properties": {
           "wat321.epicHandshake.enabled": {
             "type": "boolean",
@@ -340,32 +360,27 @@
             "scope": "application",
             "order": 4,
             "markdownDescription": "Suppress Codex completion notifications while the Epic Handshake bridge is active. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
-          }
-        }
-      },
-      {
-        "title": "Model Bridge (Local + Cloud LLMs for Claude)",
-        "order": 6,
-        "properties": {
-          "wat321.modelBridge.enabled": {
-            "type": "boolean",
-            "default": false,
-            "scope": "application",
-            "order": 1,
-            "markdownDescription": "**Enable the Model Bridge** - Wires Claude up to either a local OpenAI-compatible LLM (llama.cpp, Ollama, vLLM, LM Studio) or one of OpenCode Zen's free routes (Big Pickle, GPT 5 Nano, Ling, Hy3, Nemotron, MiniMax M2.5). Click the **Model Bridge** status-bar widget after enabling to pick the active instance, set the OpenCode Zen API key (only needed for cloud instances), tune sampling, and configure the OpenCode harness."
           },
-          "wat321.modelBridge.localEndpoint": {
+          "wat321.epicHandshake.defaultWaitMode": {
             "type": "string",
-            "default": "http://10.0.0.91:8080",
+            "default": "Adaptive",
             "scope": "application",
-            "order": 2,
-            "markdownDescription": "Base URL for your local LLM server (e.g. `http://10.0.0.91:8080` for a llama.cpp `--jinja` server on the LAN, `http://localhost:11434` for Ollama). The bridge appends `/v1/chat/completions` per call. Whichever model is loaded on that server is what the `Local LLM` instance answers with - swap models freely via the LLMs desktop shortcuts; WAT321 auto-follows."
+            "enum": [
+              "Adaptive",
+              "Fire-and-Forget"
+            ],
+            "enumDescriptions": [
+              "Stretches per-tool stall thresholds to a 2-minute floor so legitimate pure-reasoning gaps do not trip the default 60s timer.",
+              "Disables stall and hard-cap timers entirely; the reply lands when it lands. Cancel via the status-bar action if a turn truly goes off the rails."
+            ],
+            "order": 5,
+            "markdownDescription": "Default wait-mode applied at activation. Per-session toggles via the click-menu override this until the next window restart."
           }
         }
       },
       {
         "title": "Reset",
-        "order": 6,
+        "order": 7,
         "properties": {
           "wat321.clearAllData": {
             "type": "boolean",

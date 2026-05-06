@@ -5,7 +5,7 @@ import { SETTING } from "../engine/settingsKeys";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { CONFIG_PATH, MODEL_BRIDGE_DIR } from "./constants";
 import { CATALOG, LOCAL_INSTANCE_ID } from "./instanceCatalog";
-import { readPreferences, resolveOpenCodeServerUrl } from "./preferences";
+import { readPreferences } from "./preferences";
 import { resolveApiKeys } from "./secrets";
 
 /**
@@ -42,6 +42,10 @@ export interface ModelBridgeInstance {
   /** The reference name itself, preserved so channel.mjs can name
    * the missing-key error clearly. Empty for local instances. */
   apiKeyRef: string;
+  /** OpenCode provider id used by the harness. Mirrors the catalog
+   * entry's `harnessProviderID`; `channel.mjs` reads it directly when
+   * building `{providerID, modelID}` for `/session/:id/message`. */
+  harnessProviderID: "llama.cpp" | "zen";
 }
 
 export interface ModelBridgeConfig {
@@ -67,8 +71,11 @@ export interface ModelBridgeConfig {
   maxTokens: number;
   timeoutSec: number;
   systemPrompt: string;
-  phasedProtocol: "off" | "markers-v1";
+  phasedProtocol: "off" | "markers-v1" | "gated-v1" | "auto";
   autoCompactThreshold: number;
+  /** Default OpenCode agent for `model_bridge_task` calls when the
+   * caller omits an explicit `agent`. */
+  defaultAgent: "build" | "explore" | "general" | "plan";
   /** Resolved OpenCode HTTP server URL. Empty when the harness is
    * unavailable - harness toggle off, active instance not local, or
    * URL could not be derived. */
@@ -76,21 +83,41 @@ export interface ModelBridgeConfig {
 }
 
 /** Read settings + preferences + SecretStorage and produce a merged
- * config. Async because SecretStorage reads are async. */
+ * config. Async because SecretStorage reads are async.
+ *
+ * `managedOpenCodeUrl` is the URL of the WAT321-spawned local
+ * `opencode serve` process when the bridge is enabled and the
+ * manager has a live process. Empty otherwise. The caller (Model
+ * Bridge `index.ts`) owns the manager and passes the URL in,
+ * keeping `config.ts` free of subprocess lifecycle concerns. */
 export async function readConfigFromSettings(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  managedOpenCodeUrl = ""
 ): Promise<ModelBridgeConfig> {
   const cfg = vscode.workspace.getConfiguration("wat321");
   const enabled = cfg.get<boolean>(SETTING.modelBridgeEnabled, false);
   const localEndpoint = cfg
-    .get<string>(SETTING.modelBridgeLocalEndpoint, "http://10.0.0.91:8080")
+    .get<string>(SETTING.modelBridgeLocalEndpoint, "http://127.0.0.1:8080")
     .trim()
     .replace(/\/+$/, "");
+  // Empty localEndpoint means "no local LLM" - the catalog drops the
+  // local instance entirely. Any non-empty value enables it. The
+  // boolean toggle was redundant: VS Code settings do not have
+  // conditional visibility, but empty-string-as-off is cleaner than
+  // a separate bool that has to stay in sync.
+  const localEnabled = localEndpoint.length > 0;
 
   const refs = CATALOG.map((c) => c.apiKeyRef).filter((r) => r.length > 0);
   const resolvedKeys = await resolveApiKeys(context, refs);
 
-  const instances: ModelBridgeInstance[] = CATALOG.map((entry) => {
+  // Filter out the local instance entirely when `localEnabled` is
+  // off. Users with no llama-server reachable get a clean cloud-only
+  // catalog instead of a perpetually-failing entry.
+  const filteredCatalog = CATALOG.filter(
+    (entry) => entry.kind !== "local" || localEnabled
+  );
+
+  const instances: ModelBridgeInstance[] = filteredCatalog.map((entry) => {
     const endpoint = entry.kind === "local" ? localEndpoint : entry.endpoint;
     const apiKey = entry.apiKeyRef ? resolvedKeys[entry.apiKeyRef] ?? "" : "";
     const apiKeyMissing = entry.apiKeyRef.length > 0 && apiKey.length === 0;
@@ -104,20 +131,21 @@ export async function readConfigFromSettings(
       apiKey,
       apiKeyMissing,
       apiKeyRef: entry.apiKeyRef,
+      harnessProviderID: entry.harnessProviderID,
     };
   });
 
   const prefs = readPreferences();
   const activeInstanceId = pickActiveInstanceId(instances, prefs.activeInstanceId);
 
-  // Harness URL derives from the active instance when it is local.
-  // Cloud instances never run the local OpenCode harness.
-  const active = instances.find((i) => i.id === activeInstanceId);
-  const harnessSourceEndpoint =
-    active?.kind === "local" ? active.endpoint : "";
+  // Harness URL is the managed local subprocess URL the caller passed
+  // in. Empty when the manager has not yet (or cannot) spawn one,
+  // which leaves model_bridge_task disabled until it does. The harness
+  // is always managed local under the simplified settings shape -
+  // external OpenCode is no longer a configurable target.
   const openCodeServerUrl =
-    prefs.useOpenCodeHarness && harnessSourceEndpoint.length > 0
-      ? (resolveOpenCodeServerUrl(prefs, harnessSourceEndpoint) ?? "")
+    prefs.useOpenCodeHarness && managedOpenCodeUrl.length > 0
+      ? managedOpenCodeUrl.replace(/\/+$/, "")
       : "";
 
   return {
@@ -131,14 +159,14 @@ export async function readConfigFromSettings(
     systemPrompt: prefs.systemPrompt,
     phasedProtocol: prefs.phasedProtocol,
     autoCompactThreshold: prefs.autoCompactThreshold,
+    defaultAgent: prefs.defaultAgent,
     openCodeServerUrl,
   };
 }
 
 /** Resolve the active instance id. Falls back to the local instance
- * when the preference is empty or names a removed instance. The
- * local instance is always available (even with no API key) so this
- * never returns "". */
+ * when present, otherwise to the first available cloud instance so
+ * the bridge can still serve calls when `localEnabled` is off. */
 function pickActiveInstanceId(
   instances: ModelBridgeInstance[],
   preferred: string
@@ -147,7 +175,9 @@ function pickActiveInstanceId(
     const match = instances.find((i) => i.id === preferred);
     if (match) return match.id;
   }
-  return LOCAL_INSTANCE_ID;
+  const localPresent = instances.some((i) => i.id === LOCAL_INSTANCE_ID);
+  if (localPresent) return LOCAL_INSTANCE_ID;
+  return instances[0]?.id ?? "";
 }
 
 /** Atomically persist the merged config to disk so channel.mjs picks
