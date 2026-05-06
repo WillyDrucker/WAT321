@@ -1,49 +1,44 @@
 #!/usr/bin/env node
 /**
- * WAT321 Bridge - Unified MCP Server (v1.4.1+)
+ * WAT321 Bridge - Unified MCP Server.
  *
- * Single MCP entry point replacing the v1.4.0 split between
- * `wat321` (Epic Handshake / Codex) and `wat321-model-bridge`
- * (OpenCode Zen / local LLM). Registered with Claude as one server,
- * exposes 4 tools with a `target` parameter for routing:
+ * Single MCP entry point that replaced the legacy two-server split
+ * (`wat321` for Epic Handshake + `wat321-model-bridge` for Model
+ * Bridge). Registered with Claude as one server; exposes a minimal
+ * tool surface plus MCP resources for read-only state:
  *
- *   wat321_ask({target, prompt, ...})       - dispatch a prompt
- *   wat321_inbox({target, ...})              - retrieve queued replies
- *   wat321_list({target?})                   - list configured instances
- *   wat321_session({target, action, ...})    - lifecycle for resumable sessions
+ *   wat321_ask         - alias-driven dispatch (router resolves)
+ *   wat321_session     - mutating session lifecycle (create/delete/rename)
  *
- * Token economics drove the unification: 7 distinct tools across 2
- * servers = ~2100 tokens of system-prompt registration cost per Claude
- * conversation. 4 unified tools = ~1200 tokens. Saves ~900 tokens
- * compounding across every turn until context turnover.
+ *   bridge://instances        - catalog of configured backends
+ *   bridge://sessions/{target}- session aliases per target
+ *   bridge://inbox/codex      - pending Codex late replies
+ *   bridge://status           - daemon health, last-used backend
+ *
+ * Router collapses target+instance routing into a free-form `alias`
+ * string ("Big Pickle", "Codex", "Local LLM") with fuzzy matching
+ * against the catalog. Total system-prompt overhead is ~250-300
+ * tokens (down from ~1100 with the prior 4-tool surface).
  *
  * Conditional registration: at startup, the server reads enabled
- * features (epicHandshake.enabled, modelBridge.enabled) from a config
- * file the extension writes on activate. The `target` enum on each
- * tool is narrowed to whichever subset is actually enabled. If neither
- * is enabled, the server registers zero tools - users pay zero context
+ * features (epicHandshake.enabled, modelBridge.enabled) from
+ * `~/.wat321/bridge/config.json` (the extension writes it on activate
+ * and on settings change). Disabled targets are stripped from the
+ * tool surface AND from the resource list - users pay zero context
  * tokens for tools that would just error.
  *
  * Settings change requires a VS Code reload to refresh the tool list -
- * MCP tool registrations are snapshotted at connection time anyway, so
- * this matches existing behavior across the codebase.
- *
- * Status: SCAFFOLDING ONLY. Stub handlers return informative errors
- * referencing the codepath that will replace them. The legacy two-
- * server registration remains active until the implementation lands.
- *
- * Implementation order (see WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md):
- *   1. Codex handlers (port from src/WAT321_EPIC_HANDSHAKE/bin/channel.mjs)
- *   2. OpenCode handlers (use /session API discovered 2026-05-06)
- *   3. Local LLM handlers (defer until better local models tested)
- *   4. Installer wiring + legacy sweep
+ * MCP tool registrations are snapshotted at connection time, the same
+ * constraint that applies to every MCP client.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
-  ListToolsRequestSchema,
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -53,6 +48,7 @@ import * as opencode from "./opencode.mjs";
 
 const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
 const CONFIG_PATH = join(BRIDGE_DIR, "config.json");
+const MB_CONFIG_PATH = join(homedir(), ".wat321", "model-bridge", "config.json");
 const LOG_PATH = join(BRIDGE_DIR, "channel.log");
 const LOG_MAX_BYTES = 50_000;
 
@@ -98,142 +94,151 @@ function readEnabledTargets() {
   }
 }
 
-/** Build the dynamic `target` enum for a tool's input schema. Empty
- * array means the tool should not be registered at all. */
-function targetEnumFor(tool, enabled) {
-  const all = [];
-  if (enabled.codex && tool !== "session") all.push("codex");
-  if (enabled.opencode) all.push("opencode");
-  if (enabled.local) all.push("local");
-  return all;
+/** Read the Model Bridge catalog. Used by the router for alias
+ * resolution and by the `bridge://instances` resource for Claude's
+ * on-demand discovery. Returns the active instance id alongside so
+ * the router can default `alias=null` calls to the user's preferred
+ * routing target. */
+function readCatalog() {
+  const empty = { instances: [], activeInstanceId: null };
+  try {
+    if (!existsSync(MB_CONFIG_PATH)) return empty;
+    const parsed = JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8"));
+    return {
+      instances: Array.isArray(parsed?.instances) ? parsed.instances : [],
+      activeInstanceId:
+        typeof parsed?.activeInstanceId === "string" ? parsed.activeInstanceId : null,
+    };
+  } catch (err) {
+    log("warn", `readCatalog failed: ${err?.message || String(err)}`);
+    return empty;
+  }
 }
 
-/** Tool descriptor builder. Returns the MCP tool definition or null
- * when no targets apply (caller filters nulls before publishing). */
+/** Bridge router. Resolves a free-form alias string ("Big Pickle",
+ * "Codex", "Pickle" via fuzzy match) to a concrete dispatch target +
+ * optional instance_id. Catalog-driven, deterministic, no LLM in the
+ * loop - adding a new instance is a catalog edit and the router gets
+ * it for free.
+ *
+ * Resolution order:
+ *   1. Exact target keyword: "codex" / "opencode" / "local" (case-
+ *      insensitive). Returns just `{target}` so the dispatch handler
+ *      can pick the active instance for that target.
+ *   2. Exact alias / id match against the catalog.
+ *   3. Substring fuzzy match. Single hit returns it; multiple hits
+ *      return `{ambiguous, candidates}` for Claude to disambiguate.
+ *   4. Empty / null alias -> `{useDefault: true}` so the caller
+ *      either falls back to last-used or active. */
+function makeRouter() {
+  const catalog = readCatalog();
+  const targetKeywords = new Map([
+    ["codex", "codex"],
+    ["opencode", "opencode"],
+    ["local", "local"],
+    ["local llm", "local"],
+    ["local-llm", "local"],
+  ]);
+  function instanceKindToTarget(kind) {
+    return kind === "local" ? "local" : "opencode";
+  }
+  function resolve(alias) {
+    if (alias === null || alias === undefined) {
+      return { useDefault: true };
+    }
+    const norm = String(alias).trim().toLowerCase();
+    if (norm.length === 0) return { useDefault: true };
+    if (targetKeywords.has(norm)) {
+      return { target: targetKeywords.get(norm) };
+    }
+    // Exact alias / id match.
+    for (const inst of catalog.instances) {
+      const a = String(inst.alias || "").toLowerCase();
+      const id = String(inst.id || "").toLowerCase();
+      if (a === norm || id === norm) {
+        return { target: instanceKindToTarget(inst.kind), instance_id: inst.id };
+      }
+    }
+    // Substring fuzzy match. Bias toward alias matches over id matches
+    // (alias is what the user typed; id is the internal slug).
+    const candidates = catalog.instances.filter((inst) => {
+      const a = String(inst.alias || "").toLowerCase();
+      const id = String(inst.id || "").toLowerCase();
+      return a.includes(norm) || id.includes(norm);
+    });
+    if (candidates.length === 1) {
+      const inst = candidates[0];
+      return { target: instanceKindToTarget(inst.kind), instance_id: inst.id };
+    }
+    if (candidates.length > 1) {
+      return {
+        ambiguous: true,
+        candidates: candidates.map((c) => c.alias || c.id),
+      };
+    }
+    return { unknown: true, alias };
+  }
+  return { resolve, catalog };
+}
+
+/** Tool descriptor builder. Returns the MCP tool definitions exposed
+ * to Claude. Two tools after the v1.4.3 router refactor:
+ *
+ *   wat321_ask     - dispatch a prompt; alias picks the backend
+ *   wat321_session - mutating session lifecycle (create/delete/rename)
+ *
+ * The previous wat321_inbox and wat321_list tools moved to MCP
+ * resources (see resources/list below) - read-only state Claude only
+ * fetches when the user asks for it, costing zero tool-description
+ * tokens the rest of the time. The unified router resolves alias
+ * strings to concrete targets so Claude doesn't need to know the
+ * target enum exists.
+ *
+ * Total tool surface ~250-300 tokens vs the previous ~1100. */
 function buildTools(enabled) {
   const tools = [];
+  const anyEnabled = enabled.codex || enabled.opencode || enabled.local;
+  if (!anyEnabled) return tools;
 
-  const askTargets = targetEnumFor("ask", enabled);
-  if (askTargets.length > 0) {
-    tools.push({
-      name: "wat321_ask",
-      description:
-        "Send a prompt to a configured WAT321 bridge target. Use this whenever the user asks to ask, prompt, tell, or check with another model.\n\nROUTING HINTS (map common phrases to args):\n- 'Ask Codex ...' / 'tell Codex ...' / 'check with Codex' -> {target:'codex'}\n- 'Ask Big Pickle ...' / 'ask Pickle ...' -> {target:'opencode', instance_id:'big-pickle'}\n- 'Ask GPT-5 Nano ...' / 'ask Nano ...' -> {target:'opencode', instance_id:'gpt-5-nano'}\n- 'Ask Ling ...' -> {target:'opencode', instance_id:'ling-2-6-flash'}\n- 'Ask Hy3 ...' -> {target:'opencode', instance_id:'hy3-preview-free'}\n- 'Ask Nemotron ...' -> {target:'opencode', instance_id:'nemotron-3-super-free'}\n- 'Ask MiniMax ...' -> {target:'opencode', instance_id:'minimax-m2-5-free'}\n- 'Ask OpenCode ...' / 'ask the cloud model' -> {target:'opencode'} (no instance_id, uses active)\n- 'Ask the local LLM ...' / 'ask my local model' -> {target:'local'}\n\nTARGET SEMANTICS:\n- target=codex: sync sub-Claude turn via Epic Handshake (Codex CLI dispatcher).\n- target=opencode: cloud model via opencode serve, free anonymous /zen/v1 fallback if no key. Resumable via session.\n- target=local: local llama.cpp / Ollama / vLLM endpoint. Resumable via session.\n\nPass session='S1' (or any alias from wat321_session) to continue a prior conversation on opencode/local. For codex, pass thread_name. Use wat321_list to discover available instances. Use wat321_session to manage session lifecycle.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          target: {
-            type: "string",
-            enum: askTargets,
-            description: "Which bridge to dispatch through.",
-          },
-          prompt: {
-            type: "string",
-            description: "The prompt body to send.",
-          },
-          session: {
-            type: "string",
-            description:
-              "Resumable session alias (S1, S2, ...) for opencode/local. Created via wat321_session({action:'create'}). Omit to start a one-shot.",
-          },
-          thread_name: {
-            type: "string",
-            description:
-              "Codex thread name (default 'S1'). Codex-specific equivalent of session for opencode/local.",
-          },
-          instance_id: {
-            type: "string",
-            description:
-              "Specific instance id for opencode/local (e.g. 'big-pickle', 'local-llm'). Defaults to the click-menu's active instance.",
-          },
-          timeout_sec: {
-            type: "integer",
-            description: "Override the default per-target timeout.",
-          },
-        },
-        required: ["target", "prompt"],
+  // Bare-minimum tool description. Server router does the work; Claude
+  // only needs to know "this is the ask tool, pass prompt + alias."
+  // A handful of example aliases seed pattern recognition; the full
+  // catalog is the bridge://instances resource for when the user asks.
+  tools.push({
+    name: "wat321_ask",
+    description:
+      "Ask another AI model. `alias` is who (e.g. 'Codex', 'Big Pickle', 'Local LLM') - fuzzy-matched, omit for default. See bridge://instances for full catalog. `session` continues a prior conversation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Message to send." },
+        alias: { type: "string", description: "Which backend." },
+        session: { type: "string", description: "Session alias (S1, S2, ...)." },
+        thread_name: { type: "string", description: "Codex thread name." },
+        timeout_sec: { type: "integer", description: "Override timeout." },
       },
-    });
-  }
+      required: ["prompt"],
+    },
+  });
 
-  const inboxTargets = targetEnumFor("inbox", enabled);
-  if (inboxTargets.length > 0) {
-    tools.push({
-      name: "wat321_inbox",
-      description:
-        "Retrieve queued replies from a WAT321 bridge target. target=codex returns pending late-reply envelopes from Epic Handshake. target=opencode/local returns completed asynchronous wat321_ask({async:true}) results. Pass requestId to target a specific entry; pass peek to view without removing.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          target: {
-            type: "string",
-            enum: inboxTargets,
-            description: "Which bridge inbox to read.",
-          },
-          requestId: {
-            type: "string",
-            description: "Specific async request id (opencode/local).",
-          },
-          peek: {
-            type: "boolean",
-            description: "View entries without removing them.",
-          },
-        },
-        required: ["target"],
-      },
-    });
-  }
-
-  const listTargets = targetEnumFor("list", enabled);
-  if (listTargets.length > 0) {
-    tools.push({
-      name: "wat321_list",
-      description:
-        "List configured instances and their status. Omit target to list every enabled bridge. Returns id, alias, kind, model, retention, and ready/needs-key flags. Use this to find a valid instance_id for wat321_ask.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          target: {
-            type: "string",
-            enum: listTargets,
-            description: "Restrict to one bridge. Omit to list all enabled.",
-          },
-        },
-      },
-    });
-  }
-
-  const sessionTargets = targetEnumFor("session", enabled);
-  if (sessionTargets.length > 0) {
+  // Session mutations only - listing moved to bridge://sessions/{target}
+  // resource. Description stays short; the action enum self-documents.
+  if (enabled.opencode || enabled.local) {
+    const sessionTargets = [];
+    if (enabled.opencode) sessionTargets.push("opencode");
+    if (enabled.local) sessionTargets.push("local");
     tools.push({
       name: "wat321_session",
       description:
-        "Manage resumable session aliases (S1, S2, ...) for opencode/local. Sessions are owned by OpenCode (stored in opencode.db) - WAT321 just maps the user-facing alias to the underlying session id. Codex doesn't use this tool; pass thread_name on wat321_ask instead.",
+        "Manage session aliases for opencode/local. To list, read bridge://sessions/{target}.",
       inputSchema: {
         type: "object",
         properties: {
-          target: {
-            type: "string",
-            enum: sessionTargets,
-            description: "Which bridge to manage sessions for.",
-          },
-          action: {
-            type: "string",
-            enum: ["list", "create", "resume", "delete", "rename"],
-            description: "Lifecycle action.",
-          },
-          session: {
-            type: "string",
-            description: "Session alias (S1, S2, ...). Required for resume/delete/rename.",
-          },
-          instance_id: {
-            type: "string",
-            description: "Instance for create. Defaults to the active instance.",
-          },
-          new_name: {
-            type: "string",
-            description: "New alias for rename.",
-          },
+          target: { type: "string", enum: sessionTargets },
+          action: { type: "string", enum: ["create", "delete", "rename"] },
+          session: { type: "string", description: "Required for delete/rename." },
+          instance_id: { type: "string", description: "For create." },
+          new_name: { type: "string", description: "For rename." },
         },
         required: ["target", "action"],
       },
@@ -244,8 +249,8 @@ function buildTools(enabled) {
 }
 
 const server = new Server(
-  { name: "wat321", version: "1.4.1" },
-  { capabilities: { tools: {} } }
+  { name: "wat321", version: "1.4.3" },
+  { capabilities: { tools: {}, resources: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -258,47 +263,141 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
 });
 
+/** Resolve a wat321_ask call's target via the router. Returns either
+ * `{ target, instance_id? }` for dispatch, or an MCP error result
+ * suitable for direct return. Backward-compat: still accepts an
+ * explicit `target` arg if the caller bypasses the alias surface. */
+function resolveAskTarget(args, enabled) {
+  const router = makeRouter();
+  const explicitTarget = typeof args?.target === "string" ? args.target : null;
+  const explicitInstance =
+    typeof args?.instance_id === "string" ? args.instance_id : null;
+  const alias = typeof args?.alias === "string" ? args.alias : null;
+
+  // Explicit target wins (back-compat for direct callers).
+  if (explicitTarget !== null) {
+    return {
+      target: explicitTarget,
+      instance_id: explicitInstance ?? undefined,
+    };
+  }
+
+  const resolved = router.resolve(alias);
+  if (resolved.ambiguous) {
+    return {
+      error: errorResult(
+        `Alias '${alias}' is ambiguous - matched: ${resolved.candidates.join(", ")}. Be more specific.`
+      ),
+    };
+  }
+  if (resolved.unknown) {
+    return {
+      error: errorResult(
+        `Alias '${resolved.alias}' is not a known backend. Read the bridge://instances resource for available aliases, or use a known target keyword (Codex / OpenCode / Local LLM).`
+      ),
+    };
+  }
+  if (resolved.useDefault) {
+    // Pick last-used from MB sidecar if present; otherwise fall back to
+    // active instance from MB config; otherwise codex if enabled.
+    const lastUsed = readLastUsedInstance();
+    if (lastUsed?.instanceId) {
+      const inst = router.catalog.instances.find((i) => i.id === lastUsed.instanceId);
+      if (inst) {
+        return {
+          target: inst.kind === "local" ? "local" : "opencode",
+          instance_id: inst.id,
+        };
+      }
+    }
+    if (router.catalog.activeInstanceId) {
+      const inst = router.catalog.instances.find(
+        (i) => i.id === router.catalog.activeInstanceId
+      );
+      if (inst) {
+        return {
+          target: inst.kind === "local" ? "local" : "opencode",
+          instance_id: inst.id,
+        };
+      }
+    }
+    if (enabled.codex) return { target: "codex" };
+    return {
+      error: errorResult(
+        "No alias passed and no default could be resolved. Pass alias='Codex' / 'Big Pickle' / etc., or set an active instance via the WAT321 widget."
+      ),
+    };
+  }
+  return { target: resolved.target, instance_id: resolved.instance_id };
+}
+
+/** Best-effort read of the MB last-used sidecar so a default-alias
+ * dispatch routes to the most recently used backend (matches the
+ * widget's last-used display). */
+function readLastUsedInstance() {
+  const path = join(homedir(), ".wat321", "model-bridge", "last-used.json");
+  try {
+    if (!existsSync(path)) return null;
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 /** Dispatch a tool call to the right per-target handler module.
- * Returns the MCP-shaped tool result. Unknown target / tool / handler
- * combinations return an isError result so the caller learns what
- * went wrong instead of timing out. */
-async function dispatchCall(name, args) {
-  const target = typeof args?.target === "string" ? args.target : null;
-  if (target === null) {
-    return errorResult(`Tool '${name}' requires a 'target' argument.`);
-  }
-
-  const targetModule =
-    target === "codex"
-      ? codex
-      : target === "opencode" || target === "local"
-        ? opencode
-        : null;
-  if (targetModule === null) {
-    return errorResult(`Unknown target '${target}'. Expected codex, opencode, or local.`);
-  }
-
+ * wat321_ask routes through the alias router; wat321_session is a
+ * thin pass-through for opencode/local lifecycle mutations. Read-only
+ * surfaces (inbox, list) moved to MCP resources. */
+async function dispatchCall(name, args, enabled) {
   if (name === "wat321_ask") {
-    return targetModule.handleAsk(args);
+    const resolved = resolveAskTarget(args, enabled);
+    if (resolved.error) return resolved.error;
+    const target = resolved.target;
+    // Enforce enabled-target gate even after the router resolves.
+    // Cached Claude tool schemas can outlive a settings change that
+    // disabled a target, and last-used / active fallbacks may point
+    // at a target the user has since turned off. Refuse explicitly
+    // rather than silently dispatching against a disabled tier.
+    if (!enabled[target]) {
+      return errorResult(
+        `Target '${target}' is not enabled. Turn on the corresponding WAT321 setting (Epic Handshake for codex; Model Bridge for opencode/local) and reload.`
+      );
+    }
+    const targetModule =
+      target === "codex" ? codex : target === "opencode" || target === "local" ? opencode : null;
+    if (targetModule === null) {
+      return errorResult(`Unknown target '${target}'.`);
+    }
+    // Forward to the existing handler with target + instance_id baked
+    // back in. handleAsk's signature predates the router; rather than
+    // refactor every call site we synthesize the legacy args shape.
+    const forwardArgs = {
+      ...args,
+      target,
+      ...(resolved.instance_id ? { instance_id: resolved.instance_id } : {}),
+    };
+    return targetModule.handleAsk(forwardArgs);
   }
-  if (name === "wat321_inbox") {
-    return targetModule.handleInbox(args);
-  }
-  if (name === "wat321_list") {
-    return targetModule.handleList(args);
-  }
+
   if (name === "wat321_session") {
+    const target = typeof args?.target === "string" ? args.target : null;
+    if (target === null) {
+      return errorResult("wat321_session requires a 'target' argument.");
+    }
     if (target === "codex") {
       return errorResult(
         "wat321_session does not apply to target=codex. Pass thread_name on wat321_ask instead."
       );
     }
-    if (typeof targetModule.handleSession !== "function") {
+    if (!enabled[target]) {
       return errorResult(
-        `Session handler for target='${target}' not yet ported.`
+        `Target '${target}' is not enabled. Enable Model Bridge (and a local endpoint for target=local) before managing sessions.`
       );
     }
-    return targetModule.handleSession(args);
+    if (typeof opencode.handleSession !== "function") {
+      return errorResult(`Session handler for target='${target}' not available.`);
+    }
+    return opencode.handleSession(args);
   }
 
   return errorResult(`Unknown tool '${name}'.`);
@@ -311,16 +410,150 @@ function errorResult(text) {
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const name = req.params.name;
   const args = req.params.arguments || {};
-  const target = typeof args.target === "string" ? args.target : null;
-  log("info", `tools/call name=${name} target=${target}`);
+  const enabled = readEnabledTargets();
+  const aliasOrTarget = args.alias || args.target || null;
+  log("info", `tools/call name=${name} alias=${aliasOrTarget}`);
   try {
-    return await dispatchCall(name, args);
+    return await dispatchCall(name, args, enabled);
   } catch (err) {
     const msg = err?.message || String(err);
     log("error", `dispatch failed: ${msg}`);
     return errorResult(`wat321 bridge dispatch failed: ${msg}`);
   }
 });
+
+// -----------------------------------------------------------------
+// Resources (read-only state Claude fetches on demand)
+// -----------------------------------------------------------------
+//
+// Resources cost ~30-50 tokens each in resources/list (URI + name +
+// short description). Their bodies are NOT loaded into Claude's
+// context until Claude reads them. Perfect for the catalog / sessions
+// / inbox / status surfaces that Claude only needs when the user
+// explicitly asks.
+
+const RESOURCE_DEFS = [
+  {
+    uri: "bridge://instances",
+    name: "Bridge instances",
+    description: "Catalog of available AI backends.",
+    mimeType: "application/json",
+  },
+  {
+    uri: "bridge://sessions/opencode",
+    name: "OpenCode sessions",
+    description: "Active OpenCode session aliases.",
+    mimeType: "application/json",
+  },
+  {
+    uri: "bridge://sessions/local",
+    name: "Local LLM sessions",
+    description: "Active Local LLM session aliases.",
+    mimeType: "application/json",
+  },
+  {
+    uri: "bridge://inbox/codex",
+    name: "Codex inbox",
+    description: "Pending late replies from Codex.",
+    mimeType: "application/json",
+  },
+  {
+    uri: "bridge://status",
+    name: "Bridge status",
+    description: "Daemon health, last-used backend, paused state.",
+    mimeType: "application/json",
+  },
+];
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  const enabled = readEnabledTargets();
+  // Filter target-scoped resources by what's enabled. Saves tokens
+  // when only one target is on (e.g. Codex Only mode).
+  const filtered = RESOURCE_DEFS.filter((r) => {
+    if (r.uri.includes("/codex") && !enabled.codex) return false;
+    if (r.uri.includes("/opencode") && !enabled.opencode) return false;
+    if (r.uri.includes("/local") && !enabled.local) return false;
+    return true;
+  });
+  return { resources: filtered };
+});
+
+server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+  const uri = req.params.uri;
+  log("info", `resources/read uri=${uri}`);
+  try {
+    const text = await readResourceContent(uri);
+    return {
+      contents: [{ uri, mimeType: "application/json", text }],
+    };
+  } catch (err) {
+    const msg = err?.message || String(err);
+    log("error", `resource read failed: ${msg}`);
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: "application/json",
+          text: JSON.stringify({ error: msg }, null, 2),
+        },
+      ],
+    };
+  }
+});
+
+/** Resolve a `bridge://...` URI to a JSON string Claude reads. */
+async function readResourceContent(uri) {
+  if (uri === "bridge://instances") {
+    const router = makeRouter();
+    return JSON.stringify(
+      {
+        instances: router.catalog.instances.map((i) => ({
+          id: i.id,
+          alias: i.alias,
+          kind: i.kind,
+          model: i.model,
+          dataRetention: i.dataRetention,
+          ready: i.apiKeyMissing !== true,
+        })),
+        activeInstanceId: router.catalog.activeInstanceId,
+      },
+      null,
+      2
+    );
+  }
+  if (uri === "bridge://sessions/opencode" || uri === "bridge://sessions/local") {
+    const target = uri.endsWith("/local") ? "local" : "opencode";
+    if (typeof opencode.listSessionsResource === "function") {
+      return JSON.stringify(await opencode.listSessionsResource(target), null, 2);
+    }
+    return JSON.stringify({ sessions: [] }, null, 2);
+  }
+  if (uri === "bridge://inbox/codex") {
+    if (typeof codex.listInboxResource === "function") {
+      return JSON.stringify(await codex.listInboxResource(), null, 2);
+    }
+    return JSON.stringify({ inbox: [] }, null, 2);
+  }
+  if (uri === "bridge://status") {
+    const lastUsed = readLastUsedInstance();
+    const enabled = readEnabledTargets();
+    return JSON.stringify(
+      {
+        enabled,
+        lastUsed: lastUsed
+          ? {
+              instanceId: lastUsed.instanceId,
+              alias: lastUsed.alias,
+              at: lastUsed.at,
+            }
+          : null,
+      },
+      null,
+      2
+    );
+  }
+  throw new Error(`Unknown resource URI: ${uri}`);
+}
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
