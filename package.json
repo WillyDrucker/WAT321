@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -369,6 +369,13 @@
             "order": 1,
             "markdownDescription": "**Enable Epic Handshake - Experimental** - Lets you say things like *\"Ask Codex to review this\"* in any Claude session and have Codex actually answer, through a small bridge WAT321 runs locally. Both the Claude and Codex widgets must be on for this to work.\n\nAfter you turn this on, any active Claude sessions will need to be restarted so they can use the bridge. New sessions pick it up automatically. Same applies in reverse: turning this off fully removes the bridge for new Claude sessions, but already active Claude sessions keep a tiny cached reference to the bridge (roughly 20 tokens per prompt) until you restart the session. *Note: resuming an existing Claude session recalculates the entire balance on first load. In other words, just leave it off until you are done with the session - it unloads automatically when the session ends.*\n\nBridge can be paused by clicking on the Epic Handshake status bar and selecting **Pause** from the top of the dropdown."
           },
+          "wat321.epicHandshake.suppressCodexNotifications": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "order": 2,
+            "markdownDescription": "Suppress Codex completion notifications while the Epic Handshake bridge is active. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
+          },
           "wat321.epicHandshake.bridgeMode": {
             "type": "string",
             "default": "Auto (All)",
@@ -387,15 +394,8 @@
               "OpenCode/Big Pickle / Local LLM via opencode serve only. Skip Codex registration entirely.",
               "Local LLM only. Offline / cost-conscious / experimental. Requires modelBridge.localEndpoint."
             ],
-            "order": 2,
-            "markdownDescription": "Which bridges Epic Handshake exposes to Claude. Narrowing this saves Claude system-prompt tokens by registering only the targets you actually use. Requires window reload after change - MCP tool registrations are snapshotted at connection time. Has no effect when Epic Handshake is off."
-          },
-          "wat321.epicHandshake.suppressCodexNotifications": {
-            "type": "boolean",
-            "default": true,
-            "scope": "application",
             "order": 4,
-            "markdownDescription": "Suppress Codex completion notifications while the Epic Handshake bridge is active. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
+            "markdownDescription": "Which bridges Epic Handshake exposes to Claude. Narrowing this saves Claude system-prompt tokens by registering only the targets you actually use. Requires window reload after change - MCP tool registrations are snapshotted at connection time. Has no effect when Epic Handshake is off."
           },
           "wat321.modelBridge.localEndpoint": {
             "type": "string",

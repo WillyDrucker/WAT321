@@ -5,6 +5,23 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-05-06
+
+### Added
+
+- **A recovery row on the Epic Handshake widget** for users who turned on the experimental unified bridge and want to roll back. Click the EH widget; if you've ever run `Bridge - Install Unified MCP Server`, an UNINSTALL UNIFIED BRIDGE row appears at the bottom. One click flips the flag back, sweeps the unified MCP entry, and restores the legacy two-server topology on next reload. Until this, Reset was the only escape - easy to miss.
+
+### Changed
+
+- **Reset is fully factory-clean now.** Previously, Reset removed the legacy bridge MCP entries but left the unified bridge's pre-allowed tool list (`mcp__wat321__wat321_ask`, etc.) sitting in your Claude settings. Now Reset sweeps both. If you were using the experimental unified bridge and want a true clean slate, Reset gives you one.
+- **Settings UI ordering tweak:** the bridge-mode dropdown now sits below the Codex notifications toggle in the Epic Handshake section, where it reads more intuitively.
+
+### Fixed
+
+- **The 1.4.1 release was broken on fresh installs - widgets never loaded.** A circular import in the new bridge tier crashed the extension's activation before any status-bar widget could register. The 1.4.1 GitHub Release was pulled mid-day; 1.4.2 ships everything that was in 1.4.1 with the regression fixed. If you happened to install 1.4.1 in the half-hour it was up, this version restores normal behavior on next reload.
+
+### Removed
+
 ## [1.4.1] - 2026-05-06
 
 ### Added
