@@ -4,7 +4,13 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { SETTING } from "../engine/settingsKeys";
-import { BRIDGE_DIR } from "./index";
+
+// Inline the bridge dir rather than import from `./index` - the
+// re-export of this module from index.ts means top-level imports
+// resolve before index.ts has run far enough to declare BRIDGE_DIR,
+// so a `from "./index"` import sees `undefined` at module load and
+// crashes the path.join below before activation can finish.
+const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
 
 /**
  * Auto-create the resumable S1 session for OpenCode (and later Local
