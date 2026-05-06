@@ -27,20 +27,166 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
 const ALIAS_PATH = join(BRIDGE_DIR, "session-aliases.json");
-const MB_CONFIG_PATH = join(homedir(), ".wat321", "model-bridge", "config.json");
+const MB_DIR = join(homedir(), ".wat321", "model-bridge");
+const MB_CONFIG_PATH = join(MB_DIR, "config.json");
+
+// Cross-tier heartbeat write: the Model Bridge widget reads
+// `~/.wat321/model-bridge/heartbeat.json` to render live "calling"
+// state during dispatches. The unified bridge owns the actual call
+// path now, so it has to write to the path the existing widget
+// monitors. Keeps the widget code unchanged while routing all bridge
+// traffic through the unified server.
+const MB_HEARTBEAT_PATH = join(MB_DIR, "heartbeat.json");
+// Sidecar that the MB widget consults AFTER heartbeat clears. Lets
+// the widget render the last-dispatched instance's alias + retention
+// even when nothing is currently in flight, so a user who just hit
+// Big Pickle keeps seeing "Big Pickle" rather than reverting to the
+// activeInstanceId preference (which is their default-routing choice,
+// not their "what just ran" view). Survives restarts; cleared only
+// on Reset WAT321.
+const MB_LAST_USED_PATH = join(MB_DIR, "last-used.json");
 
 const ANON_BASE_URL = "https://opencode.ai/zen/v1";
 const DEFAULT_TIMEOUT_SEC = 120;
+// 5s keepalive matches the MB widget's safety-net poll cadence so
+// `startedAt` stays within the freshness window without flooding
+// disk writes. The widget computes elapsed locally so a single
+// stable `startedAt` plus periodic refresh is enough to keep the
+// "calling" badge live across long dispatches.
+const HEARTBEAT_KEEPALIVE_MS = 5_000;
 
 function ensureDir() {
   if (!existsSync(BRIDGE_DIR)) mkdirSync(BRIDGE_DIR, { recursive: true });
+}
+
+const BRIDGE_CONFIG_PATH = join(BRIDGE_DIR, "config.json");
+
+/** Read the bridge config's projectName field for use in standardized
+ * session display labels. Falls back to "Workspace" when the config
+ * isn't present yet (first activate before settings ever changed) or
+ * is missing the field. The bridge tier writes config.json on activate
+ * so this returns the live workspace folder name in normal operation. */
+function readProjectName() {
+  try {
+    if (!existsSync(BRIDGE_CONFIG_PATH)) return "Workspace";
+    const cfg = JSON.parse(readFileSync(BRIDGE_CONFIG_PATH, "utf8"));
+    if (typeof cfg?.projectName === "string" && cfg.projectName.trim().length > 0) {
+      return cfg.projectName.trim();
+    }
+    return "Workspace";
+  } catch {
+    return "Workspace";
+  }
+}
+
+/** Standardized session display label used across menus and bridge
+ * responses. All persistent sessions WAT321 manages follow the
+ * pattern `<ProjectName> Epic Handshake Claude-to-<Target> S<n>` so
+ * users see one naming convention everywhere instead of OpenCode's
+ * auto-generated slugs. The alias (S1, S2, ...) stays the routing
+ * key; this string is for display only. */
+function formatSessionDisplayName(target, alias) {
+  const targetLabel =
+    target === "local" ? "Local" : target === "opencode" ? "OpenCode" : target;
+  return `${readProjectName()} Epic Handshake Claude-to-${targetLabel} ${alias}`;
+}
+
+/** Atomic JSON write to the Model Bridge heartbeat path so the MB
+ * widget reads a coherent file even mid-write. Best-effort: any
+ * failure is silent (heartbeat absence falls back to "idle" in the
+ * widget, which is the right degraded state). */
+function writeMbHeartbeat(payload) {
+  try {
+    if (!existsSync(MB_DIR)) mkdirSync(MB_DIR, { recursive: true });
+    const tmp = `${MB_HEARTBEAT_PATH}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(payload)}\n`);
+    renameSync(tmp, MB_HEARTBEAT_PATH);
+  } catch {
+    // best-effort - widget falls back to idle on missing/invalid file
+  }
+}
+
+function clearMbHeartbeat() {
+  try {
+    if (existsSync(MB_HEARTBEAT_PATH)) unlinkSync(MB_HEARTBEAT_PATH);
+  } catch {
+    // best-effort
+  }
+}
+
+/** Persist the most recently dispatched instance so the MB widget can
+ * keep showing it after the heartbeat clears. Distinct from
+ * `activeInstanceId` (the user's preferred default) - this is the
+ * "what just ran" view, updated automatically on every successful
+ * one-shot or session-attached dispatch. Best-effort. */
+function writeMbLastUsed(meta) {
+  try {
+    if (!existsSync(MB_DIR)) mkdirSync(MB_DIR, { recursive: true });
+    const payload = {
+      instanceId: meta.instanceId,
+      alias: meta.alias,
+      dataRetention: meta.dataRetention,
+      model: meta.model || "",
+      at: new Date().toISOString(),
+    };
+    const tmp = `${MB_LAST_USED_PATH}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(payload)}\n`);
+    renameSync(tmp, MB_LAST_USED_PATH);
+  } catch {
+    // best-effort
+  }
+}
+
+/** Wrap a dispatch with start/keepalive/clear heartbeat lifecycle so
+ * the MB widget renders a live "calling" badge for the duration. The
+ * keepalive interval refreshes the file's mtime + payload every 5s so
+ * the widget's stale-detection logic doesn't flip the badge dark on
+ * long calls. Cleared on resolve OR reject - never leaks heartbeat
+ * state past the dispatch. */
+async function withMbHeartbeat(meta, runDispatch) {
+  const startedAt = new Date().toISOString();
+  const requestId = randomUUID();
+  const writeBeat = () => {
+    writeMbHeartbeat({
+      phase: "calling",
+      requestId,
+      startedAt,
+      alias: meta.alias,
+      instanceId: meta.instanceId,
+      dataRetention: meta.dataRetention,
+      model: meta.model || "",
+      timeoutMs: meta.timeoutMs,
+      tokens: 0,
+      tokensPerSec: 0,
+      currentPhase: "DISPATCH",
+      phaseTrace: [],
+    });
+  };
+  writeBeat();
+  const interval = setInterval(writeBeat, HEARTBEAT_KEEPALIVE_MS);
+  try {
+    const result = await runDispatch();
+    // Successful dispatch updates last-used so the widget can keep
+    // displaying this instance's alias after the heartbeat clears.
+    // Failure paths skip the write - showing "Big Pickle" after a
+    // failed call would be misleading.
+    if (result && result.ok !== false) {
+      writeMbLastUsed(meta);
+    }
+    return result;
+  } finally {
+    clearInterval(interval);
+    clearMbHeartbeat();
+  }
 }
 
 function readAliases() {
@@ -164,9 +310,9 @@ async function anonymousChatCompletion(model, prompt, timeoutMs) {
 }
 
 /** Fetch the latest assistant message from a session without sending
- * anything new. Used by the empty-prompt + session retrieval path
- * (handleAsk) and as the implementation backing handleInbox's
- * "fetch latest" hint. */
+ * anything new. Backs the empty-prompt + session retrieval path on
+ * handleAsk so callers can re-emit the most recent assistant turn
+ * without paying for another generation. */
 async function retrieveLatestSessionMessage(target, sessionAlias) {
   const map = readAliases();
   const sessionId = map[target]?.[sessionAlias];
@@ -257,8 +403,8 @@ async function postSessionMessage(serveUrl, sessionId, prompt, timeoutMs) {
 
 /** Handle `wat321_ask({target: "opencode" | "local", ...})`. Empty
  * prompt + session = retrieve the session's latest assistant message
- * without sending anything new. This is the "inbox" pattern that
- * handleInbox refers users to. */
+ * without sending anything new (re-read pattern; saves a generation
+ * round trip). */
 export async function handleAsk(args) {
   const target = args?.target;
   const prompt = typeof args?.prompt === "string" ? args.prompt : "";
@@ -295,7 +441,27 @@ export async function handleAsk(args) {
         `opencode serve is not running. Enable Model Bridge in WAT321 settings, then retry.`
       );
     }
-    const result = await postSessionMessage(serveUrl, sessionId, prompt, timeoutMs);
+    // Resolve instance metadata for the heartbeat payload. Sessions
+    // are pinned to an instance at create time, but the alias map
+    // doesn't carry instance id - fall back to the active instance,
+    // filtered by target kind. Heartbeat tolerates missing fields so
+    // a partial resolve still lights up the MB widget.
+    const sessionInstance =
+      findInstance(null) ||
+      readInstances().find((i) =>
+        target === "local" ? i.kind === "local" : i.kind === "remote"
+      ) ||
+      null;
+    const meta = {
+      alias: sessionInstance?.alias || (target === "local" ? "Local LLM" : "OpenCode"),
+      instanceId: sessionInstance?.id || target,
+      dataRetention: sessionInstance?.dataRetention || (target === "local" ? "local" : "retained"),
+      model: sessionInstance?.model || "",
+      timeoutMs,
+    };
+    const result = await withMbHeartbeat(meta, () =>
+      postSessionMessage(serveUrl, sessionId, prompt, timeoutMs)
+    );
     if (!result.ok) {
       return errorResult(`Session dispatch failed: ${result.error}`);
     }
@@ -322,7 +488,16 @@ export async function handleAsk(args) {
     );
   }
   const modelSlug = instance?.model || "big-pickle";
-  const result = await anonymousChatCompletion(modelSlug, prompt, timeoutMs);
+  const oneShotMeta = {
+    alias: instance?.alias || "Big Pickle",
+    instanceId: instance?.id || "big-pickle",
+    dataRetention: instance?.dataRetention || "retained",
+    model: modelSlug,
+    timeoutMs,
+  };
+  const result = await withMbHeartbeat(oneShotMeta, () =>
+    anonymousChatCompletion(modelSlug, prompt, timeoutMs)
+  );
   if (!result.ok) {
     return errorResult(`One-shot dispatch failed: ${result.error}`);
   }
@@ -333,100 +508,33 @@ export async function handleAsk(args) {
   return { content: [{ type: "text", text }] };
 }
 
-/** Handle `wat321_inbox({target: "opencode" | "local", ...})`. With no
- * session arg, returns a message explaining that opencode/local don't
- * use the late-reply inbox pattern - the user should pass a session
- * id to fetch its latest assistant message. */
-export async function handleInbox(args) {
-  const target = args?.target;
-  const sessionAlias = typeof args?.session === "string" ? args.session : null;
-  if (sessionAlias === null) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `target=${target} doesn't queue late replies the way Codex does. Pass session=<alias> to fetch the latest assistant message from a specific session, or use wat321_session({action:'list'}) to see active sessions.`,
-        },
-      ],
-    };
+/** MCP resource backing `bridge://sessions/{target}` for target in
+ * {opencode, local}. Returns the session alias map enriched with
+ * standardized display names and the underlying session id. Empty
+ * map = no active sessions. JSON-friendly shape (channel.mjs wraps). */
+export async function listSessionsResource(target) {
+  if (target !== "opencode" && target !== "local") {
+    return { sessions: [], note: `Unknown target '${target}'.` };
   }
   const map = readAliases();
-  const sessionId = map[target]?.[sessionAlias];
-  if (!sessionId) {
-    return errorResult(
-      `Session alias '${sessionAlias}' not found for target=${target}.`
-    );
-  }
-  return {
-    content: [
-      {
-        type: "text",
-        text: `Session ${sessionAlias} (${sessionId}) latest-message fetch not yet ported. Use wat321_ask({session:'${sessionAlias}', prompt:''}) as a workaround - empty prompt re-emits the session's latest assistant turn.`,
-      },
-    ],
-  };
+  const aliases = map[target] || {};
+  const sessions = Object.entries(aliases).map(([alias, id]) => ({
+    alias,
+    sessionId: id,
+    displayName: formatSessionDisplayName(target, alias),
+  }));
+  return { sessions };
 }
 
-/** Handle `wat321_list({target: "opencode" | "local"})`. Returns the
- * MB instance catalog filtered by kind. */
-export async function handleList(args) {
-  const target = args?.target;
-  const instances = readInstances();
-  const filtered = instances.filter((i) => {
-    if (target === "local") return i.kind === "local";
-    if (target === "opencode") return i.kind === "remote";
-    return true;
-  });
-  if (filtered.length === 0) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `No instances configured for target=${target}.`,
-        },
-      ],
-    };
-  }
-  const lines = filtered.map((i) => {
-    const status = i.apiKeyMissing ? "needs API key" : "ready";
-    return `- ${i.id} (${i.alias}) - kind=${i.kind} model=${i.model || "(auto)"} retention=${i.dataRetention} ${status}`;
-  });
-  return {
-    content: [
-      {
-        type: "text",
-        text: `Configured instances for target=${target}:\n\n${lines.join("\n")}`,
-      },
-    ],
-  };
-}
 
-/** Handle `wat321_session({target, action, ...})`. */
+/** Handle `wat321_session({target, action, ...})`. Action enum
+ * matches the v1.4.3 router-refactor schema: create / delete /
+ * rename only. Listing moved to `bridge://sessions/{target}`
+ * resource. */
 export async function handleSession(args) {
   const target = args?.target;
   const action = args?.action;
   const map = readAliases();
-
-  if (action === "list") {
-    const aliases = map[target] || {};
-    const entries = Object.entries(aliases);
-    if (entries.length === 0) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `No sessions for target=${target}. Create one via wat321_session({target:'${target}', action:'create'}).`,
-          },
-        ],
-      };
-    }
-    const lines = entries.map(([alias, id]) => `- ${alias}: ${id}`);
-    return {
-      content: [
-        { type: "text", text: `Sessions for target=${target}:\n\n${lines.join("\n")}` },
-      ],
-    };
-  }
 
   if (action === "create") {
     const serveUrl = readServeUrl();
@@ -468,11 +576,12 @@ export async function handleSession(args) {
       map[target][alias] = sessionId;
       writeAliases(map);
       const modelLabel = instance?.alias || data?.model?.id || "default model";
+      const displayName = formatSessionDisplayName(target, alias);
       return {
         content: [
           {
             type: "text",
-            text: `Created session ${alias} (${modelLabel}) -> ${sessionId} (slug: ${data?.slug || "?"}). Use wat321_ask({target:'${target}', session:'${alias}', prompt:'...'}) to dispatch.`,
+            text: `Created session "${displayName}" (model: ${modelLabel}) -> ${sessionId}. Use wat321_ask({target:'${target}', session:'${alias}', prompt:'...'}) to dispatch.`,
           },
         ],
       };
@@ -518,22 +627,5 @@ export async function handleSession(args) {
     };
   }
 
-  if (action === "resume") {
-    // Resume is implicit: just validate the alias exists.
-    const alias = typeof args?.session === "string" ? args.session : null;
-    if (alias === null) return errorResult("Resume requires a 'session' argument.");
-    if (!map[target]?.[alias]) {
-      return errorResult(`Session alias '${alias}' not found for target=${target}.`);
-    }
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Session ${alias} ready. Use wat321_ask({target:'${target}', session:'${alias}', prompt:'...'}) to send a message.`,
-        },
-      ],
-    };
-  }
-
-  return errorResult(`Unknown action '${action}'. Expected list, create, resume, delete, or rename.`);
+  return errorResult(`Unknown action '${action}'. Expected create, delete, or rename.`);
 }

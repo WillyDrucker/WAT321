@@ -5,6 +5,41 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-05-06
+
+### Added
+
+- **Ask any AI by name and the bridge figures out the rest.** A new server-side router now resolves free-form names like "Big Pickle", "Codex", "Local LLM", or partial aliases like "Pickle" or "Nano" to the right backend. You don't pick from a menu - you say what you want and the router matches it against the catalog, with fuzzy lookup for partials. This shrinks the system-prompt overhead Claude carries from your bridge tools by about 75%, which matters most on long-context conversations.
+- **Live model catalog and session list, available on demand.** Claude can now read `bridge://instances`, `bridge://sessions/opencode`, `bridge://sessions/local`, `bridge://inbox/codex`, and `bridge://status` as MCP resources. Ask "what models do I have?" and Claude fetches the catalog without you paying for those tool descriptions in every other turn.
+- **Sandbox permission is back as its own row.** Manage Codex Sessions → Codex Session Settings now shows MODEL, EFFORT, and SANDBOX PERMISSION as three top-level rows. One click toggles between Read-Only and Full-Access without diving into a sub-picker.
+- **Smarter \*default\* tag.** The `*default*` indicator next to your sandbox setting now disappears the moment you make a deliberate choice, even if you happen to pick the schema default. Once you've touched the row, the tag stays off forever (until Reset). Says "you've made a choice" instead of "you haven't done anything."
+- **Status bar widget mirrors your last-used backend.** Run something on Big Pickle and the Model Bridge widget reads "Big Pickle" until your next dispatch flips it. Earlier versions stuck on whichever instance was set as the default; now you see what just ran.
+- **Sessions get readable names.** Every persistent session WAT321 manages now shows up as `<Project> Epic Handshake Claude-to-<Target> S<n>` in the menu list, replacing OpenCode's auto-generated slug ("eager-knight" and friends). Same naming convention across Codex, OpenCode, and Local LLM.
+- **MODEL row on the OpenCode session manager.** Pick a different backend (Big Pickle, GPT 5 Nano, etc.) without leaving the menu. Affects the next NEW SESSION; existing sessions stay on whatever model they were created with (OpenCode constraint, not ours).
+- **Toasts on key transitions.** Enabling or disabling Model Bridge surfaces a "ready" / "disabled" toast in the same voice Epic Handshake uses. Bridge mode and status bar priority changes show a passive reload reminder.
+
+### Changed
+
+- **Epic Handshake's enable flag is now the single switch for the bridge.** Flipping Epic Handshake on installs the unified `wat321` MCP server; flipping it off sweeps it. The previous experimental `wat321.bridge.useUnified` setting is gone, the install/uninstall command palette entries are gone, and the rollback menu row introduced in v1.4.2 is gone. One toggle handles the whole lifecycle.
+- **Display Mode picks up a "Full + Compact" option.** It replaces the standalone "Session Tokens Compact" checkbox - now you choose how the status bar reads as a single setting. "Full + Compact" keeps the usage widgets at full size while shrinking session-token labels. Existing users with the old boolean turned on get migrated automatically.
+- **Local LLM endpoint defaults to empty.** Instead of assuming `http://127.0.0.1:8080` is your local server, the setting starts blank. Empty means local LLM is hidden from the catalog and not registered as a routable target. Fill in your real endpoint to turn it on.
+- **Tokens-per-second readout averages over a minute.** Was 5 seconds, which jittered hard between bursty assistant chunks. The new 60-second rolling window combined with 5-second polling produces a steady reading that still reacts to genuine rate changes within a few samples.
+
+### Fixed
+
+- **The bridge router now refuses to dispatch to disabled targets.** Before, a Claude session that had cached the bridge tool schema before you turned a target off could still try to route to it. The router now checks every dispatch against your live settings and returns a clean error if the target is off.
+- **Reading the inbox no longer consumes it.** The `bridge://inbox/codex` MCP resource peeks at queued late replies without moving them out of the inbox. The active dispatch path (which deliberately consumes them when injecting into the next assistant turn) keeps the previous behavior; only the resource read is non-destructive.
+- **Epic Handshake works when bridge mode skips Codex.** Earlier versions still required the Codex CLI to be installed even when bridge mode was OpenCode Only or Local LLM Only. Now the Codex CLI check only fires when the mode actually routes to Codex.
+- **Stale session actions cleaned up.** The session-management tool used to accept `list` and `resume` actions that the schema had already dropped. Calling them now returns a clear "use the session resource" pointer instead of running unintended code paths.
+- **Comments and tool descriptions reflect the actual behavior.** TPS service comments still said "5-second window" while the code used 60 seconds; cleaned up. Several stale references to retired tools (`wat321_inbox`, `wat321_list`, the experimental flag) removed from file headers and inline notes. Independent audit pass caught what the in-house pass missed.
+
+### Removed
+
+- **`wat321.bridge.useUnified` setting.** Single-switch lifecycle owned by Epic Handshake makes it redundant. Existing users with the setting present get it cleaned up automatically on first activate.
+- **Two MCP tools: `wat321_inbox` and `wat321_list`.** Their content moved to MCP resources, where it costs Claude tokens only when it's actually read.
+- **Two command palette entries: `WAT321: Bridge - Install/Uninstall Unified MCP Server`.** The commands stay registered as internal-only so Epic Handshake can dispatch them; no user-facing palette entries.
+- **Standalone "Session Tokens Compact" setting.** Folded into Display Mode as the new "Full + Compact" enum option.
+
 ## [1.4.2] - 2026-05-06
 
 ### Added

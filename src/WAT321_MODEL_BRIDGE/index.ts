@@ -7,15 +7,12 @@ import {
   type ModelBridgeConfig,
 } from "./config";
 import { MODEL_BRIDGE_DIR } from "./constants";
-import {
-  installModelBridge,
-  isClaudeAvailable,
-  uninstallModelBridge,
-} from "./installer";
+import { uninstallModelBridge } from "./installer";
 import { createModelBridgeLogger, type ModelBridgeLogger } from "./outputChannel";
 import { createOpenCodeManager } from "./openCodeManager";
 import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
 import { createModelBridgeStatusBarItem } from "./statusBarItem";
+import { pickActiveInstance } from "./statusBarMenu";
 
 /**
  * Model Bridge tier entry. Lifecycle:
@@ -108,6 +105,15 @@ export function activateModelBridge(
   // settings are complete enough to call out.
   void applyCurrentConfig();
 
+  // Track Model Bridge enable transitions so we toast the user on
+  // off->on (with the same "what to do next" voice as Epic Handshake's
+  // enable toast) and on on->off (matches EH "disabled." toast).
+  // Initialized from current setting at activate so a settings event
+  // fired during startup-flush doesn't get treated as a transition.
+  let lastEnabledState = vscode.workspace
+    .getConfiguration("wat321")
+    .get<boolean>(SETTING.modelBridgeEnabled, false);
+
   // Settings watcher: rewrite config.json + reconcile MCP entry on
   // any wat321.modelBridge.* change. Cheap (atomic file write +
   // optional CLI call) so doing this every keystroke in settings.json
@@ -117,6 +123,19 @@ export function activateModelBridge(
       e.affectsConfiguration(`wat321.${SETTING.modelBridgeEnabled}`) ||
       e.affectsConfiguration(`wat321.${SETTING.modelBridgeLocalEndpoint}`)
     ) {
+      const nowEnabled = vscode.workspace
+        .getConfiguration("wat321")
+        .get<boolean>(SETTING.modelBridgeEnabled, false);
+      if (nowEnabled !== lastEnabledState) {
+        if (nowEnabled) {
+          void vscode.window.showInformationMessage(
+            "Model Bridge is ready. Send prompts to OpenCode/Local LLM using natural language like \"Ask Big Pickle to ...\" or \"Ask the local LLM ...\" to use. New Claude sessions pick up the new tools automatically; active sessions need to be restarted. Note: resuming existing Claude sessions counts toward usage."
+          );
+        } else {
+          void vscode.window.showInformationMessage("Model Bridge disabled.");
+        }
+        lastEnabledState = nowEnabled;
+      }
       void applyCurrentConfig();
     }
   });
@@ -153,7 +172,17 @@ export function activateModelBridge(
     }),
     vscode.commands.registerCommand("wat321.modelBridge.clearZenApiKey", async () => {
       await clearZenApiKey(context);
-    })
+    }),
+    // Cross-tier entry point: the EH widget's Manage OpenCode Sessions
+    // submenu's MODEL row dispatches here so it can swap the active
+    // instance without importing from this tier directly. Same picker
+    // the legacy MB click menu opens.
+    vscode.commands.registerCommand(
+      "wat321.modelBridge.pickActiveInstance",
+      async () => {
+        await pickActiveInstance(context);
+      }
+    )
   );
 
   return {
@@ -180,43 +209,15 @@ export function activateModelBridge(
  * installing Claude Code, in which case the bridge silently waits
  * until both are present. */
 async function reconcileInstall(
-  context: vscode.ExtensionContext,
-  config: ModelBridgeConfig,
+  _context: vscode.ExtensionContext,
+  _config: ModelBridgeConfig,
   logger: ModelBridgeLogger
 ): Promise<void> {
-  // Skip legacy MB MCP registration when the user has flipped to the
-  // unified bridge (v1.4.1+). The unified server's installer claims
-  // the `wat321` MCP entry name and exposes the four wat321_* tools
-  // for both targets; auto-reinstalling the legacy `wat321-model-
-  // bridge` entry here would duplicate the surface and cost Claude
-  // ~1500 tokens of redundant tool registrations per conversation.
-  // The opencode serve subprocess and click-menu state continue to
-  // run regardless - the unified handlers depend on them.
-  const useUnified = vscode.workspace
-    .getConfiguration("wat321")
-    .get<boolean>(SETTING.bridgeUseUnified, false);
-  if (useUnified) {
-    logger.info(
-      "useUnified=true; skipping legacy Model Bridge MCP registration (unified bridge owns the surface)."
-    );
-    await uninstallModelBridge(logger);
-    return;
-  }
-  if (!(await isClaudeAvailable())) {
-    logger.info(
-      "Claude CLI not found on PATH or in the Claude Code VS Code extension; deferring MCP registration until Claude Code is installed."
-    );
-    return;
-  }
-  const result = await installModelBridge(context, logger);
-  if (!result.ok) {
-    logger.error(`install failed: ${result.error ?? "unknown error"}`);
-    return;
-  }
-  const inventory = config.instances
-    .map((i) => `${i.id}(${i.kind}${i.apiKeyMissing ? ":no-key" : ""})`)
-    .join(", ");
-  logger.info(
-    `Model Bridge installed (active='${config.activeInstanceId}', inventory=[${inventory}])`
-  );
+  // The legacy `wat321-model-bridge` MCP entry is retired - everything
+  // flows through the unified `wat321` server installed by the bridge
+  // tier on Epic Handshake enable. This tier's reconcileInstall now
+  // exists only to sweep any stale legacy entry from prior installs;
+  // the opencode serve subprocess and click-menu state continue to
+  // run regardless because the unified handlers depend on them.
+  await uninstallModelBridge(logger);
 }

@@ -3,7 +3,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { makeBackItem, makeCancelItem, withMenuLifecycle } from "./menuCommon";
+import {
+  makeBackItem,
+  makeCancelItem,
+  makePauseResumeItem,
+  withMenuLifecycle,
+} from "./menuCommon";
+import { isPaused, setPaused } from "./statusBarState";
 
 /**
  * Manage Sessions submenu (EH widget) for opencode-serve-backed
@@ -37,7 +43,34 @@ export type SessionTarget = "opencode" | "local";
 
 const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
 const ALIAS_PATH = join(BRIDGE_DIR, "session-aliases.json");
+const BRIDGE_CONFIG_PATH = join(BRIDGE_DIR, "config.json");
 const MB_CONFIG_PATH = join(homedir(), ".wat321", "model-bridge", "config.json");
+
+/** Read the bridge config's projectName for display labels. The
+ * bridge tier writes this on activate + workspace-folder change.
+ * Fallback "Workspace" matches what the bridge tier uses when no
+ * folder is open. */
+function readProjectName(): string {
+  try {
+    if (!existsSync(BRIDGE_CONFIG_PATH)) return "Workspace";
+    const raw = readFileSync(BRIDGE_CONFIG_PATH, "utf8");
+    const cfg = JSON.parse(raw) as { projectName?: unknown };
+    if (typeof cfg.projectName === "string" && cfg.projectName.trim().length > 0) {
+      return cfg.projectName.trim();
+    }
+    return "Workspace";
+  } catch {
+    return "Workspace";
+  }
+}
+
+/** Standardized session display label. Mirrors the format used in the
+ * unified bridge handlers so the picker, the bridge response text,
+ * and any future surfaces all read the same way. */
+function formatSessionDisplayName(target: SessionTarget, alias: string): string {
+  const targetLabel = target === "local" ? "Local" : "OpenCode";
+  return `${readProjectName()} Epic Handshake Claude-to-${targetLabel} ${alias}`;
+}
 
 interface AliasMap {
   opencode: Record<string, string>;
@@ -123,8 +156,18 @@ function formatRelative(ms: number | undefined): string {
 }
 
 interface PickerRow extends vscode.QuickPickItem {
-  rowKind: "back" | "session" | "new" | "delete" | "rename" | "cancel";
+  rowKind:
+    | "back"
+    | "model"
+    | "session"
+    | "new"
+    | "delete"
+    | "rename"
+    | "pause"
+    | "resume"
+    | "cancel";
   alias?: string;
+  instanceId?: string;
 }
 
 interface TargetConfig {
@@ -179,40 +222,74 @@ async function showSessionsPicker(target: SessionTarget): Promise<void> {
   const sessionRows: PickerRow[] = Object.entries(targetAliases).map(
     ([alias, id]) => {
       const meta = metaById.get(id);
-      const slug = meta?.slug ?? "(not found)";
       const modelLabel = meta?.model?.id ?? "(no model)";
       const ageLabel = formatRelative(meta?.time?.updated);
+      const found = meta !== undefined;
+      // Standardized label first, OpenCode's auto-slug suppressed -
+      // the user shouldn't have to read "eager-knight" to know which
+      // session this is. The "(not found)" fallback only fires when
+      // the alias points at a session id that opencode serve doesn't
+      // know about anymore (recovery from a wiped opencode.db).
+      const display = formatSessionDisplayName(target, alias);
       return {
         rowKind: "session",
         alias,
-        label: `${alias}: ${slug}`,
+        label: found ? display : `${display} (not found)`,
         description: `${modelLabel}${ageLabel ? `  -  ${ageLabel}` : ""}`,
         iconPath: new vscode.ThemeIcon("symbol-method"),
       };
     }
   );
 
+  // MODEL row: only for opencode target. Local LLM resolves its model
+  // server-side (llama.cpp answers with whatever is loaded), so a
+  // model picker on the local side has nothing to drive. For opencode,
+  // the row sets the active catalog instance via the Model Bridge
+  // tier's setActiveInstance command - that's the pref future
+  // NEW SESSION calls read when binding a model. Existing sessions
+  // keep whatever they were created with (OpenCode does not support
+  // mid-conversation model swap).
+  const activeInstance = pickInstanceForTarget(mb, target);
+  const modelRow: PickerRow | null =
+    target === "opencode"
+      ? {
+          rowKind: "model",
+          label: `MODEL: ${activeInstance?.alias ?? "(none)"}`,
+          description:
+            "Click to switch the active OpenCode model. Applies to the next NEW SESSION.",
+          iconPath: new vscode.ThemeIcon("symbol-method"),
+        }
+      : null;
+
+  const paused = isPaused();
+  const pauseItem = makePauseResumeItem(paused, false);
+
   const items: PickerRow[] = [
     { ...makeBackItem(), rowKind: "back" },
+    ...(modelRow ? [modelRow] : []),
     ...sessionRows,
     {
       rowKind: "new",
-      label: "$(add) NEW SESSION",
+      label: "NEW SESSION",
       description: `Create a fresh ${target} session with the active instance.`,
       iconPath: new vscode.ThemeIcon("add"),
     },
     {
       rowKind: "delete",
-      label: "$(trash) DELETE SESSION",
+      label: "DELETE SESSION",
       description:
         "Remove an alias (the underlying opencode session is retained for recovery).",
       iconPath: new vscode.ThemeIcon("trash"),
     },
     {
       rowKind: "rename",
-      label: "$(edit) RENAME SESSION",
+      label: "RENAME SESSION",
       description: "Change a session's alias.",
       iconPath: new vscode.ThemeIcon("edit"),
+    },
+    {
+      ...pauseItem,
+      rowKind: pauseItem.action === "resume" ? "resume" : "pause",
     },
     { ...makeCancelItem(false), rowKind: "cancel" },
   ];
@@ -225,6 +302,31 @@ async function showSessionsPicker(target: SessionTarget): Promise<void> {
     })
   );
   if (!pick || pick.rowKind === "back" || pick.rowKind === "cancel") return;
+
+  if (pick.rowKind === "pause") {
+    setPaused(true);
+    return;
+  }
+  if (pick.rowKind === "resume") {
+    setPaused(false);
+    // Re-open the picker so the user lands on RESUME flipping back to
+    // PAUSE without an extra widget click. Matches the loop pattern in
+    // the codex defaults picker.
+    await showSessionsPicker(target);
+    return;
+  }
+
+  if (pick.rowKind === "model") {
+    // Cross-tier dispatch via command - the EH tier doesn't import
+    // from the Model Bridge tier directly. The MB tier registers
+    // wat321.modelBridge.pickActiveInstance which opens its own
+    // sub-picker over the catalog and writes the new active instance
+    // to preferences.json. After the user picks, re-open this picker
+    // so the new MODEL row label reflects the choice.
+    await vscode.commands.executeCommand("wat321.modelBridge.pickActiveInstance");
+    await showSessionsPicker(target);
+    return;
+  }
 
   if (pick.rowKind === "session") {
     void vscode.window.showInformationMessage(

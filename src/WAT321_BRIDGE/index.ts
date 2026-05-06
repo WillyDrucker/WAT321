@@ -6,27 +6,20 @@ import { SETTING } from "../engine/settingsKeys";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 
 /**
- * WAT321 Bridge - extension-side scaffolding for the unified MCP
- * server (v1.4.1+).
+ * WAT321 Bridge - extension-side ownership of the unified MCP server.
  *
  * The unified `channel.mjs` reads enabled-feature flags from
- * `~/.wat321/bridge/config.json` to decide which `target` values to
- * advertise. This module owns writing that file on activate and on
- * settings change, plus exposing the bridge directory layout for
- * future wiring (installer, session alias map, etc).
+ * `~/.wat321/bridge/config.json` to decide which targets and tools to
+ * advertise to Claude. This module owns:
  *
- * Status: scaffolding only. Installer not yet wired - the legacy
- * Epic Handshake + Model Bridge servers still register independently
- * until the handler-port milestones land. Once the migration is
- * complete, this tier owns:
+ *   - bridge config writer (refreshes on activate + settings change)
+ *   - auto-install on Epic Handshake enable (idempotent)
+ *   - session-alias map storage at `~/.wat321/bridge/session-aliases.json`
+ *   - project-name stamp for standardized session display labels
+ *   - auto-create OpenCode S1 session on Model Bridge enable
  *
- *   - install/uninstall (single `claude mcp add wat321` entry)
- *   - legacy-sweep (remove `wat321-model-bridge` and old `wat321`)
- *   - tool allowlist write
- *   - session alias map storage
- *
- * See WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md for the full migration
- * order.
+ * Epic Handshake's enabled flag is the single switch for the bridge.
+ * Disabling EH sweeps the unified MCP entry; enabling installs it.
  */
 
 export { installUnifiedBridge, registerUnifiedBridgeCommands } from "./installer";
@@ -41,6 +34,12 @@ interface BridgeConfig {
     opencode: boolean;
     local: boolean;
   };
+  /** Workspace folder name for the active VS Code window. Used by
+   * the unified bridge handlers and by the EH session-management
+   * pickers to label sessions as `<projectName> Epic Handshake
+   * Claude-to-<Target> S<n>` so the user sees a deterministic title
+   * in every menu surface instead of OpenCode's auto-generated slug. */
+  projectName: string;
 }
 
 /** Read live setting state and project it onto the unified bridge
@@ -75,12 +74,21 @@ function snapshotConfig(): BridgeConfig {
   );
   const modeMask = bridgeModeMask(mode);
 
+  // Workspace folder name when one is open, "Workspace" as a generic
+  // fallback when the user has VS Code open with no folder. The bridge
+  // tier and EH menus stamp this on session display labels so users
+  // see e.g. "WAT321 Epic Handshake Claude-to-Local S1" rather than
+  // OpenCode's auto-generated slug.
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  const projectName = folder?.name?.trim() || "Workspace";
+
   return {
     enabled: {
       codex: codexAvailable && modeMask.codex,
       opencode: opencodeAvailable && modeMask.opencode,
       local: localAvailable && modeMask.local,
     },
+    projectName,
   };
 }
 
@@ -125,18 +133,20 @@ export function writeBridgeConfig(): void {
   }
 }
 
-/** Re-run the unified install on every activate when useUnified=true.
- * Idempotent: claude mcp add is a no-op when the entry already exists
- * with the same arguments. The activate-time call ensures a user who
- * upgrades the .vsix gets fresh script extracts (channel.mjs, codex.mjs,
- * opencode.mjs) without manually re-running the install command. */
+/** Re-run the unified install on every activate when Epic Handshake
+ * is enabled. Idempotent: `claude mcp add` is a no-op when the entry
+ * already exists with the same arguments. The activate-time call
+ * ensures a user who upgrades the .vsix gets fresh script extracts
+ * (channel.mjs, codex.mjs, opencode.mjs) without manually toggling
+ * EH off and back on. EH-disabled state skips - the unified server
+ * has nothing useful to expose without a dispatcher. */
 async function autoInstallIfEnabled(
   context: vscode.ExtensionContext
 ): Promise<void> {
-  const useUnified = vscode.workspace
+  const ehEnabled = vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>(SETTING.bridgeUseUnified, false);
-  if (!useUnified) return;
+    .get<boolean>(SETTING.epicHandshakeEnabled, false);
+  if (!ehEnabled) return;
   try {
     const { installUnifiedBridge } = await import("./installer");
     await installUnifiedBridge(context);
@@ -163,7 +173,24 @@ export function registerBridgeConfigWriter(
     ) {
       writeBridgeConfig();
     }
+    // Bridge mode change requires a window reload because Claude Code
+    // snapshots MCP tool registrations at connection time - the new
+    // target enum doesn't propagate to active sessions until reload.
+    // Passive toast informs without forcing a modal; the user reloads
+    // when convenient. Matches the EH enable/disable toast voice.
+    if (e.affectsConfiguration(`wat321.${SETTING.epicHandshakeBridgeMode}`)) {
+      void vscode.window.showInformationMessage(
+        "Bridge mode changed. Reload the window to update the MCP tool surface for active Claude sessions."
+      );
+    }
+  });
+  // Workspace-folder add/remove changes the projectName we stamp on
+  // session display labels - rewrite config so the next session create
+  // picks up the new name without a window reload.
+  const folderSub = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    writeBridgeConfig();
   });
   context.subscriptions.push(subscription);
+  context.subscriptions.push(folderSub);
   return subscription;
 }

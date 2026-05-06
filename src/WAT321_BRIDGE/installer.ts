@@ -10,27 +10,24 @@ import { preAllowMcpTools, unAllowMcpTools } from "../shared/mcp/preAllowTools";
 import { createBridgeLogger } from "./outputChannel";
 
 /**
- * Unified bridge installer (v1.4.1+).
+ * Unified bridge installer.
  *
- * Manual command-driven for safety while the unified handlers are
- * still minimal v1. The legacy two-server registration (`wat321` for
- * Epic Handshake, `wat321-model-bridge` for Model Bridge) stays live
- * and continues to handle real traffic. Running the install command
- * sweeps both legacy entries AND registers the unified server -
- * after that point, only the unified server is active.
+ * Epic Handshake is the single switch for the unified MCP server -
+ * EH enable dispatches `wat321.bridge.installUnified`, EH disable
+ * dispatches `wat321.bridge.uninstallUnified`. Both commands are
+ * internal-only (no command-palette entries) so the user never has
+ * to think about MCP installation directly.
  *
- * Once v1.4.1 ships and validates in real use, the install command
- * call moves to extension activate and the legacy installers go
- * away. For now the manual gate keeps the cutover under user
- * control.
+ * Install steps:
+ *   1. Sweep legacy MCP entries (`wat321` from the previous EH
+ *      channel install, plus the retired `wat321-model-bridge` from
+ *      pre-1.4.x) so duplicates can't accumulate.
+ *   2. Extract `channel.mjs` / `codex.mjs` / `opencode.mjs` to
+ *      `~/.wat321/bridge/bin/` and copy `node_modules/` for prod deps.
+ *   3. `claude mcp add wat321 -- node ~/.wat321/bridge/bin/channel.mjs`.
+ *   4. Pre-allow the unified tool surface in Claude's settings.
  *
- * Commands registered:
- *   - `wat321.bridge.installUnified`   (sweep legacy + register unified)
- *   - `wat321.bridge.uninstallUnified` (sweep unified, leave legacy alone)
- *
- * The "use unified" flip is bidirectional: a user who wants to roll
- * back from unified to legacy runs the legacy installers' commands
- * (already exist) after this uninstall.
+ * Uninstall reverses the registration + the pre-allow list.
  */
 
 const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
@@ -39,10 +36,12 @@ const UNIFIED_MCP_NAME = "wat321";
 const LEGACY_MCP_NAMES = ["wat321", "wat321-model-bridge"] as const;
 const SCRIPT_FILES = ["channel.mjs", "codex.mjs", "opencode.mjs"] as const;
 
+// Tool surface after the v1.4.3 router refactor: just dispatch +
+// session lifecycle. Inbox / list moved to MCP resources, which
+// don't need pre-allowance because resources/read is a different
+// permission surface than tool calls.
 const UNIFIED_ALLOWED_TOOLS = [
   "mcp__wat321__wat321_ask",
-  "mcp__wat321__wat321_inbox",
-  "mcp__wat321__wat321_list",
   "mcp__wat321__wat321_session",
 ] as const;
 
@@ -234,51 +233,17 @@ export function registerUnifiedBridgeCommands(
   const { logger, channel } = createBridgeLogger();
   context.subscriptions.push(channel);
 
+  // Internal-only commands - dispatched by Epic Handshake on enable /
+  // disable. Not contributed to the command palette (the palette
+  // contributions were removed when EH became the single switch).
+  // Idempotent so a second install/uninstall in a row is a no-op.
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "wat321.bridge.installUnified",
       async () => {
-        const confirm = await vscode.window.showWarningMessage(
-          "Install the unified WAT321 bridge? This sweeps the legacy 'wat321' (Epic Handshake) and 'wat321-model-bridge' MCP entries and registers a single 'wat321' entry exposing 4 unified tools (wat321_ask / wat321_inbox / wat321_list / wat321_session). The unified handlers are minimal v1 - some advanced legacy features (adaptive heartbeat, fire-and-forget, harness sub-agents) are not yet ported.",
-          { modal: false },
-          "Install Unified",
-          "Cancel"
-        );
-        if (confirm !== "Install Unified") return;
-        // Set the feature flag FIRST so EH/MB tier reconcileInstall
-        // skips its legacy registration on the next activate. Without
-        // this, a settings-change-driven re-install after our sweep
-        // would re-add the legacy entry.
-        const config = vscode.workspace.getConfiguration("wat321");
-        try {
-          await config.update(
-            "bridge.useUnified",
-            true,
-            vscode.ConfigurationTarget.Global
-          );
-        } catch {
-          // best-effort
-        }
         const result = await installUnifiedBridge(context, logger);
-        if (result.ok) {
-          void vscode.window.showInformationMessage(
-            "Unified WAT321 bridge installed. Reload the Claude Code window for new tools to take effect."
-          );
-        } else {
-          // Roll back the flag so legacy installers retake their slots
-          // on next activate.
-          try {
-            await config.update(
-              "bridge.useUnified",
-              false,
-              vscode.ConfigurationTarget.Global
-            );
-          } catch {
-            // best-effort
-          }
-          void vscode.window.showErrorMessage(
-            `Unified bridge install failed: ${result.error}`
-          );
+        if (!result.ok) {
+          throw new Error(result.error || "unified bridge install failed");
         }
       }
     )
@@ -288,24 +253,7 @@ export function registerUnifiedBridgeCommands(
     vscode.commands.registerCommand(
       "wat321.bridge.uninstallUnified",
       async () => {
-        // Flip the flag BEFORE the uninstall so the next activate's
-        // legacy reconcileInstall paths re-register the EH and MB
-        // entries automatically. The user gets a clean rollback to
-        // the v1.4.0 two-server topology with one command.
-        const config = vscode.workspace.getConfiguration("wat321");
-        try {
-          await config.update(
-            "bridge.useUnified",
-            false,
-            vscode.ConfigurationTarget.Global
-          );
-        } catch {
-          // best-effort
-        }
         await uninstallUnifiedBridge(logger);
-        void vscode.window.showInformationMessage(
-          "Unified WAT321 bridge uninstalled. Reload VS Code to re-register the legacy Epic Handshake + Model Bridge entries."
-        );
       }
     )
   );

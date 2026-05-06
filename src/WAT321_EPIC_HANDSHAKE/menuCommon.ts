@@ -38,7 +38,6 @@ export type Action =
   | "manage-local-llm-sessions"
   | "repair-sessions"
   | "in-flight-info"
-  | "uninstall-unified-bridge"
   | "back";
 
 export type Item = vscode.QuickPickItem & { action: Action };

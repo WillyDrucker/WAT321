@@ -46,7 +46,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
   private tpsPrevOutputTokens = 0;
   private tpsPrevMtimeMs = 0;
   private tpsLastValue: number | null = null;
-  /** Rolling 5-second window of accepted (deltaTokens, deltaTimeMs)
+  /** Rolling 60-second window of accepted (deltaTokens, deltaTimeMs)
    * samples. Smoothed TPS = sum(tokens) / sum(time) * 1000 across
    * the window, which de-noises poll-to-poll variation while still
    * tracking real throughput changes. Samples whose individual gap
@@ -287,7 +287,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     });
   }
 
-  /** Compute smoothed TPS over a rolling 5-second window. Rejects
+  /** Compute smoothed TPS over a rolling 60-second window. Rejects
    * samples whose individual gap exceeded 30s as paused (tool wait,
    * bridge wait, idle-reasoning gap) so a long-paused turn that
    * suddenly flushes a large chunk of output doesn't register as a
@@ -300,7 +300,15 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     mtimeMs: number
   ): number | null {
     const TPS_MAX = 999;
-    const TPS_WINDOW_MS = 5_000;
+    // 60s window holds ~12 samples on the 5s safety-net cadence (more
+    // when fs.watch fires on every JSONL append). Bigger window means
+    // the displayed value barely moves even when one bursty chunk lands
+    // - the prior history still dominates. Tradeoff: rate shifts mid-
+    // turn take ~30s longer to reflect than a 30s window. Picked the
+    // smoother end since users care about steady-state readings more
+    // than fast tracking of within-turn rate variance. Memory cost is
+    // ~1.2 KB per provider, trivial.
+    const TPS_WINDOW_MS = 60_000;
     const TPS_PAUSE_THRESHOLD_MS = 30_000;
 
     if (sessionId !== this.tpsPrevSessionId) {

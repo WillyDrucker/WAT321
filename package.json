@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -93,14 +93,6 @@
       {
         "command": "wat321.modelBridge.clearZenApiKey",
         "title": "WAT321: Model Bridge - Clear OpenCode Zen API Key"
-      },
-      {
-        "command": "wat321.bridge.installUnified",
-        "title": "WAT321: Bridge - Install Unified MCP Server (sweeps legacy)"
-      },
-      {
-        "command": "wat321.bridge.uninstallUnified",
-        "title": "WAT321: Bridge - Uninstall Unified MCP Server"
       }
     ],
     "icons": {
@@ -266,13 +258,6 @@
             "scope": "application",
             "order": 1,
             "markdownDescription": "Adds Big Pickle, GPT 5 Nano, Ling 2.6 Flash, Hy3 Preview, Nemotron 3 Super, and MiniMax M2.5 to Claude as routable models. When on, WAT321 auto-spawns a managed `opencode serve` on `127.0.0.1:4096` so the tool-using harness (`model_bridge_task`) works against any catalog instance, including your local LLM. Direct chat completions (`model_bridge_ask`, `model_bridge_thread`) keep working whether this is on or off. Hidden automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\n**Enable OpenCode**"
-          },
-          "wat321.bridge.useUnified": {
-            "type": "boolean",
-            "default": false,
-            "scope": "application",
-            "order": 99,
-            "markdownDescription": "Use the unified WAT321 Bridge MCP server (v1.4.1+). When ON, the legacy `wat321` (Epic Handshake) and `wat321-model-bridge` MCP entries are not auto-registered; the unified `wat321` server with the four `wat321_*` tools handles all bridge traffic. Toggle this via the command palette: 'WAT321: Bridge - Install Unified MCP Server' / 'Uninstall Unified MCP Server' rather than editing this setting directly - the commands also sweep / register the MCP entries themselves."
           }
         }
       },
@@ -325,24 +310,19 @@
             "enum": [
               "Auto",
               "Full",
+              "Full + Compact",
               "Compact",
               "Minimal"
             ],
             "enumDescriptions": [
               "Automatic - Full when only one provider is active, Compact when both are active",
               "Full progress bars (10 blocks)",
+              "Full usage widgets with compact session tokens",
               "Compact progress bars (5 blocks), slim session tokens",
               "Text-only status bar, progress bars move to tooltips on hover"
             ],
             "order": 1,
-            "markdownDescription": "Status bar display density. Auto adjusts based on how many providers are active."
-          },
-          "wat321.sessionTokens.compact": {
-            "type": "boolean",
-            "default": false,
-            "scope": "application",
-            "order": 2,
-            "markdownDescription": "Render session-token widgets in Compact form (used / percent only) while leaving usage widgets at the global Display Mode. Useful when you want full usage bars but a slimmer per-turn token readout. Has no effect when Display Mode is set to Minimal."
+            "markdownDescription": "Status bar display density. Auto adjusts based on how many providers are active. **Full + Compact** keeps usage widgets at full size while shrinking session-token labels - useful when the status bar is full and you want to free space without losing usage detail."
           },
           "wat321.statusBarPriority": {
             "type": "number",
@@ -399,10 +379,10 @@
           },
           "wat321.modelBridge.localEndpoint": {
             "type": "string",
-            "default": "http://127.0.0.1:8080",
+            "default": "",
             "scope": "application",
             "order": 5,
-            "markdownDescription": "Base URL for your local LLM server (e.g. `http://127.0.0.1:8080` for a llama.cpp `--jinja` server on the dev box, `http://10.0.0.91:8080` for a separate LLM box on the LAN, `http://localhost:11434` for Ollama). The bridge appends `/v1/chat/completions` per call. **Filled:** Local LLM appears as a catalog instance; the harness routes to it when OpenCode is enabled. **Empty:** Local LLM is hidden from the catalog; only Zen routes are available."
+            "markdownDescription": "Base URL for your local LLM server. Examples: `http://127.0.0.1:8080` for a llama.cpp `--jinja` server on the dev box, `http://10.0.0.91:8080` for a separate LLM box on the LAN, `http://localhost:11434` for Ollama. The bridge appends `/v1/chat/completions` per call.\n\n**Empty (default):** Local LLM is hidden from the catalog and not registered as a routable target - WAT321 does not assume you have a local server running. Only OpenCode/Zen routes are available.\n\n**Filled:** Local LLM appears as a catalog instance; the unified bridge routes `target=local` calls there when Model Bridge is enabled."
           }
         }
       },

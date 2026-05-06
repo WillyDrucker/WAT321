@@ -43,6 +43,16 @@ export function activate(context: vscode.ExtensionContext) {
 
   ctx = createEngineContext();
 
+  // One-shot migration for users upgrading from 1.4.0 - 1.4.2 who had
+  // `wat321.sessionTokens.compact: true`. The setting was removed in
+  // v1.4.3 and folded into `wat321.displayMode` as "Full + Compact".
+  // Map the old true-value onto the new enum value, then let the
+  // workspace-scope-heal sweep strip the orphan key. Idempotent - on a
+  // user with the new mode already set or a user who never used the old
+  // setting, this is a no-op. Best-effort; failure leaves both legacy
+  // and new state intact and the user can pick the mode from the UI.
+  void migrateSessionTokensCompact();
+
   // Bridge config writer maintains ~/.wat321/bridge/config.json so
   // the unified MCP server scaffold (v1.4.1+) can read enabled-target
   // flags. Cheap on activate, cheap on settings change. The legacy
@@ -150,10 +160,19 @@ function handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
 
   if (
     e.affectsConfiguration(`wat321.${SETTING.displayMode}`) ||
-    e.affectsConfiguration(`wat321.${SETTING.sessionTokensCompact}`) ||
     e.affectsConfiguration(`wat321.${SETTING.enableHeatmap}`)
   ) {
     ctx.providers.rebroadcastAll();
+  }
+
+  // statusBarPriority requires a window reload to take effect because
+  // VS Code reads the priority once when each status bar item is
+  // created and never recomputes. Passive toast nudges the user; no
+  // modal, no action button (matches the rest of WAT321's voice).
+  if (e.affectsConfiguration(`wat321.${SETTING.statusBarPriority}`)) {
+    void vscode.window.showInformationMessage(
+      "Status bar priority changed. Reload the window to apply the new ordering."
+    );
   }
 
   // Notification mode changed: Off unchecks both provider
@@ -240,5 +259,35 @@ async function safeUpdate(
     await config.update(key, value, vscode.ConfigurationTarget.Global);
   } catch {
     // read-only or scope rejected
+  }
+}
+
+/** v1.4.3: fold legacy `sessionTokens.compact: true` into the new
+ * displayMode enum value "Full + Compact". Skips when the current
+ * displayMode is already set to a non-Auto/non-Full value (Compact,
+ * Minimal) - those users had no effect from the old boolean and
+ * shouldn't be flipped to a different visible mode by the migration.
+ * Skips when the user is already on "Full + Compact" or doesn't have
+ * the legacy boolean set. Best-effort; the workspace-scope-heal sweep
+ * strips the source key on the same activate. */
+async function migrateSessionTokensCompact(): Promise<void> {
+  try {
+    const config = vscode.workspace.getConfiguration("wat321");
+    const inspect = config.inspect<boolean>("sessionTokens.compact");
+    const compact =
+      inspect?.globalValue === true || inspect?.workspaceValue === true;
+    if (!compact) return;
+    const currentMode = config.get<string>(SETTING.displayMode, "Auto");
+    if (currentMode === "Auto" || currentMode === "Full") {
+      await config.update(
+        SETTING.displayMode,
+        "Full + Compact",
+        vscode.ConfigurationTarget.Global
+      );
+    }
+    // Source key removal happens via workspaceScopeHeal's APPLICATION_SCOPE_KEYS
+    // sweep (also catches workspace-scope copies) - no need to update here.
+  } catch {
+    // best-effort - leaving both keys present is recoverable from the UI
   }
 }

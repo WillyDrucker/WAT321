@@ -18,7 +18,6 @@ import {
 import { BridgeStageCoordinator } from "./bridgeStageCoordinator";
 import {
   extractChannelScript,
-  installChannel,
   isClaudeAvailable,
   isCodexAvailable,
   uninstallChannel,
@@ -419,30 +418,40 @@ class EpicHandshakeTier {
           return;
         }
 
-        progress.report({ message: "checking Codex install..." });
-        const codexAvailable = await isCodexAvailable();
-        if (!codexAvailable) {
-          await this.unflipAndWarn(
-            "Epic Handshake needs the Codex CLI. Either install the OpenAI Codex VS Code extension from the Marketplace, or install the standalone CLI, then re-enable."
-          );
-          return;
+        // Codex CLI is only required when the bridge mode actually
+        // routes to Codex. Modes that explicitly skip Codex (OpenCode
+        // Only, Local LLM Only) work fine without it - the unified
+        // bridge will simply omit Codex from the tool surface based
+        // on the enabled flags written to bridge/config.json.
+        const bridgeMode = vscode.workspace
+          .getConfiguration("wat321")
+          .get<string>(SETTING.epicHandshakeBridgeMode, "Auto (All)");
+        const codexInMode =
+          bridgeMode !== "OpenCode Only" && bridgeMode !== "Local LLM Only";
+        if (codexInMode) {
+          progress.report({ message: "checking Codex install..." });
+          const codexAvailable = await isCodexAvailable();
+          if (!codexAvailable) {
+            await this.unflipAndWarn(
+              "Epic Handshake needs the Codex CLI for the current bridge mode. Either install the OpenAI Codex VS Code extension or set the bridge mode to OpenCode Only / Local LLM Only, then re-enable."
+            );
+            return;
+          }
         }
 
         progress.report({ message: "registering bridge channel..." });
-        const useUnified = vscode.workspace
-          .getConfiguration("wat321")
-          .get<boolean>("bridge.useUnified", false);
-        if (useUnified) {
-          this.logger.info(
-            "useUnified=true; skipping legacy Epic Handshake MCP registration (unified bridge owns the surface)."
-          );
-          await uninstallChannel(this.logger);
-          return;
-        }
-        const res = await installChannel(this.context, this.logger);
-        if (!res.ok) {
+        // Sweep any stale `wat321` channel registration left over from
+        // a previous EH-only install path before the unified bridge
+        // takes over the same MCP entry name. uninstallChannel is
+        // idempotent so a missing entry is silently absorbed.
+        await uninstallChannel(this.logger);
+        try {
+          await vscode.commands.executeCommand("wat321.bridge.installUnified");
+        } catch (err) {
           await this.unflipAndWarn(
-            `Epic Handshake could not register its bridge channel: ${res.error ?? "unknown error"}. Check the WAT321 Epic Handshake output channel for details.`
+            `Epic Handshake could not register the unified bridge: ${
+              err instanceof Error ? err.message : String(err)
+            }. Check the WAT321 Bridge output channel for details.`
           );
           return;
         }
@@ -477,7 +486,17 @@ class EpicHandshakeTier {
 
   private async disableFlow(): Promise<void> {
     await this.stopEnabled();
+    // EH is the single switch now - disabling sweeps the unified
+    // bridge MCP entry (the only registration in play) AND any stale
+    // legacy `wat321` channel that might have been left over from
+    // pre-1.4.x installs. Both removes are idempotent so a missing
+    // entry is silently absorbed.
     await uninstallChannel(this.logger);
+    try {
+      await vscode.commands.executeCommand("wat321.bridge.uninstallUnified");
+    } catch {
+      // best-effort - sweep is meant to be idempotent
+    }
     // Clean paused sentinel so a later re-enable starts active, not
     // stuck-paused because the file lingered from prior use.
     try {
