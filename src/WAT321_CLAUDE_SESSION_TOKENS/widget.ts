@@ -42,6 +42,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
       claudeTurnInfo: session.turnInfo,
       autoCompactEffectiveTokens: session.autoCompactEffectiveTokens,
       lastCompactTimestamp: session.turnInfo?.lastCompactTimestamp ?? null,
+      tokensPerSecond: session.tokensPerSecond,
     };
   },
 };

@@ -101,9 +101,16 @@ const SENT_CLAUDE = join(SENT_CLAUDE_ROOT, WORKSPACE_HASH);
  * When a heartbeat goes stale past this, the tool gives up even if
  * it has time left on timeoutMs - dispatcher already cut the turn. */
 const HEARTBEAT_STALE_MS = 60_000;
-/** Absolute ceiling on how long adaptive mode can extend the MCP
- * tool wait. Matches TurnMonitor's hardCapMs so both sides give up
- * at the same wall-clock moment. */
+/** Adaptive-mode runaway ceiling. Stays at 5 min in v1.4.1 because
+ * adaptive should err on the side of "something went wrong" when a
+ * dispatch hangs, not block for tens of minutes. The previous v1.4.0
+ * #69 trigger was that this cap silently overrode caller timeout_sec
+ * - that bug is fixed by the v1.5 phased-messaging framework
+ * (WDDOCS/WAT321_V150_PHASED_MESSAGING_FRAMEWORK.md), which gives
+ * adaptive per-stage timeouts (60s on RECEIVED/PLANNING, 2 min on
+ * WORKING/INTEGRATING) so a stuck stage abandons fast while a
+ * legitimate long working stage gets the time it needs. Until that
+ * framework lands, 5 min is the backstop ceiling. */
 const ADAPTIVE_HARD_CAP_MS = 300_000;
 
 const POLL_INTERVAL_MS = 500;
@@ -433,6 +440,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const adaptive = existsSync(ADAPTIVE_FLAG);
   const startedAt = Date.now();
   const initialDeadline = startedAt + timeoutMs;
+  // Adaptive ceiling is generous (30 min) - heartbeat freshness is
+  // the actual signal governing the inner loop. Caller-supplied
+  // timeout_sec governs when the heartbeat-stale check kicks in
+  // (initial window before stale-detection bites), not the absolute
+  // ceiling.
   const hardDeadline = startedAt + ADAPTIVE_HARD_CAP_MS;
   const heartbeatFile = join(EH_DIR, `turn-heartbeat.${id}.json`);
   let replyContent = null;

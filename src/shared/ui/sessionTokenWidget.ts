@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { BridgeStageReader } from "../../engine/bridgeTypes";
-import { getDisplayMode } from "../../engine/displayMode";
+import { getSessionTokenDisplayMode } from "../../engine/displayMode";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
 import type { StageInfo } from "../codex-rollout/types";
 import type { LastEntryKind } from "../transcriptClassifier";
@@ -150,6 +150,11 @@ export interface SessionTokenRenderData {
    * `context_compacted` rollout entry. Null when no compact event is
    * in the scanned tail window. */
   lastCompactTimestamp: number | null;
+  /** Live tokens-per-second estimate from the most recent transcript /
+   * rollout delta. Null when no recent positive sample is available
+   * (idle, just started, transcript not advancing). Surfaced in the
+   * tooltip as a "Streaming ~X tps" line. */
+  tokensPerSecond?: number | null;
 }
 
 export interface SessionTokenWidgetDescriptor<TState extends { status: string }> {
@@ -181,6 +186,22 @@ const TICK_MS = 250;
  * checking - signal 0 is test-only, never actually delivered.
  * ESRCH means the process is gone, EPERM means alive but we lack
  * permission to signal it (still alive for our purposes). */
+/** Inline TPS suffix for the widget text. Three-digit max (services
+ * cap at 999), one decimal below 10 so a slow local LLM at 3.4 tps
+ * does not round to 3. Suppressed in minimal mode to keep minimal
+ * genuinely minimal. Returns an empty string when no reading is
+ * available yet (fresh session, no completed turn) so the widget
+ * does not show "0tps" before the first observation. */
+function tpsSuffix(
+  tps: number | null | undefined,
+  mode: "full" | "compact" | "minimal"
+): string {
+  if (mode === "minimal") return "";
+  if (typeof tps !== "number" || tps <= 0) return "";
+  const formatted = tps >= 10 ? `${Math.round(tps)}` : tps.toFixed(1);
+  return ` ${formatted}tps`;
+}
+
 function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -699,7 +720,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           ? Math.min(100, Math.round((effectiveUsed / effectiveCeiling) * 100))
           : 0;
 
-        const mode = getDisplayMode();
+        const mode = getSessionTokenDisplayMode();
         const prefix = this.currentPrefix(data);
         const banner = this.currentCacheBanner();
         if (banner !== null) {
@@ -713,9 +734,9 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           // flash still gives you session info.
           this.item.text = `${prefix} ${banner}`;
         } else if (mode === "minimal" || mode === "compact") {
-          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}`;
+          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}${tpsSuffix(data.tokensPerSecond, mode)}`;
         } else {
-          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} / ${formatTokens(data.ceiling)} ${formatPct(pctOfCeiling)}`;
+          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} / ${formatTokens(data.ceiling)} ${formatPct(pctOfCeiling)}${tpsSuffix(data.tokensPerSecond, mode)}`;
         }
 
         this.item.color = getSessionTokenColor(pctOfCeiling, d.whitePct, d.yellowPct);
@@ -735,6 +756,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           turnState: data.turnState,
           autoCompactEffectiveTokens: data.autoCompactEffectiveTokens,
           codexEffort: this.bridgeStage.snapshot().codexEffort,
+          tokensPerSecond: data.tokensPerSecond ?? null,
         });
         this.item.show();
         return;

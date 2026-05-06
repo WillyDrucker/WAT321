@@ -35,6 +35,13 @@ export interface CodexResolvedSession {
    * signaling a deliberate context rebuild. Null when no compact event
    * is in the scanned tail window. */
   lastCompactTimestamp: number | null;
+  /** Estimated output tokens-per-second from the most recent rollout
+   * delta. Computed by comparing successive `stageInfo.outputTokens`
+   * snapshots over the wall-clock gap between rollout mtimes. Null
+   * when no recent positive sample is available (idle, no turn yet,
+   * file not advancing). Decays after ~30s of no growth so a pause
+   * does not keep showing a stale reading. */
+  tokensPerSecond: number | null;
 }
 
 export type CodexTokenWidgetState =

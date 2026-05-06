@@ -19,6 +19,7 @@ export const SETTING = {
   enableClaude: "enableClaude",
   enableCodex: "enableCodex",
   displayMode: "displayMode",
+  sessionTokensCompact: "sessionTokens.compact",
   statusBarPriority: "statusBarPriority",
   enableHeatmap: "enableHeatmap",
   notificationsMode: "notifications.mode",
@@ -26,8 +27,9 @@ export const SETTING = {
   notificationsCodex: "notifications.codex",
   clearAllData: "clearAllData",
   epicHandshakeEnabled: "epicHandshake.enabled",
+  epicHandshakeBridgeMode: "epicHandshake.bridgeMode",
   epicHandshakeSuppressCodexToasts: "epicHandshake.suppressCodexNotifications",
-  epicHandshakeDefaultWaitMode: "epicHandshake.defaultWaitMode",
   modelBridgeEnabled: "modelBridge.enabled",
   modelBridgeLocalEndpoint: "modelBridge.localEndpoint",
+  bridgeUseUnified: "bridge.useUnified",
 } as const satisfies Record<string, string>;

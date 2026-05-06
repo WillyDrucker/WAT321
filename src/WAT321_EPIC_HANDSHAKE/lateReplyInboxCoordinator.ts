@@ -115,15 +115,24 @@ export class LateReplyInboxCoordinator implements vscode.Disposable {
   /** Attach fs-watch on the active workspace's inbox dir. Detaches +
    * re-attaches when the workspace changes. Lazy: if the inbox dir
    * doesn't exist yet (first prompt hasn't fired), retries on each
-   * tick once the dispatcher creates it. */
+   * tick once the dispatcher creates it.
+   *
+   * Retry-while-attached: when `targetDir` matches `watchedDir` but
+   * `watcher` is still null (previous attach attempt found the dir
+   * missing or watch() threw), keep trying on every tick. Skipping
+   * the retry was the silent-fallback bug: the coordinator believed
+   * fs-watch was attached because watchedDir was set, but reactivity
+   * was actually 5s polling-only. */
   private ensureWatcher(workspacePath: string | null): void {
     const targetDir =
       workspacePath !== null
         ? inboxClaudeDir(workspaceHash(workspacePath))
         : null;
-    if (targetDir === this.watchedDir) return;
-    this.detachWatcher();
-    this.watchedDir = targetDir;
+    if (targetDir === this.watchedDir && this.watcher !== null) return;
+    if (targetDir !== this.watchedDir) {
+      this.detachWatcher();
+      this.watchedDir = targetDir;
+    }
     if (targetDir === null) return;
     if (!existsSync(targetDir)) return;
     try {

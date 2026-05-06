@@ -33,6 +33,7 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
       turnState: session.turnState,
       stageInfo: session.stageInfo,
       lastCompactTimestamp: session.lastCompactTimestamp,
+      tokensPerSecond: session.tokensPerSecond,
     };
   },
 };

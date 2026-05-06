@@ -11,6 +11,11 @@ import {
   setHostAppName,
 } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
+import {
+  registerAutoCreateOpenCodeS1,
+  registerBridgeConfigWriter,
+  registerUnifiedBridgeCommands,
+} from "./WAT321_BRIDGE";
 import { activateEpicHandshake } from "./WAT321_EPIC_HANDSHAKE";
 import { activateModelBridge } from "./WAT321_MODEL_BRIDGE";
 
@@ -37,6 +42,15 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   ctx = createEngineContext();
+
+  // Bridge config writer maintains ~/.wat321/bridge/config.json so
+  // the unified MCP server scaffold (v1.4.1+) can read enabled-target
+  // flags. Cheap on activate, cheap on settings change. The legacy
+  // two-server registration still drives all real traffic until the
+  // unified handlers ship per WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md.
+  registerBridgeConfigWriter(context);
+  registerUnifiedBridgeCommands(context);
+  registerAutoCreateOpenCodeS1(context);
 
   // Epic Handshake tier activates first so its bridge-stage
   // coordinator exists by the time the Claude / Codex session-token
@@ -122,6 +136,7 @@ function handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
 
   if (
     e.affectsConfiguration(`wat321.${SETTING.displayMode}`) ||
+    e.affectsConfiguration(`wat321.${SETTING.sessionTokensCompact}`) ||
     e.affectsConfiguration(`wat321.${SETTING.enableHeatmap}`)
   ) {
     ctx.providers.rebroadcastAll();

@@ -120,7 +120,15 @@ export async function readConfigFromSettings(
   const instances: ModelBridgeInstance[] = filteredCatalog.map((entry) => {
     const endpoint = entry.kind === "local" ? localEndpoint : entry.endpoint;
     const apiKey = entry.apiKeyRef ? resolvedKeys[entry.apiKeyRef] ?? "" : "";
-    const apiKeyMissing = entry.apiKeyRef.length > 0 && apiKey.length === 0;
+    // Anonymous-access instances (free-tier Zen routes verified to
+    // accept no Authorization header) are never "missing" a key -
+    // missing key just means they fall through to the free path.
+    // Keyed call still wins when a key is present; this only affects
+    // the "needs API key" rejection in channel.mjs.
+    const apiKeyMissing =
+      entry.apiKeyRef.length > 0 &&
+      apiKey.length === 0 &&
+      !entry.anonymousAccess;
     return {
       id: entry.id,
       alias: entry.alias,

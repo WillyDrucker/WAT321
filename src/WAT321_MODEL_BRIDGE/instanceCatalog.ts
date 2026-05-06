@@ -38,6 +38,17 @@ export interface CatalogEntry {
    * provider; auto-discovery only fills in the model id for local
    * entries. */
   harnessProviderID: "llama.cpp" | "zen";
+  /** When true, the instance is dispatchable without an API key.
+   * Used by free-tier OpenCode Zen routes (Big Pickle, GPT-5 Nano,
+   * etc) - opencode.ai's `/zen/v1/chat/completions` endpoint accepts
+   * anonymous requests with no Authorization header and routes them
+   * to a rotating free-model pool with `cost: "0"`. Verified via
+   * curl probe against the live endpoint on 2026-05-06. SST controls
+   * quota per IP and can revoke at will - so this is best-effort
+   * free use, not an SLA. When `apiKeyRef` is non-empty AND the user
+   * has set a key, the keyed request takes precedence (paid quota,
+   * no rate limits). */
+  anonymousAccess?: boolean;
 }
 
 export const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
@@ -64,6 +75,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
     harnessProviderID: "zen",
+    anonymousAccess: true,
   },
   {
     id: "gpt-5-nano",
@@ -74,6 +86,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
     harnessProviderID: "zen",
+    anonymousAccess: true,
   },
   {
     id: "ling-2-6-flash",
@@ -84,6 +97,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
     harnessProviderID: "zen",
+    anonymousAccess: true,
   },
   {
     id: "hy3-preview-free",
@@ -94,6 +108,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
     harnessProviderID: "zen",
+    anonymousAccess: true,
   },
   {
     id: "nemotron-3-super-free",
@@ -104,6 +119,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
     harnessProviderID: "zen",
+    anonymousAccess: true,
   },
   {
     id: "minimax-m2-5-free",
@@ -114,5 +130,6 @@ export const CATALOG: readonly CatalogEntry[] = [
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
     harnessProviderID: "zen",
+    anonymousAccess: true,
   },
 ] as const;

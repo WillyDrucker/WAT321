@@ -42,11 +42,11 @@ import {
   clearClipboardStaging,
   sweepStaleClipboardStages,
 } from "./stageClipboardImage";
+import { registerSessionPickerCommands } from "./openCodeSessionsPicker";
 import {
   applyDefaultWaitMode,
   createEpicHandshakeStatusBarItem,
   currentWaitMode,
-  parseDefaultWaitMode,
 } from "./statusBarItem";
 import type { BridgeThreadRecord } from "./threadPersistence";
 import {
@@ -232,14 +232,13 @@ class EpicHandshakeTier {
         // launch, not on every activation.
         return;
       }
-      const raw = vscode.workspace
-        .getConfiguration("wat321")
-        .get<string>(SETTING.epicHandshakeDefaultWaitMode, "Adaptive");
-      applyDefaultWaitMode(parseDefaultWaitMode(raw));
+      // Adaptive is the only default at activate now. The user-facing
+      // `epicHandshake.defaultWaitMode` setting was removed in v1.4.1
+      // - the click menu still toggles between Adaptive and
+      // Fire-and-Forget at runtime, but the launch default is fixed.
+      applyDefaultWaitMode("adaptive");
     } catch {
-      // best-effort; parseDefaultWaitMode falls back to Adaptive on any
-      // unrecognized value, so a settings read failure leaves the user
-      // in the same state as a fresh install.
+      // best-effort
     }
   }
 
@@ -386,16 +385,6 @@ class EpicHandshakeTier {
           return;
         }
         if (
-          e.affectsConfiguration(
-            `wat321.${SETTING.epicHandshakeDefaultWaitMode}`
-          )
-        ) {
-          // Settings change event = explicit user intent to switch the
-          // default. Force-apply even if a flag already exists; the
-          // user just edited the setting expecting it to take effect.
-          this.applyDefaultWaitModeSetting({ force: true });
-        }
-        if (
           !e.affectsConfiguration(`wat321.${SETTING.epicHandshakeEnabled}`)
         ) {
           return;
@@ -440,6 +429,16 @@ class EpicHandshakeTier {
         }
 
         progress.report({ message: "registering bridge channel..." });
+        const useUnified = vscode.workspace
+          .getConfiguration("wat321")
+          .get<boolean>("bridge.useUnified", false);
+        if (useUnified) {
+          this.logger.info(
+            "useUnified=true; skipping legacy Epic Handshake MCP registration (unified bridge owns the surface)."
+          );
+          await uninstallChannel(this.logger);
+          return;
+        }
         const res = await installChannel(this.context, this.logger);
         if (!res.ok) {
           await this.unflipAndWarn(
@@ -548,6 +547,10 @@ export function activateEpicHandshake(
 ): EpicHandshakeHandle {
   const tier = new EpicHandshakeTier(context, events);
   tier.activate();
+  // Cross-tier command surface: lets the Local LLM widget click open
+  // the per-target Manage Sessions submenu without importing from
+  // this tier directly (engine-blessed crossing via command dispatch).
+  registerSessionPickerCommands(context);
   return {
     dispose: () => tier.deactivate(),
     resetCleanup: () => tier.resetCleanup(),

@@ -27,14 +27,21 @@ import { writeFileAtomic } from "./fs/atomicWrite";
  * `"scope": "application"` entries in package.json. */
 const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.clearAllData}`,
+  `wat321.${SETTING.sessionTokensCompact}`,
   `wat321.${SETTING.notificationsMode}`,
   `wat321.${SETTING.notificationsClaude}`,
   `wat321.${SETTING.notificationsCodex}`,
   `wat321.${SETTING.epicHandshakeEnabled}`,
+  `wat321.${SETTING.epicHandshakeBridgeMode}`,
   `wat321.${SETTING.epicHandshakeSuppressCodexToasts}`,
-  `wat321.${SETTING.epicHandshakeDefaultWaitMode}`,
+  // Legacy: epicHandshake.defaultWaitMode was removed in v1.4.1 -
+  // adaptive is the fixed activate-time default now. Keep the key in
+  // the heal sweep so a user upgrading from <=1.4.0 with a stale
+  // workspace-scope override gets it stripped automatically.
+  `wat321.epicHandshake.defaultWaitMode`,
   `wat321.${SETTING.modelBridgeEnabled}`,
   `wat321.${SETTING.modelBridgeLocalEndpoint}`,
+  `wat321.${SETTING.bridgeUseUnified}`,
 ] as const;
 
 /** Value-pattern fragments matched per JSONC value shape. Ordered

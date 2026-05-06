@@ -229,9 +229,32 @@ export function createModelBridgeStatusBarItem(
   item.command = COMMAND_ID;
   item.hide();
 
+  // v1.4.1+: click jumps to the EH widget's Manage submenu - either
+  // OpenCode or Local LLM, routed by the active instance's kind. All
+  // session/instance management lives there now per the parity table
+  // in WDDOCS/WAT321_V141_MB_FEATURE_STRIP.md. The legacy click-menu
+  // command stays registered (still callable from the command palette
+  // for users who need the old surface during transition) but the
+  // widget's own click skips it.
   const menuCommand = vscode.commands.registerCommand(COMMAND_ID, async () => {
-    await showModelBridgeMenu(context, logger);
+    const snap = readConfigSnapshot();
+    const active = snap?.instances?.find((i) => i.id === snap.activeInstanceId);
+    const kind = active?.kind ?? "remote";
+    const submenu =
+      kind === "local"
+        ? "wat321.bridge.manageLocalLlmSessions"
+        : "wat321.bridge.manageOpenCodeSessions";
+    await vscode.commands.executeCommand(submenu);
   });
+  // Legacy menu command stays available for users who want the
+  // old click-menu shape during transition; surface it from the
+  // command palette as 'WAT321: Model Bridge - Menu (legacy)'.
+  const legacyMenuCommand = vscode.commands.registerCommand(
+    "wat321.modelBridge.legacyMenu",
+    async () => {
+      await showModelBridgeMenu(context, logger);
+    }
+  );
   // Cross-tier hook: Epic Handshake dispatches to this command from
   // its "Manage OpenCode Sessions" row so users can reach bridge
   // session management without leaving the EH dropdown.
@@ -318,11 +341,11 @@ export function createModelBridgeStatusBarItem(
         const rate =
           typeof heartbeat.tokensPerSec === "number" ? heartbeat.tokensPerSec : 0;
         const stat = tokens > 0 ? `${tokens}t @ ${rate}/s` : `${elapsedSec}s`;
-        const phaseTag =
-          heartbeat.currentPhase && heartbeat.currentPhase !== "DISPATCH"
-            ? ` ${heartbeat.currentPhase}`
-            : "";
-        text = `${icon} ${alias}${phaseTag} ${stat}`;
+        // Phase tags (DISPATCH/RECEIPT/STARTED/HALFWAY/COMPLETING/TASK)
+        // are intentionally omitted from the widget text - users only
+        // want tokens + tps at a glance. The full phase trace remains
+        // available in the tooltip for diagnostics.
+        text = `${icon} ${alias} ${stat}`;
         tooltipSig = `live:${heartbeat.currentPhase || "DISPATCH"}:${(heartbeat.phaseTrace || []).length}:${usageSig}`;
         tooltip = buildLiveTooltip(heartbeat, idleAlias, heartbeat.dataRetention ?? retention, snap, usage);
       }
@@ -347,7 +370,13 @@ export function createModelBridgeStatusBarItem(
   refresh();
   const timer = setInterval(refresh, REFRESH_INTERVAL_MS);
 
-  context.subscriptions.push(menuCommand, sessionsCommand, showCommand, item);
+  context.subscriptions.push(
+    menuCommand,
+    legacyMenuCommand,
+    sessionsCommand,
+    showCommand,
+    item
+  );
 
   return {
     dispose: (): void => {

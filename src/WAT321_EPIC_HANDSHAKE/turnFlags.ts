@@ -1,5 +1,5 @@
 import { existsSync, statSync, unlinkSync } from "node:fs";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { clearFlag, setFlag } from "../shared/fs/flagFile";
 import {
   cancelFlagPath,
   inFlightFlagPath,
@@ -15,14 +15,7 @@ import { workspaceHash } from "./workspaceHash";
  * on detect. Workspace-scoped so a sibling VS Code instance's turn
  * is never cancelled by a click in this window. */
 export function writeCancelFlag(workspacePath: string): void {
-  try {
-    writeFileAtomic(
-      cancelFlagPath(workspaceHash(workspacePath)),
-      new Date().toISOString()
-    );
-  } catch {
-    // best-effort - caller surfaces the error
-  }
+  setFlag(cancelFlagPath(workspaceHash(workspacePath)));
 }
 
 /** How long a suppress-codex-toast sentinel stays valid after the
@@ -54,43 +47,19 @@ const SUPPRESS_CODEX_TOAST_FRESHNESS_MS = 30_000;
  */
 
 export function writeInFlightFlag(workspacePath: string): void {
-  try {
-    writeFileAtomic(
-      inFlightFlagPath(workspaceHash(workspacePath)),
-      new Date().toISOString()
-    );
-  } catch {
-    // best-effort; status bar will just miss the in-flight signal
-  }
+  setFlag(inFlightFlagPath(workspaceHash(workspacePath)));
 }
 
 export function clearInFlightFlag(workspacePath: string): void {
-  const path = inFlightFlagPath(workspaceHash(workspacePath));
-  try {
-    if (existsSync(path)) unlinkSync(path);
-  } catch {
-    // best-effort
-  }
+  clearFlag(inFlightFlagPath(workspaceHash(workspacePath)));
 }
 
 export function writeProcessingFlag(workspacePath: string): void {
-  try {
-    writeFileAtomic(
-      processingFlagPath(workspaceHash(workspacePath)),
-      new Date().toISOString()
-    );
-  } catch {
-    // best-effort
-  }
+  setFlag(processingFlagPath(workspaceHash(workspacePath)));
 }
 
 export function clearProcessingFlag(workspacePath: string): void {
-  const path = processingFlagPath(workspaceHash(workspacePath));
-  try {
-    if (existsSync(path)) unlinkSync(path);
-  } catch {
-    // best-effort
-  }
+  clearFlag(processingFlagPath(workspaceHash(workspacePath)));
 }
 
 /** Drop the suppress-codex-toast sentinel for this workspace. The
@@ -103,14 +72,7 @@ export function clearProcessingFlag(workspacePath: string): void {
  * transcript write that lands long after RPC completion still
  * suppresses correctly. */
 export function writeSuppressCodexToast(workspacePath: string): void {
-  try {
-    writeFileAtomic(
-      suppressCodexToastFlagPath(workspaceHash(workspacePath)),
-      new Date().toISOString()
-    );
-  } catch {
-    // best-effort
-  }
+  setFlag(suppressCodexToastFlagPath(workspaceHash(workspacePath)));
 }
 
 /** Read-and-delete the suppress-codex-toast sentinel for this
@@ -148,18 +110,11 @@ export function consumeRecentCodexCompletion(workspacePath: string): boolean {
  * untouched. */
 export function clearBridgeRuntimeFlags(workspacePath: string): void {
   const hash = workspaceHash(workspacePath);
-  const removeIfExists = (path: string): void => {
-    try {
-      if (existsSync(path)) unlinkSync(path);
-    } catch {
-      // best-effort
-    }
-  };
-  removeIfExists(inFlightFlagPath(hash));
-  removeIfExists(processingFlagPath(hash));
-  removeIfExists(returningFlagPath(hash));
-  removeIfExists(cancelFlagPath(hash));
-  removeIfExists(suppressCodexToastFlagPath(hash));
+  clearFlag(inFlightFlagPath(hash));
+  clearFlag(processingFlagPath(hash));
+  clearFlag(returningFlagPath(hash));
+  clearFlag(cancelFlagPath(hash));
+  clearFlag(suppressCodexToastFlagPath(hash));
 }
 
 /** Write the returning flag and schedule its cleanup 3000ms later.
@@ -170,17 +125,7 @@ export function clearBridgeRuntimeFlags(workspacePath: string): void {
  * 3-second beat the rest of the bridge UI uses. */
 export function writeReturningFlag(workspacePath: string): void {
   const path = returningFlagPath(workspaceHash(workspacePath));
-  try {
-    writeFileAtomic(path, new Date().toISOString());
-    const t = setTimeout(() => {
-      try {
-        if (existsSync(path)) unlinkSync(path);
-      } catch {
-        // best-effort
-      }
-    }, 3_000);
-    t.unref?.();
-  } catch {
-    // best-effort
-  }
+  setFlag(path);
+  const t = setTimeout(() => clearFlag(path), 3_000);
+  t.unref?.();
 }

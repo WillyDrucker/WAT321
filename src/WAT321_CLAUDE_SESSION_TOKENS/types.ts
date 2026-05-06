@@ -46,6 +46,15 @@ export interface ResolvedSession {
    * from the same tail read that populated `turnState`. Drives the
    * session-token tooltip richness during active turns. */
   turnInfo: ClaudeTurnInfo;
+  /** Estimated output tokens-per-second from the most recent transcript
+   * delta. Computed by comparing successive transcript snapshots: when
+   * the latest assistant turn's output_tokens count grows between two
+   * polls, divide the delta by the wall-clock gap between transcript
+   * mtimes. Null when no recent delta is available (idle session,
+   * transcript not advancing, or session just started). Decays back
+   * to null after ~30s of no further growth so a long idle does not
+   * keep showing a stale "TPS" reading. */
+  tokensPerSecond: number | null;
 }
 
 export type WidgetState =

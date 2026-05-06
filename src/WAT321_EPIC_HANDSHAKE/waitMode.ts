@@ -82,17 +82,10 @@ export function applyWaitMode(mode: WaitMode): void {
   // mode === "standard" leaves both cleared - that's the Standard state.
 }
 
-/** Parse the user-facing `wat321.epicHandshake.defaultWaitMode`
- * setting value into our internal enum. The setting now exposes only
- * Adaptive and Fire-and-Forget; users who carried over a "Standard"
- * value from earlier versions migrate to Adaptive on activate. */
-export function parseDefaultWaitMode(raw: string | undefined): WaitMode {
-  if (raw === "Fire-and-Forget") return "fire-and-forget";
-  return "adaptive";
-}
-
-/** Apply the user's default wait mode at tier activation. Subsequent
- * user toggles via the menu override this until the next restart. */
+/** Apply the activate-time default wait mode. Adaptive is the fixed
+ * default in v1.4.1+ - the user-facing `defaultWaitMode` setting was
+ * removed. Subsequent runtime toggles via the menu override this
+ * until the next restart. */
 export function applyDefaultWaitMode(mode: WaitMode): void {
   applyWaitMode(mode);
 }

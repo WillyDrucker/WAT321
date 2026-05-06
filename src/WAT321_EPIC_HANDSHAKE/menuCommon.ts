@@ -35,6 +35,7 @@ export type Action =
   | "codex-defaults"
   | "manage-sessions"
   | "manage-opencode-sessions"
+  | "manage-local-llm-sessions"
   | "repair-sessions"
   | "in-flight-info"
   | "back";
