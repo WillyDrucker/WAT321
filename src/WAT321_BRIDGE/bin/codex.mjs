@@ -133,16 +133,17 @@ function writeAtomic(path, content) {
 }
 
 /** Walk inbox/claude for envelopes addressed to this session that
- * predate the 5-second active-poll cutoff. Late replies from prior
- * timed-out prompts. Returns formatted preamble or empty string. */
-function collectLateReplies() {
+ * predate the 5-second active-poll cutoff. Returns the matched
+ * envelopes WITHOUT moving the source files. Drain variants are
+ * built on top of this primitive when consumption is intended. */
+function scanLateReplies() {
   const out = [];
   const cutoff = Date.now() - 5_000;
   let files;
   try {
     files = readdirSync(INBOX_CLAUDE);
   } catch {
-    return "";
+    return out;
   }
   for (const f of files) {
     if (!f.endsWith(".md")) continue;
@@ -165,19 +166,31 @@ function collectLateReplies() {
     if (parsed.fields.source_session_fp !== SESSION_FP) continue;
     out.push({
       filename: f,
+      sourcePath: p,
       body: parsed.body,
       createdAt: parsed.fields.created_at,
     });
+  }
+  return out;
+}
+
+/** Scan + format + move-to-sent. Used by the active dispatch path
+ * (preamble injection on the next reply) where consuming the inbox is
+ * the correct semantic - the late replies are about to be delivered
+ * to Claude, leaving them in the inbox would re-deliver them. */
+function collectLateReplies() {
+  const found = scanLateReplies();
+  for (const r of found) {
     try {
-      renameSync(p, join(SENT_CLAUDE, f));
+      renameSync(r.sourcePath, join(SENT_CLAUDE, r.filename));
     } catch {
       // best-effort
     }
   }
-  if (out.length === 0) return "";
-  const chunks = out.map(
+  if (found.length === 0) return "";
+  const chunks = found.map(
     (r, i) =>
-      `[Late reply ${i + 1}/${out.length} from Codex, originally sent ${r.createdAt || "earlier"}]\n${r.body}`
+      `[Late reply ${i + 1}/${found.length} from Codex, originally sent ${r.createdAt || "earlier"}]\n${r.body}`
   );
   return chunks.join("\n\n---\n\n");
 }
@@ -306,22 +319,23 @@ export async function handleAsk(args) {
   };
 }
 
-/** Handle a `wat321_inbox({target: "codex"})` call. Args are
- * accepted for parity with opencode/local handlers but Codex's late-
- * reply collection is workspace-scoped only - no peek/requestId
- * filters apply. */
-export async function handleInbox(_args) {
+/** MCP resource backing `bridge://inbox/codex`. Read-only (peek):
+ * surfaces queued late replies WITHOUT moving them to sent/. The
+ * active dispatch path's `collectLateReplies` is what actually
+ * consumes them so they get injected into the next assistant turn.
+ * Resources reading the inbox shouldn't have that side effect. */
+export async function listInboxResource() {
   ensureDirs();
-  const preamble = collectLateReplies();
-  const text = preamble || "No pending replies from Codex. The Epic Handshake inbox is empty.";
-  return { content: [{ type: "text", text }] };
-}
-
-/** Handle a `wat321_list({target: "codex"})` call. Codex doesn't have
- * configurable instances - returns a single line confirming the
- * legacy server status. */
-export async function handleList(_args) {
-  const text =
-    "Codex bridge: one CLI instance (no per-target catalog). Use wat321_ask({target:'codex', prompt}) to dispatch.";
-  return { content: [{ type: "text", text }] };
+  const found = scanLateReplies();
+  return {
+    pending: found.map((r) => ({
+      filename: r.filename,
+      createdAt: r.createdAt,
+      body: r.body,
+    })),
+    note:
+      found.length > 0
+        ? "Late replies are queued. They will be injected as a preamble on the next Codex dispatch automatically."
+        : "Inbox is empty.",
+  };
 }
