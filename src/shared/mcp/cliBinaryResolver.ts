@@ -5,30 +5,26 @@ import * as vscode from "vscode";
 
 /**
  * Resolve the `claude`, `codex`, and `opencode` CLI binaries with a
- * two-tier search: first the user's PATH (the historical assumption),
- * then the binary bundled inside the corresponding VS Code extension
- * if the user has it installed. Lets users who only ever installed
- * the marketplace extensions and never ran a global CLI installer
- * still use Epic Handshake + Model Bridge.
+ * two-tier search: VS Code extension-bundled binary first, then the
+ * user's PATH as fallback. The extension is the canonical install
+ * surface for most users (marketplace one-click) and ships a fresher
+ * binary than typical PATH installs because marketplace updates push
+ * a new platform-specific binary on every extension release. PATH
+ * remains the fallback so users who only have a global CLI install
+ * still work end-to-end.
  *
  * Claude Code and OpenAI Codex extensions bundle their CLIs and
- * unlock the extension-tier fallback. The OpenCode VS Code extension
+ * unlock the extension-tier preference. The OpenCode VS Code extension
  * (sst-dev.opencode) is a thin terminal-shortcut wrapper that does
  * NOT bundle the CLI - it explicitly requires a separate `opencode`
  * install. So the OpenCode resolver is PATH-only; the extension probe
  * is omitted to avoid pretending an install path exists when it
  * doesn't.
  *
- * The Claude / Codex extension bundles ship a fresher CLI than most
- * users have on PATH because marketplace updates push a new platform-
- * specific binary on every extension release. Preferring PATH preserves
- * existing behavior; the extension-bundled fallback only kicks in when
- * PATH has nothing.
- *
  * Resolved paths are cached for the life of the extension host.
  * Installing or uninstalling a CLI mid-session won't be picked up
- * until VS Code reloads, mirroring the existing PATH-only behavior
- * (a fresh CLI install on PATH also needs a reload to take effect).
+ * until VS Code reloads, mirroring the existing PATH behavior (a
+ * fresh CLI install on PATH also needs a reload to take effect).
  */
 
 export interface ResolvedCli {
@@ -112,33 +108,48 @@ function probeVersion(command: string, useShell: boolean): Promise<boolean> {
 }
 
 async function resolveCli(spec: CliSpec): Promise<ResolvedCli | null> {
-  // PATH first. Preserves the historical install path that users with
-  // a global CLI install rely on. Win32 needs shell:true so .cmd shims
-  // (npm-installed) resolve.
-  const pathNeedsShell = process.platform === "win32";
-  if (await probeVersion(spec.pathCommand, pathNeedsShell)) {
-    return { command: spec.pathCommand, needsShell: pathNeedsShell, source: "path" };
+  // Extension-bundled first. The marketplace extension is the canonical
+  // install surface and auto-updates with platform-specific binaries,
+  // so it is typically fresher and more compatible than whatever the
+  // user happens to have on PATH (which can be a stale npm-global
+  // install or a hand-copied binary). Specs with extensionId === null
+  // opt out of this path - their extension doesn't bundle a CLI.
+  if (spec.extensionId !== null) {
+    const extension = vscode.extensions.getExtension(spec.extensionId);
+    if (extension) {
+      const relPath = spec.bundledRelPath(process.platform);
+      if (relPath !== null) {
+        const absolute = join(extension.extensionUri.fsPath, relPath);
+        // Probe to confirm the bundled binary actually runs on this
+        // machine before we hand the path to a caller. An extension
+        // install for a different architecture (rare but possible with
+        // hand-copied extension dirs) would otherwise fail at first use.
+        if (existsSync(absolute) && (await probeVersion(absolute, false))) {
+          return {
+            command: absolute,
+            needsShell: false,
+            source: "extension-bundled",
+          };
+        }
+      }
+    }
   }
 
-  // Extension-bundled fallback. The user installed the marketplace
-  // extension but never installed a global CLI. The extension's
-  // install dir resolves via VS Code's stable extensionUri API,
-  // so we don't have to glob the version-stamped folder name (which
-  // changes on every upgrade). Specs with extensionId === null opt
-  // out of this path - their extension doesn't bundle a CLI.
-  if (spec.extensionId === null) return null;
-  const extension = vscode.extensions.getExtension(spec.extensionId);
-  if (!extension) return null;
-  const relPath = spec.bundledRelPath(process.platform);
-  if (relPath === null) return null;
-  const absolute = join(extension.extensionUri.fsPath, relPath);
-  if (!existsSync(absolute)) return null;
-  // Probe to confirm the bundled binary actually runs on this
-  // machine before we hand the path to a caller. An extension
-  // install for a different architecture (rare but possible with
-  // hand-copied extension dirs) would otherwise fail at first use.
-  if (!(await probeVersion(absolute, false))) return null;
-  return { command: absolute, needsShell: false, source: "extension-bundled" };
+  // PATH fallback. Catches users with a global CLI install and no
+  // marketplace extension, plus the case where the extension is
+  // installed but its bundled binary doesn't run on this machine
+  // (architecture mismatch on a hand-copied extension dir).
+  // Win32 needs shell:true so .cmd shims (npm-installed) resolve.
+  const pathNeedsShell = process.platform === "win32";
+  if (await probeVersion(spec.pathCommand, pathNeedsShell)) {
+    return {
+      command: spec.pathCommand,
+      needsShell: pathNeedsShell,
+      source: "path",
+    };
+  }
+
+  return null;
 }
 
 /** Resolve the Claude Code CLI. Returns null when neither PATH nor the

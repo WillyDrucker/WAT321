@@ -183,16 +183,33 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes(SETTING.enableClaude, undefined),
     updateSettingAllScopes(SETTING.enableCodex, undefined),
     updateSettingAllScopes(SETTING.displayMode, undefined),
+    updateSettingAllScopes(SETTING.sessionTokensCompact, undefined),
     updateSettingAllScopes(SETTING.statusBarPriority, undefined),
     updateSettingAllScopes(SETTING.enableHeatmap, undefined),
     updateSettingAllScopes(SETTING.notificationsMode, undefined),
     updateSettingAllScopes(SETTING.notificationsClaude, undefined),
     updateSettingAllScopes(SETTING.notificationsCodex, undefined),
-    updateSettingAllScopes(SETTING.epicHandshakeEnabled, undefined),
+    // Bridge `enabled` flags are force-written to `false` rather than
+    // reset-to-schema-default. Reset is the user's "something is wrong,
+    // give me a clean slate" signal; both bridges should be off after
+    // it, requiring an explicit opt-in to re-enable. Epic Handshake's
+    // schema default is already false (so undefined would also work),
+    // but Model Bridge defaults to true and would auto-re-enable on
+    // reset without the explicit false. Reset only fires from user-
+    // invoked paths (command, checkbox, click menu) - never at activate
+    // - so this never accidentally disables a working bridge.
+    updateSettingAllScopes(SETTING.epicHandshakeEnabled, false),
+    updateSettingAllScopes(SETTING.epicHandshakeBridgeMode, undefined),
     updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexToasts, undefined),
-    updateSettingAllScopes(SETTING.epicHandshakeDefaultWaitMode, undefined),
-    updateSettingAllScopes(SETTING.modelBridgeEnabled, undefined),
+    // Legacy: epicHandshake.defaultWaitMode removed in v1.4.1. Sweep
+    // any stale value at every scope so reset-to-defaults still
+    // strips it for users upgrading from <=1.4.0.
+    updateSettingAllScopes("epicHandshake.defaultWaitMode", undefined),
+    updateSettingAllScopes(SETTING.modelBridgeEnabled, false),
     updateSettingAllScopes(SETTING.modelBridgeLocalEndpoint, undefined),
+    // useUnified flips back to false on reset (factory defaults). The
+    // user re-runs the install command if they want unified again.
+    updateSettingAllScopes(SETTING.bridgeUseUnified, false),
     resetStatusBarItemVisibility(),
   ]);
 
