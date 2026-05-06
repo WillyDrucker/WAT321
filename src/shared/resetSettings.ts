@@ -183,7 +183,11 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes(SETTING.enableClaude, undefined),
     updateSettingAllScopes(SETTING.enableCodex, undefined),
     updateSettingAllScopes(SETTING.displayMode, undefined),
-    updateSettingAllScopes(SETTING.sessionTokensCompact, undefined),
+    // Legacy: sessionTokens.compact removed in v1.4.3 (folded into the
+    // displayMode enum as "Full + Compact"). Sweep stale value at every
+    // scope so reset-to-defaults still strips it for users upgrading
+    // from 1.4.0 - 1.4.2.
+    updateSettingAllScopes("sessionTokens.compact", undefined),
     updateSettingAllScopes(SETTING.statusBarPriority, undefined),
     updateSettingAllScopes(SETTING.enableHeatmap, undefined),
     updateSettingAllScopes(SETTING.notificationsMode, undefined),
@@ -207,9 +211,11 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes("epicHandshake.defaultWaitMode", undefined),
     updateSettingAllScopes(SETTING.modelBridgeEnabled, false),
     updateSettingAllScopes(SETTING.modelBridgeLocalEndpoint, undefined),
-    // useUnified flips back to false on reset (factory defaults). The
-    // user re-runs the install command if they want unified again.
-    updateSettingAllScopes(SETTING.bridgeUseUnified, false),
+    // Legacy: bridge.useUnified was removed in v1.4.3 - Epic Handshake
+    // is the single switch for the unified bridge now. Sweep stale
+    // value at every scope so reset-to-defaults still strips it for
+    // users upgrading from <=1.4.2.
+    updateSettingAllScopes("bridge.useUnified", undefined),
     resetStatusBarItemVisibility(),
   ]);
 

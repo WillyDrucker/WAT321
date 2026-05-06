@@ -2,14 +2,20 @@ import * as vscode from "vscode";
 import { SETTING } from "./settingsKeys";
 
 export type DisplayMode = "full" | "compact" | "minimal";
-export type RawDisplayMode = DisplayMode | "auto";
+export type RawDisplayMode = DisplayMode | "auto" | "full+compact";
 
-/** Read raw setting value, may return "auto". */
+/** Read raw setting value. May return "auto" (display-mode resolution
+ * driven by active provider count) or "full+compact" (usage widgets
+ * Full while session tokens render Compact). The two split values
+ * collapse into one of the three concrete modes via `resolveDisplayMode`
+ * for usage widgets, and via `getSessionTokenDisplayMode` for session
+ * tokens. */
 export function getRawDisplayMode(): RawDisplayMode {
   const config = vscode.workspace.getConfiguration("wat321");
   const mode = config.get<string>(SETTING.displayMode, "Auto").toLowerCase();
   if (mode === "auto" || mode === "compact" || mode === "minimal") return mode;
   if (mode === "full") return "full";
+  if (mode === "full + compact" || mode === "full+compact") return "full+compact";
   return "auto";
 }
 
@@ -18,6 +24,10 @@ export function getRawDisplayMode(): RawDisplayMode {
  * needing the full getDisplayMode + registry dependency. */
 export function resolveDisplayMode(activeProviderCount: number): DisplayMode {
   const raw = getRawDisplayMode();
+  // "full+compact" is a split mode: usage widgets stay Full while
+  // session-token widgets render Compact. From the usage widget's
+  // perspective, that means Full.
+  if (raw === "full+compact") return "full";
   if (raw !== "auto") return raw;
   return activeProviderCount >= 2 ? "compact" : "full";
 }
@@ -48,17 +58,14 @@ export function getDisplayMode(): DisplayMode {
   return resolveDisplayMode(activeProviderCount);
 }
 
-/** Display mode for session-token widgets specifically. When
- * `wat321.sessionTokens.compact` is true, session tokens render in
- * compact form regardless of the global displayMode (so usage widgets
- * can stay Full while session tokens go Compact). When false, follows
- * the global displayMode resolution. Minimal global mode wins over
- * compact-override (a user who set Minimal globally wants minimal
- * everywhere; the override only widens compactness, never narrows it). */
+/** Display mode for session-token widgets specifically. When the
+ * display mode is "full+compact", session tokens render Compact even
+ * though usage widgets stay Full. Otherwise follows the resolved
+ * global mode. Minimal stays minimal everywhere - "minimal" implies
+ * the user wants the smallest footprint and the split mode never
+ * widens past that. */
 export function getSessionTokenDisplayMode(): DisplayMode {
-  const globalMode = getDisplayMode();
-  if (globalMode === "minimal") return "minimal";
-  const config = vscode.workspace.getConfiguration("wat321");
-  const compact = config.get<boolean>(SETTING.sessionTokensCompact, false);
-  return compact ? "compact" : globalMode;
+  const raw = getRawDisplayMode();
+  if (raw === "full+compact") return "compact";
+  return getDisplayMode();
 }
