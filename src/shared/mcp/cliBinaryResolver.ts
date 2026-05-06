@@ -4,24 +4,31 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 
 /**
- * Resolve the `claude` and `codex` CLI binaries with a two-tier
- * search: first the user's PATH (the historical assumption), then the
- * binary bundled inside the corresponding VS Code extension if the
- * user has it installed. Lets users who only ever installed the
- * marketplace extensions and never ran a global CLI installer still
- * use Epic Handshake + Model Bridge.
+ * Resolve the `claude`, `codex`, and `opencode` CLI binaries with a
+ * two-tier search: first the user's PATH (the historical assumption),
+ * then the binary bundled inside the corresponding VS Code extension
+ * if the user has it installed. Lets users who only ever installed
+ * the marketplace extensions and never ran a global CLI installer
+ * still use Epic Handshake + Model Bridge.
  *
- * The extension bundles a fresher CLI than most users have on PATH
- * because marketplace updates push a new platform-specific binary on
- * every extension release. Preferring PATH preserves existing
- * behavior; the extension-bundled fallback only kicks in when PATH
- * has nothing.
+ * Claude Code and OpenAI Codex extensions bundle their CLIs and
+ * unlock the extension-tier fallback. The OpenCode VS Code extension
+ * (sst-dev.opencode) is a thin terminal-shortcut wrapper that does
+ * NOT bundle the CLI - it explicitly requires a separate `opencode`
+ * install. So the OpenCode resolver is PATH-only; the extension probe
+ * is omitted to avoid pretending an install path exists when it
+ * doesn't.
+ *
+ * The Claude / Codex extension bundles ship a fresher CLI than most
+ * users have on PATH because marketplace updates push a new platform-
+ * specific binary on every extension release. Preferring PATH preserves
+ * existing behavior; the extension-bundled fallback only kicks in when
+ * PATH has nothing.
  *
  * Resolved paths are cached for the life of the extension host.
- * Installing or uninstalling Claude Code / Codex extensions
- * mid-session won't be picked up until VS Code reloads, mirroring
- * the existing PATH-only behavior (a fresh CLI install on PATH also
- * needs a reload to take effect).
+ * Installing or uninstalling a CLI mid-session won't be picked up
+ * until VS Code reloads, mirroring the existing PATH-only behavior
+ * (a fresh CLI install on PATH also needs a reload to take effect).
  */
 
 export interface ResolvedCli {
@@ -40,7 +47,11 @@ export interface ResolvedCli {
 
 interface CliSpec {
   pathCommand: string;
-  extensionId: string;
+  /** Extension id whose bundled binary serves as the fallback when
+   * PATH probing fails. `null` opts the spec out of extension probing
+   * entirely - useful for tools whose extension is a thin shortcut
+   * wrapper that does not bundle the CLI (e.g. OpenCode). */
+  extensionId: string | null;
   bundledRelPath: (platform: NodeJS.Platform) => string | null;
 }
 
@@ -72,8 +83,18 @@ const CODEX_SPEC: CliSpec = {
   },
 };
 
+const OPENCODE_SPEC: CliSpec = {
+  pathCommand: "opencode",
+  // OpenCode VS Code extension (sst-dev.opencode-0.0.13) is a terminal
+  // shortcut wrapper that explicitly requires a separate opencode CLI
+  // install. No bundled binary to fall back to.
+  extensionId: null,
+  bundledRelPath: () => null,
+};
+
 let claudeCache: ResolvedCli | null | undefined;
 let codexCache: ResolvedCli | null | undefined;
+let openCodeCache: ResolvedCli | null | undefined;
 
 /** Spawn `<command> --version` and resolve true on exit code 0.
  * Used both for PATH probing (with shell on win32) and bundled
@@ -103,7 +124,9 @@ async function resolveCli(spec: CliSpec): Promise<ResolvedCli | null> {
   // extension but never installed a global CLI. The extension's
   // install dir resolves via VS Code's stable extensionUri API,
   // so we don't have to glob the version-stamped folder name (which
-  // changes on every upgrade).
+  // changes on every upgrade). Specs with extensionId === null opt
+  // out of this path - their extension doesn't bundle a CLI.
+  if (spec.extensionId === null) return null;
   const extension = vscode.extensions.getExtension(spec.extensionId);
   if (!extension) return null;
   const relPath = spec.bundledRelPath(process.platform);
@@ -134,12 +157,22 @@ export async function resolveCodexCli(): Promise<ResolvedCli | null> {
   return codexCache;
 }
 
+/** Resolve the OpenCode CLI on PATH. Returns null when no `opencode`
+ * binary is reachable. PATH-only - the OpenCode VS Code extension
+ * doesn't bundle the CLI, so no extension fallback exists. */
+export async function resolveOpenCodeCli(): Promise<ResolvedCli | null> {
+  if (openCodeCache !== undefined) return openCodeCache;
+  openCodeCache = await resolveCli(OPENCODE_SPEC);
+  return openCodeCache;
+}
+
 /** Drop the cache so the next resolve probes again. Called from the
  * activate-time reset path so a user who just enabled the bridge
  * after installing a CLI doesn't have to reload the window. */
 export function resetCliResolverCache(): void {
   claudeCache = undefined;
   codexCache = undefined;
+  openCodeCache = undefined;
 }
 
 /** Sync read of the cached resolution state. Returns:
@@ -153,4 +186,7 @@ export function peekResolvedClaudeCli(): ResolvedCli | null | undefined {
 }
 export function peekResolvedCodexCli(): ResolvedCli | null | undefined {
   return codexCache;
+}
+export function peekResolvedOpenCodeCli(): ResolvedCli | null | undefined {
+  return openCodeCache;
 }

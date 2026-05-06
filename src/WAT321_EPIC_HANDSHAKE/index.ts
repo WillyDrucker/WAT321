@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
@@ -7,6 +8,7 @@ import { SETTING } from "../engine/settingsKeys";
 import {
   peekResolvedClaudeCli,
   peekResolvedCodexCli,
+  peekResolvedOpenCodeCli,
   type ResolvedCli,
 } from "../shared/mcp/cliBinaryResolver";
 import {
@@ -557,6 +559,39 @@ export function activateEpicHandshake(
 /** Append Epic Handshake diagnostic lines to the health command
  * output. Called from `src/engine/healthCommand.ts`. Surfaces
  * per-workspace bridge state for debugging. */
+/** Synchronous `<cli> --version` probe with cache + tight ceiling.
+ * Health output is rare enough that a 500ms blocking spawn per CLI
+ * once per command invocation is acceptable; the cache keeps repeat
+ * calls free. Returns the trimmed first line of stdout or null when
+ * the binary cannot answer in time. Best-effort - any failure mode
+ * leaves the version off the line, the resolved-source display
+ * still renders. */
+const cliVersionCache = new Map<string, string | null>();
+function probeCliVersion(resolved: ResolvedCli): string | null {
+  const key = resolved.command;
+  if (cliVersionCache.has(key)) return cliVersionCache.get(key) ?? null;
+  let version: string | null = null;
+  try {
+    const r = spawnSync(resolved.command, ["--version"], {
+      encoding: "utf8",
+      timeout: 500,
+      windowsHide: true,
+      shell: resolved.needsShell,
+    });
+    if (r.status === 0 && typeof r.stdout === "string") {
+      const first = r.stdout.split(/\r?\n/)[0]?.trim() ?? "";
+      // CLIs vary: "1.14.39", "claude-code 2.1.128", "codex 0.124.0".
+      // Strip leading words to leave just the semver-ish suffix.
+      const match = first.match(/(\d+\.\d+\.\d+[\w.+-]*)/);
+      version = match ? match[1] : (first.length > 0 ? first.slice(0, 30) : null);
+    }
+  } catch {
+    // best-effort
+  }
+  cliVersionCache.set(key, version);
+  return version;
+}
+
 export function appendEpicHandshakeHealth(lines: string[]): void {
   const enabled = vscode.workspace
     .getConfiguration("wat321")
@@ -574,13 +609,17 @@ export function appendEpicHandshakeHealth(lines: string[]): void {
   // run yet (rare in practice; isClaudeAvailable runs at activate).
   const claude = peekResolvedClaudeCli();
   const codex = peekResolvedCodexCli();
+  const opencode = peekResolvedOpenCodeCli();
   const renderResolved = (label: string, r: ResolvedCli | null | undefined): string => {
     if (r === undefined) return `  ${label}: not yet probed`;
     if (r === null) return `  ${label}: not found (install Marketplace extension or standalone CLI)`;
-    return `  ${label}: ${r.source} (${r.command})`;
+    const version = probeCliVersion(r);
+    const versionTag = version ? ` v${version}` : "";
+    return `  ${label}: ${r.source}${versionTag} (${r.command})`;
   };
-  lines.push(renderResolved("claude CLI", claude));
-  lines.push(renderResolved("codex CLI ", codex));
+  lines.push(renderResolved("claude CLI  ", claude));
+  lines.push(renderResolved("codex CLI   ", codex));
+  lines.push(renderResolved("opencode CLI", opencode));
 
   if (!enabled) return;
 
