@@ -5,15 +5,36 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.1] - unreleased
+## [1.4.1] - 2026-05-06
 
 ### Added
 
+- **A unified bridge MCP server is now available behind a feature flag.** One `wat321` entry replaces the two-server topology (Epic Handshake + Model Bridge), exposing four tools - `wat321_ask`, `wat321_inbox`, `wat321_list`, `wat321_session` - with a single `target` parameter that picks `codex`, `opencode`, or `local`. Fewer tool slots in Claude's system prompt, less drift between the two bridges. Off by default; install via `WAT321: Bridge - Install Unified MCP Server` to opt in.
+- **A bridge-mode dropdown on Epic Handshake** lets you narrow what the unified server advertises: Auto (All), Codex + OpenCode, Codex Only, OpenCode Only, or Local LLM Only. The narrower the slice, the fewer tool descriptions Claude has to carry. Useful when you only want one route active for a given session.
+- **Three Manage submenus on the Epic Handshake widget** - Manage Codex Sessions, Manage OpenCode Sessions, and Manage Local LLM Sessions. All three follow the same row layout: BACK, the session list, NEW, DELETE, RENAME, CANCEL. The Model Bridge widget click now routes to whichever submenu matches the active instance, so all session management lives in one menu rather than two.
+- **A compact display option for the session-tokens widgets.** `wat321.sessionTokens.compact` shrinks the Claude and Codex session-token labels without affecting the usage widgets. Cuts status-bar real estate when the bar fills up.
+- **Live tokens-per-second now averages over a five-second window** instead of jittering on the most recent sample. The widget rejects intervals longer than 30 seconds (tool waits, bridge waits) so a quiet stretch doesn't drag the average to zero. Persistent across idle, caps at 999/s.
+- **Big Pickle works without a Zen API key.** The free Zen tier accepts anonymous requests, and WAT321 now knows that - the red "missing API key" badge no longer fires for free routes. Click the widget, pick Big Pickle, dispatch.
+
 ### Changed
+
+- **The Codex session-settings menu collapses to two rows.** Sandbox now lives inside the Effort sub-picker rather than as its own top-level entry. One less hop for the common edit flow.
+- **Reset turns both bridges off.** Previously, Reset only forced Epic Handshake off and let Model Bridge re-enable itself from its schema default. Now both flip to disabled together, matching what "reset" usually means.
+- **The wait-mode setting is gone.** Adaptive is now the fixed activate-time default; the toggle was always going to land on adaptive, so the option just added noise. Click-menu entry, schema key, runtime watcher, parser all stripped.
+- **The local LLM endpoint setting moved.** It's now under the Epic Handshake section right below `suppressCodexNotifications`, where the rest of the bridge configuration lives.
+- **The CLI binary search order flipped.** WAT321 now tries the extension-bundled CLI first and falls back to your PATH, matching how the marketplace install is meant to work.
+- **The Local LLM widget shows just tokens and TPS during a run.** Phase tags (`RECEIPT`, `STARTED`, `HALFWAY`, etc.) used to sit in the widget text - they're now stripped. The tooltip still shows full phase progression.
+- **The MISS-unclear tooltip on Claude session tokens is more specific.** Instead of "cause unclear", it now says what was ruled out (TTL gap, large tool payload, post-compact rebuild) and what's most likely left (tool schema change or system-prompt mutation). Conservative classification - false positives on LOAD events are worse than ambiguous tooltips.
 
 ### Fixed
 
+- **A second root cause behind the "Codex went silent for five minutes then said it ran out of time" failure.** The adaptive hard cap was silently overriding caller-supplied `timeout_sec`, so a 15-minute request still got killed at five. The cap is now a runaway protection (intended to fire when something genuinely went wrong), not a working ceiling. Per-stage adaptive timeouts are designed for v1.5 as the proper enhancement.
+- **The inbox watcher silently falling back to polling at fresh VS Code start.** When the inbox directory didn't exist yet at activate, the coordinator marked itself as "watching" without actually attaching - and then never retried. Inbox arrival reactivity dropped from ~50 ms (fs.watch) to five seconds (polling backstop). Fixed: the coordinator retries until the watch actually attaches.
+- **A class of unified-bridge dispatch bugs.** `target=local` one-shots silently routed to Big Pickle because the local catalog leaves the `model` field blank by design. Empty-prompt retrieval against an existing OpenCode session was contradictory between the two tools. Active-instance fallback was unimplemented. The bridge-mode dropdown wasn't wired into the config writer. The atomic-rename pattern in the alias-map writer was broken (wrote the tmp file, then wrote again to the destination, defeating the point). All five caught by an independent Codex audit run; all five fixed.
+
 ### Removed
+
+- **`epicHandshake.defaultWaitMode` is gone from settings.json.** Adaptive is the activate-time default; pause/resume still works at runtime via the click menu.
 
 ## [1.4.0] - 2026-05-05
 
