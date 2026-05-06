@@ -12,6 +12,10 @@ import {
 } from "./menuCommon";
 import { showCodexDefaultsPicker } from "./codexDefaultsPicker";
 import {
+  showLocalLLMSessionsPicker,
+  showOpenCodeSessionsPicker,
+} from "./openCodeSessionsPicker";
+import {
   discardAllLateReplies,
   showLateRepliesPicker,
 } from "./lateReplyPickers";
@@ -187,18 +191,40 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
 
   // Cross-tier entry into the Model Bridge's session management. Only
   // shown when the bridge is enabled - keeps the menu lean for users
-  // running EH without OpenCode.
+  // running EH without OpenCode. Per v1.4.1 plan, this submenu mirrors
+  // Manage Codex Sessions row-for-row (List sessions, Set Active,
+  // Pause/Resume, Cancel, Restart, Session Settings, Inbox, New/Delete/
+  // Rename) - see WDDOCS/WAT321_V141_MB_FEATURE_STRIP.md for the parity
+  // table. Currently delegates to the legacy MB menu; the EH-native
+  // submenu lands as part of the unified MCP server work.
   const modelBridgeEnabled = vscode.workspace
     .getConfiguration("wat321")
     .get<boolean>("modelBridge.enabled", false);
+  const localEndpoint = vscode.workspace
+    .getConfiguration("wat321")
+    .get<string>("modelBridge.localEndpoint", "")
+    .trim();
   const opencodeSessionsItem: Item | null = modelBridgeEnabled
     ? {
         label: "MANAGE OPENCODE SESSIONS",
-        description: "List or erase Model Bridge rollouts.",
+        description: "List, resume, or manage OpenCode sessions.",
         iconPath: new vscode.ThemeIcon("wat321-square-info"),
         action: "manage-opencode-sessions",
       }
     : null;
+  // Local LLM submenu shows only when both Model Bridge is enabled
+  // AND a local endpoint is configured. Without an endpoint, the
+  // local target has nothing to dispatch to and the submenu would
+  // be a dead row.
+  const localLlmSessionsItem: Item | null =
+    modelBridgeEnabled && localEndpoint.length > 0
+      ? {
+          label: "MANAGE LOCAL LLM SESSIONS",
+          description: "List, resume, or manage local LLM sessions.",
+          iconPath: new vscode.ThemeIcon("wat321-square-info"),
+          action: "manage-local-llm-sessions",
+        }
+      : null;
 
   const clearErrorItem: Item | null =
     hasError && !paused
@@ -246,6 +272,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     retrieveItem,
     sessionsItem,
     ...(opencodeSessionsItem ? [opencodeSessionsItem] : []),
+    ...(localLlmSessionsItem ? [localLlmSessionsItem] : []),
     ...(waitModeItem ? [waitModeItem] : []),
     ...(clearErrorItem ? [clearErrorItem] : []),
     restartBridgeItem,
@@ -421,7 +448,10 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       });
       break;
     case "manage-opencode-sessions":
-      await vscode.commands.executeCommand("wat321.modelBridge.manageSessions");
+      await showOpenCodeSessionsPicker();
+      break;
+    case "manage-local-llm-sessions":
+      await showLocalLLMSessionsPicker();
       break;
     case "repair-sessions":
       await showRepairSessionsPicker(ctx.ws, ctx.recoverable, ctx.inFlight);

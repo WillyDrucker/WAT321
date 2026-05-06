@@ -1,0 +1,359 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import * as vscode from "vscode";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { makeBackItem, makeCancelItem, withMenuLifecycle } from "./menuCommon";
+
+/**
+ * Manage Sessions submenu (EH widget) for opencode-serve-backed
+ * targets: "opencode" (cloud / Big Pickle) and "local" (local LLM).
+ *
+ * Both targets share opencode serve's session machinery; the only
+ * differences are the alias-map namespace and the instance kind
+ * filter. A single parameterized picker handles both, keeping them
+ * in lockstep on row order and behavior. Codex's picker stays
+ * separate because Codex sessions live in Codex's own rollout files,
+ * not in opencode.db.
+ *
+ * Mirrors the parity table in WDDOCS/WAT321_V141_MB_FEATURE_STRIP.md
+ * row-for-row where the underlying provider's capability matches.
+ *
+ * v1 row set:
+ *   - BACK
+ *   - Sessions list (S1, S2, ...) with slug + model + last-active
+ *   - NEW SESSION
+ *   - DELETE SESSION (sub-picker)
+ *   - RENAME SESSION (sub-picker)
+ *   - CANCEL
+ *
+ * Pause/Resume/Cancel/Restart/Set-Active rows queued for v1.4.2 -
+ * each requires runtime infrastructure (target-scoped pause flag,
+ * cancel sentinel for in-flight dispatches, restart of opencode
+ * serve, default-resume preference) that doesn't exist yet.
+ */
+
+export type SessionTarget = "opencode" | "local";
+
+const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
+const ALIAS_PATH = join(BRIDGE_DIR, "session-aliases.json");
+const MB_CONFIG_PATH = join(homedir(), ".wat321", "model-bridge", "config.json");
+
+interface AliasMap {
+  opencode: Record<string, string>;
+  local: Record<string, string>;
+}
+
+interface OpenCodeSessionMeta {
+  id: string;
+  slug?: string;
+  title?: string;
+  model?: { id?: string; providerID?: string };
+  time?: { created?: number; updated?: number };
+}
+
+interface MbInstance {
+  id: string;
+  alias: string;
+  kind: "local" | "remote";
+  model: string;
+  harnessProviderID: "llama.cpp" | "zen";
+}
+
+interface MbConfig {
+  openCodeServerUrl?: string;
+  activeInstanceId?: string;
+  instances?: MbInstance[];
+}
+
+function readAliases(): AliasMap {
+  if (!existsSync(ALIAS_PATH)) return { opencode: {}, local: {} };
+  try {
+    const parsed = JSON.parse(readFileSync(ALIAS_PATH, "utf8")) as Partial<AliasMap>;
+    return {
+      opencode:
+        parsed?.opencode && typeof parsed.opencode === "object"
+          ? parsed.opencode
+          : {},
+      local:
+        parsed?.local && typeof parsed.local === "object" ? parsed.local : {},
+    };
+  } catch {
+    return { opencode: {}, local: {} };
+  }
+}
+
+function writeAliases(map: AliasMap): void {
+  writeFileAtomic(ALIAS_PATH, JSON.stringify(map, null, 2));
+}
+
+function readMbConfig(): MbConfig | null {
+  if (!existsSync(MB_CONFIG_PATH)) return null;
+  try {
+    return JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8")) as MbConfig;
+  } catch {
+    return null;
+  }
+}
+
+function nextAlias(taken: string[]): string {
+  let n = 1;
+  while (taken.includes(`S${n}`)) n++;
+  return `S${n}`;
+}
+
+async function fetchSessions(serveUrl: string): Promise<OpenCodeSessionMeta[]> {
+  try {
+    const res = await fetch(`${serveUrl}/session`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as OpenCodeSessionMeta[];
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+function formatRelative(ms: number | undefined): string {
+  if (typeof ms !== "number") return "";
+  const ageMs = Date.now() - ms;
+  if (ageMs < 60_000) return "just now";
+  if (ageMs < 3_600_000) return `${Math.round(ageMs / 60_000)}m ago`;
+  if (ageMs < 86_400_000) return `${Math.round(ageMs / 3_600_000)}h ago`;
+  return `${Math.round(ageMs / 86_400_000)}d ago`;
+}
+
+interface PickerRow extends vscode.QuickPickItem {
+  rowKind: "back" | "session" | "new" | "delete" | "rename" | "cancel";
+  alias?: string;
+}
+
+interface TargetConfig {
+  title: string;
+  instanceKind: "local" | "remote";
+  fallbackInstanceId: string;
+  emptyHint: string;
+}
+
+const TARGET_CONFIGS: Record<SessionTarget, TargetConfig> = {
+  opencode: {
+    title: "Manage OpenCode Sessions",
+    instanceKind: "remote",
+    fallbackInstanceId: "big-pickle",
+    emptyHint: "No OpenCode sessions yet. Create one with NEW SESSION.",
+  },
+  local: {
+    title: "Manage Local LLM Sessions",
+    instanceKind: "local",
+    fallbackInstanceId: "local-llm",
+    emptyHint:
+      "No local LLM sessions yet. Create one with NEW SESSION (requires modelBridge.localEndpoint set).",
+  },
+};
+
+function pickInstanceForTarget(
+  mb: MbConfig | null,
+  target: SessionTarget
+): MbInstance | null {
+  if (!mb) return null;
+  const cfg = TARGET_CONFIGS[target];
+  const instances = mb.instances ?? [];
+  const candidates = instances.filter((i) => i.kind === cfg.instanceKind);
+  if (candidates.length === 0) return null;
+  const active = candidates.find((i) => i.id === mb.activeInstanceId);
+  if (active) return active;
+  const fallback = candidates.find((i) => i.id === cfg.fallbackInstanceId);
+  if (fallback) return fallback;
+  return candidates[0];
+}
+
+async function showSessionsPicker(target: SessionTarget): Promise<void> {
+  const cfg = TARGET_CONFIGS[target];
+  const aliases = readAliases();
+  const mb = readMbConfig();
+  const serveUrl = mb?.openCodeServerUrl ?? null;
+
+  const sessionMetas = serveUrl ? await fetchSessions(serveUrl) : [];
+  const metaById = new Map(sessionMetas.map((s) => [s.id, s]));
+
+  const targetAliases = aliases[target];
+  const sessionRows: PickerRow[] = Object.entries(targetAliases).map(
+    ([alias, id]) => {
+      const meta = metaById.get(id);
+      const slug = meta?.slug ?? "(not found)";
+      const modelLabel = meta?.model?.id ?? "(no model)";
+      const ageLabel = formatRelative(meta?.time?.updated);
+      return {
+        rowKind: "session",
+        alias,
+        label: `${alias}: ${slug}`,
+        description: `${modelLabel}${ageLabel ? `  -  ${ageLabel}` : ""}`,
+        iconPath: new vscode.ThemeIcon("symbol-method"),
+      };
+    }
+  );
+
+  const items: PickerRow[] = [
+    { ...makeBackItem(), rowKind: "back" },
+    ...sessionRows,
+    {
+      rowKind: "new",
+      label: "$(add) NEW SESSION",
+      description: `Create a fresh ${target} session with the active instance.`,
+      iconPath: new vscode.ThemeIcon("add"),
+    },
+    {
+      rowKind: "delete",
+      label: "$(trash) DELETE SESSION",
+      description:
+        "Remove an alias (the underlying opencode session is retained for recovery).",
+      iconPath: new vscode.ThemeIcon("trash"),
+    },
+    {
+      rowKind: "rename",
+      label: "$(edit) RENAME SESSION",
+      description: "Change a session's alias.",
+      iconPath: new vscode.ThemeIcon("edit"),
+    },
+    { ...makeCancelItem(false), rowKind: "cancel" },
+  ];
+
+  const pick = await withMenuLifecycle(() =>
+    vscode.window.showQuickPick<PickerRow>(items, {
+      title: cfg.title,
+      placeHolder:
+        sessionRows.length === 0 ? cfg.emptyHint : "Pick a session to view, or an action.",
+    })
+  );
+  if (!pick || pick.rowKind === "back" || pick.rowKind === "cancel") return;
+
+  if (pick.rowKind === "session") {
+    void vscode.window.showInformationMessage(
+      `${pick.alias}: ${pick.label}. Use wat321_ask({target:'${target}', session:'${pick.alias}', prompt:'...'}) to dispatch.`
+    );
+    return;
+  }
+
+  if (pick.rowKind === "new") {
+    if (!serveUrl) {
+      void vscode.window.showWarningMessage(
+        "opencode serve is not running. Enable Model Bridge in settings, then try again."
+      );
+      return;
+    }
+    const instance = pickInstanceForTarget(mb, target);
+    if (!instance) {
+      void vscode.window.showWarningMessage(
+        `No ${cfg.instanceKind} instances configured. Check your Model Bridge settings.`
+      );
+      return;
+    }
+    const body: { model?: { id: string; providerID: string } } = {};
+    if (instance.model) {
+      body.model = { id: instance.model, providerID: instance.harnessProviderID };
+    }
+    try {
+      const res = await fetch(`${serveUrl}/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        void vscode.window.showErrorMessage(
+          `Session create failed: opencode serve returned ${res.status}.`
+        );
+        return;
+      }
+      const data = (await res.json()) as { id?: string; slug?: string };
+      if (!data.id) {
+        void vscode.window.showErrorMessage(
+          "Session create failed: opencode serve did not return an id."
+        );
+        return;
+      }
+      const alias = nextAlias(Object.keys(targetAliases));
+      targetAliases[alias] = data.id;
+      writeAliases(aliases);
+      void vscode.window.showInformationMessage(
+        `Created ${alias} (${instance.alias}, slug ${data.slug ?? "?"}).`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      void vscode.window.showErrorMessage(`Session create failed: ${msg}`);
+    }
+    return;
+  }
+
+  if (pick.rowKind === "delete") {
+    if (sessionRows.length === 0) {
+      void vscode.window.showInformationMessage("No sessions to delete.");
+      return;
+    }
+    const target2 = await vscode.window.showQuickPick(
+      sessionRows.map((r) => ({ label: r.label, description: r.description, alias: r.alias })),
+      { title: "Delete which session?", placeHolder: "Pick an alias to remove" }
+    );
+    if (!target2?.alias) return;
+    const removedId = targetAliases[target2.alias];
+    delete targetAliases[target2.alias];
+    writeAliases(aliases);
+    void vscode.window.showInformationMessage(
+      `Removed alias ${target2.alias}. Underlying session (${removedId}) retained in opencode.db for recovery.`
+    );
+    return;
+  }
+
+  if (pick.rowKind === "rename") {
+    if (sessionRows.length === 0) {
+      void vscode.window.showInformationMessage("No sessions to rename.");
+      return;
+    }
+    const target2 = await vscode.window.showQuickPick(
+      sessionRows.map((r) => ({ label: r.label, description: r.description, alias: r.alias })),
+      { title: "Rename which session?", placeHolder: "Pick an alias to rename" }
+    );
+    if (!target2?.alias) return;
+    const newName = await vscode.window.showInputBox({
+      title: `Rename ${target2.alias}`,
+      prompt: "New alias (e.g. 'Pickle Test', 'S1', 'Coding Session')",
+      value: target2.alias,
+    });
+    if (!newName || newName === target2.alias) return;
+    if (targetAliases[newName]) {
+      void vscode.window.showErrorMessage(`Alias '${newName}' is already in use.`);
+      return;
+    }
+    targetAliases[newName] = targetAliases[target2.alias];
+    delete targetAliases[target2.alias];
+    writeAliases(aliases);
+    void vscode.window.showInformationMessage(
+      `Renamed ${target2.alias} -> ${newName}.`
+    );
+    return;
+  }
+}
+
+export async function showOpenCodeSessionsPicker(): Promise<void> {
+  return showSessionsPicker("opencode");
+}
+
+export async function showLocalLLMSessionsPicker(): Promise<void> {
+  return showSessionsPicker("local");
+}
+
+/** Register the cross-tier commands so the MB widget click can route
+ * here without violating the tier-import rule (MB cannot import from
+ * EH directly; command dispatch is the engine-blessed crossing). */
+export function registerSessionPickerCommands(
+  context: vscode.ExtensionContext
+): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "wat321.bridge.manageOpenCodeSessions",
+      async () => showOpenCodeSessionsPicker()
+    ),
+    vscode.commands.registerCommand(
+      "wat321.bridge.manageLocalLlmSessions",
+      async () => showLocalLLMSessionsPicker()
+    )
+  );
+}
