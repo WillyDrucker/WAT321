@@ -30,6 +30,14 @@ export interface CatalogEntry {
   dataRetention: "local" | "retained";
   /** SecretStorage key name. Empty for local instances. */
   apiKeyRef: string;
+  /** OpenCode provider id used by the harness (`model_bridge_task`).
+   * Maps to the provider key registered in the WAT321-managed
+   * `opencode.json`. Local instances drive the harness via the
+   * `llama.cpp` provider; cloud instances drive it via the `zen`
+   * provider with a shared API key. The harness needs an explicit
+   * provider; auto-discovery only fills in the model id for local
+   * entries. */
+  harnessProviderID: "llama.cpp" | "zen";
 }
 
 export const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
@@ -45,6 +53,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     kind: "local",
     dataRetention: "local",
     apiKeyRef: "",
+    harnessProviderID: "llama.cpp",
   },
   {
     id: "big-pickle",
@@ -54,6 +63,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     kind: "remote",
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
   },
   {
     id: "gpt-5-nano",
@@ -63,6 +73,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     kind: "remote",
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
   },
   {
     id: "ling-2-6-flash",
@@ -72,6 +83,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     kind: "remote",
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
   },
   {
     id: "hy3-preview-free",
@@ -81,6 +93,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     kind: "remote",
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
   },
   {
     id: "nemotron-3-super-free",
@@ -90,6 +103,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     kind: "remote",
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
   },
   {
     id: "minimax-m2-5-free",
@@ -99,5 +113,6 @@ export const CATALOG: readonly CatalogEntry[] = [
     kind: "remote",
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
   },
 ] as const;
