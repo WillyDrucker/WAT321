@@ -108,6 +108,20 @@ export function activate(context: vscode.ExtensionContext) {
     ctx?.events.emit("engine.reset", {});
     await epicHandshake.resetCleanup();
     if (modelBridge) await modelBridge.resetCleanup();
+    // Sweep the unified bridge's MCP entry + pre-allowed tool list
+    // (mcp__wat321__wat321_ask, etc.) from ~/.claude/settings.json. EH's
+    // resetCleanup removes the legacy `wat321` entry, but if the user
+    // ever ran the unified install command the entry got rewritten to
+    // point at ~/.wat321/bridge/bin/channel.mjs and the unified tool
+    // names were added to the allowlist. Reset is "factory clean" - both
+    // surfaces have to go. Idempotent - succeeds even if neither was
+    // ever installed.
+    try {
+      const { uninstallUnifiedBridge } = await import("./WAT321_BRIDGE/installer");
+      await uninstallUnifiedBridge();
+    } catch {
+      // best-effort - reset continues regardless
+    }
   });
   registerHealthCommand(context, () => ctx);
 }
