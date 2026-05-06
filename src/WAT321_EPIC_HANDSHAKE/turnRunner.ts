@@ -293,6 +293,12 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       disableAllTimeouts: isFireAndForget,
       stallFloorMs: isAdaptive ? ADAPTIVE_STALL_FLOOR_MS : undefined,
       onProgress: (stage, info) => {
+        // Monitor progress (heartbeat + rollout-poller observation)
+        // is unambiguous proof the turn is happening. Set the gate
+        // here too so a transport hiccup that swallows turn/started
+        // and item/* notifications cannot block rollout-recovery
+        // when the rollout poller IS seeing fresh progress on disk.
+        ourTurnObserved = true;
         writeHeartbeat(stage, info);
       },
       onStall: (reason) => {
@@ -396,6 +402,12 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
 
     const completedSub = client.onNotification("turn/completed", (params) => {
       const c = params as TurnCompleted;
+      // Arrival of turn/completed is itself proof the turn happened,
+      // even if every prior notification (turn/started, item/*) was
+      // lost to a transport hiccup. The non-success and empty-items
+      // recovery branches below gate on ourTurnObserved; setting it
+      // here unblocks the exact recovery they exist for.
+      ourTurnObserved = true;
       monitor.forceStage("complete");
 
       if (c.turn.status !== "completed") {
