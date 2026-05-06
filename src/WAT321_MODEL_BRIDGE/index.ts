@@ -184,6 +184,24 @@ async function reconcileInstall(
   config: ModelBridgeConfig,
   logger: ModelBridgeLogger
 ): Promise<void> {
+  // Skip legacy MB MCP registration when the user has flipped to the
+  // unified bridge (v1.4.1+). The unified server's installer claims
+  // the `wat321` MCP entry name and exposes the four wat321_* tools
+  // for both targets; auto-reinstalling the legacy `wat321-model-
+  // bridge` entry here would duplicate the surface and cost Claude
+  // ~1500 tokens of redundant tool registrations per conversation.
+  // The opencode serve subprocess and click-menu state continue to
+  // run regardless - the unified handlers depend on them.
+  const useUnified = vscode.workspace
+    .getConfiguration("wat321")
+    .get<boolean>(SETTING.bridgeUseUnified, false);
+  if (useUnified) {
+    logger.info(
+      "useUnified=true; skipping legacy Model Bridge MCP registration (unified bridge owns the surface)."
+    );
+    await uninstallModelBridge(logger);
+    return;
+  }
   if (!(await isClaudeAvailable())) {
     logger.info(
       "Claude CLI not found on PATH or in the Claude Code VS Code extension; deferring MCP registration until Claude Code is installed."
