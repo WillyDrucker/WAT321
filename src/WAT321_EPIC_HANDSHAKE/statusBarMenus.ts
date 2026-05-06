@@ -1,4 +1,7 @@
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import { waitModeFlashFlagPath } from "./constants";
 import { listLateReplies } from "./lateReplyInbox";
@@ -44,6 +47,52 @@ import {
   waitModeLabel,
 } from "./waitMode";
 import { workspaceHash } from "./workspaceHash";
+
+/** Read the unified bridge's alias map for the current S# suffix on
+ * the parent menu's MANAGE OPENCODE/LOCAL rows. Best-effort: a missing
+ * file or parse failure returns empty maps so the parent label simply
+ * omits the suffix rather than blocking the menu render. */
+const BRIDGE_ALIASES_PATH = join(homedir(), ".wat321", "bridge", "session-aliases.json");
+function readBridgeAliases(): {
+  opencode: Record<string, string>;
+  local: Record<string, string>;
+} {
+  try {
+    if (!existsSync(BRIDGE_ALIASES_PATH)) return { opencode: {}, local: {} };
+    const parsed = JSON.parse(readFileSync(BRIDGE_ALIASES_PATH, "utf8")) as {
+      opencode?: Record<string, string>;
+      local?: Record<string, string>;
+    };
+    return {
+      opencode:
+        parsed.opencode && typeof parsed.opencode === "object" ? parsed.opencode : {},
+      local: parsed.local && typeof parsed.local === "object" ? parsed.local : {},
+    };
+  } catch {
+    return { opencode: {}, local: {} };
+  }
+}
+
+/** Highest S<n> alias by numeric suffix. Returns `null` when no
+ * sessions exist for the target. Mirrors how the Codex menu shows
+ * the active sessionCounter rather than a count - the user reads
+ * "S<n>" as the working session, not "<n> sessions exist". */
+function latestAlias(map: Record<string, string>): string | null {
+  const aliases = Object.keys(map);
+  if (aliases.length === 0) return null;
+  let bestNum = -1;
+  let bestAlias: string | null = null;
+  for (const alias of aliases) {
+    const m = /^S(\d+)$/.exec(alias);
+    if (!m) continue;
+    const n = parseInt(m[1], 10);
+    if (n > bestNum) {
+      bestNum = n;
+      bestAlias = alias;
+    }
+  }
+  return bestAlias;
+}
 
 /** Format a millisecond duration as `HhMmSs` / `MmSs` / `Ss` for menu
  * detail rendering. Stays compact - QuickPick's `detail` line truncates
@@ -204,9 +253,20 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     .getConfiguration("wat321")
     .get<string>("modelBridge.localEndpoint", "")
     .trim();
+  // S# suffix on the parent label so the user sees the active session
+  // count at a glance, mirroring the Codex menu's `MANAGE CODEX
+  // SESSIONS (S<n>)` pattern. The latest alias is read off the
+  // unified bridge's session-aliases.json - we show the highest S#
+  // present rather than the count, matching how Codex displays the
+  // active sessionCounter (the working session).
+  const bridgeAliases = readBridgeAliases();
+  const opencodeLatest = latestAlias(bridgeAliases.opencode);
+  const localLatest = latestAlias(bridgeAliases.local);
   const opencodeSessionsItem: Item | null = modelBridgeEnabled
     ? {
-        label: "MANAGE OPENCODE SESSIONS",
+        label: opencodeLatest
+          ? `MANAGE OPENCODE SESSIONS (${opencodeLatest})`
+          : "MANAGE OPENCODE SESSIONS",
         description: "List, resume, or manage OpenCode sessions.",
         iconPath: new vscode.ThemeIcon("wat321-square-info"),
         action: "manage-opencode-sessions",
@@ -219,35 +279,14 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   const localLlmSessionsItem: Item | null =
     modelBridgeEnabled && localEndpoint.length > 0
       ? {
-          label: "MANAGE LOCAL LLM SESSIONS",
+          label: localLatest
+            ? `MANAGE LOCAL LLM SESSIONS (${localLatest})`
+            : "MANAGE LOCAL LLM SESSIONS",
           description: "List, resume, or manage local LLM sessions.",
           iconPath: new vscode.ThemeIcon("wat321-square-info"),
           action: "manage-local-llm-sessions",
         }
       : null;
-
-  // Recovery row for users stuck on the v1.4.x experimental unified
-  // bridge. The install command flips wat321.bridge.useUnified=true and
-  // sweeps the legacy `wat321` (Epic Handshake) and `wat321-model-bridge`
-  // MCP entries; once on, the flag persists across reloads and the user
-  // is locked into the minimal-v1 unified handlers. This row only shows
-  // when the flag is true so it's invisible to the 99% who never opted
-  // in. Clicking flips the flag back, uninstalls the unified MCP entry,
-  // and prompts a reload - on reload, EH and MB reconcileInstall paths
-  // re-register the legacy two-server topology.
-  const useUnified = vscode.workspace
-    .getConfiguration("wat321")
-    .get<boolean>("bridge.useUnified", false);
-  const uninstallUnifiedItem: Item | null = useUnified
-    ? {
-        label: "UNINSTALL UNIFIED BRIDGE",
-        description: "Roll back to legacy two-server bridge topology.",
-        detail:
-          "Removes the experimental unified `wat321` MCP entry and re-registers `wat321` (Epic Handshake) + `wat321-model-bridge` on next reload.",
-        iconPath: new vscode.ThemeIcon("wat321-square-bolt"),
-        action: "uninstall-unified-bridge",
-      }
-    : null;
 
   const clearErrorItem: Item | null =
     hasError && !paused
@@ -298,7 +337,6 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     ...(localLlmSessionsItem ? [localLlmSessionsItem] : []),
     ...(waitModeItem ? [waitModeItem] : []),
     ...(clearErrorItem ? [clearErrorItem] : []),
-    ...(uninstallUnifiedItem ? [uninstallUnifiedItem] : []),
     restartBridgeItem,
     pauseItem,
     cancelItem,
@@ -487,14 +525,6 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       void vscode.window.showInformationMessage(
         "Epic Handshake: bridge restarted. The active session resumes on your next prompt."
       );
-      break;
-    case "uninstall-unified-bridge":
-      // Bridge tier owns the actual uninstall command; this row is just
-      // a discoverable surface for users who got trapped on the v1.4.x
-      // experimental flag. The command flips wat321.bridge.useUnified
-      // back to false and sweeps the unified MCP entry; on reload, EH
-      // and MB reconcileInstall paths re-register the legacy topology.
-      await vscode.commands.executeCommand("wat321.bridge.uninstallUnified");
       break;
     case "back":
       // Sub-menus invoke this to return to the main menu so the user

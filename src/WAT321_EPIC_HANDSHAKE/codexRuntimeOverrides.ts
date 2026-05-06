@@ -4,6 +4,7 @@ import {
   codexEffortFlagPath,
   codexModelFlagPath,
   codexSandboxFlagPath,
+  codexSandboxTouchedFlagPath,
 } from "./constants";
 
 /**
@@ -57,6 +58,25 @@ export function writeCodexSandboxOverride(
   } catch {
     // best-effort
   }
+  // Mark this workspace's sandbox slot as user-touched so the picker's
+  // "*default*" badge stops appearing on read-only - the user is now
+  // showing a deliberate choice, not a pristine schema default. The
+  // sentinel is write-once and stays put until Reset wipes ~/.wat321.
+  try {
+    const touched = codexSandboxTouchedFlagPath(wsHash);
+    if (!existsSync(touched)) {
+      writeFileAtomic(touched, new Date().toISOString());
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+/** True once the user has explicitly picked sandbox at least once for
+ * this workspace. Used by the picker to suppress the "*default*" tag
+ * on a workspace where the user has actively chosen read-only. */
+export function sandboxHasBeenTouched(wsHash: string): boolean {
+  return existsSync(codexSandboxTouchedFlagPath(wsHash));
 }
 
 // -----------------------------------------------------------------

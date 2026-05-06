@@ -93,6 +93,21 @@ export function codexSandboxFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-sandbox.${wsHash}.flag`);
 }
 
+/** Companion sentinel that records whether the user has ever explicitly
+ * set the sandbox state for this workspace (regardless of which value
+ * they picked). Used to drive the "*default*" tag in the picker - the
+ * tag should appear on truly pristine slots (fresh install, post-Reset)
+ * and disappear once the user makes any choice, even if their choice
+ * happens to match the schema default (read-only). Without this, every
+ * read-only slot would re-render *default* after the user explicitly
+ * picked it, which reads as "you haven't done anything" when they have.
+ *
+ * Sentinel is write-once-then-stays - no logic deletes it short of
+ * Reset wiping `~/.wat321/`. */
+export function codexSandboxTouchedFlagPath(wsHash: string): string {
+  return join(EPIC_HANDSHAKE_DIR, `codex-sandbox-touched.${wsHash}.flag`);
+}
+
 /** Per-workspace model override. Body is the bare slug (e.g.
  * `gpt-5.4-mini`). When present, `turnRunner` passes `model` on every
  * `turn/start` so the running thread uses the override - per-turn,
