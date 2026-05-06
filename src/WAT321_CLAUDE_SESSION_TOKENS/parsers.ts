@@ -273,9 +273,21 @@ export function parseMostRecentCacheEvent(
         ts: t.assistantTs,
       };
     }
+    // Ruled out: TTL gap (turn-to-turn was within 5 min), large tool
+    // payload (preceding tool_result was below 50 KB), and post-compact
+    // rebuild. Most likely remaining causes for a prefix-rebuild that
+    // we can't pin from the transcript:
+    //   - Tool schema change: a tool was added/removed since the
+    //     prior turn (Claude Code's tool list shifts between sessions
+    //     or after MCP server reinstall, which invalidates the cache).
+    //   - System-prompt mutation: <system-reminder> content varies
+    //     across turns.
+    //   - Claude Code internal cache reset: not observable here.
+    // Surfacing the ruled-out bucket helps the user know we checked
+    // the obvious causes and they're not the answer.
     return {
       kind: "MISS-unknown",
-      description: `MISS - prefix change, cause unclear (${ago})`,
+      description: `MISS - prefix rebuilt (${ago}); ruled out TTL/large-payload/compact. Likely tool schema or system-prompt change.`,
       ts: t.assistantTs,
     };
   }

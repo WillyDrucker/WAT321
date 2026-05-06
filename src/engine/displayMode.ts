@@ -47,3 +47,18 @@ export function isProviderActive(key: string): boolean {
 export function getDisplayMode(): DisplayMode {
   return resolveDisplayMode(activeProviderCount);
 }
+
+/** Display mode for session-token widgets specifically. When
+ * `wat321.sessionTokens.compact` is true, session tokens render in
+ * compact form regardless of the global displayMode (so usage widgets
+ * can stay Full while session tokens go Compact). When false, follows
+ * the global displayMode resolution. Minimal global mode wins over
+ * compact-override (a user who set Minimal globally wants minimal
+ * everywhere; the override only widens compactness, never narrows it). */
+export function getSessionTokenDisplayMode(): DisplayMode {
+  const globalMode = getDisplayMode();
+  if (globalMode === "minimal") return "minimal";
+  const config = vscode.workspace.getConfiguration("wat321");
+  const compact = config.get<boolean>(SETTING.sessionTokensCompact, false);
+  return compact ? "compact" : globalMode;
+}

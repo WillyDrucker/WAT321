@@ -71,6 +71,12 @@ export interface SessionTokenTooltipInput {
    * `default_reasoning_level` so the user always sees what Codex will
    * actually run. */
   codexEffort?: "low" | "medium" | "high" | "xhigh" | null;
+  /** Provider-agnostic: live tokens-per-second estimate from the most
+   * recent transcript / rollout delta. When non-null, the tooltip adds
+   * a "Streaming ~X tps" line under the per-turn details. Surfaces
+   * Claude streaming throughput the same way Codex / OpenCode SSE do
+   * so the user has one consistent place to read live model speed. */
+  tokensPerSecond?: number | null;
 }
 
 export function buildSessionTokenTooltip(
@@ -91,6 +97,7 @@ export function buildSessionTokenTooltip(
     turnState,
     autoCompactEffectiveTokens,
     codexEffort,
+    tokensPerSecond,
   } = input;
 
   const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
@@ -243,12 +250,25 @@ export function buildSessionTokenTooltip(
       );
       if (pct > 0) lines.push(`${pct}% cached`);
     }
+    if (typeof tokensPerSecond === "number" && tokensPerSecond > 0) {
+      lines.push(`Streaming ~${formatTps(tokensPerSecond)} tps`);
+    }
     if (lines.length > 0) {
       md.appendMarkdown(`\n\n${lines.join("  \n")}`);
     }
+  } else if (typeof tokensPerSecond === "number" && tokensPerSecond > 0) {
+    md.appendMarkdown(`\n\nStreaming ~${formatTps(tokensPerSecond)} tps`);
   }
 
   return md;
+}
+
+/** Format a TPS reading. Whole numbers above 10 (more typical for
+ * fast models); one decimal below 10 so a slow local LLM at 3.4 tps
+ * does not round to 3. Caller already filters non-positive values. */
+function formatTps(tps: number): string {
+  if (tps >= 10) return `${Math.round(tps)}`;
+  return tps.toFixed(1);
 }
 
 /** Wrap a long session title across up to two lines, breaking on a

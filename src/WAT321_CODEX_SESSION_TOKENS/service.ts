@@ -58,6 +58,20 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private cachedModelSlug: string | null = null;
   private cachedAutoCompactTokens: number | null = null;
   private cachedAutoCompactModel = "";
+  /** Per-session prior snapshot for TPS computation. Keyed by sessionId
+   * so a switch to a different rollout starts the counter fresh. Uses
+   * `stageInfo.outputTokens` (per-turn output) rather than the cumulative
+   * contextUsed: contextUsed grows by both input and output and would
+   * inflate the rate. */
+  private tpsPrevSessionId: string | null = null;
+  private tpsPrevOutputTokens = 0;
+  private tpsPrevMtimeMs = 0;
+  private tpsLastValue: number | null = null;
+  /** Rolling 5-second window of accepted samples. See the Claude
+   * service's matching field for the smoothing rationale - same
+   * shape, same paused-interval rejection, applied to Codex's
+   * stageInfo.outputTokens delta. */
+  private tpsSamples: Array<{ atMs: number; tokens: number; timeMs: number }> = [];
 
   constructor(workspacePath: string) {
     super(
@@ -205,6 +219,13 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       this.cachedAutoCompactModel = this.cachedModelSlug ?? "";
     }
 
+    const stageInfo = parseStageInfo(tail);
+    const tokensPerSecond = this.computeTps(
+      sessionId,
+      stageInfo.outputTokens,
+      rolloutMtime
+    );
+
     this.emitOk({
       sessionId,
       label: this.cachedCwd ? basename(this.cachedCwd) : "Codex",
@@ -215,8 +236,64 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       autoCompactTokens: this.cachedAutoCompactTokens,
       lastActiveAt: rolloutMtime,
       turnState: classifyCodexTurn(tail),
-      stageInfo: parseStageInfo(tail),
+      stageInfo,
       lastCompactTimestamp: parseLastCompactTimestamp(tail),
+      tokensPerSecond,
     });
+  }
+
+  /** Compute smoothed TPS over a rolling 5-second window. Mirrors
+   * the Claude service's smoothing implementation: rejects samples
+   * whose individual gap > 30s as paused (tool wait, agent loop, idle
+   * reasoning) so a long-paused turn that suddenly flushes a large
+   * chunk of output doesn't register as a spurious-high spike.
+   * Persistent across idle, capped at 999. */
+  private computeTps(
+    sessionId: string,
+    outputTokens: number,
+    mtimeMs: number
+  ): number | null {
+    const TPS_MAX = 999;
+    const TPS_WINDOW_MS = 5_000;
+    const TPS_PAUSE_THRESHOLD_MS = 30_000;
+
+    if (sessionId !== this.tpsPrevSessionId) {
+      this.tpsPrevSessionId = sessionId;
+      this.tpsPrevOutputTokens = outputTokens;
+      this.tpsPrevMtimeMs = mtimeMs;
+      this.tpsLastValue = null;
+      this.tpsSamples = [];
+      return null;
+    }
+
+    const tokenDelta = outputTokens - this.tpsPrevOutputTokens;
+    const timeDeltaMs = mtimeMs - this.tpsPrevMtimeMs;
+
+    if (tokenDelta < 0) {
+      this.tpsPrevOutputTokens = outputTokens;
+      this.tpsPrevMtimeMs = mtimeMs;
+      return this.tpsLastValue;
+    }
+
+    if (tokenDelta > 0 && timeDeltaMs > 0) {
+      this.tpsPrevOutputTokens = outputTokens;
+      this.tpsPrevMtimeMs = mtimeMs;
+      if (timeDeltaMs > TPS_PAUSE_THRESHOLD_MS) {
+        return this.tpsLastValue;
+      }
+      const now = Date.now();
+      this.tpsSamples.push({ atMs: now, tokens: tokenDelta, timeMs: timeDeltaMs });
+      const cutoff = now - TPS_WINDOW_MS;
+      while (this.tpsSamples.length > 0 && this.tpsSamples[0].atMs < cutoff) {
+        this.tpsSamples.shift();
+      }
+      const tokenSum = this.tpsSamples.reduce((s, x) => s + x.tokens, 0);
+      const timeSum = this.tpsSamples.reduce((s, x) => s + x.timeMs, 0);
+      if (timeSum > 0 && tokenSum > 0) {
+        this.tpsLastValue = Math.min(TPS_MAX, (tokenSum / timeSum) * 1000);
+      }
+    }
+
+    return this.tpsLastValue;
   }
 }
