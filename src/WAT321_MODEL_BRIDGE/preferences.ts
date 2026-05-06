@@ -46,20 +46,38 @@ export interface ModelBridgePreferences {
   /** Optional global system prompt prepended to every chat call.
    * Per-call `system` arg overrides. */
   systemPrompt: string;
-  /** Phased Model Protocol mode. `markers-v1` prepends the marker
-   * prompt and surfaces a phase trace; `off` disables both. Mostly
-   * useful with local instances - cloud models tend to ignore the
-   * marker scaffolding. */
-  phasedProtocol: "off" | "markers-v1";
+  /** Phased Model Protocol mode.
+   *
+   *   - `auto`        - resolves at call time: `gated-v1` for local
+   *                     instances, `off` for cloud. Default. Small
+   *                     local models benefit from gating; capable
+   *                     cloud models lose latency for no quality gain.
+   *   - `gated-v1`    - bridge runs the prompt through N separate
+   *                     round-trips (RESTATE -> PLAN -> SOLVE ->
+   *                     REVIEW -> ANSWER), each phase a discrete HTTP
+   *                     call carrying prior phase outputs forward.
+   *                     Status bar shows live phase progress.
+   *   - `markers-v1`  - single-shot scaffolding: model emits marker
+   *                     tokens inline (<<PHASE:STARTED>>, etc.) and
+   *                     the bridge surfaces them as a phase trace.
+   *                     Faster than gated; weaker steering for small
+   *                     models that drift mid-plan.
+   *   - `off`         - no scaffolding. */
+  phasedProtocol: "off" | "markers-v1" | "gated-v1" | "auto";
   /** Fraction of n_ctx (0-1) at which `model_bridge_thread` auto-
    * compacts. */
   autoCompactThreshold: number;
-  /** Base URL of the OpenCode HTTP server (`opencode serve`). Empty
-   * means "auto-derive from the active local instance's endpoint
-   * host" (substituting port 4096, OpenCode's default). The click
-   * menu lets the user override when OpenCode runs on a different
-   * host or port than the LLM. */
-  openCodeServerUrl: string;
+  /** Default OpenCode agent for `model_bridge_task` calls when the
+   * caller does not pass an explicit `agent` argument. OpenCode ships
+   * four built-in agents:
+   *   - `build`   - default; full file r/w + shell + web tools
+   *   - `explore` - read-only investigation
+   *   - `general` - mixed; lighter than build
+   *   - `plan`    - planning sub-agent that proposes work without
+   *                 executing it
+   * The click menu lets the user change the default. Per-call
+   * overrides via the tool's `agent` argument always win. */
+  defaultAgent: "build" | "explore" | "general" | "plan";
 }
 
 export const DEFAULT_PREFERENCES: ModelBridgePreferences = {
@@ -71,29 +89,8 @@ export const DEFAULT_PREFERENCES: ModelBridgePreferences = {
   systemPrompt: "",
   phasedProtocol: "markers-v1",
   autoCompactThreshold: 0.85,
-  openCodeServerUrl: "",
+  defaultAgent: "build",
 };
-
-/** Compute the effective OpenCode server URL. Returns the explicit
- * preference if set; otherwise derives one from the supplied LLM
- * endpoint host using OpenCode's default port (4096). Returns `null`
- * only when neither a preference nor an endpoint is available, in
- * which case the harness can't run. */
-export function resolveOpenCodeServerUrl(
-  prefs: ModelBridgePreferences,
-  llmEndpoint: string
-): string | null {
-  if (prefs.openCodeServerUrl && prefs.openCodeServerUrl.length > 0) {
-    return prefs.openCodeServerUrl.replace(/\/+$/, "");
-  }
-  if (!llmEndpoint || llmEndpoint.length === 0) return null;
-  try {
-    const url = new URL(llmEndpoint);
-    return `${url.protocol}//${url.hostname}:4096`;
-  } catch {
-    return null;
-  }
-}
 
 function ensureDir(): void {
   if (!existsSync(MODEL_BRIDGE_DIR)) {
