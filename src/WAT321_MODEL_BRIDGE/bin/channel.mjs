@@ -78,6 +78,8 @@ const HEARTBEAT_PATH = join(MB_DIR, "heartbeat.json");
 const INBOX_DIR = join(MB_DIR, "inbox");
 const SESSIONS_DIR = join(MB_DIR, "sessions");
 const USAGE_PATH = join(MB_DIR, "usage.json");
+const PAUSED_FLAG_PATH = join(MB_DIR, "paused");
+const CANCEL_FLAG_PATH = join(MB_DIR, "cancel.flag");
 const LOG_MAX_BYTES = 50_000;
 const HEARTBEAT_THROTTLE_MS = 250;
 const INBOX_TTL_MS = 60 * 60 * 1000;
@@ -92,6 +94,30 @@ if (!existsSync(INBOX_DIR)) mkdirSync(INBOX_DIR, { recursive: true });
 if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true });
 
 let busyRequest = null;
+
+// Pause / cancel flag observers. The click menu drops these files
+// under MB_DIR; channel.mjs polls them at handler entry (pause) and
+// inside the streaming loop (cancel). Self-clearing cancel so the
+// next call is not interrupted spuriously by a stale flag.
+function isPausedFlag() {
+  return existsSync(PAUSED_FLAG_PATH);
+}
+function consumeCancelFlag() {
+  if (!existsSync(CANCEL_FLAG_PATH)) return false;
+  try {
+    unlinkSync(CANCEL_FLAG_PATH);
+  } catch {
+    // best-effort
+  }
+  return true;
+}
+
+// One-shot per channel.mjs lifetime. Logged once on the first
+// cloud-harness `model_bridge_task` call so a routing surprise (Zen
+// instance active when the user expected a local-only run) leaves a
+// trace in channel.log without spamming. Cleared on process exit; a
+// fresh Claude Code spawn warns again, which is the point.
+let cloudHarnessWarned = false;
 
 // ----------------------------------------------------------------------
 // log + atomic write
@@ -336,6 +362,51 @@ function resolveAlias(instance, payloadModel) {
 // phase markers (Phased Model Protocol v1)
 // ----------------------------------------------------------------------
 
+/** Phase templates for `gated-v1` phased protocol. Each phase is a
+ * separate HTTP round-trip; the model sees the original user prompt
+ * plus every prior phase's reply and is asked to produce just this
+ * phase's contribution. Five steps deliberately - small enough to
+ * avoid latency tax for medium tasks, structured enough to keep small
+ * local models on rails. The final phase (`ANSWER`) is what reaches
+ * the user; the prior four are bridge-internal scaffolding included
+ * in the phaseTrace meta but not the headline reply. */
+const GATED_PHASE_TEMPLATES = [
+  {
+    name: "RESTATE",
+    instruction:
+      "Restate the user's request in your own words. One short paragraph. Identify the deliverable. Do NOT begin solving yet.",
+  },
+  {
+    name: "PLAN",
+    instruction:
+      "Lay out a numbered plan to satisfy the request. Reference your restatement. Five steps maximum. Do NOT execute the plan yet.",
+  },
+  {
+    name: "SOLVE",
+    instruction:
+      "Execute the plan you just produced. Show your work step by step, referring back to plan items by number. If you discover the plan was wrong, say so and correct course.",
+  },
+  {
+    name: "REVIEW",
+    instruction:
+      "Critique your own work for correctness, off-by-one errors, missed cases, and clarity. Fix anything you find. State explicitly when nothing needs changing.",
+  },
+  {
+    name: "ANSWER",
+    instruction:
+      "Write the final answer for the user. Concise and direct. Do NOT mention the phases, this gating protocol, or your prior reasoning. Deliver only what the user asked for.",
+  },
+];
+
+/** Resolve the effective phased-protocol mode at call time. The
+ * `auto` sentinel means "gated for local instances, off for cloud" -
+ * small local models benefit most from gating, capable cloud models
+ * lose latency for no quality gain. */
+function resolvePhasedMode(config, instance) {
+  if (config.phasedProtocol !== "auto") return config.phasedProtocol;
+  return instance.kind === "local" ? "gated-v1" : "off";
+}
+
 /** Marker prompt prepended to every user envelope when phasedProtocol
  * is `markers-v1`. Lifted verbatim from Part III of the master plan. */
 const MARKER_PROMPT_PREFIX =
@@ -555,7 +626,7 @@ async function streamCompletion({ url, headers, body, signal, onProgress, onPhas
 /** Drive a streaming call from start to finish. Owns the heartbeat
  * file, the busy gate, and (when phasedProtocol is `markers-v1`) the
  * phase trace assembly. Returns `{isError, message, meta}`. */
-async function runStreamingCall({ requestId, instance, config, messages }) {
+async function runStreamingCall({ requestId, instance, config, messages, outerBusyHeld = false }) {
   const body = buildRequestBody(instance, config, messages);
   const headers = buildAuthHeaders(instance);
   const url = `${instance.endpoint.replace(/\/+$/, "")}/v1/chat/completions`;
@@ -571,7 +642,10 @@ async function runStreamingCall({ requestId, instance, config, messages }) {
   let currentPhase = "DISPATCH";
   let lastHeartbeatAt = 0;
 
-  busyRequest = requestId;
+  // When called inside a gated-phase loop the outer wrapper holds
+  // the busy gate continuously; per-phase set/clear here would open
+  // a window between phases for an unrelated tool call to slip in.
+  if (!outerBusyHeld) busyRequest = requestId;
   const writeBeat = (tokenCount) => {
     const now = Date.now();
     const elapsedMs = now - start;
@@ -613,6 +687,13 @@ async function runStreamingCall({ requestId, instance, config, messages }) {
       parseMarkers: config.phasedProtocol === "markers-v1",
       onPhase: handlePhase,
       onProgress: ({ tokenCount }) => {
+        // Cancel flag dropped by the click menu's 🔴 CANCEL row aborts
+        // the stream. Checked once per heartbeat tick so the polling
+        // cost is bounded by HEARTBEAT_THROTTLE_MS.
+        if (consumeCancelFlag()) {
+          ac.abort();
+          return;
+        }
         const now = Date.now();
         if (now - lastHeartbeatAt < HEARTBEAT_THROTTLE_MS) return;
         lastHeartbeatAt = now;
@@ -673,7 +754,7 @@ async function runStreamingCall({ requestId, instance, config, messages }) {
     return { isError: true, message };
   } finally {
     clearHeartbeat();
-    if (busyRequest === requestId) busyRequest = null;
+    if (!outerBusyHeld && busyRequest === requestId) busyRequest = null;
   }
 }
 
@@ -1069,6 +1150,95 @@ function preflightConfig() {
   return { config, error: null };
 }
 
+/** Run a gated-v1 ask: N sequential round-trips, each phase carrying
+ * prior phase outputs forward. Reuses runStreamingCall per phase so
+ * heartbeat + TPS work unchanged; the bridge accumulates phase outputs
+ * and surfaces the final phase's text as the headline reply with the
+ * preceding phases captured in `phaseTrace` meta. */
+async function runGatedAsk({ instance, config, basePrompt, baseSystem }) {
+  const phaseOutputs = [];
+  const phaseTraceEntries = [];
+  let lastUsage = null;
+  let totalElapsedMs = 0;
+
+  // Hold the busy gate continuously across all phases. Per-phase
+  // runStreamingCall calls receive `outerBusyHeld: true` so they do
+  // not touch busyRequest themselves; the inter-phase window stays
+  // closed to unrelated tool calls.
+  const gatedRequestId = `gated-${randomUUID()}`;
+  busyRequest = gatedRequestId;
+
+  try {
+    for (let i = 0; i < GATED_PHASE_TEMPLATES.length; i++) {
+      const tpl = GATED_PHASE_TEMPLATES[i];
+      const phaseLabel = `${i + 1}/${GATED_PHASE_TEMPLATES.length}`;
+
+      const priorBlock = phaseOutputs
+        .map((p) => `--- PRIOR PHASE ${p.name} ---\n${p.text}`)
+        .join("\n\n");
+      const priorSection = priorBlock.length > 0 ? `${priorBlock}\n\n` : "";
+      const userPhasePrompt =
+        `--- USER REQUEST ---\n${basePrompt}\n\n${priorSection}` +
+        `--- CURRENT PHASE ${phaseLabel}: ${tpl.name} ---\n${tpl.instruction}`;
+
+      const messages = [];
+      if (baseSystem.length > 0) messages.push({ role: "system", content: baseSystem });
+      messages.push({ role: "user", content: userPhasePrompt });
+
+      const phaseResult = await runStreamingCall({
+        requestId: `${gatedRequestId}-${tpl.name.toLowerCase()}`,
+        instance,
+        config: { ...config, phasedProtocol: "off" },
+        messages,
+        outerBusyHeld: true,
+      });
+      if (phaseResult.isError) {
+        return {
+          isError: true,
+          message: `Gated phase ${phaseLabel} (${tpl.name}) failed: ${phaseResult.message}`,
+        };
+      }
+      const phaseText = (phaseResult.meta?.content ?? "").trim();
+      phaseOutputs.push({ name: tpl.name, text: phaseText });
+      phaseTraceEntries.push({
+        phase: tpl.name,
+        elapsedMs: phaseResult.meta?.elapsedMs ?? 0,
+        tokens: phaseResult.meta?.tokens ?? 0,
+      });
+      lastUsage = phaseResult.meta?.usage ?? lastUsage;
+      totalElapsedMs += phaseResult.meta?.elapsedMs ?? 0;
+    }
+  } finally {
+    if (busyRequest === gatedRequestId) busyRequest = null;
+  }
+
+  const finalAnswer = phaseOutputs[phaseOutputs.length - 1].text;
+  const aliasFinal = resolveAlias(instance, "");
+  const phaseTraceFooter = phaseOutputs
+    .slice(0, -1)
+    .map((p, i) => `[${i + 1}/${GATED_PHASE_TEMPLATES.length}] ${p.name}: ${p.text.slice(0, 120).replace(/\s+/g, " ")}…`)
+    .join("\n");
+  const replyBody =
+    `--- ${aliasFinal} reply (gated ${GATED_PHASE_TEMPLATES.length}-phase, ${totalElapsedMs} ms) ---\n\n` +
+    `${finalAnswer}\n\n` +
+    `--- phase trace ---\n${phaseTraceFooter}`;
+  return {
+    isError: false,
+    message: `${replyBody}\n\n${retentionBanner(instance)}`,
+    meta: {
+      alias: aliasFinal,
+      instanceId: instance.id,
+      dataRetention: instance.dataRetention,
+      model: instance.model || "",
+      elapsedMs: totalElapsedMs,
+      usage: lastUsage || {},
+      tokens: phaseOutputs.reduce((a, p) => a + (p.text?.length ?? 0), 0),
+      content: finalAnswer,
+      phaseTrace: phaseTraceEntries,
+    },
+  };
+}
+
 async function handleAsk(args) {
   const pre = preflightConfig();
   if (pre.error) return { isError: true, message: pre.error };
@@ -1093,9 +1263,57 @@ async function handleAsk(args) {
     };
   }
 
+  const resolvedMode = resolvePhasedMode(config, instance);
   const requestId = randomUUID();
   const systemContent = (systemOverride ?? config.systemPrompt ?? "").trim();
-  const markerPrefix = config.phasedProtocol === "markers-v1" ? MARKER_PROMPT_PREFIX : "";
+
+  // Gated mode hands off to the multi-round-trip runner. Sync calls
+  // wait inline; async dispatches run the gated loop in the background
+  // and deposit the final reply in the inbox like single-shot async.
+  if (resolvedMode === "gated-v1") {
+    const startedAt = new Date().toISOString();
+    const alias = resolveAlias(instance, "");
+    if (!isAsync) {
+      return runGatedAsk({ instance, config, basePrompt: prompt, baseSystem: systemContent });
+    }
+    log("info", `async gated dispatch ${requestId} instance=${instance.id} alias=${alias}`);
+    void runGatedAsk({ instance, config, basePrompt: prompt, baseSystem: systemContent })
+      .then((result) => {
+        writeInboxEntry(requestId, {
+          requestId,
+          completedAt: new Date().toISOString(),
+          startedAt,
+          alias,
+          instanceId: instance.id,
+          prompt: prompt.slice(0, 200),
+          isError: result.isError,
+          message: result.message,
+          meta: result.meta || null,
+        });
+      })
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        log("error", `async gated ${requestId} crashed: ${msg}`);
+        writeInboxEntry(requestId, {
+          requestId,
+          completedAt: new Date().toISOString(),
+          startedAt,
+          alias,
+          instanceId: instance.id,
+          prompt: prompt.slice(0, 200),
+          isError: true,
+          message: `Async gated Model Bridge call crashed: ${msg}`,
+          meta: null,
+        });
+      });
+    return {
+      isError: false,
+      message:
+        `Dispatched async gated ${GATED_PHASE_TEMPLATES.length}-phase call ${requestId} to ${alias}. Retrieve via model_bridge_inbox({requestId: "${requestId}"}).`,
+    };
+  }
+
+  const markerPrefix = resolvedMode === "markers-v1" ? MARKER_PROMPT_PREFIX : "";
   const messages = [];
   if (systemContent.length > 0) messages.push({ role: "system", content: systemContent });
   messages.push({ role: "user", content: `${markerPrefix}${prompt}` });
@@ -1380,47 +1598,6 @@ async function probeHarness(config) {
   return value;
 }
 
-/** Probe `/v1/models` on the local endpoint to discover the loaded
- * model id. llama.cpp answers chat completions with whatever's loaded
- * regardless of the request's `model` field, but OpenCode's
- * `/session/:id/message` requires an explicit `{providerID, modelID}`
- * pair - so for the harness we have to know the real model id even
- * though the catalog leaves it blank to support auto-follow.
- *
- * Cached per endpoint with a 30s TTL so a flurry of harness calls
- * doesn't pound /v1/models. The cache invalidates if the user swaps
- * models server-side (the next call after the TTL picks up the new
- * id). */
-const localModelIdCache = new Map();
-const LOCAL_MODEL_ID_TTL_MS = 30_000;
-
-async function discoverLocalModelId(endpoint) {
-  const key = endpoint;
-  const cached = localModelIdCache.get(key);
-  if (cached && Date.now() - cached.at < LOCAL_MODEL_ID_TTL_MS) {
-    return cached.id;
-  }
-  const url = `${endpoint.replace(/\/+$/, "")}/v1/models`;
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 4000);
-  let id = "";
-  try {
-    const res = await fetch(url, { signal: ac.signal });
-    if (res.ok) {
-      const json = await res.json();
-      const first = json?.data?.[0]?.id;
-      if (typeof first === "string" && first.length > 0) id = first;
-    }
-  } catch {
-    // network or parse failure - leave id empty, caller surfaces a
-    // friendly message
-  } finally {
-    clearTimeout(timer);
-  }
-  localModelIdCache.set(key, { at: Date.now(), id });
-  return id;
-}
-
 /** Build the model object OpenCode expects in `/session/:id/message`
  * requests. The API rejects a slash-joined string with a 400; it
  * wants `{providerID, modelID}`. We standardize on `llama.cpp` as
@@ -1429,23 +1606,172 @@ async function discoverLocalModelId(endpoint) {
  * we discover the loaded model id via `/v1/models` when the catalog
  * leaves it blank (the auto-follow design). */
 async function buildHarnessModel(instance) {
-  if (typeof instance.model === "string" && instance.model.length > 0) {
-    return { providerID: "llama.cpp", modelID: instance.model };
-  }
+  const providerID =
+    typeof instance.harnessProviderID === "string" && instance.harnessProviderID.length > 0
+      ? instance.harnessProviderID
+      : instance.kind === "local"
+        ? "llama.cpp"
+        : "zen";
+  // Local instances always use the canonical `"local"` modelID that
+  // openCodeManager registers under the llama.cpp provider in
+  // opencode.json. OpenCode rejects any modelID not in its config
+  // map, but llama.cpp itself ignores the request's `model` field
+  // and answers with whatever's loaded - so a fixed wire identifier
+  // here decouples WAT321 from whatever model the user happens to
+  // be running. Direct chat completions still surface the actual
+  // model name in their reply banner via the OpenAI usage block.
   if (instance.kind === "local") {
-    const discovered = await discoverLocalModelId(instance.endpoint);
-    if (discovered.length > 0) {
-      return { providerID: "llama.cpp", modelID: discovered };
-    }
+    return { providerID, modelID: "local" };
+  }
+  if (typeof instance.model === "string" && instance.model.length > 0) {
+    return { providerID, modelID: instance.model };
   }
   return null;
+}
+
+/** Tap OpenCode's `/event` SSE stream while a task is running. Two
+ * jobs:
+ *   1. Live progress: classify messages by `info.role === "assistant"`,
+ *      track the latest text per assistant `part.id`, fire
+ *      `onProgress(charCount)` so the caller can refresh the
+ *      heartbeat with token motion during the blocking POST.
+ *   2. Source-of-truth capture: keep the full assistant text per
+ *      part id (not just length) so the caller can use the SSE
+ *      stream as the canonical reply rather than parsing the
+ *      response payload's mutable schema. Also captures
+ *      `session.error` events so OpenCode-side failures surface
+ *      with their real error message instead of the bland
+ *      response-shape fallback.
+ *
+ * Returns a handle exposing `stop()` plus `getAssistantText()` and
+ * `getSessionError()` accessors the caller reads after the POST
+ * settles. Best-effort throughout - any tap failure leaves the
+ * accessors empty so the response-payload path is still tried. */
+function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
+  const ac = new AbortController();
+  const assistantMsgIds = new Set();
+  // Map part id -> latest full text. Insertion order is the order
+  // OpenCode emitted the parts; iterating preserves that order so
+  // multi-part replies concatenate cleanly.
+  const partTexts = new Map();
+  let sessionError = null;
+
+  (async () => {
+    let res;
+    try {
+      res = await fetch(`${base}/event`, {
+        headers: { Accept: "text/event-stream" },
+        signal: ac.signal,
+      });
+    } catch {
+      return;
+    }
+    if (!res.ok || !res.body) return;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Locate the next event boundary. Per W3C SSE the boundary
+        // is a blank line (LF or CRLF). Pick whichever appears first
+        // in the buffer so a server using either framing parses
+        // correctly.
+        for (;;) {
+          const lfIdx = buffer.indexOf("\n\n");
+          const crlfIdx = buffer.indexOf("\r\n\r\n");
+          let boundary;
+          let advance;
+          if (lfIdx < 0 && crlfIdx < 0) break;
+          else if (lfIdx < 0) {
+            boundary = crlfIdx;
+            advance = 4;
+          } else if (crlfIdx < 0 || lfIdx < crlfIdx) {
+            boundary = lfIdx;
+            advance = 2;
+          } else {
+            boundary = crlfIdx;
+            advance = 4;
+          }
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + advance);
+          // SSE concatenates every `data:` line in the event with
+          // newlines per spec. Single-line is the common case, but a
+          // multi-line payload would silently lose its tail under a
+          // first-line-only parse.
+          const dataLines = block
+            .split(/\r?\n/)
+            .filter((l) => l.startsWith("data:"))
+            .map((l) => l.slice(5).replace(/^ /, ""));
+          if (dataLines.length === 0) continue;
+          let evt;
+          try {
+            evt = JSON.parse(dataLines.join("\n"));
+          } catch {
+            continue;
+          }
+          const sid = evt?.properties?.sessionID;
+          // Strict filter when caller supplied an expected session
+          // id: events with no sessionID also get dropped, since we
+          // cannot verify they belong to the intended session.
+          if (expectedSessionId && sid !== expectedSessionId) continue;
+          if (evt.type === "session.error") {
+            // Capture and keep the first (most informative) error.
+            // Subsequent errors during the same call are usually
+            // cascade noise.
+            const err = evt.properties?.error;
+            if (sessionError === null && err) {
+              const name = typeof err.name === "string" ? err.name : "OpenCodeError";
+              const msg = err.data?.message ?? err.message ?? JSON.stringify(err).slice(0, 300);
+              sessionError = `${name}: ${msg}`;
+            }
+          } else if (evt.type === "message.updated") {
+            const info = evt.properties?.info;
+            if (info?.role === "assistant" && info?.id) {
+              assistantMsgIds.add(info.id);
+            }
+          } else if (evt.type === "message.part.updated") {
+            const part = evt.properties?.part;
+            if (
+              part?.type === "text" &&
+              part?.messageID &&
+              part?.id &&
+              assistantMsgIds.has(part.messageID)
+            ) {
+              const text = typeof part.text === "string" ? part.text : "";
+              partTexts.set(part.id, text);
+              let total = 0;
+              for (const t of partTexts.values()) total += t.length;
+              onProgress(total);
+            }
+          }
+        }
+      }
+    } catch {
+      // stream ended or aborted - best-effort, task still completes
+    }
+  })();
+
+  return {
+    stop: () => ac.abort(),
+    getAssistantText: () => {
+      const out = [];
+      for (const t of partTexts.values()) {
+        if (t.length > 0) out.push(t);
+      }
+      return out.join("\n");
+    },
+    getSessionError: () => sessionError,
+  };
 }
 
 /** Run a single task against the OpenCode HTTP server. Creates a
  * session (or reuses one if `sessionId` is supplied), posts the
  * message, and returns the assistant's text reply. The OpenCode
  * server runs the entire tool loop; we only see the final result. */
-async function runOpenCodeTask({ instance, config, prompt, sessionId, dir, agent }) {
+async function runOpenCodeTask({ instance, config, prompt, sessionId, dir, agent, onTextProgress }) {
   const modelRef = await buildHarnessModel(instance);
   if (!modelRef) {
     return {
@@ -1502,6 +1828,20 @@ async function runOpenCodeTask({ instance, config, prompt, sessionId, dir, agent
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
 
+  // Open the SSE event tap now that we know the session id. The
+  // tap serves two roles: live token motion for the heartbeat
+  // during the blocking POST below, AND canonical capture of the
+  // assistant's reply text so we don't have to parse the response
+  // payload's mutable schema. Always opened (not just when
+  // `onTextProgress` is set) so the reply-capture path works for
+  // every task call.
+  const noopProgress = () => {};
+  const eventTap = tapOpenCodeEvents(
+    base,
+    activeSessionId,
+    onTextProgress ?? noopProgress
+  );
+
   // OpenCode's parts schema: array of content parts. We send a single
   // text part. The server adds tool_use / tool_result parts as the
   // loop runs and surfaces the final assistant text in the response.
@@ -1512,69 +1852,88 @@ async function runOpenCodeTask({ instance, config, prompt, sessionId, dir, agent
   if (dir) body.directory = dir;
   if (agent) body.agent = agent;
 
-  let msgRes;
   try {
-    msgRes = await fetch(`${base}/session/${encodeURIComponent(activeSessionId)}/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: ac.signal,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    if (err?.name === "AbortError") {
+    let msgRes;
+    try {
+      msgRes = await fetch(`${base}/session/${encodeURIComponent(activeSessionId)}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ac.signal,
+      });
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        return {
+          isError: true,
+          message: `OpenCode task timed out after ${timeoutMs}ms.`,
+        };
+      }
+      const msg = describeUndiciFetchError(err);
+      log("error", `OpenCode message post failed: ${msg}`);
+      return { isError: true, message: `OpenCode server call failed: ${msg}` };
+    }
+
+    // SSE may have captured a `session.error` event during the call
+    // (model-not-found, config-invalid, provider-rejected, etc.).
+    // OpenCode often still returns HTTP 200 in those cases with an
+    // empty body, so the SSE error is the only reliable surface for
+    // a real diagnostic. Check before reading the response.
+    const sseError = eventTap.getSessionError();
+    if (sseError !== null) {
+      return { isError: true, message: `OpenCode: ${sseError}` };
+    }
+
+    if (!msgRes.ok) {
+      const text = await msgRes.text().catch(() => "");
       return {
         isError: true,
-        message: `OpenCode task timed out after ${timeoutMs}ms.`,
+        message: `OpenCode message returned HTTP ${msgRes.status}: ${text.slice(0, 400)}`,
       };
     }
-    const msg = describeUndiciFetchError(err);
-    log("error", `OpenCode message post failed: ${msg}`);
-    return { isError: true, message: `OpenCode server call failed: ${msg}` };
-  }
-  clearTimeout(timer);
 
-  if (!msgRes.ok) {
-    const text = await msgRes.text().catch(() => "");
-    return {
-      isError: true,
-      message: `OpenCode message returned HTTP ${msgRes.status}: ${text.slice(0, 400)}`,
-    };
-  }
-
-  const payload = await msgRes.json().catch(() => null);
-  // OpenCode's response shape varies across versions. Try a few common
-  // shapes for the assistant's final text. If none match, surface the
-  // raw payload so the user can debug.
-  let replyText = "";
-  if (payload) {
-    if (typeof payload.text === "string") {
-      replyText = payload.text;
-    } else if (Array.isArray(payload.parts)) {
-      replyText = payload.parts
-        .filter((p) => p?.type === "text" && typeof p.text === "string")
-        .map((p) => p.text)
-        .join("\n");
-    } else if (Array.isArray(payload.message?.parts)) {
-      replyText = payload.message.parts
-        .filter((p) => p?.type === "text" && typeof p.text === "string")
-        .map((p) => p.text)
-        .join("\n");
-    } else if (typeof payload.message?.text === "string") {
-      replyText = payload.message.text;
-    }
+    // Prefer the SSE-captured assistant text - it is the canonical
+    // record of what the model emitted, with no schema-version
+    // guessing. The response body is read only as a fallback for
+    // older OpenCode versions that may not emit
+    // `message.part.updated` events for the final assistant
+    // message.
+    const sseText = eventTap.getAssistantText();
+    let replyText = sseText;
     if (replyText.length === 0) {
-      replyText = `(OpenCode returned no text content; raw payload: ${JSON.stringify(payload).slice(0, 600)})`;
+      const payload = await msgRes.json().catch(() => null);
+      if (payload) {
+        if (typeof payload.text === "string") {
+          replyText = payload.text;
+        } else if (Array.isArray(payload.parts)) {
+          replyText = payload.parts
+            .filter((p) => p?.type === "text" && typeof p.text === "string")
+            .map((p) => p.text)
+            .join("\n");
+        } else if (Array.isArray(payload.message?.parts)) {
+          replyText = payload.message.parts
+            .filter((p) => p?.type === "text" && typeof p.text === "string")
+            .map((p) => p.text)
+            .join("\n");
+        } else if (typeof payload.message?.text === "string") {
+          replyText = payload.message.text;
+        }
+        if (replyText.length === 0) {
+          replyText = `(OpenCode returned no text content; raw payload: ${JSON.stringify(payload).slice(0, 600)})`;
+        }
+      } else {
+        replyText = "(OpenCode returned no text content)";
+      }
     }
-  } else {
-    replyText = "(OpenCode returned non-JSON response)";
-  }
 
-  return {
-    isError: false,
-    message: replyText,
-    sessionId: activeSessionId,
-  };
+    return {
+      isError: false,
+      message: replyText,
+      sessionId: activeSessionId,
+    };
+  } finally {
+    clearTimeout(timer);
+    eventTap.stop();
+  }
 }
 
 async function handleTask(args) {
@@ -1593,12 +1952,12 @@ async function handleTask(args) {
   const picked = pickInstance(config, typeof args?.instance_id === "string" ? args.instance_id : "");
   if (picked.error) return { isError: true, message: picked.error };
   const instance = picked.instance;
-  if (instance.kind !== "local") {
-    return {
-      isError: true,
-      message:
-        `model_bridge_task only routes to local instances; '${instance.alias}' is kind=remote. Pass instance_id of a local instance or change the active instance via the click menu.`,
-    };
+  if (instance.kind === "remote" && !cloudHarnessWarned) {
+    cloudHarnessWarned = true;
+    log(
+      "info",
+      `cloud-harness call: '${instance.alias}' (retention=${instance.dataRetention}). Tool-using runs against a retained provider send repo content upstream.`
+    );
   }
 
   const probe = await probeHarness(config);
@@ -1616,7 +1975,13 @@ async function handleTask(args) {
   }
   const sessionId = typeof args?.session_id === "string" ? args.session_id.trim() : "";
   const dir = typeof args?.dir === "string" ? args.dir.trim() : "";
-  const agent = typeof args?.agent === "string" ? args.agent.trim() : "";
+  // Per-call `agent` arg wins; otherwise fall back to the user's
+  // click-menu default. Empty string (the no-arg case with no
+  // default set) lets OpenCode pick its own default agent.
+  const agentArg = typeof args?.agent === "string" ? args.agent.trim() : "";
+  const agent = agentArg.length > 0
+    ? agentArg
+    : (typeof config.defaultAgent === "string" ? config.defaultAgent : "");
 
   if (busyRequest !== null) {
     return {
@@ -1628,20 +1993,45 @@ async function handleTask(args) {
   busyRequest = `task-${randomUUID()}`;
   const aliasIdle = resolveAlias(instance, "");
   const start = Date.now();
-  writeHeartbeat({
-    phase: "calling",
-    requestId: busyRequest,
-    startedAt: new Date(start).toISOString(),
-    alias: aliasIdle,
-    instanceId: instance.id,
-    dataRetention: instance.dataRetention,
-    model: typeof instance.model === "string" ? instance.model : "",
-    timeoutMs: (typeof config.timeoutSec === "number" ? config.timeoutSec : 180) * 1000,
-    tokens: 0,
-    tokensPerSec: 0,
-    currentPhase: "TASK",
-    phaseTrace: [{ phase: "DISPATCH", elapsedMs: 0 }, { phase: "TASK", elapsedMs: 0 }],
-  });
+  const taskTimeoutMs =
+    (typeof config.timeoutSec === "number" ? config.timeoutSec : 180) * 1000;
+  // Approximate tokens from char count using the conventional 4
+  // chars per token heuristic. Imprecise vs an actual tokenizer but
+  // good enough for the live status-bar TPS readout - the value is
+  // visual liveness, not billing accuracy.
+  const TASK_CHARS_PER_TOKEN = 4;
+  let lastTaskBeatAt = 0;
+  const writeTaskBeat = (chars) => {
+    const tokens = Math.ceil(chars / TASK_CHARS_PER_TOKEN);
+    const elapsedMs = Date.now() - start;
+    const elapsedSec = Math.max(0.001, elapsedMs / 1000);
+    writeHeartbeat({
+      phase: "calling",
+      requestId: busyRequest,
+      startedAt: new Date(start).toISOString(),
+      alias: aliasIdle,
+      instanceId: instance.id,
+      dataRetention: instance.dataRetention,
+      model: typeof instance.model === "string" ? instance.model : "",
+      timeoutMs: taskTimeoutMs,
+      tokens,
+      tokensPerSec: Math.round(tokens / elapsedSec),
+      currentPhase: "TASK",
+      phaseTrace: [{ phase: "DISPATCH", elapsedMs: 0 }, { phase: "TASK", elapsedMs }],
+    });
+  };
+  writeTaskBeat(0);
+
+  // Throttled progress callback shared with the SSE tap inside
+  // runOpenCodeTask. The tap fires on every assistant text-part
+  // delta; coalescing to HEARTBEAT_THROTTLE_MS keeps the file write
+  // rate sane when the model produces a fast token stream.
+  const onTextProgress = (chars) => {
+    const now = Date.now();
+    if (now - lastTaskBeatAt < HEARTBEAT_THROTTLE_MS) return;
+    lastTaskBeatAt = now;
+    writeTaskBeat(chars);
+  };
 
   try {
     const result = await runOpenCodeTask({
@@ -1651,6 +2041,7 @@ async function handleTask(args) {
       sessionId: sessionId || null,
       dir: dir || null,
       agent: agent || null,
+      onTextProgress,
     });
     const elapsedMs = Date.now() - start;
     if (result.isError) return result;
@@ -1796,6 +2187,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const args = req.params.arguments || {};
+
+  // Paused state refuses all new dispatches except inbox + list
+  // (those are the drain tools - a paused user still needs to read
+  // queued replies and inspect the catalog). Set by the click menu's
+  // 🟡 PAUSE row; cleared by 🟢 RESUME.
+  const drainTool =
+    req.params.name === "model_bridge_inbox" ||
+    req.params.name === "model_bridge_list";
+  if (!drainTool && isPausedFlag()) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: "Model Bridge is paused. Click the Model Bridge widget and choose 🟢 RESUME to re-enable tool calls.",
+        },
+      ],
+    };
+  }
+
+  // Note: cancel flag is consumed inside the streaming `onProgress`
+  // tick, not here. Consuming at dispatcher entry would let a drain
+  // tool (inbox / list) eat a cancel meant for an active stream.
+
   let result;
   try {
     switch (req.params.name) {
