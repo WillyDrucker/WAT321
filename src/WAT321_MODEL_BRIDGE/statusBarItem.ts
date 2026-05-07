@@ -29,7 +29,6 @@ import { showModelBridgeMenu, showModelBridgeSessions } from "./statusBarMenu";
  * on every-second token counts is not.
  */
 
-const COMMAND_ID = "wat321.modelBridge.menu";
 const REFRESH_INTERVAL_MS = 1000;
 const STALE_HEARTBEAT_MULTIPLIER = 1.5;
 
@@ -254,29 +253,14 @@ export function createModelBridgeStatusBarItem(
     getWidgetPriority(WIDGET_SLOT.modelBridge)
   );
   item.name = "Model Bridge";
-  item.command = COMMAND_ID;
   item.hide();
 
-  // v1.4.1+: click jumps to the EH widget's Manage submenu - either
-  // OpenCode or Local LLM, routed by the active instance's kind. All
-  // session/instance management lives there now per the parity table
-  // in WDDOCS/WAT321_V141_MB_FEATURE_STRIP.md. The legacy click-menu
-  // command stays registered (still callable from the command palette
-  // for users who need the old surface during transition) but the
-  // widget's own click skips it.
-  const menuCommand = vscode.commands.registerCommand(COMMAND_ID, async () => {
-    const snap = readConfigSnapshot();
-    const active = snap?.instances?.find((i) => i.id === snap.activeInstanceId);
-    const kind = active?.kind ?? "remote";
-    const submenu =
-      kind === "local"
-        ? "wat321.bridge.manageLocalLlmSessions"
-        : "wat321.bridge.manageOpenCodeSessions";
-    await vscode.commands.executeCommand(submenu);
-  });
-  // Legacy menu command stays available for users who want the
-  // old click-menu shape during transition; surface it from the
-  // command palette as 'WAT321: Model Bridge - Menu (legacy)'.
+  // v1.4.4+: tooltip-only widget. All session/instance management
+  // lives on the Epic Handshake dropdown (Manage OpenCode Sessions /
+  // Manage Local LLM Sessions). The legacy click-menu stays
+  // registered as a command-palette entry only ('WAT321: Model
+  // Bridge - Menu (legacy)') for the rare user who wants the old
+  // shape; the widget itself never sets `item.command`.
   const legacyMenuCommand = vscode.commands.registerCommand(
     "wat321.modelBridge.legacyMenu",
     async () => {
@@ -325,6 +309,12 @@ export function createModelBridgeStatusBarItem(
     const idleAlias = active.alias || active.id || "Model Bridge";
     const retention = active.dataRetention;
     const needsKey = active.apiKeyMissing === true;
+    // Idle icon: llama for Local LLM, opencode square for remote
+    // (Big Pickle / Zen / etc.). Widget is tooltip-only across all
+    // backends - all session/instance management routes through the
+    // Epic Handshake dropdown.
+    const isLocal = active.kind === "local";
+    const idleIcon = isLocal ? "$(wat321-llama)" : "$(wat321-opencode)";
     const usage = readUsageSnapshot();
     const usageSig = usage
       ? Object.entries(usage.instances)
@@ -357,13 +347,18 @@ export function createModelBridgeStatusBarItem(
         Number.isFinite(startedMs) &&
         elapsedMs > heartbeat.timeoutMs * STALE_HEARTBEAT_MULTIPLIER;
       if (stale) {
-        text = `$(wat321-square) ${idleAlias}${activeTokensSuffix}`;
+        text = `${idleIcon} ${idleAlias}${activeTokensSuffix}`;
         tooltipSig = `idle:${idleAlias}:${needsKey}:${usageSig}`;
         tooltip = buildIdleTooltip(idleAlias, retention, needsKey, snap, usage);
       } else {
         const elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
+        // Active "thinking" frames mirror the Claude/Codex session-
+        // tokens widgets: $(comment) <-> $(comment-discussion-quote)
+        // alternating at 1Hz. Same cadence + same glyphs across all
+        // four backends so the user reads "in progress" consistently
+        // regardless of which provider is currently active.
         const oneHz = Math.floor(Date.now() / 1000) % 2 === 0;
-        const icon = oneHz ? "$(wat321-square-info)" : "$(wat321-square)";
+        const icon = oneHz ? "$(comment)" : "$(comment-discussion-quote)";
         const alias = heartbeat.alias || idleAlias;
         const tokens = typeof heartbeat.tokens === "number" ? heartbeat.tokens : 0;
         const rate =
@@ -379,7 +374,7 @@ export function createModelBridgeStatusBarItem(
       }
     } else {
       const badge = needsKey ? " $(wat321-square-alert)" : "";
-      text = `$(wat321-square) ${idleAlias}${activeTokensSuffix}${badge}`;
+      text = `${idleIcon} ${idleAlias}${activeTokensSuffix}${badge}`;
       tooltipSig = `idle:${idleAlias}:${needsKey}:${usageSig}`;
       tooltip = buildIdleTooltip(idleAlias, retention, needsKey, snap, usage);
     }
@@ -399,7 +394,6 @@ export function createModelBridgeStatusBarItem(
   const timer = setInterval(refresh, REFRESH_INTERVAL_MS);
 
   context.subscriptions.push(
-    menuCommand,
     legacyMenuCommand,
     sessionsCommand,
     showCommand,

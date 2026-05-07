@@ -38,15 +38,26 @@ const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.notificationsClaude}`,
   `wat321.${SETTING.notificationsCodex}`,
   `wat321.${SETTING.epicHandshakeEnabled}`,
-  `wat321.${SETTING.epicHandshakeBridgeMode}`,
   `wat321.${SETTING.epicHandshakeSuppressCodexToasts}`,
+  // Legacy: epicHandshake.bridgeMode was removed in v1.4.4 - the
+  // unified bridge exposes every enabled target without a per-mode
+  // mask now. Keep the key in the heal sweep so a user upgrading
+  // from <=1.4.3 with a stale workspace-scope override gets it
+  // stripped automatically.
+  `wat321.epicHandshake.bridgeMode`,
   // Legacy: epicHandshake.defaultWaitMode was removed in v1.4.1 -
   // adaptive is the fixed activate-time default now. Keep the key in
   // the heal sweep so a user upgrading from <=1.4.0 with a stale
   // workspace-scope override gets it stripped automatically.
   `wat321.epicHandshake.defaultWaitMode`,
-  `wat321.${SETTING.modelBridgeEnabled}`,
-  `wat321.${SETTING.modelBridgeLocalEndpoint}`,
+  `wat321.${SETTING.enableOpenCode}`,
+  `wat321.${SETTING.localEndpoint}`,
+  // Legacy: modelBridge.enabled and modelBridge.localEndpoint were
+  // renamed in v1.4.4 to enableOpenCode and localEndpoint. Migration
+  // happens on activate; sweep the source keys here so the workspace
+  // copy doesn't shadow the new ones.
+  `wat321.modelBridge.enabled`,
+  `wat321.modelBridge.localEndpoint`,
   // Legacy: bridge.useUnified was removed in v1.4.3 - Epic Handshake's
   // own enabled flag is the single switch for the unified bridge MCP
   // server now. Keep the key in the heal sweep so a user upgrading

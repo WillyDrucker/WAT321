@@ -20,6 +20,7 @@ import {
   extractChannelScript,
   isClaudeAvailable,
   isCodexAvailable,
+  isOpenCodeAvailable,
   uninstallChannel,
 } from "./channelInstaller";
 import { CodexDispatcher } from "./codexDispatcher";
@@ -418,25 +419,22 @@ class EpicHandshakeTier {
           return;
         }
 
-        // Codex CLI is only required when the bridge mode actually
-        // routes to Codex. Modes that explicitly skip Codex (OpenCode
-        // Only, Local LLM Only) work fine without it - the unified
-        // bridge will simply omit Codex from the tool surface based
-        // on the enabled flags written to bridge/config.json.
-        const bridgeMode = vscode.workspace
-          .getConfiguration("wat321")
-          .get<string>(SETTING.epicHandshakeBridgeMode, "Auto (All)");
-        const codexInMode =
-          bridgeMode !== "OpenCode Only" && bridgeMode !== "Local LLM Only";
-        if (codexInMode) {
-          progress.report({ message: "checking Codex install..." });
-          const codexAvailable = await isCodexAvailable();
-          if (!codexAvailable) {
-            await this.unflipAndWarn(
-              "Epic Handshake needs the Codex CLI for the current bridge mode. Either install the OpenAI Codex VS Code extension or set the bridge mode to OpenCode Only / Local LLM Only, then re-enable."
-            );
-            return;
-          }
+        // Epic Handshake routes Claude to Codex and/or OpenCode; at
+        // least one of those CLIs must be reachable for the bridge to
+        // do anything useful. Both missing => unflip and warn. Either
+        // present => activation proceeds; the unified bridge handlers
+        // gracefully report "not installed" on dispatches to whichever
+        // backend is missing.
+        progress.report({ message: "checking backend installs..." });
+        const [codexAvailable, openCodeAvailable] = await Promise.all([
+          isCodexAvailable(),
+          isOpenCodeAvailable(),
+        ]);
+        if (!codexAvailable && !openCodeAvailable) {
+          await this.unflipAndWarn(
+            "Epic Handshake needs at least one backend installed: the Codex CLI or the OpenCode CLI (`npm i -g opencode-ai`). Install either one, then re-enable."
+          );
+          return;
         }
 
         progress.report({ message: "registering bridge channel..." });

@@ -53,6 +53,13 @@ export function activate(context: vscode.ExtensionContext) {
   // and new state intact and the user can pick the mode from the UI.
   void migrateSessionTokensCompact();
 
+  // v1.4.4 rename: `wat321.modelBridge.enabled` -> `wat321.enableOpenCode`
+  // and `wat321.modelBridge.localEndpoint` -> `wat321.localEndpoint`.
+  // Reads any explicit value at the old keys and copies it to the new
+  // keys; the workspace-scope-heal sweep strips the source on the same
+  // activate. Idempotent.
+  void migrateModelBridgeKeys();
+
   // Bridge config writer maintains ~/.wat321/bridge/config.json so
   // the unified MCP server scaffold (v1.4.1+) can read enabled-target
   // flags. Cheap on activate, cheap on settings change. The legacy
@@ -289,5 +296,59 @@ async function migrateSessionTokensCompact(): Promise<void> {
     // sweep (also catches workspace-scope copies) - no need to update here.
   } catch {
     // best-effort - leaving both keys present is recoverable from the UI
+  }
+}
+
+/** v1.4.4: rename `modelBridge.enabled` -> `enableOpenCode` and
+ * `modelBridge.localEndpoint` -> `localEndpoint`. The "Model Bridge"
+ * naming was internal; the user-facing settings now live under the
+ * top-level OpenCode section with cleaner labels.
+ *
+ * Migration semantics: copy any explicit value at the old key onto
+ * the new key, only when the new key has no explicit value of its
+ * own (so a user who already set the new key during a prior partial
+ * upgrade isn't overwritten). Source key removal happens via the
+ * workspace-scope-heal legacy sweep on the same activate. */
+async function migrateModelBridgeKeys(): Promise<void> {
+  try {
+    const config = vscode.workspace.getConfiguration("wat321");
+
+    const oldEnabled = config.inspect<boolean>("modelBridge.enabled");
+    const newEnabled = config.inspect<boolean>("enableOpenCode");
+    if (
+      newEnabled?.globalValue === undefined &&
+      newEnabled?.workspaceValue === undefined &&
+      (oldEnabled?.globalValue !== undefined ||
+        oldEnabled?.workspaceValue !== undefined)
+    ) {
+      const value = oldEnabled.globalValue ?? oldEnabled.workspaceValue;
+      if (typeof value === "boolean") {
+        await config.update(
+          SETTING.enableOpenCode,
+          value,
+          vscode.ConfigurationTarget.Global
+        );
+      }
+    }
+
+    const oldEndpoint = config.inspect<string>("modelBridge.localEndpoint");
+    const newEndpoint = config.inspect<string>("localEndpoint");
+    if (
+      newEndpoint?.globalValue === undefined &&
+      newEndpoint?.workspaceValue === undefined &&
+      (oldEndpoint?.globalValue !== undefined ||
+        oldEndpoint?.workspaceValue !== undefined)
+    ) {
+      const value = oldEndpoint.globalValue ?? oldEndpoint.workspaceValue;
+      if (typeof value === "string") {
+        await config.update(
+          SETTING.localEndpoint,
+          value,
+          vscode.ConfigurationTarget.Global
+        );
+      }
+    }
+  } catch {
+    // best-effort - source keys remain readable until the heal sweep runs
   }
 }

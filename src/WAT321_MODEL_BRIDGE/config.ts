@@ -95,9 +95,9 @@ export async function readConfigFromSettings(
   managedOpenCodeUrl = ""
 ): Promise<ModelBridgeConfig> {
   const cfg = vscode.workspace.getConfiguration("wat321");
-  const enabled = cfg.get<boolean>(SETTING.modelBridgeEnabled, false);
+  const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
   const localEndpoint = cfg
-    .get<string>(SETTING.modelBridgeLocalEndpoint, "http://127.0.0.1:8080")
+    .get<string>(SETTING.localEndpoint, "")
     .trim()
     .replace(/\/+$/, "");
   // Empty localEndpoint means "no local LLM" - the catalog drops the

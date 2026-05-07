@@ -1,4 +1,6 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import type { EventHub } from "../engine/eventHub";
 import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
@@ -10,6 +12,53 @@ import {
 } from "./constants";
 import { loadBridgeThreadRecordIfExists } from "./threadPersistence";
 import { workspaceHash } from "./workspaceHash";
+
+/** Path to the unified bridge's Model Bridge heartbeat. Written by
+ * the OC/Local dispatch path (`opencode.mjs:withMbHeartbeat`) every
+ * 5s while a turn is in flight, deleted on settle. The EH widget
+ * reads it to drive a synthetic stage animation when no Codex turn
+ * is active - same adaptive cycle the Codex flow uses, just driven
+ * by elapsed time rather than real stage events (we don't have an
+ * SSE-to-stage mapping yet; that lands with the Phased Messaging
+ * framework). */
+const MB_HEARTBEAT_PATH = join(homedir(), ".wat321", "model-bridge", "heartbeat.json");
+
+interface MbHeartbeatActivity {
+  startedAtMs: number;
+}
+
+/** Snapshot the MB heartbeat for animation timing. Returns null when
+ * the file is missing, malformed, or has a startedAt that doesn't
+ * parse. Best-effort - any read failure simply suppresses the cycle. */
+function readMbHeartbeatActivity(): MbHeartbeatActivity | null {
+  try {
+    if (!existsSync(MB_HEARTBEAT_PATH)) return null;
+    const raw = readFileSync(MB_HEARTBEAT_PATH, "utf8").trim();
+    if (raw.length === 0) return null;
+    const parsed = JSON.parse(raw) as { startedAt?: unknown };
+    if (typeof parsed.startedAt !== "string") return null;
+    const t = new Date(parsed.startedAt).getTime();
+    if (!Number.isFinite(t)) return null;
+    return { startedAtMs: t };
+  } catch {
+    return null;
+  }
+}
+
+/** Synthesize a Codex-style stage from elapsed time since the MB
+ * dispatch started. The unified bridge's OC/Local handlers don't
+ * emit real stage transitions yet, so the EH widget runs a
+ * time-driven progression to give the user the same visual rhythm
+ * during an OC/Local turn that they get during a Codex turn. Stage
+ * lands on `working` for the long tail of generation. */
+function syntheticMbStage(elapsedMs: number):
+  | "dispatched"
+  | "received"
+  | "working" {
+  if (elapsedMs < 3_000) return "dispatched";
+  if (elapsedMs < 8_000) return "received";
+  return "working";
+}
 
 // Wait mode, heartbeat reading, stage helpers, menu surface, and the
 // shared workspace utilities all live in dedicated files so this
@@ -310,6 +359,21 @@ export function createEpicHandshakeStatusBarItem(
       // In adaptive mode the walker always reaches stage 5 with its
       // own arrow-left cycle, so this branch is mostly a fallback.
       icon = oneHz ? "$(wat321-square-arrow-left)" : "$(wat321-square)";
+    } else if (readMbHeartbeatActivity() !== null) {
+      // OC/Local dispatch in flight (and no Codex turn active - the
+      // earlier branches would have caught that). Drives the same
+      // adaptive cycle the Codex flow uses, with the stage synthesized
+      // from elapsed time since the MB heartbeat's startedAt. This is
+      // the v1.4.4 stop-gap until Phased Messaging gives us real
+      // SSE-to-stage transitions for OC/Local. Standard / fire-and-
+      // forget modes fall back to the classic outbound arrow cycle.
+      const mb = readMbHeartbeatActivity();
+      const elapsedMs = mb !== null ? Math.max(0, now - mb.startedAtMs) : 0;
+      icon = adaptive
+        ? adaptiveStageCycle(syntheticMbStage(elapsedMs), oneHz, false)
+        : oneHz
+          ? "$(wat321-square-arrow-right)"
+          : "$(wat321-square)";
     } else if (renderWaitModeFlash(now, wsHash)) {
       // User-initiated wait-mode toggle needs visible feedback, so
       // the flash preempts pendingCount / fail-count states that

@@ -123,7 +123,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     id: "minimax-m2-5-free",
-    alias: "MiniMax M2.5",
+    alias: "MiniMax M2.7",
     endpoint: ZEN_BASE_URL,
     model: "minimax-m2.5-free",
     kind: "remote",

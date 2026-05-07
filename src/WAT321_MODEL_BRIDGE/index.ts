@@ -64,9 +64,9 @@ export function activateModelBridge(
 
   const applyCurrentConfig = async (): Promise<void> => {
     const cfg = vscode.workspace.getConfiguration("wat321");
-    const enabled = cfg.get<boolean>(SETTING.modelBridgeEnabled, false);
+    const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
     const localEndpoint = cfg
-      .get<string>(SETTING.modelBridgeLocalEndpoint, "http://127.0.0.1:8080")
+      .get<string>(SETTING.localEndpoint, "http://127.0.0.1:8080")
       .trim()
       .replace(/\/+$/, "");
     const zenKey = (await readSecret(context, ZEN_API_KEY_SECRET)) ?? "";
@@ -112,7 +112,7 @@ export function activateModelBridge(
   // fired during startup-flush doesn't get treated as a transition.
   let lastEnabledState = vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>(SETTING.modelBridgeEnabled, false);
+    .get<boolean>(SETTING.enableOpenCode, false);
 
   // Settings watcher: rewrite config.json + reconcile MCP entry on
   // any wat321.modelBridge.* change. Cheap (atomic file write +
@@ -120,12 +120,12 @@ export function activateModelBridge(
   // is fine.
   const watcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
-      e.affectsConfiguration(`wat321.${SETTING.modelBridgeEnabled}`) ||
-      e.affectsConfiguration(`wat321.${SETTING.modelBridgeLocalEndpoint}`)
+      e.affectsConfiguration(`wat321.${SETTING.enableOpenCode}`) ||
+      e.affectsConfiguration(`wat321.${SETTING.localEndpoint}`)
     ) {
       const nowEnabled = vscode.workspace
         .getConfiguration("wat321")
-        .get<boolean>(SETTING.modelBridgeEnabled, false);
+        .get<boolean>(SETTING.enableOpenCode, false);
       if (nowEnabled !== lastEnabledState) {
         if (nowEnabled) {
           void vscode.window.showInformationMessage(
@@ -179,8 +179,8 @@ export function activateModelBridge(
     // the legacy MB click menu opens.
     vscode.commands.registerCommand(
       "wat321.modelBridge.pickActiveInstance",
-      async () => {
-        await pickActiveInstance(context);
+      async (kindFilter?: "remote" | "local") => {
+        await pickActiveInstance(context, kindFilter);
       }
     )
   );

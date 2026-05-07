@@ -203,19 +203,28 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     // invoked paths (command, checkbox, click menu) - never at activate
     // - so this never accidentally disables a working bridge.
     updateSettingAllScopes(SETTING.epicHandshakeEnabled, false),
-    updateSettingAllScopes(SETTING.epicHandshakeBridgeMode, undefined),
     updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexToasts, undefined),
     // Legacy: epicHandshake.defaultWaitMode removed in v1.4.1. Sweep
     // any stale value at every scope so reset-to-defaults still
     // strips it for users upgrading from <=1.4.0.
     updateSettingAllScopes("epicHandshake.defaultWaitMode", undefined),
-    updateSettingAllScopes(SETTING.modelBridgeEnabled, false),
-    updateSettingAllScopes(SETTING.modelBridgeLocalEndpoint, undefined),
+    updateSettingAllScopes(SETTING.enableOpenCode, false),
+    updateSettingAllScopes(SETTING.localEndpoint, undefined),
+    // Legacy: modelBridge.enabled / modelBridge.localEndpoint renamed
+    // in v1.4.4 to enableOpenCode / localEndpoint. Sweep the old keys
+    // at every scope so reset-to-defaults strips them for users
+    // upgrading from <=1.4.3.
+    updateSettingAllScopes("modelBridge.enabled", undefined),
+    updateSettingAllScopes("modelBridge.localEndpoint", undefined),
     // Legacy: bridge.useUnified was removed in v1.4.3 - Epic Handshake
     // is the single switch for the unified bridge now. Sweep stale
     // value at every scope so reset-to-defaults still strips it for
     // users upgrading from <=1.4.2.
     updateSettingAllScopes("bridge.useUnified", undefined),
+    // Legacy: epicHandshake.bridgeMode was removed in v1.4.4 - the
+    // unified bridge now exposes every enabled target without a
+    // per-mode mask. Sweep stale value at every scope.
+    updateSettingAllScopes("epicHandshake.bridgeMode", undefined),
     resetStatusBarItemVisibility(),
   ]);
 

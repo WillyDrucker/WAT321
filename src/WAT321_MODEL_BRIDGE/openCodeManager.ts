@@ -141,7 +141,7 @@ function buildOpenCodeJson(localEndpoint: string): string {
           "ling-2.6-flash": { name: "Ling 2.6 Flash" },
           "hy3-preview-free": { name: "Hy3 Preview" },
           "nemotron-3-super-free": { name: "Nemotron 3 Super" },
-          "minimax-m2.5-free": { name: "MiniMax M2.5" },
+          "minimax-m2.5-free": { name: "MiniMax M2.7" },
         },
       },
     },
