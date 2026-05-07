@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { readAliases, writeAliases } from "../shared/bridge/sessionAliases";
 import { SETTING } from "../engine/settingsKeys";
 
 // Inline the bridge dir rather than import from `./index` - the
@@ -36,11 +36,6 @@ const MB_CONFIG_PATH = join(homedir(), ".wat321", "model-bridge", "config.json")
 const RETRY_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 8_000;
 
-interface AliasMap {
-  opencode: Record<string, string>;
-  local: Record<string, string>;
-}
-
 interface MbInstance {
   id: string;
   alias: string;
@@ -53,29 +48,6 @@ interface MbConfig {
   openCodeServerUrl?: string;
   activeInstanceId?: string;
   instances?: MbInstance[];
-}
-
-function readAliases(): AliasMap {
-  if (!existsSync(BRIDGE_DIR)) mkdirSync(BRIDGE_DIR, { recursive: true });
-  if (!existsSync(ALIAS_PATH)) return { opencode: {}, local: {} };
-  try {
-    const parsed = JSON.parse(readFileSync(ALIAS_PATH, "utf8")) as Partial<AliasMap>;
-    return {
-      opencode:
-        parsed?.opencode && typeof parsed.opencode === "object"
-          ? parsed.opencode
-          : {},
-      local:
-        parsed?.local && typeof parsed.local === "object" ? parsed.local : {},
-    };
-  } catch {
-    return { opencode: {}, local: {} };
-  }
-}
-
-function writeAliases(map: AliasMap): void {
-  if (!existsSync(BRIDGE_DIR)) mkdirSync(BRIDGE_DIR, { recursive: true });
-  writeFileAtomic(ALIAS_PATH, JSON.stringify(map, null, 2));
 }
 
 function readMbConfig(): MbConfig | null {
@@ -141,10 +113,10 @@ async function waitForOpencodeServe(): Promise<MbConfig | null> {
 /** Run the auto-create flow. Idempotent. Best-effort. */
 export async function ensureOpenCodeS1(): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
-  const mbEnabled = config.get<boolean>(SETTING.modelBridgeEnabled, false);
+  const mbEnabled = config.get<boolean>(SETTING.enableOpenCode, false);
   if (!mbEnabled) return;
 
-  const aliases = readAliases();
+  const aliases = readAliases(ALIAS_PATH);
   if (Object.keys(aliases.opencode).length > 0) {
     // S1 (or later) already exists - nothing to do.
     return;
@@ -159,8 +131,8 @@ export async function ensureOpenCodeS1(): Promise<void> {
   const sessionId = await attemptCreate(cfg, instance);
   if (sessionId === null) return;
 
-  aliases.opencode["S1"] = sessionId;
-  writeAliases(aliases);
+  aliases.opencode["S1"] = { sessionId, instanceId: instance.id };
+  writeAliases(ALIAS_PATH, aliases);
 }
 
 /** Wire activate-time auto-create + the settings-change watcher.
@@ -173,7 +145,7 @@ export function registerAutoCreateOpenCodeS1(
   void ensureOpenCodeS1();
 
   const subscription = vscode.workspace.onDidChangeConfiguration((e) => {
-    if (e.affectsConfiguration(`wat321.${SETTING.modelBridgeEnabled}`)) {
+    if (e.affectsConfiguration(`wat321.${SETTING.enableOpenCode}`)) {
       void ensureOpenCodeS1();
     }
   });

@@ -49,19 +49,20 @@ import {
 import { workspaceHash } from "./workspaceHash";
 
 /** Read the unified bridge's alias map for the current S# suffix on
- * the parent menu's MANAGE OPENCODE/LOCAL rows. Best-effort: a missing
- * file or parse failure returns empty maps so the parent label simply
- * omits the suffix rather than blocking the menu render. */
+ * the parent menu's MANAGE OPENCODE/LOCAL rows. Only the alias keys
+ * are consumed here, so the value shape is left as `unknown` -
+ * tolerates both legacy string entries and the new `{sessionId,
+ * instanceId}` form without coupling this menu to either schema. */
 const BRIDGE_ALIASES_PATH = join(homedir(), ".wat321", "bridge", "session-aliases.json");
 function readBridgeAliases(): {
-  opencode: Record<string, string>;
-  local: Record<string, string>;
+  opencode: Record<string, unknown>;
+  local: Record<string, unknown>;
 } {
   try {
     if (!existsSync(BRIDGE_ALIASES_PATH)) return { opencode: {}, local: {} };
     const parsed = JSON.parse(readFileSync(BRIDGE_ALIASES_PATH, "utf8")) as {
-      opencode?: Record<string, string>;
-      local?: Record<string, string>;
+      opencode?: Record<string, unknown>;
+      local?: Record<string, unknown>;
     };
     return {
       opencode:
@@ -77,7 +78,7 @@ function readBridgeAliases(): {
  * sessions exist for the target. Mirrors how the Codex menu shows
  * the active sessionCounter rather than a count - the user reads
  * "S<n>" as the working session, not "<n> sessions exist". */
-function latestAlias(map: Record<string, string>): string | null {
+function latestAlias(map: Record<string, unknown>): string | null {
   const aliases = Object.keys(map);
   if (aliases.length === 0) return null;
   let bestNum = -1;
@@ -248,10 +249,10 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // submenu lands as part of the unified MCP server work.
   const modelBridgeEnabled = vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>("modelBridge.enabled", false);
+    .get<boolean>("enableOpenCode", false);
   const localEndpoint = vscode.workspace
     .getConfiguration("wat321")
-    .get<string>("modelBridge.localEndpoint", "")
+    .get<string>("localEndpoint", "")
     .trim();
   // S# suffix on the parent label so the user sees the active session
   // count at a glance, mirroring the Codex menu's `MANAGE CODEX

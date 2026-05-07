@@ -43,36 +43,25 @@ interface BridgeConfig {
 }
 
 /** Read live setting state and project it onto the unified bridge
- * config shape. Two layers of gating:
+ * config shape. Each target gates on its own master switch:
  *
- *   1. Master availability: codex requires `epicHandshake.enabled`,
- *      opencode requires `modelBridge.enabled`, local additionally
- *      requires a non-empty `modelBridge.localEndpoint`. Targets that
- *      aren't installed never appear regardless of mode.
- *   2. Bridge mode narrowing: `epicHandshake.bridgeMode` further
- *      filters which available targets to expose. "Codex Only" with
- *      both EH and MB enabled still drops opencode/local from the
- *      unified MCP server's tool surface, saving Claude's system-
- *      prompt tokens.
+ *   - codex: `epicHandshake.enabled`
+ *   - opencode: `modelBridge.enabled`
+ *   - local: `modelBridge.enabled` AND non-empty `modelBridge.localEndpoint`
  *
- * The dropdown intersects with master availability via AND - mode
- * "OpenCode Only" with Model Bridge disabled still produces all-
- * disabled (the master switch wins). */
+ * Targets whose CLI is not installed gracefully degrade at the router
+ * (handlers return a clean "not installed" error rather than crashing).
+ * The unified MCP server reads this snapshot at every dispatch to
+ * honor the disabled-target gate. */
 function snapshotConfig(): BridgeConfig {
   const config = vscode.workspace.getConfiguration("wat321");
   const codexAvailable = config.get<boolean>(SETTING.epicHandshakeEnabled, false);
-  const modelBridge = config.get<boolean>(SETTING.modelBridgeEnabled, false);
+  const modelBridge = config.get<boolean>(SETTING.enableOpenCode, false);
   const localEndpoint = config
-    .get<string>(SETTING.modelBridgeLocalEndpoint, "")
+    .get<string>(SETTING.localEndpoint, "")
     .trim();
   const opencodeAvailable = modelBridge;
   const localAvailable = modelBridge && localEndpoint.length > 0;
-
-  const mode = config.get<string>(
-    SETTING.epicHandshakeBridgeMode,
-    "Auto (All)"
-  );
-  const modeMask = bridgeModeMask(mode);
 
   // Workspace folder name when one is open, "Workspace" as a generic
   // fallback when the user has VS Code open with no folder. The bridge
@@ -84,37 +73,12 @@ function snapshotConfig(): BridgeConfig {
 
   return {
     enabled: {
-      codex: codexAvailable && modeMask.codex,
-      opencode: opencodeAvailable && modeMask.opencode,
-      local: localAvailable && modeMask.local,
+      codex: codexAvailable,
+      opencode: opencodeAvailable,
+      local: localAvailable,
     },
     projectName,
   };
-}
-
-interface BridgeModeMask {
-  codex: boolean;
-  opencode: boolean;
-  local: boolean;
-}
-
-/** Translate the user-facing bridgeMode enum into a per-target mask.
- * Unknown values fall back to Auto (All) so a typo doesn't silently
- * disable everything. */
-function bridgeModeMask(mode: string): BridgeModeMask {
-  switch (mode) {
-    case "Codex Only":
-      return { codex: true, opencode: false, local: false };
-    case "OpenCode Only":
-      return { codex: false, opencode: true, local: false };
-    case "Local LLM Only":
-      return { codex: false, opencode: false, local: true };
-    case "Codex + OpenCode":
-      return { codex: true, opencode: true, local: false };
-    default:
-      // Auto (All) and any unrecognized value: expose every available target.
-      return { codex: true, opencode: true, local: true };
-  }
 }
 
 /** Atomic write of the current setting snapshot. Called on activate
@@ -167,21 +131,10 @@ export function registerBridgeConfigWriter(
   const subscription = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
       e.affectsConfiguration(`wat321.${SETTING.epicHandshakeEnabled}`) ||
-      e.affectsConfiguration(`wat321.${SETTING.epicHandshakeBridgeMode}`) ||
-      e.affectsConfiguration(`wat321.${SETTING.modelBridgeEnabled}`) ||
-      e.affectsConfiguration(`wat321.${SETTING.modelBridgeLocalEndpoint}`)
+      e.affectsConfiguration(`wat321.${SETTING.enableOpenCode}`) ||
+      e.affectsConfiguration(`wat321.${SETTING.localEndpoint}`)
     ) {
       writeBridgeConfig();
-    }
-    // Bridge mode change requires a window reload because Claude Code
-    // snapshots MCP tool registrations at connection time - the new
-    // target enum doesn't propagate to active sessions until reload.
-    // Passive toast informs without forcing a modal; the user reloads
-    // when convenient. Matches the EH enable/disable toast voice.
-    if (e.affectsConfiguration(`wat321.${SETTING.epicHandshakeBridgeMode}`)) {
-      void vscode.window.showInformationMessage(
-        "Bridge mode changed. Reload the window to update the MCP tool surface for active Claude sessions."
-      );
     }
   });
   // Workspace-folder add/remove changes the projectName we stamp on
