@@ -266,7 +266,7 @@ export class CodexDispatcher {
       // brief and never echoes raw lower-layer messages.
       this.logger.error(`dispatch failed for ${env.id}: ${msg}`);
       this.writeReply(env, {
-        body: `The Codex bridge couldn't complete this turn. Open the WAT321: Epic Handshake output channel for details, or pick Restart Codex Bridge from the bridge menu to recover.`,
+        body: `The Codex bridge couldn't complete this turn. Open the WAT321: Epic Handshake output channel for details, or pick Restart Epic Handshake Bridge from the bridge menu to recover.`,
         intent: "blocker",
       });
       moveToSent(path, this.sentCodex);
