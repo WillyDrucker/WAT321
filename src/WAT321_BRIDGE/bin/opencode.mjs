@@ -200,31 +200,39 @@ async function withMbHeartbeat(meta, runDispatch) {
   // of inflating by 4x.
   let tokens = 0;
   let tokensPerSec = 0;
-  // Smoothed tps tracker - mirrors the windowed math in
+  // Smoothed tps tracker. Mirrors the windowed math in
   // `src/shared/sessionTokens/tpsTracker.ts` (Claude/Codex side) so
-  // local LLM and OpenCode dispatches read in the same magnitude as
-  // Claude/Codex tps. Idle gaps reset the window so a tool-wait pause
-  // doesn't smear the rate. Min window age + min token delta block
-  // the first sample-pair from spiking when the first SSE chunk lands.
+  // local LLM and OpenCode dispatches read in the same magnitude. Idle
+  // gaps reset the window so a tool-wait pause doesn't smear the rate.
+  // Min window age + min token delta block the first sample-pair from
+  // spiking when the first SSE chunk lands. Bridge dispatches often
+  // complete in 4-6 seconds, so the window threshold matches the 2s
+  // poll cadence rather than the 5s used on long-running transcripts -
+  // a short dispatch otherwise reports 0/s for its entire duration.
   // Capped at TPS_MAX so a runaway estimate never escapes the widget.
   const TPS_MAX = 999;
   const TPS_WINDOW_MS = 60_000;
   const TPS_IDLE_GAP_MS = 10_000;
-  const TPS_MIN_WINDOW_AGE_MS = 5_000;
-  const TPS_MIN_TOKEN_DELTA = 5;
+  const TPS_MIN_WINDOW_AGE_MS = 2_000;
+  const TPS_MIN_TOKEN_DELTA = 2;
   const tpsSamples = [];
   let tpsLastValue = 0;
   const computeTps = (atMs, totalTokens) => {
     const last = tpsSamples[tpsSamples.length - 1];
     if (last !== undefined && totalTokens < last.tokens) {
+      // Rollback. Mirror the TS tracker's clear-lastValue behavior even
+      // though pushProgress is monotonic-gated upstream - keeps semantics
+      // identical so a future caller can't surface a stale rate.
       tpsSamples.length = 0;
+      tpsLastValue = 0;
     } else if (last !== undefined && atMs - last.atMs > TPS_IDLE_GAP_MS) {
       tpsSamples.length = 0;
-    } else if (
-      last !== undefined &&
-      atMs === last.atMs &&
-      totalTokens === last.tokens
-    ) {
+    }
+    // Unchanged-tokens guard runs AFTER rollback / idle-gap so a clear
+    // followed by a stale-token sample does not re-anchor the window
+    // without any token progress. Server-thinking polls return the same
+    // char count repeatedly; sampling them dilutes the rate.
+    if (last !== undefined && totalTokens === last.tokens) {
       return tpsLastValue;
     }
     tpsSamples.push({ atMs, tokens: totalTokens });

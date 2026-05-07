@@ -1,10 +1,10 @@
 /**
- * Codex target handlers for the unified WAT321 bridge.
- *
- * Minimal v1 port of the Epic Handshake dispatch path. Covers the
+ * Codex target handlers for the unified WAT321 bridge. Covers the
  * happy path (write envelope, await reply, return body) and late-
- * reply collection. Advanced modes carried in legacy
- * `src/WAT321_EPIC_HANDSHAKE/bin/channel.mjs` not yet ported here:
+ * reply collection.
+ *
+ * Advanced modes live in `src/WAT321_EPIC_HANDSHAKE/bin/channel.mjs`
+ * rather than here:
  *
  *   - adaptive heartbeat (ADAPTIVE_FLAG) - extends timeout while the
  *     dispatcher's per-turn heartbeat stays fresh
@@ -16,9 +16,7 @@
  *   - queue summary tail line
  *   - schema-fix hint when caller passes 'prompt' instead of 'text'
  *
- * Those land in v1.4.2+ as the use cases reappear. Legacy server
- * stays registered as the source of truth until the full migration
- * completes (see WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md).
+ * See WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md for the migration outline.
  */
 
 import {

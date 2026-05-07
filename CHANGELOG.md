@@ -5,6 +5,14 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.7] - 2026-05-07
+
+### Changed
+
+- **Tokens-per-second now stays steady prompt-to-prompt.** Earlier versions could swing from around 50/s to 150/s between turns even when the model was writing at the same pace. The math used to advance its time window on every poll, including polls where the token count hadn't changed - server-thinking pauses and bookkeeping writes ate into the rate without contributing any tokens. The widget now only counts moments when tokens actually moved, so the readout reflects real generation speed.
+- **Bridge dispatches show a live rate sooner.** Big Pickle and Local LLM prompts that finish in 4-6 seconds used to read 0/s for their entire run because the rate-smoothing window needed 5 seconds of activity before reporting a number. Short bridge calls now start reporting after 2 seconds while the longer Claude and Codex transcript widgets keep the original 5-second floor.
+- **README rewrite.** The "experimental" labels are gone, the retired Model Bridge section was dropped, and the Epic Handshake section now reads as one unified bridge story - ask Codex, OpenCode, or your local LLM in plain language and the right backend picks it up. The Display Modes list also gained the "Full + Compact" entry that was already a setting but wasn't documented.
+
 ## [1.4.6] - 2026-05-07
 
 ### Added
