@@ -92,9 +92,9 @@ export function activateModelBridge(
     lastInstallable = installable;
     everReconciled = true;
 
-    // The legacy `wat321-model-bridge` MCP entry was retired in
-    // v1.4.x in favor of the unified `wat321` server installed by the
-    // bridge tier on Epic Handshake enable. Both branches sweep any
+    // The legacy `wat321-model-bridge` MCP entry is retired - the
+    // unified `wat321` server installed by the bridge tier on Epic
+    // Handshake enable handles all dispatch. Both branches sweep any
     // stale legacy registration; opencode serve + click-menu state
     // continue regardless because the unified handlers depend on them.
     void installable;

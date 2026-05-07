@@ -33,10 +33,11 @@ import { isPaused, setPaused } from "./statusBarState";
  *   - RENAME SESSION (sub-picker)
  *   - CANCEL
  *
- * Pause/Resume/Cancel/Restart/Set-Active rows queued for v1.4.2 -
- * each requires runtime infrastructure (target-scoped pause flag,
- * cancel sentinel for in-flight dispatches, restart of opencode
- * serve, default-resume preference) that doesn't exist yet.
+ * Pause/Resume/Cancel/Restart/Set-Active rows are intentionally
+ * absent: each requires runtime infrastructure (target-scoped pause
+ * flag, cancel sentinel for in-flight dispatches, restart of opencode
+ * serve, default-resume preference) that doesn't exist yet. Add the
+ * row when the runtime piece lands.
  */
 
 export type SessionTarget = "opencode" | "local";

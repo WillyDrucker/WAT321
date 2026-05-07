@@ -8,9 +8,8 @@ import type { ModelBridgeLogger } from "./outputChannel";
  * Sweep the legacy `wat321-model-bridge` MCP entry from
  * `~/.claude/settings.json` on every Model Bridge enable. The unified
  * `wat321` server installed by the bridge tier handles all dispatch
- * now, so this tier only needs to clean up after itself - the
- * `installModelBridge` flow was retired in v1.4.x along with the
- * bundled `channel.mjs` script that backed it.
+ * now, so this tier only cleans up stale registrations from earlier
+ * installs - there is no live MB MCP install path anymore.
  */
 
 const LEGACY_ALLOWED_TOOLS = [
