@@ -756,7 +756,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           turnState: data.turnState,
           autoCompactEffectiveTokens: data.autoCompactEffectiveTokens,
           codexEffort: this.bridgeStage.snapshot().codexEffort,
-          tokensPerSecond: data.tokensPerSecond ?? null,
+          bridgeActive: this.bridgeStage.snapshot().phase !== "idle",
         });
         this.item.show();
         return;
