@@ -67,7 +67,15 @@ export class TpsTracker {
       // recent valid rate during a tool wait or between-prompt pause
       // instead of going blank.
       this.samples = [];
-    } else if (last !== undefined && atMs === last.atMs && tokens === last.tokens) {
+    }
+
+    // Unchanged-tokens guard runs AFTER rollback / idle-gap so a clear
+    // followed by a stale-token sample does not re-anchor the window
+    // without any token progress. The transcript can tick mtime for
+    // non-token-bearing writes (tool result bodies, sidecar entries),
+    // so we sample only when tokens strictly increase from the last
+    // observed value.
+    if (last !== undefined && tokens === last.tokens) {
       return this.lastValue;
     }
 
