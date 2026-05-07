@@ -9,11 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OpenCode and Local LLM session menus now follow the Codex flow.** Earlier versions had separate NEW / DELETE / RENAME sub-pickers for each backend; now every backend's session menu reads the same way: a single CURRENT row showing the active session, RESET to start fresh on the next prompt, DELETE for the active session, DELETE ALL to clear everything. Sessions are auto-created on the first prompt - you no longer have to ask Claude to call `wat321_session({action:"create"})` before dispatching.
+- **Token tracking now works for non-streaming OpenCode models.** Big Pickle and other zen-routed models return the assistant reply as one big chunk after the model finishes, so the SSE stream never produced enough events to drive the live tokens/tps readout. The bridge now polls the session message endpoint every 2 seconds during a dispatch and feeds the heartbeat from whichever source - SSE or poll - is producing higher numbers. The widget shows `Nt @ X/s` for both streaming and non-streaming backends.
+- **Local LLM Model Settings row** opens VS Code's Settings UI filtered to the relevant local-side keys when clicked. Replaces the placeholder Local LLM Model row which used to show only the catalog alias and have no useful click action.
+
 ### Changed
+
+- **Codex menu reorganized to read more like the rest of the system.** The SESSION SETTINGS row is now MODEL SETTINGS (effort + model + sandbox live there). A new CURRENT CODEX SESSION row at the top of the menu shows the active S# and lets you switch between recoverable sessions; it subsumes the old standalone RECOVER row. DELETE CODEX SESSION shows the active S# inline, e.g. `DELETE CODEX SESSION (S2)`, and is hidden when no session exists yet.
+- **Restart Codex Bridge renamed to Restart Epic Handshake Bridge** in the dropdown menu, command palette, and recovery hint text. The bridge handles every backend now, not just Codex - the old name was a leftover from when Codex was the only target.
+- **Session-token tooltip is significantly leaner.** Dropped the per-turn extras (active tool name, tool-call count, output tokens, cached %, streaming tps line) from the Claude tooltip - they duplicated info already visible in the widget label or the underlying CLI. Codex's mid-turn block (stage / plan / tool count / thinking) now only shows when the Epic Handshake bridge is actively driving the session, so a standalone Codex chat doesn't double-report what Codex's CLI already prints. Auto-Compact moved to the bottom of the tooltip; the cache-event line renamed from "Most recent" to "Most recent cache HIT" for clarity.
+- **OpenCode setting description rewritten with a data-usage note.** The free-models list now matches OpenCode's actual catalog (Big Pickle, MiniMax M2.5 Free, Ling 2.6 Flash Free, Hy3 Preview Free, Nemotron 3 Super Free) and a second paragraph explains that during the free period collected data may be used to improve the model, with NVIDIA-specific logging called out for Nemotron. Source: opencode.ai/docs/zen.
+- **Local Endpoint setting moved** from the OpenCode section to the Epic Handshake section, sitting under Suppress Codex Notifications. Easier to find when configuring the bridge end-to-end.
+- **OpenCode widget icon swapped to an inverted outlined square.** Replaces the previous outlined double-square. The new version reads cleaner at status-bar size.
 
 ### Fixed
 
+- **First text frame of every dispatch is no longer discarded.** OpenCode's event stream emits the assistant's first text fragment slightly before the message-role classification arrives. The previous logic gated text-progress events on already-knowing the message was assistant, so the early frame got dropped, the heartbeat stayed at zero, and the widget fell back to elapsed-seconds display. Any text part with a message id is now counted as assistant-bound.
+- **BACK from OpenCode and Local LLM session menus returns to the main menu.** Previously these submenus closed entirely when you picked BACK, leaving you to click the widget again to navigate. Now they re-open the main menu the way the Codex submenu always has.
+- **Bridge dispatches that omit `session` now resolve correctly.** Earlier versions errored on `wat321_ask` calls without an explicit session argument. The bridge now falls back to the active alias the menu's CURRENT row tracks, and auto-creates a session if none is active. The menu's "Created on next prompt to OpenCode" hint actually delivers.
+
 ### Removed
+
+- **NEW SESSION, DELETE SESSION sub-picker, and RENAME SESSION rows** from the OpenCode and Local LLM menus. Sessions are auto-created on first prompt; deletion targets the active session via the standard DELETE row; renaming was rarely used and added clutter.
+- **Standalone RECOVER row** from the Codex menu. Recoverable sessions now surface as alternatives in the CURRENT CODEX SESSION sub-picker.
 
 ## [1.4.4] - 2026-05-07
 
