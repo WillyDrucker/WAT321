@@ -17,10 +17,13 @@ export const MODEL_BRIDGE_DIR = join(WAT321_DIR, "model-bridge");
  * directly, so the file is the bridge between settings and runtime. */
 export const CONFIG_PATH = join(MODEL_BRIDGE_DIR, "config.json");
 
-/** Heartbeat file `channel.mjs` writes at request start and removes
- * at request end. The status-bar widget polls it at 1 Hz to surface
- * in-flight state. Absence = idle. */
-export const HEARTBEAT_PATH = join(MODEL_BRIDGE_DIR, "heartbeat.json");
+/** Heartbeat is per-workspace at
+ * `~/.wat321/model-bridge/heartbeat.<wshash>.json` so two VS Code
+ * windows running the bridge concurrently don't both render "calling"
+ * state when only one workspace fires the prompt. The writer composes
+ * the path from `WAT321_WORKSPACE_PATH` env (channel-side); readers
+ * compose from `vscode.workspace.workspaceFolders[0]` (widget-side).
+ * Path is hash-suffixed at use-site - no exported constant. */
 
 /** Sidecar the unified bridge writes after every successful dispatch
  * with the instance that just ran. The widget consults this file
@@ -44,11 +47,11 @@ export const PREFERENCES_PATH = join(MODEL_BRIDGE_DIR, "preferences.json");
  * Reset WAT321 along with everything else. */
 export const USAGE_PATH = join(MODEL_BRIDGE_DIR, "usage.json");
 
-/** Per-thread rollout directory. Each `model_bridge_thread` thread
+/** Per-thread rollout directory. Legacy harness layout: each thread
  * gets a subdirectory `<thread_id>/rollout.jsonl` with one JSON entry
- * per line: a `session_meta` first record, then alternating `turn`
- * entries (user / assistant) and any `compact` entries the bridge
- * inserts when the rollout passes the auto-compact threshold. */
+ * per line. The unified bridge no longer writes here; only the
+ * legacy MB Manage Sessions row reads it for the erase-rollouts
+ * action. */
 export const SESSIONS_DIR = join(MODEL_BRIDGE_DIR, "sessions");
 
 /** MCP server name registered with `claude mcp add`. Distinct from
@@ -56,7 +59,9 @@ export const SESSIONS_DIR = join(MODEL_BRIDGE_DIR, "sessions");
  * stepping on each other's tool registrations. */
 export const MCP_SERVER_NAME = "wat321-model-bridge";
 
-/** Earlier-named MB MCP entries the v1.4.x sweep removes from
- * `~/.claude/settings.json` so a user upgrading from <=1.4.0 doesn't
- * end up with stale registrations after the unified bridge takes over. */
+/** Legacy: MB MCP entries swept from `~/.claude/settings.json` on
+ * activate so an upgrade from <=1.4.0 doesn't leave stale registrations
+ * after the unified bridge takes over. Removable when no users on
+ * those versions remain - typically two shipped releases past the
+ * unified-bridge cutover. */
 export const LEGACY_MCP_SERVER_NAMES = ["wat321-local-llm"] as const;
