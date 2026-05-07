@@ -83,9 +83,9 @@ export function applyWaitMode(mode: WaitMode): void {
 }
 
 /** Apply the activate-time default wait mode. Adaptive is the fixed
- * default in v1.4.1+ - the user-facing `defaultWaitMode` setting was
- * removed. Subsequent runtime toggles via the menu override this
- * until the next restart. */
+ * default - the user-facing `defaultWaitMode` setting is gone.
+ * Subsequent runtime toggles via the menu override this until the
+ * next restart. */
 export function applyDefaultWaitMode(mode: WaitMode): void {
   applyWaitMode(mode);
 }
