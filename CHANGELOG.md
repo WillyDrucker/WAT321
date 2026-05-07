@@ -9,11 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Live tokens-per-second on the OpenCode and Local LLM widgets.** Earlier versions showed only elapsed seconds during a dispatch; now the widget reads `Nt @ X/s` while a turn is generating. The bridge taps OpenCode's event stream and feeds char-count progress into the heartbeat as the assistant's reply accumulates.
+- **Epic Handshake animation cycle now plays on OpenCode and Local LLM dispatches too.** Same numbered-stage walk and arrow animation Codex turns get - so the widget reads "in progress" the same way regardless of which backend is active. Stage transitions are time-driven for now (placeholder until the Phased Messaging framework lands real per-backend events).
+- **New llama icon for the Local LLM widget.** Idle state on Local LLM now reads with a llama silhouette instead of the generic square. OpenCode/Big Pickle dispatches show a new outlined opencode square. Both share the standard chat-bubble alternation when a turn is active, so all four backends (Claude, Codex, OpenCode, Local LLM) move to the same rhythm.
+- **Sessions remember the model they were created on.** Earlier versions used your currently-active instance to label a resumed session, so flipping the MODEL row mid-flight made the widget say "Big Pickle" while you were actually talking to GPT 5 Nano. The alias map now carries the bound instance id; resume always shows the model the session was actually created with.
+
 ### Changed
+
+- **Tokens-per-second readout averages over the last 60 seconds of activity.** The previous smoothing approach sampled per-tick deltas of a token field that only updates at turn boundary on Codex - the widget froze mid-turn, then capped at 999/s when the boundary jump landed. The new approach snapshots cumulative tokens at every poll and reports the slope across the window. Compaction resets handled automatically.
+- **Local Endpoint setting was renamed and reworded.** The setting that used to be `wat321.modelBridge.localEndpoint` is now `wat321.localEndpoint` and lives next to the OpenCode toggle. Description spells out "leave empty if you don't have a local LLM" with examples for both same-machine and LAN-server setups. The old key migrates automatically on first launch.
+- **OpenCode toggle name cleaned up.** The setting that used to read "WAT321 › Model Bridge: Enabled" now reads "WAT321 › OpenCode: Enable Open Code". "Model Bridge" was internal vocabulary that didn't tell you what the toggle did.
+- **Status-bar widget for OpenCode/Local LLM is tooltip-only across all backends.** Click does nothing; hover shows the status. All session and instance management lives on the Epic Handshake dropdown, where it can stay consistent across every backend instead of branching by widget.
+- **Epic Handshake activates with either backend installed.** Earlier versions required both Claude and Codex CLIs. Now Claude is mandatory, plus at least one of Codex or OpenCode - so an OpenCode-only setup (no Codex) can still run the bridge and route to Big Pickle / Local LLM via natural language.
+- **Epic Handshake section title is now "Claude-to-Any-LLM"** to match what the bridge actually does. Previously read "Claude to Codex Only" which was true on day one and outdated by the time OpenCode + Local LLM landed.
+- **Settings UI ordering: "Enable Heatmap" moved above "Status Bar Priority"** in the General section so display preferences cluster together before the priority knob.
+- **MiniMax catalog label updated to M2.7** to match the version the upstream Zen route is currently serving.
 
 ### Fixed
 
+- **OpenCode session creation no longer binds to Local LLM by mistake.** When your active instance was set to local-llm and you created a fresh OpenCode session, the bridge would inherit the local-kind active instance for the new opencode session - your remote session ended up bound to llama.cpp instead of Big Pickle. The bridge now filters the active-instance fallback by target kind so opencode and local sessions only inherit their own kind.
+- **The "WAT321: Model Bridge - Menu" command palette entry actually works now.** It contributed `wat321.modelBridge.menu` while the registered handler was `wat321.modelBridge.legacyMenu` - the entry was orphan and did nothing on click. Realigned the names; the entry now opens the legacy click-menu as labeled.
+- **Epic Handshake gate alignment.** The internal "is this bridge runnable" check still required both Claude and Codex even though the activation gate had been relaxed to accept either Codex or OpenCode. Without this fix, an OpenCode-only user could pass activation but the bridge would refuse to handle settings transitions correctly. Both gates now agree.
+- **Local Endpoint default fallback consistency.** One read path defaulted to `http://127.0.0.1:8080` while the schema and other paths defaulted to empty. A user with no local server configured could see a phantom catalog entry until a different code path overwrote it. All paths now agree on empty.
+
 ### Removed
+
+- **Epic Handshake bridge-mode dropdown.** The five-option enum (Auto, Codex + OpenCode, Codex Only, OpenCode Only, Local LLM Only) was supposed to narrow Claude's MCP tool surface, but the v1.4.3 router refactor already cut the surface to two tools regardless of mode. The dropdown stopped earning its complexity. Existing values get swept on first launch.
+- **"Experimental" wording on Epic Handshake.** The bridge has been stable through several releases; the label was outdated.
+- **A 2200-line dead legacy script.** The bundled `WAT321_MODEL_BRIDGE/bin/channel.mjs` was retired when the unified bridge took over but still shipped in every vsix. Cleaning it out drops package size by ~30KB and removes a frequent source of "is this still used?" confusion.
 
 ## [1.4.3] - 2026-05-06
 
