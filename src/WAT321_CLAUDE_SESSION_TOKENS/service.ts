@@ -42,9 +42,14 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
    * delta). The wall-clock gap uses transcript mtime, not poll time:
    * mtime advances only on an actual write so a fast poll loop over a
    * still file does not produce a divide-by-near-zero. */
+  /** Per-session rolling token snapshots for TPS computation. See
+   * the matching field in CodexSessionTokenService for the full
+   * rationale - cumulative contextUsed snapshots in a 60s window,
+   * slope = (newest - oldest) / elapsed. Switched from the older
+   * sample/pause-threshold approach in v1.4.4 because the prior
+   * version froze when the source field stopped advancing mid-turn
+   * and then capped at 999 on the boundary jump. */
   private tpsPrevSessionId: string | null = null;
-  private tpsPrevOutputTokens = 0;
-  private tpsPrevMtimeMs = 0;
   private tpsLastValue: number | null = null;
   /** Rolling 60-second window of accepted (deltaTokens, deltaTimeMs)
    * samples. Smoothed TPS = sum(tokens) / sum(time) * 1000 across
@@ -54,7 +59,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
    * / bridge waits / idle reasoning gaps - including them would
    * double-count a 10k-token tool-result flush as 333 TPS instead
    * of recognizing it as a paused interval). */
-  private tpsSamples: Array<{ atMs: number; tokens: number; timeMs: number }> = [];
+  private tpsSamples: Array<{ atMs: number; tokens: number }> = [];
 
   /** Watches ~/.claude/sessions/ for new/removed CLI process files.
    * Triggers an immediate poll so new sessions are detected instantly
@@ -266,7 +271,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       usage.cacheReadTokens +
       usage.outputTokens;
 
-    const tokensPerSecond = this.computeTps(sessionId, usage.outputTokens, mtime);
+    const tokensPerSecond = this.computeTps(sessionId, contextUsed);
 
     this.emitOk({
       sessionId,
@@ -287,79 +292,44 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     });
   }
 
-  /** Compute smoothed TPS over a rolling 60-second window. Rejects
-   * samples whose individual gap exceeded 30s as paused (tool wait,
-   * bridge wait, idle-reasoning gap) so a long-paused turn that
-   * suddenly flushes a large chunk of output doesn't register as a
-   * spurious-high spike. Persistent across idle - the last positive
-   * windowed average sticks until the active sessionId changes.
-   * Capped at 999 to keep the inline display three digits. */
-  private computeTps(
-    sessionId: string,
-    outputTokens: number,
-    mtimeMs: number
-  ): number | null {
+  /** "Average tokens-per-second over the last 60s of activity" via
+   * cumulative-token snapshots. See the matching method in
+   * CodexSessionTokenService for the full rationale; both providers
+   * share the same shape. */
+  private computeTps(sessionId: string, totalTokens: number): number | null {
     const TPS_MAX = 999;
-    // 60s window holds ~12 samples on the 5s safety-net cadence (more
-    // when fs.watch fires on every JSONL append). Bigger window means
-    // the displayed value barely moves even when one bursty chunk lands
-    // - the prior history still dominates. Tradeoff: rate shifts mid-
-    // turn take ~30s longer to reflect than a 30s window. Picked the
-    // smoother end since users care about steady-state readings more
-    // than fast tracking of within-turn rate variance. Memory cost is
-    // ~1.2 KB per provider, trivial.
     const TPS_WINDOW_MS = 60_000;
-    const TPS_PAUSE_THRESHOLD_MS = 30_000;
 
     if (sessionId !== this.tpsPrevSessionId) {
       this.tpsPrevSessionId = sessionId;
-      this.tpsPrevOutputTokens = outputTokens;
-      this.tpsPrevMtimeMs = mtimeMs;
       this.tpsLastValue = null;
       this.tpsSamples = [];
-      return null;
     }
 
-    const tokenDelta = outputTokens - this.tpsPrevOutputTokens;
-    const timeDeltaMs = mtimeMs - this.tpsPrevMtimeMs;
-
-    if (tokenDelta < 0) {
-      // Output tokens shrank - new turn. Reset baseline without
-      // emitting a stale reading; keep the windowed value so the
-      // persistent indicator doesn't blink off between turns.
-      this.tpsPrevOutputTokens = outputTokens;
-      this.tpsPrevMtimeMs = mtimeMs;
-      return this.tpsLastValue;
+    const now = Date.now();
+    if (
+      this.tpsSamples.length > 0 &&
+      totalTokens < this.tpsSamples[this.tpsSamples.length - 1].tokens
+    ) {
+      this.tpsSamples = [];
+      this.tpsLastValue = null;
     }
 
-    if (tokenDelta > 0 && timeDeltaMs > 0) {
-      this.tpsPrevOutputTokens = outputTokens;
-      this.tpsPrevMtimeMs = mtimeMs;
-      // Reject paused intervals: a > 30s gap with a sudden token
-      // bump is almost certainly a tool-result flush, not actual
-      // generation rate. Updating the baseline (above) without
-      // pushing a sample lets the next genuine streaming sample
-      // re-anchor the window.
-      if (timeDeltaMs > TPS_PAUSE_THRESHOLD_MS) {
-        return this.tpsLastValue;
-      }
-      const now = Date.now();
-      this.tpsSamples.push({ atMs: now, tokens: tokenDelta, timeMs: timeDeltaMs });
-      // Evict samples older than the window. The window is wall-
-      // clock-based on `atMs` rather than mtime-based so a long
-      // accept-then-pause-then-accept arc still reflects current
-      // throughput once the post-pause samples accumulate.
-      const cutoff = now - TPS_WINDOW_MS;
-      while (this.tpsSamples.length > 0 && this.tpsSamples[0].atMs < cutoff) {
-        this.tpsSamples.shift();
-      }
-      const tokenSum = this.tpsSamples.reduce((s, x) => s + x.tokens, 0);
-      const timeSum = this.tpsSamples.reduce((s, x) => s + x.timeMs, 0);
-      if (timeSum > 0 && tokenSum > 0) {
-        this.tpsLastValue = Math.min(TPS_MAX, (tokenSum / timeSum) * 1000);
-      }
+    this.tpsSamples.push({ atMs: now, tokens: totalTokens });
+    const cutoff = now - TPS_WINDOW_MS;
+    while (this.tpsSamples.length > 1 && this.tpsSamples[0].atMs < cutoff) {
+      this.tpsSamples.shift();
     }
 
+    if (this.tpsSamples.length < 2) return this.tpsLastValue;
+
+    const oldest = this.tpsSamples[0];
+    const newest = this.tpsSamples[this.tpsSamples.length - 1];
+    const tokenDelta = newest.tokens - oldest.tokens;
+    const timeDeltaMs = newest.atMs - oldest.atMs;
+    if (timeDeltaMs <= 0 || tokenDelta <= 0) return this.tpsLastValue;
+
+    this.tpsLastValue = Math.min(TPS_MAX, (tokenDelta / timeDeltaMs) * 1000);
     return this.tpsLastValue;
   }
 }
