@@ -46,8 +46,8 @@ interface BridgeConfig {
  * config shape. Each target gates on its own master switch:
  *
  *   - codex: `epicHandshake.enabled`
- *   - opencode: `modelBridge.enabled`
- *   - local: `modelBridge.enabled` AND non-empty `modelBridge.localEndpoint`
+ *   - opencode: `enableOpenCode`
+ *   - local: `enableOpenCode` AND non-empty `localEndpoint`
  *
  * Targets whose CLI is not installed gracefully degrade at the router
  * (handlers return a clean "not installed" error rather than crashing).

@@ -10,7 +10,7 @@ import type { ModelBridgeLogger } from "./outputChannel";
 /**
  * Lifecycle for the WAT321-managed `opencode serve` subprocess.
  *
- * When `wat321.modelBridge.enabled` is on, WAT321 spawns its own
+ * When `wat321.enableOpenCode` is on, WAT321 spawns its own
  * OpenCode server in an isolated workdir under
  * `~/.wat321/model-bridge/opencode-workdir/`. The workdir holds a
  * single `opencode.json` describing the providers (`llama.cpp`

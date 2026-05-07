@@ -26,7 +26,7 @@ const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
  *
  * Triggered from:
  *   - Bridge tier activate (covers fresh installs + reload)
- *   - `modelBridge.enabled` settings change (covers user opting in
+ *   - `enableOpenCode` settings change (covers user opting in
  *     for the first time after install)
  */
 

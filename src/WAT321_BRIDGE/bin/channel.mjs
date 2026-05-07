@@ -21,7 +21,7 @@
  * tokens (down from ~1100 with the prior 4-tool surface).
  *
  * Conditional registration: at startup, the server reads enabled
- * features (epicHandshake.enabled, modelBridge.enabled) from
+ * features (epicHandshake.enabled, enableOpenCode) from
  * `~/.wat321/bridge/config.json` (the extension writes it on activate
  * and on settings change). Disabled targets are stripped from the
  * tool surface AND from the resource list - users pay zero context
