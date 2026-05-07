@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -76,7 +76,7 @@
       },
       {
         "command": "wat321.epicHandshake.restartCodexBridge",
-        "title": "WAT321: Epic Handshake - Restart Codex Bridge"
+        "title": "WAT321: Epic Handshake - Restart Bridge"
       },
       {
         "command": "wat321.modelBridge.show",
@@ -271,14 +271,7 @@
             "default": true,
             "scope": "application",
             "order": 1,
-            "markdownDescription": "Adds Big Pickle, GPT 5 Nano, Ling 2.6 Flash, Hy3 Preview, Nemotron 3 Super, MiniMax M2.7, and all OpenCode free models. When enabled, WAT321 auto-spawns a managed `opencode serve` so the tool-using harness works against any free instance, including your local LLM. It unloads automatically when VS Code closes.\n\nWidgets hide automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`)."
-          },
-          "wat321.localEndpoint": {
-            "type": "string",
-            "default": "",
-            "scope": "application",
-            "order": 2,
-            "markdownDescription": "URL for your local LLM server. You can have one installed directly on this computer or on a server on your local network.\n\n**Empty (default):** leave empty if you don't have a local LLM running.\n\n**Examples:**\n- `http://127.0.0.1:8080` - installed directly on this computer\n- `http://10.0.0.101:8080` - running on a server on your local network"
+            "markdownDescription": "**Enable OpenCode** widgets and the managed `opencode serve` for free routable models (Big Pickle, MiniMax M2.5 Free, Ling 2.6 Flash Free, Hy3 Preview Free, Nemotron 3 Super Free). Auto-spawns a serve subprocess so Claude and your tool-using harness can dispatch against any catalog instance, including your local LLM. Unloads automatically when VS Code closes. Hidden automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\n**Data usage on free models.** Per OpenCode's docs, during the free period collected data may be used to improve the model. Nemotron 3 Super Free additionally has prompts and outputs logged by NVIDIA. If you don't want training-eligible traffic, disable this and use Claude/Codex/your local LLM only."
           }
         }
       },
@@ -376,6 +369,13 @@
             "scope": "application",
             "order": 2,
             "markdownDescription": "Suppress Codex completion notifications while the Epic Handshake bridge is active. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
+          },
+          "wat321.localEndpoint": {
+            "type": "string",
+            "default": "",
+            "scope": "application",
+            "order": 3,
+            "markdownDescription": "URL for your local LLM server. You can have one installed directly on this computer or on a server on your local network.\n\n**Empty (default):** leave empty if you don't have a local LLM running.\n\n**Examples:**\n- `http://127.0.0.1:8080` - installed directly on this computer\n- `http://10.0.0.101:8080` - running on a server on your local network"
           }
         }
       },

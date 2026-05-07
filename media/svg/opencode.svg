@@ -8,38 +8,22 @@
    id="svg5"
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
+  <defs id="defs1" />
   <g
      transform="translate(30, 0)"
      id="g5">
-    <!-- Middle solid square (unchanged): 60..180 x, 120..240 y, gray fill -->
+    <!-- Inverted OpenCode logo as a single nonzero-winding path so
+         the icon-font generator (which strips fill-rule and fills
+         under nonzero by default) still produces the cutouts.
+         Subpath winding order:
+           - Outer (CW):       contributes +1 fill
+           - White hole (CCW): contributes -1 (cancels to 0 inside)
+           - Inner box (CW):   contributes +1 again inside the hole
+         Net result: foreground / hole / foreground stacking, same
+         visual as the original three-color invert layout. -->
     <path
-       d="M180 240H60V120H180V240Z"
-       fill="#CFCECD"
-       id="path-middle" />
-    <!-- Inner rectangle outline: traces the original frame's inner
-         cutout (60..180 x, 60..240 y, 120x180 - same 60-unit offset
-         on every side as the outer 240x300). Inset by 5 + stroke-width
-         10 puts the entire stroke band exactly along that boundary,
-         drawn inward. -->
-    <rect
-       x="65"
-       y="65"
-       width="110"
-       height="170"
-       fill="none"
-       stroke="#211E1E"
-       stroke-width="10"
-       id="rect-inner" />
-    <!-- Outer box outline: 10-unit stroke, inset by 5 so the entire
-         stroke fits inside the original 240x300 footprint. -->
-    <rect
-       x="5"
-       y="5"
-       width="230"
-       height="290"
-       fill="none"
-       stroke="#211E1E"
-       stroke-width="10"
-       id="rect-outline" />
+       style="fill:#211e1e"
+       d="M 0,0 H 240 V 300 H 0 Z M 47,46 V 253 H 193 V 46 Z M 60,120 H 180 V 240 H 60 Z"
+       id="opencode-invert" />
   </g>
 </svg>

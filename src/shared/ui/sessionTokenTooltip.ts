@@ -71,12 +71,14 @@ export interface SessionTokenTooltipInput {
    * `default_reasoning_level` so the user always sees what Codex will
    * actually run. */
   codexEffort?: "low" | "medium" | "high" | "xhigh" | null;
-  /** Provider-agnostic: live tokens-per-second estimate from the most
-   * recent transcript / rollout delta. When non-null, the tooltip adds
-   * a "Streaming ~X tps" line under the per-turn details. Surfaces
-   * Claude streaming throughput the same way Codex / OpenCode SSE do
-   * so the user has one consistent place to read live model speed. */
-  tokensPerSecond?: number | null;
+  /** Codex-only gate for the mid-turn richness block (Codex: X/5,
+   * plan / tool / token-split lines). True when the Epic Handshake
+   * bridge is currently driving this Codex session - phase is non-idle
+   * in the bridgeStageCoordinator snapshot. The block is hidden for
+   * standalone Codex sessions because the surrounding Codex CLI
+   * already shows the same info inline; surfacing it twice clutters
+   * the tooltip. Defaults to false at the type level. */
+  bridgeActive?: boolean;
 }
 
 export function buildSessionTokenTooltip(
@@ -97,7 +99,7 @@ export function buildSessionTokenTooltip(
     turnState,
     autoCompactEffectiveTokens,
     codexEffort,
-    tokensPerSecond,
+    bridgeActive = false,
   } = input;
 
   const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
@@ -161,114 +163,67 @@ export function buildSessionTokenTooltip(
     `${FOLDER} ${label} ${formatTokens(contextUsed)} / ${formatTokens(ceiling)}\n\n`
   );
   md.appendMarkdown(`${bar} ${formatPct(pctUsed)} used\n\n`);
-  if (provider === "Claude") {
-    // Claude Code's percentage override stacks with an internal
-    // reserve in recent releases: setting OVERRIDE=73 on a 1M window
-    // triggers compaction around ~715k, not the nominal 730k the
-    // ceiling math produces. `autoCompactEffectiveTokens` (when
-    // supplied) captures that drift. Prefix `~` to signal approximate
-    // so the label doesn't read as a guaranteed exact fire point.
-    // Falls back to the exact ceiling when the caller didn't wire
-    // the effective value through.
-    const triggerTokens = autoCompactEffectiveTokens ?? ceiling;
-    const prefix = autoCompactEffectiveTokens !== undefined ? "~" : "";
-    md.appendMarkdown(
-      `${CLAMP} Auto-Compact at ${prefix}${formatTokens(triggerTokens)}`
-    );
-  } else {
-    // Codex's ceiling is the effective context window. Actual
-    // compact fires earlier, at `context_window * 9 / 10` upstream.
-    // Since our ceiling is `context_window * 95 / 100`, the trigger
-    // works out to `ceiling * 90 / 95` = ~245k for current gpt-5.x
-    // models. Integer math mirrors upstream's
-    // `(context_window * 9) / 10` formulation. Assumes
-    // `effective_context_window_percent` stays at 95 (the upstream
-    // default and true for every model in models_cache.json today);
-    // a future model with a different effective_pct would shift this.
-    const compactTrigger = Math.floor((ceiling * 90) / 95);
-    md.appendMarkdown(
-      `${CLAMP} Auto-Compact ~${formatTokens(compactTrigger)}`
-    );
-  }
-
-  // Codex mid-turn richness. Only render when a turn is in flight AND
-  // we have structured rollout state. Idle sessions skip these lines
-  // entirely so the tooltip stays short when nothing is happening.
-  if (provider === "Codex" && stageInfo && turnStateIsActive(turnState)) {
+  // Codex mid-turn richness. Only renders when (1) the Epic Handshake
+  // bridge is actively driving this Codex session, (2) a turn is in
+  // flight, and (3) we have structured rollout state. Standalone Codex
+  // sessions show the same info in the Codex CLI itself, so duplicating
+  // it in the tooltip just clutters the hover. The block carries
+  // stage / plan / tool / token-split lines; the legacy "% cached"
+  // line is intentionally dropped because its semantics weren't clear
+  // from the rendered string.
+  if (
+    provider === "Codex" &&
+    stageInfo &&
+    bridgeActive &&
+    turnStateIsActive(turnState)
+  ) {
     const display = renderStageDisplay(stageInfo);
     const lines: string[] = [];
     lines.push(`Codex: ${display.fraction} ${display.label}`);
     if (display.planLine) lines.push(display.planLine);
     if (display.toolLine) lines.push(display.toolLine);
     if (stageInfo.toolCallCount > 0) {
-      lines.push(`${stageInfo.toolCallCount} tool call${stageInfo.toolCallCount === 1 ? "" : "s"} this turn`);
+      lines.push(
+        `${stageInfo.toolCallCount} tool call${stageInfo.toolCallCount === 1 ? "" : "s"} this turn`
+      );
     }
     if (stageInfo.reasoningTokens > 0 || stageInfo.outputTokens > 0) {
       lines.push(
         `Thinking ${formatTokens(stageInfo.reasoningTokens)}, output ${formatTokens(stageInfo.outputTokens)} (last turn)`
       );
     }
-    if (stageInfo.inputTokens > 0) {
-      const pct = Math.round((stageInfo.cachedInputTokens / stageInfo.inputTokens) * 100);
-      if (pct > 0) lines.push(`${pct}% cached`);
-    }
     md.appendMarkdown(`\n\n${lines.join("  \n")}`);
   }
 
-  // Claude cache-event readout (always shown when claudeTurnInfo is
-  // present, regardless of turn state). Surfaces classified LOAD/MISS/
-  // HIT info that previously was only visible via the banner flash -
-  // tooltip is the always-on layer for cadence visibility.
-  // Read-only: derived purely from the same transcript tail. No HTTP,
-  // no spawns, no file writes. See parseMostRecentCacheEvent.
+  // Claude cache-event readout. Always shown when claudeTurnInfo is
+  // present (regardless of in-flight). One blank line above so it
+  // stands as its own clean line; no further detail trails the
+  // description. Read-only: derived from the transcript tail by
+  // parseMostRecentCacheEvent.
   if (provider === "Claude" && claudeTurnInfo?.mostRecentCacheEvent) {
     const ev = claudeTurnInfo.mostRecentCacheEvent;
-    md.appendMarkdown(`\n\nMost recent: ${ev.description}`);
+    md.appendMarkdown(`\n\nMost recent cache HIT: ${ev.description}`);
   }
 
-  // Claude mid-turn richness. Analog of the Codex block above, shaped
-  // to Claude's transcript signals. Rendered only when actively mid-
-  // turn so the tooltip stays short on idle sessions.
-  if (provider === "Claude" && claudeTurnInfo && turnStateIsActive(turnState)) {
-    const lines: string[] = [];
-    if (claudeTurnInfo.activeToolName) {
-      lines.push(`Tool: ${claudeTurnInfo.activeToolName}`);
-    } else if (claudeTurnInfo.hasThinkingRecent) {
-      lines.push("Thinking");
-    }
-    if (claudeTurnInfo.toolCallCount > 0) {
-      lines.push(
-        `${claudeTurnInfo.toolCallCount} tool call${claudeTurnInfo.toolCallCount === 1 ? "" : "s"} this turn`
-      );
-    }
-    if (claudeTurnInfo.outputTokens > 0) {
-      lines.push(`Output ${formatTokens(claudeTurnInfo.outputTokens)} (last turn)`);
-    }
-    if (claudeTurnInfo.totalInputTokens > 0) {
-      const pct = Math.round(
-        (claudeTurnInfo.cachedInputTokens / claudeTurnInfo.totalInputTokens) * 100
-      );
-      if (pct > 0) lines.push(`${pct}% cached`);
-    }
-    if (typeof tokensPerSecond === "number" && tokensPerSecond > 0) {
-      lines.push(`Streaming ~${formatTps(tokensPerSecond)} tps`);
-    }
-    if (lines.length > 0) {
-      md.appendMarkdown(`\n\n${lines.join("  \n")}`);
-    }
-  } else if (typeof tokensPerSecond === "number" && tokensPerSecond > 0) {
-    md.appendMarkdown(`\n\nStreaming ~${formatTps(tokensPerSecond)} tps`);
+  // Auto-Compact lives at the bottom of every session-token tooltip.
+  // Claude's effective trigger may differ from the nominal ceiling
+  // when Claude Code's internal reserve stacks with the percentage
+  // override; `autoCompactEffectiveTokens` captures that drift. Codex
+  // computes the trigger from `(ceiling * 90) / 95` to mirror the
+  // upstream `context_window * 9 / 10` formulation against our 95%
+  // effective-window ceiling.
+  if (provider === "Claude") {
+    const triggerTokens = autoCompactEffectiveTokens ?? ceiling;
+    const prefix = autoCompactEffectiveTokens !== undefined ? "~" : "";
+    md.appendMarkdown(
+      `\n\n${CLAMP} Auto-Compact at ${prefix}${formatTokens(triggerTokens)}`
+    );
+  } else {
+    const compactTrigger = Math.floor((ceiling * 90) / 95);
+    md.appendMarkdown(`\n\n${CLAMP} Auto-Compact ~${formatTokens(compactTrigger)}`);
   }
 
   return md;
-}
-
-/** Format a TPS reading. Whole numbers above 10 (more typical for
- * fast models); one decimal below 10 so a slow local LLM at 3.4 tps
- * does not round to 3. Caller already filters non-positive values. */
-function formatTps(tps: number): string {
-  if (tps >= 10) return `${Math.round(tps)}`;
-  return tps.toFixed(1);
 }
 
 /** Wrap a long session title across up to two lines, breaking on a

@@ -738,7 +738,7 @@ function reportInFlightOrAbortStale() {
       ``,
       `Recovery options:`,
       `- Re-dispatch the same prompt; the next turn starts on a clean state.`,
-      `- If retries keep stalling, pick "Restart Codex Bridge" from the Epic Handshake menu to force-kill the codex app-server child and spawn a fresh one.`,
+      `- If retries keep stalling, pick "Restart Epic Handshake Bridge" from the Epic Handshake menu to force-kill the codex app-server child and spawn a fresh one.`,
       `- For long-running Codex tasks (multi-minute scrapes, large audits), switching to Fire-and-Forget mode lets Claude return immediately and the reply lands in the inbox when ready.`,
     ].join("\n");
     const envelope = buildEnvelope({

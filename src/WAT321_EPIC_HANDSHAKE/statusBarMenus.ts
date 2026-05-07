@@ -234,19 +234,17 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
 
   const sessionsItem: Item = {
     label: `MANAGE CODEX SESSIONS (S${sessionCounter})`,
-    description: "Reset, delete, recover, or change defaults.",
+    description: "Switch, reset, delete, or change model settings.",
     iconPath: new vscode.ThemeIcon("wat321-square-info"),
     action: "manage-sessions",
   };
 
-  // Cross-tier entry into the Model Bridge's session management. Only
-  // shown when the bridge is enabled - keeps the menu lean for users
-  // running EH without OpenCode. Per v1.4.1 plan, this submenu mirrors
-  // Manage Codex Sessions row-for-row (List sessions, Set Active,
-  // Pause/Resume, Cancel, Restart, Session Settings, Inbox, New/Delete/
-  // Rename) - see WDDOCS/WAT321_V141_MB_FEATURE_STRIP.md for the parity
-  // table. Currently delegates to the legacy MB menu; the EH-native
-  // submenu lands as part of the unified MCP server work.
+  // Cross-tier entry into OpenCode + Local LLM session management.
+  // Hidden when both backends are off so the menu stays lean for users
+  // running EH/Codex only. Both sub-pickers live in
+  // openCodeSessionsPicker.ts and mirror the Codex menu's row shape
+  // (CURRENT/RESET/DELETE/DELETE ALL) on top of the unified bridge's
+  // active-alias state.
   const modelBridgeEnabled = vscode.workspace
     .getConfiguration("wat321")
     .get<boolean>("enableOpenCode", false);
@@ -311,7 +309,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // would force a Claude cache LOAD). Always visible because the
   // value is exactly that it works when nothing else does.
   const restartBridgeItem: Item = {
-    label: "RESTART CODEX BRIDGE",
+    label: "RESTART EPIC HANDSHAKE BRIDGE",
     description: `Cancel, clear and restart bridge. Resumes (S${sessionCounter}) on next prompt.`,
     iconPath: new vscode.ThemeIcon("sync"),
     action: "restart-bridge",
@@ -511,10 +509,14 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       });
       break;
     case "manage-opencode-sessions":
-      await showOpenCodeSessionsPicker();
+      if ((await showOpenCodeSessionsPicker()) === "back") {
+        await showMainMenu({ inFlight: isBridgeBusy(ctx.ws) });
+      }
       break;
     case "manage-local-llm-sessions":
-      await showLocalLLMSessionsPicker();
+      if ((await showLocalLLMSessionsPicker()) === "back") {
+        await showMainMenu({ inFlight: isBridgeBusy(ctx.ws) });
+      }
       break;
     case "repair-sessions":
       await showRepairSessionsPicker(ctx.ws, ctx.recoverable, ctx.inFlight);

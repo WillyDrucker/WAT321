@@ -76,7 +76,7 @@ Full access. Do not prompt for permission. All tools unrestricted. Git exception
 
 - **Never writes outside `~/.wat321/`.** Two documented exceptions for Epic Handshake: (a) one managed MCP entry in `~/.claude/settings.json` via Claude's CLI; (b) `session_meta.model` in bridge-owned rollouts (gated by thread-name pattern + cwd match), rewritten only via the Repair sessions menu.
 - **API rate limiting** - polling >=122s, cooldown >=61s. Never bypass cooldown.
-- **No bundler** - `tsc` only, no external runtime deps beyond `@modelcontextprotocol/sdk`.
+- **No bundler** - `tsc` only. Two runtime deps: `@modelcontextprotocol/sdk` (bridge MCP servers) and `undici` (lifts Node 22's 5-min fetch cap so the OpenCode harness can run long tool loops).
 - **CHANGELOG.md must be updated before any version bump.** `/wat-publish` handles this via `/watsession-update` in Step 1.
 - **Release notes are human-readable, not technical.** CHANGELOG reads like "what you'll notice". See `feedback_changelog_tone.md` in auto-memory.
 - **Commit messages are descriptive, not versioned.** Only CHANGELOG entries and version-bump commits mention the version number.
