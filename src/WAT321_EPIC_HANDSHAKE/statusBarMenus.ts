@@ -233,7 +233,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
         };
 
   const sessionsItem: Item = {
-    label: `MANAGE CODEX SESSIONS (S${sessionCounter})`,
+    label: `MANAGE CODEX (S${sessionCounter})`,
     description: "Switch, reset, delete, or change model settings.",
     iconPath: new vscode.ThemeIcon("wat321-square-info"),
     action: "manage-sessions",
@@ -254,18 +254,18 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     .trim();
   // S# suffix on the parent label so the user sees the active session
   // count at a glance, mirroring the Codex menu's `MANAGE CODEX
-  // SESSIONS (S<n>)` pattern. The latest alias is read off the
-  // unified bridge's session-aliases.json - we show the highest S#
-  // present rather than the count, matching how Codex displays the
-  // active sessionCounter (the working session).
+  // (S<n>)` pattern. The latest alias is read off the unified bridge's
+  // session-aliases.json - we show the highest S# present rather than
+  // the count, matching how Codex displays the active sessionCounter
+  // (the working session).
   const bridgeAliases = readBridgeAliases();
   const opencodeLatest = latestAlias(bridgeAliases.opencode);
   const localLatest = latestAlias(bridgeAliases.local);
   const opencodeSessionsItem: Item | null = modelBridgeEnabled
     ? {
         label: opencodeLatest
-          ? `MANAGE OPENCODE SESSIONS (${opencodeLatest})`
-          : "MANAGE OPENCODE SESSIONS",
+          ? `MANAGE OPENCODE (${opencodeLatest})`
+          : "MANAGE OPENCODE",
         description: "List, resume, or manage OpenCode sessions.",
         iconPath: new vscode.ThemeIcon("wat321-square-info"),
         action: "manage-opencode-sessions",
@@ -279,8 +279,8 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     modelBridgeEnabled && localEndpoint.length > 0
       ? {
           label: localLatest
-            ? `MANAGE LOCAL LLM SESSIONS (${localLatest})`
-            : "MANAGE LOCAL LLM SESSIONS",
+            ? `MANAGE LOCAL LLM (${localLatest})`
+            : "MANAGE LOCAL LLM",
           description: "List, resume, or manage local LLM sessions.",
           iconPath: new vscode.ThemeIcon("wat321-square-info"),
           action: "manage-local-llm-sessions",

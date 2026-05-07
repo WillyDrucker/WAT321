@@ -45,8 +45,8 @@ function currentWsHash(): string {
  *
  * Each row shows the current value. `*default*` marks rows that match
  * the platform baseline (sandbox=read-only, model=codex-config-default,
- * effort=model's own default-effort). `(CURRENT)` marks the active
- * selection inside sub-pickers.
+ * effort=model's own default-effort). A leading green check (✔️) marks
+ * the active selection inside sub-pickers.
  *
  * Sandbox is a direct toggle (no sub-picker) - one click flips between
  * full-access and read-only. Model and effort open sub-pickers because
@@ -252,13 +252,12 @@ async function pickModel(
     ...models.map((m): ModelRow => {
       const isDefault = m.slug === baseline;
       const isCurrent = m.slug === current || (current === null && m.slug === baseline);
-      // Tag order: *default* first when applicable, then (CURRENT).
-      // Both flank the model name so they stay visible even when the
-      // description is truncated by a narrow QuickPick column.
-      const tags: string[] = [];
-      if (isDefault) tags.push("*default*");
-      if (isCurrent) tags.push("(CURRENT)");
-      const tagPrefix = tags.length > 0 ? ` ${tags.join(" ")}` : "";
+      // Active row gets a leading green check after the iconPath, the
+      // same affordance the session pickers use. *default* still tags
+      // the trailing slot so the user can see at a glance whether the
+      // active pick matches the platform baseline.
+      const checkPrefix = isCurrent ? "✔️ " : "";
+      const tagSuffix = isDefault ? " *default*" : "";
       // Description trimmed to the first sentence so the row label
       // does not get truncated mid-word in narrow QuickPick layouts.
       const shortDescription = shortenForRow(m.description);
@@ -266,7 +265,7 @@ async function pickModel(
       return {
         rowKind: "value",
         slug: m.slug,
-        label: `${m.displayName.toUpperCase()}${tagPrefix}${descSuffix}`,
+        label: `${checkPrefix}${m.displayName.toUpperCase()}${tagSuffix}${descSuffix}`,
         iconPath: new vscode.ThemeIcon("symbol-method"),
       };
     }),
@@ -341,16 +340,14 @@ async function pickEffort(
     ...supported.map((e): EffortPickerRow => {
       const isDefault = e.effort === baseline;
       const isCurrent = e.effort === current || (current === null && e.effort === baseline);
-      const tags: string[] = [];
-      if (isDefault) tags.push("*default*");
-      if (isCurrent) tags.push("(CURRENT)");
-      const tagPrefix = tags.length > 0 ? ` ${tags.join(" ")}` : "";
+      const checkPrefix = isCurrent ? "✔️ " : "";
+      const tagSuffix = isDefault ? " *default*" : "";
       const shortDescription = shortenForRow(e.description);
       const descSuffix = shortDescription ? ` - ${shortDescription}` : "";
       return {
         rowKind: "value",
         effort: e.effort,
-        label: `${e.effort.toUpperCase()}${tagPrefix}${descSuffix}`,
+        label: `${checkPrefix}${e.effort.toUpperCase()}${tagSuffix}${descSuffix}`,
         iconPath: new vscode.ThemeIcon("dashboard"),
       };
     }),
