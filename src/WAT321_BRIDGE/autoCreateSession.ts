@@ -132,6 +132,9 @@ export async function ensureOpenCodeS1(): Promise<void> {
   if (sessionId === null) return;
 
   aliases.opencode["S1"] = { sessionId, instanceId: instance.id };
+  // Mark as active so the EH menu's CURRENT row reflects this session
+  // and bridge dispatches that omit `session` resolve to it.
+  aliases.activeAliases.opencode = "S1";
   writeAliases(ALIAS_PATH, aliases);
 }
 

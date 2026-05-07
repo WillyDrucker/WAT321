@@ -38,6 +38,24 @@ const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
 const ALIAS_PATH = join(BRIDGE_DIR, "session-aliases.json");
 const MB_DIR = join(homedir(), ".wat321", "model-bridge");
 const MB_CONFIG_PATH = join(MB_DIR, "config.json");
+const CHANNEL_LOG_PATH = join(BRIDGE_DIR, "channel.log");
+
+/** Append a structured trace line to the bridge's channel log. Used to
+ * diagnose SSE-tap failures (the live token/tps fall back to elapsed-
+ * seconds when no `message.part.updated` events arrive, so the log is
+ * the only signal the tap silently failed). Best-effort. */
+function logSse(message) {
+  try {
+    if (!existsSync(BRIDGE_DIR)) mkdirSync(BRIDGE_DIR, { recursive: true });
+    writeFileSync(
+      CHANNEL_LOG_PATH,
+      `[${new Date().toISOString()}] [sse] ${message}\n`,
+      { flag: "a" }
+    );
+  } catch {
+    // best-effort
+  }
+}
 
 // Cross-tier heartbeat write: the Model Bridge widget reads
 // `~/.wat321/model-bridge/heartbeat.json` to render live "calling"
@@ -224,6 +242,28 @@ async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
   const ac = new AbortController();
   const assistantMsgIds = new Set();
   const partTexts = new Map();
+  const counters = {
+    events: 0,
+    sessionMatches: 0,
+    partUpdates: 0,
+    progressCalls: 0,
+    pollUpdates: 0,
+  };
+  // Monotonic reporter: SSE and the poll fallback both push token
+  // estimates through here. Without monotonic gating, a slow poll
+  // could undo a higher SSE-reported value mid-dispatch.
+  let lastTotal = 0;
+  const pushProgress = (total) => {
+    if (typeof total !== "number" || total <= lastTotal) return;
+    lastTotal = total;
+    try {
+      onProgress(total);
+      counters.progressCalls++;
+    } catch {
+      // best-effort - heartbeat write failure is non-fatal
+    }
+  };
+  logSse(`tap.open base=${base} session=${expectedSessionId}`);
 
   let res;
   try {
@@ -231,12 +271,50 @@ async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
       headers: { Accept: "text/event-stream" },
       signal: ac.signal,
     });
-  } catch {
+  } catch (err) {
+    logSse(`tap.fetchFail err=${err?.message || err}`);
     return { stop: () => ac.abort() };
   }
   if (!res.ok || !res.body) {
+    logSse(`tap.handshakeFail status=${res?.status} hasBody=${Boolean(res?.body)}`);
     return { stop: () => ac.abort() };
   }
+  logSse(`tap.handshakeOk status=${res.status}`);
+
+  // Poll fallback. Non-streaming providers (zen / Big Pickle and
+  // friends) return the assistant reply as one big chunk after the
+  // model finishes, so SSE produces zero or one part-updates and the
+  // widget falls back to elapsed-seconds. Polling /session/{id}/message
+  // every 2s lets the widget read in-progress text length even when
+  // SSE never streams. Streaming providers still win in latency
+  // because pushProgress is monotonic - whichever source reports
+  // higher first sticks. Timeout/network failures are silent.
+  const pollSessionMessages = async () => {
+    if (!expectedSessionId) return;
+    try {
+      const r = await fetch(`${base}/session/${expectedSessionId}/message`);
+      if (!r.ok) return;
+      const messages = await r.json();
+      if (!Array.isArray(messages) || messages.length === 0) return;
+      const latest = messages[messages.length - 1];
+      const role = latest?.info?.role;
+      if (role !== "assistant") return;
+      const parts = Array.isArray(latest?.parts) ? latest.parts : [];
+      let total = 0;
+      for (const p of parts) {
+        if (p?.type === "text" && typeof p.text === "string") {
+          total += p.text.length;
+        }
+      }
+      if (total > 0) {
+        counters.pollUpdates++;
+        pushProgress(total);
+      }
+    } catch {
+      // best-effort - polling errors don't block the dispatch
+    }
+  };
+  const pollInterval = setInterval(pollSessionMessages, 2000);
 
   const reader = res.body.getReader();
   (async () => {
@@ -277,30 +355,38 @@ async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
           } catch {
             continue;
           }
+          counters.events++;
+          if (counters.events <= 3) {
+            logSse(`tap.event#${counters.events} type=${evt?.type} sid=${evt?.properties?.sessionID}`);
+          }
           const sid = evt?.properties?.sessionID;
           if (expectedSessionId && sid !== expectedSessionId) continue;
+          counters.sessionMatches++;
           if (evt.type === "message.updated") {
             const info = evt.properties?.info;
             if (info?.role === "assistant" && info?.id) {
               assistantMsgIds.add(info.id);
             }
           } else if (evt.type === "message.part.updated") {
+            counters.partUpdates++;
             const part = evt.properties?.part;
-            if (
-              part?.type === "text" &&
-              part?.messageID &&
-              part?.id &&
-              assistantMsgIds.has(part.messageID)
-            ) {
+            // Race-tolerant: text part-updates arrive before the
+            // corresponding message.updated registers the messageID
+            // as assistant. opencode serve only emits text part-
+            // updates for assistant messages, so any text part with
+            // a messageID is safe to count without gating on prior
+            // assistant registration. Earlier guard discarded the
+            // first text frame on every dispatch.
+            if (part?.type === "text" && part?.messageID && part?.id) {
               const text = typeof part.text === "string" ? part.text : "";
               partTexts.set(part.id, text);
               let total = 0;
               for (const t of partTexts.values()) total += t.length;
-              try {
-                onProgress(total);
-              } catch {
-                // best-effort - heartbeat write failure is non-fatal
-              }
+              pushProgress(total);
+            } else if (counters.partUpdates <= 2) {
+              logSse(
+                `tap.partSkip type=${part?.type} hasMsgId=${Boolean(part?.messageID)}`
+              );
             }
           }
         }
@@ -310,7 +396,15 @@ async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
     }
   })();
 
-  return { stop: () => ac.abort() };
+  return {
+    stop: () => {
+      ac.abort();
+      clearInterval(pollInterval);
+      logSse(
+        `tap.stop events=${counters.events} sessionMatches=${counters.sessionMatches} partUpdates=${counters.partUpdates} pollUpdates=${counters.pollUpdates} progressCalls=${counters.progressCalls}`
+      );
+    },
+  };
 }
 
 /** Normalize a per-target alias bucket to `{sessionId, instanceId}`.
@@ -340,17 +434,36 @@ function normalizeAliasBucket(raw) {
   return out;
 }
 
+function emptyAliasMap() {
+  return {
+    opencode: {},
+    local: {},
+    activeAliases: { opencode: null, local: null },
+  };
+}
+
+function normalizeActiveAlias(raw, bucket) {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  return raw in bucket ? raw : null;
+}
+
 function readAliases() {
   ensureDir();
-  if (!existsSync(ALIAS_PATH)) return { opencode: {}, local: {} };
+  if (!existsSync(ALIAS_PATH)) return emptyAliasMap();
   try {
     const parsed = JSON.parse(readFileSync(ALIAS_PATH, "utf8"));
+    const opencode = normalizeAliasBucket(parsed?.opencode);
+    const local = normalizeAliasBucket(parsed?.local);
     return {
-      opencode: normalizeAliasBucket(parsed?.opencode),
-      local: normalizeAliasBucket(parsed?.local),
+      opencode,
+      local,
+      activeAliases: {
+        opencode: normalizeActiveAlias(parsed?.activeAliases?.opencode, opencode),
+        local: normalizeActiveAlias(parsed?.activeAliases?.local, local),
+      },
     };
   } catch {
-    return { opencode: {}, local: {} };
+    return emptyAliasMap();
   }
 }
 
@@ -585,13 +698,93 @@ export async function handleAsk(args) {
 
   const instanceId = typeof args?.instance_id === "string" ? args.instance_id : null;
 
+  // Resolve session: explicit alias wins, else fall back to the active
+  // alias the EH menu tracks for this target. Lets callers omit
+  // `session` and dispatch through whatever the user has marked active
+  // in the widget.
+  let resolvedAlias = sessionAlias;
+  if (resolvedAlias === null) {
+    const aliasMap = readAliases();
+    const active = aliasMap.activeAliases?.[target] ?? null;
+    if (active && aliasMap[target]?.[active]) {
+      resolvedAlias = active;
+    }
+  }
+
+  // Codex-flow auto-create: caller omitted `session` and no active
+  // alias is set. Spawn a fresh opencode session, persist it as the
+  // new active alias, and continue into the session-attached path
+  // below. Subsequent dispatches reuse the same alias until the user
+  // resets or deletes via the EH menu. Without this, a RESET from the
+  // menu would leave the next prompt unable to dispatch (the session-
+  // attached branch errors on a missing alias).
+  if (sessionAlias === null && resolvedAlias === null) {
+    const serveUrl = readServeUrl();
+    if (serveUrl === null) {
+      return errorResult(
+        "opencode serve is not running. Enable OpenCode in WAT321 settings, then retry."
+      );
+    }
+    const targetKind = target === "local" ? "local" : "remote";
+    const autoInstance = findInstance(instanceId, targetKind);
+    if (target === "local" && !autoInstance) {
+      return errorResult(
+        "target=local requires a configured local catalog entry. Set Local Endpoint in WAT321 settings, then retry."
+      );
+    }
+    const body = {};
+    if (autoInstance?.model) {
+      body.model = {
+        id: autoInstance.model,
+        providerID: autoInstance.harnessProviderID || "zen",
+      };
+    }
+    try {
+      const res = await fetch(`${serveUrl}/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        return errorResult(
+          `Auto-create session failed: opencode serve returned ${res.status}.`
+        );
+      }
+      const data = await res.json();
+      const newSessionId = data?.id;
+      if (!newSessionId) {
+        return errorResult(
+          "Auto-create session failed: opencode serve returned no id."
+        );
+      }
+      const refreshed = readAliases();
+      refreshed[target] = refreshed[target] || {};
+      const newAlias = nextAlias(target);
+      refreshed[target][newAlias] = {
+        sessionId: newSessionId,
+        instanceId: autoInstance?.id ?? null,
+      };
+      refreshed.activeAliases = refreshed.activeAliases || {
+        opencode: null,
+        local: null,
+      };
+      refreshed.activeAliases[target] = newAlias;
+      writeAliases(refreshed);
+      resolvedAlias = newAlias;
+    } catch (err) {
+      return errorResult(
+        `Auto-create session failed: ${err?.message || String(err)}`
+      );
+    }
+  }
+
   // Session-attached path: lookup alias, POST to /session/{id}/message.
-  if (sessionAlias !== null) {
+  if (resolvedAlias !== null) {
     const map = readAliases();
-    const aliasEntry = map[target]?.[sessionAlias];
+    const aliasEntry = map[target]?.[resolvedAlias];
     if (!aliasEntry) {
       return errorResult(
-        `Session alias '${sessionAlias}' not found for target=${target}. Create it first via wat321_session({target:'${target}', action:'create'}).`
+        `Session alias '${resolvedAlias}' not found for target=${target}. Create it first via wat321_session({target:'${target}', action:'create'}).`
       );
     }
     const sessionId = aliasEntry.sessionId;
@@ -769,6 +962,11 @@ export async function handleSession(args) {
       const alias = nextAlias(target);
       map[target] = map[target] || {};
       map[target][alias] = { sessionId, instanceId: instance?.id ?? null };
+      // Mark new session as the active alias so the EH menu's CURRENT
+      // row reflects what was just created without needing the user
+      // to switch manually.
+      map.activeAliases = map.activeAliases || { opencode: null, local: null };
+      map.activeAliases[target] = alias;
       writeAliases(map);
       const modelLabel = instance?.alias || data?.model?.id || "default model";
       const displayName = formatSessionDisplayName(target, alias);
@@ -796,6 +994,12 @@ export async function handleSession(args) {
     if (action === "delete") {
       const sessionId = map[target][alias]?.sessionId;
       delete map[target][alias];
+      // Clear active if we just deleted it; next dispatch falls back
+      // to "create on first use" when the menu's CURRENT row is blank.
+      map.activeAliases = map.activeAliases || { opencode: null, local: null };
+      if (map.activeAliases[target] === alias) {
+        map.activeAliases[target] = null;
+      }
       writeAliases(map);
       return {
         content: [
@@ -816,6 +1020,10 @@ export async function handleSession(args) {
     }
     map[target][newName] = map[target][alias];
     delete map[target][alias];
+    map.activeAliases = map.activeAliases || { opencode: null, local: null };
+    if (map.activeAliases[target] === alias) {
+      map.activeAliases[target] = newName;
+    }
     writeAliases(map);
     return {
       content: [{ type: "text", text: `Renamed ${alias} -> ${newName}.` }],
