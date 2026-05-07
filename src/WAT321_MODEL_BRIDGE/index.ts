@@ -4,11 +4,10 @@ import {
   isConfigInstallable,
   readConfigFromSettings,
   writeConfigFile,
-  type ModelBridgeConfig,
 } from "./config";
 import { MODEL_BRIDGE_DIR } from "./constants";
 import { uninstallModelBridge } from "./installer";
-import { createModelBridgeLogger, type ModelBridgeLogger } from "./outputChannel";
+import { createModelBridgeLogger } from "./outputChannel";
 import { createOpenCodeManager } from "./openCodeManager";
 import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
 import { createModelBridgeStatusBarItem } from "./statusBarItem";
@@ -93,11 +92,13 @@ export function activateModelBridge(
     lastInstallable = installable;
     everReconciled = true;
 
-    if (installable) {
-      await reconcileInstall(context, config, logger);
-    } else {
-      await uninstallModelBridge(logger);
-    }
+    // The legacy `wat321-model-bridge` MCP entry was retired in
+    // v1.4.x in favor of the unified `wat321` server installed by the
+    // bridge tier on Epic Handshake enable. Both branches sweep any
+    // stale legacy registration; opencode serve + click-menu state
+    // continue regardless because the unified handlers depend on them.
+    void installable;
+    await uninstallModelBridge(logger);
   };
 
   // Apply once at activate so the config file exists before
@@ -204,20 +205,3 @@ export function activateModelBridge(
   };
 }
 
-/** Install the MCP entry. Skips registration when the `claude` CLI is
- * not available - the user can configure Model Bridge settings before
- * installing Claude Code, in which case the bridge silently waits
- * until both are present. */
-async function reconcileInstall(
-  _context: vscode.ExtensionContext,
-  _config: ModelBridgeConfig,
-  logger: ModelBridgeLogger
-): Promise<void> {
-  // The legacy `wat321-model-bridge` MCP entry is retired - everything
-  // flows through the unified `wat321` server installed by the bridge
-  // tier on Epic Handshake enable. This tier's reconcileInstall now
-  // exists only to sweep any stale legacy entry from prior installs;
-  // the opencode serve subprocess and click-menu state continue to
-  // run regardless because the unified handlers depend on them.
-  await uninstallModelBridge(logger);
-}
