@@ -71,9 +71,12 @@ export async function deleteCurrentCodexSession(
 
   const sessionName = bridgeThreadDisplayName(workspacePath, record.sessionCounter);
   const confirmation = await vscode.window.showWarningMessage(
-    `Permanently delete Codex session "${sessionName}"? This removes the rollout file and strips the entry from Codex's session index. The conversation history will be lost. Next Claude to Codex prompt spawns a fresh S${record.sessionCounter + 1}.`,
-    "Delete",
-    "Cancel"
+    `Delete Codex session "${sessionName}"?`,
+    {
+      modal: true,
+      detail: `Removes the rollout file and strips the entry from Codex's session index. Conversation history will be lost. Next Claude-to-Codex prompt spawns a fresh S${record.sessionCounter + 1}.`,
+    },
+    "Delete"
   );
   if (confirmation !== "Delete") return;
 
@@ -301,9 +304,12 @@ export async function deleteAllCodexSessions(
   }
 
   const confirmation = await vscode.window.showWarningMessage(
-    `Permanently delete ALL ${sessions.length} Codex bridge session${sessions.length === 1 ? "" : "s"} for this workspace? This removes every rollout file and strips the matching entries from Codex's session index. Sessions: ${sessions.map((s) => s.displayName).join(", ")}.`,
-    "Delete All",
-    "Cancel"
+    `Delete ALL ${sessions.length} Codex bridge session${sessions.length === 1 ? "" : "s"} for this workspace?`,
+    {
+      modal: true,
+      detail: `Removes every rollout file and strips matching entries from Codex's session index.\n\nSessions: ${sessions.map((s) => s.displayName).join(", ")}`,
+    },
+    "Delete All"
   );
   if (confirmation !== "Delete All") return;
 

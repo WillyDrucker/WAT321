@@ -179,29 +179,45 @@ export async function showSessionsSubmenu(opts: {
     action: "codex-defaults",
   };
 
+  // CURRENT CODEX SESSION row. Labels show the active S# when one
+  // exists, else "Created on next prompt to Codex". Click opens the
+  // existing recover-session picker so the user can switch among
+  // recoverable sessions; that subpicker subsumes the old standalone
+  // RECOVER row.
+  const currentRecord =
+    opts.ws !== null ? loadBridgeThreadRecord(opts.ws) : null;
+  const currentCounter =
+    currentRecord !== null && currentRecord.threadId !== null
+      ? currentRecord.sessionCounter
+      : null;
+  const currentSessionLabel =
+    currentCounter !== null
+      ? `Epic Handshake Claude-to-Codex S${currentCounter}`
+      : "Created on next prompt to Codex";
+  const currentItem: Item = {
+    label: `CURRENT CODEX SESSION: ${currentSessionLabel}`,
+    iconPath: new vscode.ThemeIcon("history"),
+    action: "recover",
+  };
+
   const resetItem: Item = {
     label: "RESET CODEX SESSION",
-    description: "Fresh session on next prompt.",
-    detail: "Keeps the old Codex session visible in Codex's own history.",
     iconPath: new vscode.ThemeIcon("refresh"),
     action: "reset",
   };
 
-  const deleteItem: Item = {
-    label: "DELETE CODEX SESSION",
-    description: "Removes the active session.",
-    detail:
-      "Removes and deletes the currently active \"Epic Handshake\" session. Next prompt spawns a fresh session.",
-    iconPath: new vscode.ThemeIcon("trash"),
-    action: "delete",
-  };
+  const deleteItem: Item | null = currentCounter !== null
+    ? {
+        label: `DELETE CODEX SESSION (S${currentCounter})`,
+        detail:
+          "Deletes the currently active \"Epic Handshake\" session. Next prompt spawns a fresh session.",
+        iconPath: new vscode.ThemeIcon("trash"),
+        action: "delete",
+      }
+    : null;
 
   const deleteAllItem: Item = {
     label: `DELETE ALL CODEX SESSIONS (${opts.recoverable.length})`,
-    description:
-      opts.recoverable.length === 0
-        ? "Nothing to clear right now."
-        : "Removes every bridge session for this workspace.",
     detail:
       opts.recoverable.length === 0
         ? undefined
@@ -209,17 +225,6 @@ export async function showSessionsSubmenu(opts: {
     iconPath: new vscode.ThemeIcon("trash"),
     action: "delete-all",
   };
-
-  const recoverItem: Item | null =
-    opts.recoverable.length > 0
-      ? {
-          label: `RECOVER CODEX SESSION (${opts.recoverable.length})`,
-          description: "Reattach to a prior session.",
-          detail: "Reattach to a prior \"Epic Handshake\" session.",
-          iconPath: new vscode.ThemeIcon("history"),
-          action: "recover",
-        }
-      : null;
 
   // Repair surfaces sessions whose stored `session_meta.model` is not
   // in the local Codex models cache (drifted across a Codex CLI
@@ -248,10 +253,10 @@ export async function showSessionsSubmenu(opts: {
   const items: Item[] = [
     makeBackItem(),
     codexDefaultsItem,
+    currentItem,
     resetItem,
-    deleteItem,
+    ...(deleteItem ? [deleteItem] : []),
     deleteAllItem,
-    ...(recoverItem ? [recoverItem] : []),
     ...(repairItem ? [repairItem] : []),
     pauseItem,
     cancelItem,

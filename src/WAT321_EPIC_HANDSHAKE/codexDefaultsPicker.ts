@@ -37,7 +37,7 @@ function currentWsHash(): string {
 }
 
 /**
- * Combined "Codex Session Settings" picker - one entry point for all
+ * Combined "Codex Model Settings" picker - one entry point for all
  * three per-turn overrides the bridge passes on every `turn/start`:
  *   - sandbox  (Full-Access | Read-Only)
  *   - model    (any visibility=list slug from `models_cache.json`)
@@ -73,17 +73,17 @@ type DefaultsRow = vscode.QuickPickItem & {
   row: "model" | "effort" | "sandbox" | "back" | "pause" | "resume" | "cancel";
 };
 
-/** Headline for the "CODEX SESSION SETTINGS" row in the sessions
+/** Headline for the "CODEX MODEL SETTINGS" row in the sessions
  * submenu. Capitalized "Default" suffix when every override matches
- * the baseline; otherwise just "CODEX SESSION SETTINGS" so users can
+ * the baseline; otherwise just "CODEX MODEL SETTINGS" so users can
  * tell at a glance whether anything is overridden. */
 export function codexDefaultsHeadline(): string {
   return everythingAtDefault()
-    ? "CODEX SESSION SETTINGS: Default"
-    : "CODEX SESSION SETTINGS";
+    ? "CODEX MODEL SETTINGS: Default"
+    : "CODEX MODEL SETTINGS";
 }
 
-/** Sub-line for the "CODEX SESSION SETTINGS" row in the sessions
+/** Sub-line for the "CODEX MODEL SETTINGS" row in the sessions
  * submenu. Lowercase "sandbox · model · effort" with the live current
  * values. Lets the user verify what the bridge will send without
  * opening the picker. */
@@ -176,7 +176,7 @@ export async function showCodexDefaultsPicker(
 
     const pick = await withMenuLifecycle(() =>
       vscode.window.showQuickPick<DefaultsRow>(items, {
-        title: "Codex Session Settings",
+        title: "Codex Model Settings",
         placeHolder: "Pick a setting to change",
       })
     );
