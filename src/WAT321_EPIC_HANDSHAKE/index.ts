@@ -1,16 +1,9 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, unlinkSync } from "node:fs";
 import * as vscode from "vscode";
 import type { EventHub } from "../engine/eventHub";
 import { registerHealthSection } from "../engine/healthCommand";
 import { SETTING } from "../engine/settingsKeys";
-import {
-  peekResolvedClaudeCli,
-  peekResolvedCodexCli,
-  peekResolvedOpenCodeCli,
-  type ResolvedCli,
-} from "../shared/mcp/cliBinaryResolver";
+import { appendEpicHandshakeHealth } from "./epicHandshakeHealth";
 import {
   setBridgeActiveProbe,
   setRecentCodexCompletionConsumer,
@@ -27,7 +20,6 @@ import { CodexDispatcher } from "./codexDispatcher";
 import { registerEpicHandshakeCommands } from "./commandRegistration";
 import { LateReplyInboxCoordinator } from "./lateReplyInboxCoordinator";
 import {
-  EPIC_HANDSHAKE_DIR,
   inFlightFlagPath,
   PAUSED_FLAG_PATH,
   processingFlagPath,
@@ -48,7 +40,6 @@ import {
   createEpicHandshakeStatusBarItem,
   currentWaitMode,
 } from "./statusBarItem";
-import type { BridgeThreadRecord } from "./threadPersistence";
 import {
   clearBridgeRuntimeFlags,
   consumeRecentCodexCompletion,
@@ -232,10 +223,9 @@ class EpicHandshakeTier {
         // launch, not on every activation.
         return;
       }
-      // Adaptive is the only default at activate now. The user-facing
-      // `epicHandshake.defaultWaitMode` setting was removed in v1.4.1
-      // - the click menu still toggles between Adaptive and
-      // Fire-and-Forget at runtime, but the launch default is fixed.
+      // Adaptive is the fixed default at activate. The click menu still
+      // toggles between Adaptive and Fire-and-Forget at runtime, but the
+      // launch default is hardcoded - no user-facing setting.
       applyDefaultWaitMode("adaptive");
     } catch {
       // best-effort
@@ -578,112 +568,4 @@ export function activateEpicHandshake(
   };
 }
 
-/** Append Epic Handshake diagnostic lines to the health command
- * output. Called from `src/engine/healthCommand.ts`. Surfaces
- * per-workspace bridge state for debugging. */
-/** Synchronous `<cli> --version` probe with cache + tight ceiling.
- * Health output is rare enough that a 500ms blocking spawn per CLI
- * once per command invocation is acceptable; the cache keeps repeat
- * calls free. Returns the trimmed first line of stdout or null when
- * the binary cannot answer in time. Best-effort - any failure mode
- * leaves the version off the line, the resolved-source display
- * still renders. */
-const cliVersionCache = new Map<string, string | null>();
-function probeCliVersion(resolved: ResolvedCli): string | null {
-  const key = resolved.command;
-  if (cliVersionCache.has(key)) return cliVersionCache.get(key) ?? null;
-  let version: string | null = null;
-  try {
-    const r = spawnSync(resolved.command, ["--version"], {
-      encoding: "utf8",
-      timeout: 500,
-      windowsHide: true,
-      shell: resolved.needsShell,
-    });
-    if (r.status === 0 && typeof r.stdout === "string") {
-      const first = r.stdout.split(/\r?\n/)[0]?.trim() ?? "";
-      // CLIs vary: "1.14.39", "claude-code 2.1.128", "codex 0.124.0".
-      // Strip leading words to leave just the semver-ish suffix.
-      const match = first.match(/(\d+\.\d+\.\d+[\w.+-]*)/);
-      version = match ? match[1] : (first.length > 0 ? first.slice(0, 30) : null);
-    }
-  } catch {
-    // best-effort
-  }
-  cliVersionCache.set(key, version);
-  return version;
-}
-
-export function appendEpicHandshakeHealth(lines: string[]): void {
-  const enabled = vscode.workspace
-    .getConfiguration("wat321")
-    .get<boolean>(SETTING.epicHandshakeEnabled, false);
-  lines.push("");
-  lines.push("Epic Handshake");
-  lines.push("-".repeat(30));
-  lines.push(`  enabled: ${enabled}`);
-  lines.push("  architecture: sync MCP bridge (Claude -> Codex forward direction)");
-
-  // CLI binary resolution surface. Helps the user diagnose "where is
-  // my claude/codex coming from?" - especially relevant now that the
-  // bridge can fall back to the marketplace extension's bundled binary
-  // when nothing is on PATH. peek* returns undefined when no probe has
-  // run yet (rare in practice; isClaudeAvailable runs at activate).
-  const claude = peekResolvedClaudeCli();
-  const codex = peekResolvedCodexCli();
-  const opencode = peekResolvedOpenCodeCli();
-  const renderResolved = (label: string, r: ResolvedCli | null | undefined): string => {
-    if (r === undefined) return `  ${label}: not yet probed`;
-    if (r === null) return `  ${label}: not found (install Marketplace extension or standalone CLI)`;
-    const version = probeCliVersion(r);
-    const versionTag = version ? ` v${version}` : "";
-    return `  ${label}: ${r.source}${versionTag} (${r.command})`;
-  };
-  lines.push(renderResolved("claude CLI  ", claude));
-  lines.push(renderResolved("codex CLI   ", codex));
-  lines.push(renderResolved("opencode CLI", opencode));
-
-  if (!enabled) return;
-
-  // Scan bridge-thread records for all workspaces on this machine.
-  if (!existsSync(EPIC_HANDSHAKE_DIR)) {
-    lines.push("  state: no on-disk state yet (nothing dispatched)");
-    return;
-  }
-
-  let files: string[];
-  try {
-    files = readdirSync(EPIC_HANDSHAKE_DIR).filter(
-      (f) => f.startsWith("bridge-thread.") && f.endsWith(".json")
-    );
-  } catch {
-    lines.push("  state: unreadable");
-    return;
-  }
-
-  if (files.length === 0) {
-    lines.push("  state: no bridge threads yet");
-    return;
-  }
-
-  for (const f of files) {
-    try {
-      const raw = readFileSync(join(EPIC_HANDSHAKE_DIR, f), "utf8");
-      const rec = JSON.parse(raw) as BridgeThreadRecord;
-      lines.push(`  workspace:     ${rec.workspacePath}`);
-      lines.push(`    session:     S${rec.sessionCounter}${rec.threadId !== null ? ` (${rec.threadId.slice(0, 8)}...)` : " (null - fresh on next prompt)"}`);
-      if (rec.lastSuccessAt) {
-        lines.push(`    lastSuccess: ${new Date(rec.lastSuccessAt).toLocaleString()}`);
-      }
-      if ((rec.consecutiveFailures ?? 0) > 0) {
-        lines.push(`    failures:    ${rec.consecutiveFailures} consecutive`);
-        lines.push(`    lastError:   ${rec.lastError ?? "(unknown)"}`);
-      }
-      if (rec.lastResetAt) {
-        lines.push(`    lastReset:   ${new Date(rec.lastResetAt).toLocaleString()}`);
-      }
-    } catch {
-      lines.push(`  workspace: ${f} unreadable`);
-    }
-  }
-}
+export { appendEpicHandshakeHealth };

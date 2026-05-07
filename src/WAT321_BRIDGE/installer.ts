@@ -36,10 +36,9 @@ const UNIFIED_MCP_NAME = "wat321";
 const LEGACY_MCP_NAMES = ["wat321", "wat321-model-bridge"] as const;
 const SCRIPT_FILES = ["channel.mjs", "codex.mjs", "opencode.mjs"] as const;
 
-// Tool surface after the v1.4.3 router refactor: just dispatch +
-// session lifecycle. Inbox / list moved to MCP resources, which
-// don't need pre-allowance because resources/read is a different
-// permission surface than tool calls.
+// Tool surface: dispatch + session lifecycle. Inbox / list moved to
+// MCP resources, which don't need pre-allowance because resources/read
+// is a different permission surface than tool calls.
 const UNIFIED_ALLOWED_TOOLS = [
   "mcp__wat321__wat321_ask",
   "mcp__wat321__wat321_session",

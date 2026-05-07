@@ -5,6 +5,28 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-05-07
+
+### Added
+
+- **Live tokens-per-second now reads sensibly across all four backends.** Earlier versions could spike to 999/s on the first prompt of a Claude or Codex session, sag toward zero during idle gaps between prompts, and run uncapped on Local LLM (capped at 15000+ in the field). The widget now smooths the rate over the last 60 seconds of actual writes - idle wall-clock no longer drags the average, the first sample-pair after a session starts no longer spikes, and every backend caps at the same 999/s ceiling.
+- **Per-workspace bridge activity.** When two VS Code windows had the bridge enabled, asking a question in one window used to light up the icons in both. Each window now watches its own workspace's heartbeat file, so a sibling window stays dark while you work.
+
+### Changed
+
+- **Backend menus polished.** The dropdown rows now read "Manage Codex (S#)" / "Manage OpenCode (S#)" / "Manage Local LLM (S#)" - no more "Sessions" suffix on the row label, the "(S#)" suffix carries the active count. Inside each submenu, the session row reads simply as "Codex Session:" / "OpenCode Session:" / "Local LLM Session:" - the "Current" prefix is gone since the active session is now marked with a green check (✔️) wherever it appears in switch sub-pickers and model pickers. Reset / Delete / Delete All rows recovered their inline descriptions ("Fresh session on next prompt." etc.) that got trimmed too aggressively in the last release.
+- **Back / Pause / Cancel on every sub-picker.** OpenCode and Local LLM switch sub-pickers (the "Pick a session to mark active" picker) gained the standard navigation footer, matching the Codex side. The legacy Model Bridge active-instance picker got the same treatment.
+- **Status bar icons render at the right size now.** The llama, OpenCode, and the wat321 square family all carried unused padding inside their viewBox, so the icon-font generator scaled the visible glyph 20-25% smaller than peer codicons. Source files were tightened to the actual content bounds; codepoints stay stable.
+- **Tokens-per-second poll cadence dropped from 5 seconds to 3 seconds** for a more responsive readout during active turns. Detection is event-driven (fs.watch) so the change adds essentially no overhead.
+
+### Fixed
+
+- **Local LLM tps was reading character count instead of tokens.** SSE text part-update lengths are character counts; the bridge was forwarding them as tokens with no conversion, so the widget read roughly 4x higher than what Claude or Codex would show for equivalent output. The bridge now approximates `chars / 4` to match the magnitude the transcript-based widgets report.
+- **Stale references to retired Model Bridge tools** removed from the Model Bridge widget's click-menu strings. The harness toggle, manage-sessions row, auto-compact row, and default-agent row described `model_bridge_thread` / `model_bridge_task` tools that no longer exist; wording is now generic harness language.
+- **Tps no longer ghost-renders the pre-reset rate after a compaction.** A token rollback used to clear the sample window but kept the cached rate displayed until the new window aged in. Both clear together now.
+
+### Removed
+
 ## [1.4.5] - 2026-05-07
 
 ### Added

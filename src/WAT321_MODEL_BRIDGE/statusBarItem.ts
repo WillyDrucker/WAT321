@@ -1,9 +1,36 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
-import { CONFIG_PATH, HEARTBEAT_PATH, LAST_USED_PATH, USAGE_PATH } from "./constants";
+import {
+  CONFIG_PATH,
+  LAST_USED_PATH,
+  MODEL_BRIDGE_DIR,
+  USAGE_PATH,
+} from "./constants";
 import type { ModelBridgeLogger } from "./outputChannel";
 import { showModelBridgeMenu, showModelBridgeSessions } from "./statusBarMenu";
+
+/** Per-workspace heartbeat path. Mirrors the hash compute in
+ * `src/WAT321_BRIDGE/bin/opencode.mjs:WORKSPACE_HASH` so the writer
+ * (channel-side) and the reader (widget-side) land on the same file.
+ * Without partitioning, two VS Code windows with the bridge enabled
+ * would both light up "calling" state when only one workspace's
+ * Claude Code session actually fired the prompt. */
+function currentWorkspaceHash(): string | null {
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) return null;
+  return createHash("sha256")
+    .update(ws.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase(), "utf8")
+    .digest("hex")
+    .slice(0, 16);
+}
+function mbHeartbeatPath(): string | null {
+  const wsHash = currentWorkspaceHash();
+  if (!wsHash) return null;
+  return join(MODEL_BRIDGE_DIR, `heartbeat.${wsHash}.json`);
+}
 
 /**
  * Model Bridge status bar widget. Renders to the right of the Codex
@@ -16,8 +43,8 @@ import { showModelBridgeMenu, showModelBridgeSessions } from "./statusBarMenu";
  *               1 Hz
  *   stale     - heartbeat older than 1.5x timeout, falls back to idle
  *
- * Heartbeat at `~/.wat321/model-bridge/heartbeat.json` is the single
- * source of truth for live state. Active instance + retention come
+ * Heartbeat at `~/.wat321/model-bridge/heartbeat.<wshash>.json` is the
+ * single source of truth for live state. Active instance + retention come
  * from `~/.wat321/model-bridge/config.json` (written by the
  * extension's settings + secrets watchers). Both reads are cheap
  * synchronous JSON parses, so the 1Hz refresh loop stays in the main
@@ -67,9 +94,10 @@ interface ConfigSnapshot {
 }
 
 function readHeartbeat(): Heartbeat | null {
-  if (!existsSync(HEARTBEAT_PATH)) return null;
+  const path = mbHeartbeatPath();
+  if (!path || !existsSync(path)) return null;
   try {
-    const raw = readFileSync(HEARTBEAT_PATH, "utf8").trim();
+    const raw = readFileSync(path, "utf8").trim();
     if (raw.length === 0) return null;
     const parsed = JSON.parse(raw) as Heartbeat;
     if (typeof parsed?.startedAt !== "string") return null;

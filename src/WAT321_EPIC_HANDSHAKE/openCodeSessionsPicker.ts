@@ -146,13 +146,13 @@ interface TargetConfig {
 
 const TARGET_CONFIGS: Record<SessionTarget, TargetConfig> = {
   opencode: {
-    title: "Manage OpenCode Sessions",
+    title: "Manage OpenCode",
     instanceKind: "remote",
     fallbackInstanceId: "big-pickle",
     emptyHint: "No OpenCode sessions yet. The next prompt creates one.",
   },
   local: {
-    title: "Manage Local LLM Sessions",
+    title: "Manage Local LLM",
     instanceKind: "local",
     fallbackInstanceId: "local-llm",
     emptyHint:
@@ -226,16 +226,20 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
   const modelRow: PickerRow = {
     rowKind: "model",
     label: modelRowLabel,
+    description:
+      target === "local"
+        ? "Click to open Local Endpoint settings."
+        : "Click to change model.",
     iconPath: new vscode.ThemeIcon(
       target === "local" ? "settings-gear" : "symbol-method"
     ),
   };
 
-  // CURRENT SESSION row. Mirrors Codex's row exactly: shows the active
-  // alias' display name, or the "Created on next prompt to ..." hint
-  // when nothing is active. Click opens the switch sub-picker (when
-  // multiple aliases exist) or shows a hint toast when only the
-  // active one exists.
+  // SESSION row. Mirrors Codex's row exactly: shows the active alias'
+  // display name, or the "Created on next prompt to ..." hint when
+  // nothing is active. Click opens the switch sub-picker (when multiple
+  // aliases exist) or shows a hint toast when only the active one
+  // exists. Active row in the sub-picker carries a green check.
   const toolDisplay = target === "local" ? "Local" : "OpenCode";
   const toolUpper = target === "local" ? "LOCAL LLM" : "OPENCODE";
   const currentLabel =
@@ -244,13 +248,15 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
       : `Created on next prompt to ${toolDisplay}`;
   const currentRow: PickerRow = {
     rowKind: "current",
-    label: `CURRENT ${toolUpper} SESSION: ${currentLabel}`,
+    label: `${toolUpper} SESSION: ${currentLabel}`,
     iconPath: new vscode.ThemeIcon("history"),
   };
 
   const resetRow: PickerRow = {
     rowKind: "reset",
     label: `RESET ${toolUpper} SESSION`,
+    description: "Fresh session on next prompt.",
+    detail: `Keeps past ${toolDisplay} sessions in the alias bucket.`,
     iconPath: new vscode.ThemeIcon("refresh"),
   };
 
@@ -264,9 +270,10 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
       activeAlias !== null
         ? `DELETE ${toolUpper} SESSION (${activeAlias})`
         : `DELETE ${toolUpper} SESSION`,
+    description: "Remove the active session.",
     detail:
       activeAlias !== null
-        ? `Deletes the currently active "Epic Handshake" session. Next prompt spawns a fresh session.`
+        ? `Deletes the currently active "Epic Handshake" session. Fresh session on next prompt.`
         : undefined,
     iconPath: new vscode.ThemeIcon("trash"),
   };
@@ -274,10 +281,11 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
   const deleteAllRow: PickerRow = {
     rowKind: "delete-all",
     label: `DELETE ALL ${toolUpper} SESSIONS (${bucketSize})`,
-    detail:
+    description:
       bucketSize === 0
-        ? undefined
-        : `Deletes all "Epic Handshake" sessions for this project. Next prompt spawns a fresh session.`,
+        ? "Nothing to clear right now."
+        : "Removes every bridge session for this workspace.",
+    detail: bucketSize === 0 ? undefined : "Fresh session on next prompt.",
     iconPath: new vscode.ThemeIcon("trash"),
   };
 
@@ -341,7 +349,11 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
       );
       return showSessionsPicker(target);
     }
-    const aliasOptions = Object.entries(targetAliases).map(
+    interface SwitchRow extends vscode.QuickPickItem {
+      rowType: "session" | "back" | "pause" | "resume" | "cancel";
+      alias?: string;
+    }
+    const aliasRows: SwitchRow[] = Object.entries(targetAliases).map(
       ([alias, entry]) => {
         const meta = metaById.get(entry.sessionId);
         const boundInstance = entry.instanceId
@@ -353,23 +365,48 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
         const display = formatSessionDisplayName(target, alias);
         const isActive = alias === activeAlias;
         return {
-          label: `${display}${isActive ? "  (current)" : ""}`,
+          rowType: "session",
+          label: `${isActive ? "✔️ " : ""}${display}`,
           description: `${modelHint}${ageLabel ? `  -  ${ageLabel}` : ""}`,
           alias,
         };
       }
     );
-    const switchPick = await vscode.window.showQuickPick(aliasOptions, {
-      title: `Switch ${toolDisplay} session`,
-      placeHolder: "Pick a session to mark active",
-    });
-    if (!switchPick?.alias) return showSessionsPicker(target);
-    if (switchPick.alias !== activeAlias) {
-      aliases.activeAliases[target] = switchPick.alias;
-      writeAliases(ALIAS_PATH, aliases);
-      void vscode.window.showInformationMessage(
-        `Active ${toolDisplay} session: ${formatSessionDisplayName(target, switchPick.alias)}.`
-      );
+    const subPause = makePauseResumeItem(paused, false);
+    const switchItems: SwitchRow[] = [
+      { ...makeBackItem(), rowType: "back" },
+      ...aliasRows,
+      {
+        ...subPause,
+        rowType: subPause.action === "resume" ? "resume" : "pause",
+      },
+      { ...makeCancelItem(false), rowType: "cancel" },
+    ];
+    const switchPick = await vscode.window.showQuickPick<SwitchRow>(
+      switchItems,
+      {
+        title: `Switch ${toolDisplay} session`,
+        placeHolder: "Pick a session to mark active",
+      }
+    );
+    if (!switchPick || switchPick.rowType === "cancel") return;
+    if (switchPick.rowType === "back") return showSessionsPicker(target);
+    if (switchPick.rowType === "pause") {
+      setPaused(true);
+      return;
+    }
+    if (switchPick.rowType === "resume") {
+      setPaused(false);
+      return showSessionsPicker(target);
+    }
+    if (switchPick.rowType === "session" && switchPick.alias !== undefined) {
+      if (switchPick.alias !== activeAlias) {
+        aliases.activeAliases[target] = switchPick.alias;
+        writeAliases(ALIAS_PATH, aliases);
+        void vscode.window.showInformationMessage(
+          `Active ${toolDisplay} session: ${formatSessionDisplayName(target, switchPick.alias)}.`
+        );
+      }
     }
     return showSessionsPicker(target);
   }

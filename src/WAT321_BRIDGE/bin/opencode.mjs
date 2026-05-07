@@ -32,13 +32,30 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
 const ALIAS_PATH = join(BRIDGE_DIR, "session-aliases.json");
 const MB_DIR = join(homedir(), ".wat321", "model-bridge");
 const MB_CONFIG_PATH = join(MB_DIR, "config.json");
 const CHANNEL_LOG_PATH = join(BRIDGE_DIR, "channel.log");
+
+// Workspace identity for the dispatch heartbeat. Two VS Code instances
+// running the bridge concurrently would otherwise watch the same
+// global heartbeat.json and both light up "calling" state when only
+// one workspace's Claude Code session actually fired the prompt.
+// Writing per-workspace partitions activity so each window only reacts
+// to its own dispatches. Mirrors `src/WAT321_EPIC_HANDSHAKE/
+// workspaceHash.ts`; channel.mjs computes the same hash for inbox /
+// sent partitioning.
+const WORKSPACE_PATH = process.env.WAT321_WORKSPACE_PATH || process.cwd();
+const WORKSPACE_HASH = createHash("sha256")
+  .update(
+    WORKSPACE_PATH.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase(),
+    "utf8"
+  )
+  .digest("hex")
+  .slice(0, 16);
 
 /** Append a structured trace line to the bridge's channel log. Used to
  * diagnose SSE-tap failures (the live token/tps fall back to elapsed-
@@ -57,13 +74,14 @@ function logSse(message) {
   }
 }
 
-// Cross-tier heartbeat write: the Model Bridge widget reads
-// `~/.wat321/model-bridge/heartbeat.json` to render live "calling"
-// state during dispatches. The unified bridge owns the actual call
-// path now, so it has to write to the path the existing widget
-// monitors. Keeps the widget code unchanged while routing all bridge
-// traffic through the unified server.
-const MB_HEARTBEAT_PATH = join(MB_DIR, "heartbeat.json");
+// Cross-tier heartbeat write: the Model Bridge + Epic Handshake
+// widgets read `~/.wat321/model-bridge/heartbeat.<wshash>.json` to
+// render live "calling" state during dispatches. Per-workspace
+// partition keeps a sibling VS Code window from lighting up when this
+// workspace's Claude Code session fires a prompt - each window watches
+// only its own hash. Reset WAT321 sweeps any leftover unhashed
+// `heartbeat.json` from earlier installs.
+const MB_HEARTBEAT_PATH = join(MB_DIR, `heartbeat.${WORKSPACE_HASH}.json`);
 // Sidecar that the MB widget consults AFTER heartbeat clears. Lets
 // the widget render the last-dispatched instance's alias + retention
 // even when nothing is currently in flight, so a user who just hit
@@ -172,16 +190,58 @@ function writeMbLastUsed(meta) {
  * state past the dispatch. */
 async function withMbHeartbeat(meta, runDispatch) {
   const startedAt = new Date().toISOString();
-  const startedMs = Date.now();
   const requestId = randomUUID();
   // Live progress closure variables. The SSE tap (see
   // tapOpenCodeEvents) calls updateProgress(charCount) on every
   // assistant text update; subsequent writeBeat calls pick up the
-  // new token count. Char count is used as a token-count proxy so
-  // the widget reads non-zero tokens during the blocking POST and
-  // shows live tps instead of falling back to seconds-elapsed.
+  // new token estimate. Approximate ~4 chars/token English so the
+  // widget reads in roughly the same token magnitude as Claude/Codex
+  // (which read real `usage.output_tokens` from transcripts) instead
+  // of inflating by 4x.
   let tokens = 0;
   let tokensPerSec = 0;
+  // Smoothed tps tracker - mirrors the windowed math in
+  // `src/shared/sessionTokens/tpsTracker.ts` (Claude/Codex side) so
+  // local LLM and OpenCode dispatches read in the same magnitude as
+  // Claude/Codex tps. Idle gaps reset the window so a tool-wait pause
+  // doesn't smear the rate. Min window age + min token delta block
+  // the first sample-pair from spiking when the first SSE chunk lands.
+  // Capped at TPS_MAX so a runaway estimate never escapes the widget.
+  const TPS_MAX = 999;
+  const TPS_WINDOW_MS = 60_000;
+  const TPS_IDLE_GAP_MS = 10_000;
+  const TPS_MIN_WINDOW_AGE_MS = 5_000;
+  const TPS_MIN_TOKEN_DELTA = 5;
+  const tpsSamples = [];
+  let tpsLastValue = 0;
+  const computeTps = (atMs, totalTokens) => {
+    const last = tpsSamples[tpsSamples.length - 1];
+    if (last !== undefined && totalTokens < last.tokens) {
+      tpsSamples.length = 0;
+    } else if (last !== undefined && atMs - last.atMs > TPS_IDLE_GAP_MS) {
+      tpsSamples.length = 0;
+    } else if (
+      last !== undefined &&
+      atMs === last.atMs &&
+      totalTokens === last.tokens
+    ) {
+      return tpsLastValue;
+    }
+    tpsSamples.push({ atMs, tokens: totalTokens });
+    const cutoff = atMs - TPS_WINDOW_MS;
+    while (tpsSamples.length > 1 && tpsSamples[0].atMs < cutoff) {
+      tpsSamples.shift();
+    }
+    if (tpsSamples.length < 2) return tpsLastValue;
+    const oldest = tpsSamples[0];
+    const newest = tpsSamples[tpsSamples.length - 1];
+    const tokenDelta = newest.tokens - oldest.tokens;
+    const timeDeltaMs = newest.atMs - oldest.atMs;
+    if (timeDeltaMs < TPS_MIN_WINDOW_AGE_MS) return tpsLastValue;
+    if (tokenDelta < TPS_MIN_TOKEN_DELTA) return tpsLastValue;
+    tpsLastValue = Math.min(TPS_MAX, (tokenDelta / timeDeltaMs) * 1000);
+    return tpsLastValue;
+  };
   const writeBeat = () => {
     writeMbHeartbeat({
       phase: "calling",
@@ -200,9 +260,9 @@ async function withMbHeartbeat(meta, runDispatch) {
   };
   const updateProgress = (charCount) => {
     if (typeof charCount !== "number" || charCount < 0) return;
-    tokens = charCount;
-    const elapsedSec = Math.max(0.001, (Date.now() - startedMs) / 1000);
-    tokensPerSec = Math.round(charCount / elapsedSec);
+    const approxTokens = Math.round(charCount / 4);
+    tokens = approxTokens;
+    tokensPerSec = Math.round(computeTps(Date.now(), approxTokens));
     writeBeat();
   };
   writeBeat();

@@ -16,6 +16,7 @@ import {
   SESSION_TOKEN_RESCAN_MS,
 } from "../shared/polling/constants";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
+import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
 import { classifyLastEntry } from "../shared/transcriptClassifier";
 import { parseFirstUserMessage, parseLastUsage, parseTurnInfo } from "./parsers";
 import {
@@ -36,30 +37,13 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
   private cachedSessionTitlePath = "";
   private cachedAutoCompactPct: number | null = null;
   private cachedAutoCompactTime = 0;
-  /** Per-session prior snapshot for TPS computation. Reset whenever
-   * the active sessionId changes (a new session starts the counter
-   * from scratch rather than carrying over a meaningless cross-session
-   * delta). The wall-clock gap uses transcript mtime, not poll time:
-   * mtime advances only on an actual write so a fast poll loop over a
-   * still file does not produce a divide-by-near-zero. */
-  /** Per-session rolling token snapshots for TPS computation. See
-   * the matching field in CodexSessionTokenService for the full
-   * rationale - cumulative contextUsed snapshots in a 60s window,
-   * slope = (newest - oldest) / elapsed. Switched from the older
-   * sample/pause-threshold approach because the prior
-   * version froze when the source field stopped advancing mid-turn
-   * and then capped at 999 on the boundary jump. */
-  private tpsPrevSessionId: string | null = null;
-  private tpsLastValue: number | null = null;
-  /** Rolling 60-second window of accepted (deltaTokens, deltaTimeMs)
-   * samples. Smoothed TPS = sum(tokens) / sum(time) * 1000 across
-   * the window, which de-noises poll-to-poll variation while still
-   * tracking real throughput changes. Samples whose individual gap
-   * exceeded TPS_PAUSE_THRESHOLD_MS are rejected (likely tool waits
-   * / bridge waits / idle reasoning gaps - including them would
-   * double-count a 10k-token tool-result flush as 333 TPS instead
-   * of recognizing it as a paused interval). */
-  private tpsSamples: Array<{ atMs: number; tokens: number }> = [];
+  /** Smoothed tokens-per-second tracker. Time axis is transcript mtime
+   * (not Date.now()) so idle stretches between writes contribute zero
+   * seconds to the denominator. See `shared/sessionTokens/tpsTracker.ts`
+   * for the windowing, idle-gap reset, and minimum-age guards that
+   * keep first-prompt cache-creation step functions from spiking the
+   * counter to 999. */
+  private readonly tpsTracker = new TpsTracker();
 
   /** Watches ~/.claude/sessions/ for new/removed CLI process files.
    * Triggers an immediate poll so new sessions are detected instantly
@@ -271,7 +255,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       usage.cacheReadTokens +
       usage.outputTokens;
 
-    const tokensPerSecond = this.computeTps(sessionId, contextUsed);
+    const tokensPerSecond = this.tpsTracker.add(sessionId, mtime, contextUsed);
 
     this.emitOk({
       sessionId,
@@ -292,44 +276,4 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     });
   }
 
-  /** "Average tokens-per-second over the last 60s of activity" via
-   * cumulative-token snapshots. See the matching method in
-   * CodexSessionTokenService for the full rationale; both providers
-   * share the same shape. */
-  private computeTps(sessionId: string, totalTokens: number): number | null {
-    const TPS_MAX = 999;
-    const TPS_WINDOW_MS = 60_000;
-
-    if (sessionId !== this.tpsPrevSessionId) {
-      this.tpsPrevSessionId = sessionId;
-      this.tpsLastValue = null;
-      this.tpsSamples = [];
-    }
-
-    const now = Date.now();
-    if (
-      this.tpsSamples.length > 0 &&
-      totalTokens < this.tpsSamples[this.tpsSamples.length - 1].tokens
-    ) {
-      this.tpsSamples = [];
-      this.tpsLastValue = null;
-    }
-
-    this.tpsSamples.push({ atMs: now, tokens: totalTokens });
-    const cutoff = now - TPS_WINDOW_MS;
-    while (this.tpsSamples.length > 1 && this.tpsSamples[0].atMs < cutoff) {
-      this.tpsSamples.shift();
-    }
-
-    if (this.tpsSamples.length < 2) return this.tpsLastValue;
-
-    const oldest = this.tpsSamples[0];
-    const newest = this.tpsSamples[this.tpsSamples.length - 1];
-    const tokenDelta = newest.tokens - oldest.tokens;
-    const timeDeltaMs = newest.atMs - oldest.atMs;
-    if (timeDeltaMs <= 0 || tokenDelta <= 0) return this.tpsLastValue;
-
-    this.tpsLastValue = Math.min(TPS_MAX, (tokenDelta / timeDeltaMs) * 1000);
-    return this.tpsLastValue;
-  }
 }
