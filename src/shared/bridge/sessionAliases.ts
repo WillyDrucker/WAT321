@@ -15,7 +15,7 @@ import { writeFileAtomic } from "../fs/atomicWrite";
  * between sessions. OpenCode's session storage pins the model
  * server-side, so the alias-side instanceId mirrors that truth.
  *
- * Legacy normalization: pre-v1.4.4 alias files stored bare session-id
+ * Legacy normalization: alias files used to store bare session-id
  * strings instead of `{sessionId, instanceId}` objects. `readAliases`
  * normalizes string-form entries to `{sessionId, instanceId: null}`
  * on read so existing users don't lose sessions on upgrade. Null

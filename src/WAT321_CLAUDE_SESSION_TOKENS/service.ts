@@ -46,7 +46,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
    * the matching field in CodexSessionTokenService for the full
    * rationale - cumulative contextUsed snapshots in a 60s window,
    * slope = (newest - oldest) / elapsed. Switched from the older
-   * sample/pause-threshold approach in v1.4.4 because the prior
+   * sample/pause-threshold approach because the prior
    * version froze when the source field stopped advancing mid-turn
    * and then capped at 999 on the boundary jump. */
   private tpsPrevSessionId: string | null = null;

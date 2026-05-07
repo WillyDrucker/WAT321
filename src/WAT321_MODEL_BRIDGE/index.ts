@@ -65,7 +65,7 @@ export function activateModelBridge(
     const cfg = vscode.workspace.getConfiguration("wat321");
     const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
     const localEndpoint = cfg
-      .get<string>(SETTING.localEndpoint, "http://127.0.0.1:8080")
+      .get<string>(SETTING.localEndpoint, "")
       .trim()
       .replace(/\/+$/, "");
     const zenKey = (await readSecret(context, ZEN_API_KEY_SECRET)) ?? "";

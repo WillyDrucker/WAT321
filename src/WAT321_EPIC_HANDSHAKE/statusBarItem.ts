@@ -364,8 +364,8 @@ export function createEpicHandshakeStatusBarItem(
       // earlier branches would have caught that). Drives the same
       // adaptive cycle the Codex flow uses, with the stage synthesized
       // from elapsed time since the MB heartbeat's startedAt. This is
-      // the v1.4.4 stop-gap until Phased Messaging gives us real
-      // SSE-to-stage transitions for OC/Local. Standard / fire-and-
+      // a stop-gap until Phased Messaging gives us real SSE-to-stage
+      // transitions for OC/Local. Standard / fire-and-
       // forget modes fall back to the classic outbound arrow cycle.
       const mb = readMbHeartbeatActivity();
       const elapsedMs = mb !== null ? Math.max(0, now - mb.startedAtMs) : 0;

@@ -5,7 +5,7 @@
  * (lifecycle in `src/WAT321_MODEL_BRIDGE/openCodeManager.ts`).
  * Sessions are owned by OpenCode itself - stored in
  * `~/.local/share/opencode/opencode.db` - and accessed via the REST
- * API verified during the v1.4.1 investigation:
+ * Endpoints used:
  *
  *   GET  /session                -> list all sessions
  *   POST /session                -> create new session, returns {id, slug, ...}
@@ -313,10 +313,10 @@ async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
   return { stop: () => ac.abort() };
 }
 
-/** Normalize a per-target alias bucket to the v1.4.4 shape:
- * `{sessionId, instanceId}`. Pre-v1.4.4 entries stored bare session-id
- * strings; those become `{sessionId, instanceId: null}` on read so
- * existing users keep their sessions through upgrade. Null instanceId
+/** Normalize a per-target alias bucket to `{sessionId, instanceId}`.
+ * Legacy entries stored bare session-id strings; those become
+ * `{sessionId, instanceId: null}` on read so existing users keep
+ * their sessions through upgrade. Null instanceId
  * means "unknown" - heartbeat callers fall back to the active instance
  * for those entries until the alias is recreated. */
 function normalizeAliasBucket(raw) {
@@ -401,10 +401,10 @@ function readInstances() {
 }
 
 /** Resolve a catalog instance by id, with an optional target-kind
- * filter applied to the active-instance fallback. The kind filter is
- * the v1.4.4 fix for the cross-kind bind bug: when target=opencode but
- * activeInstanceId pointed to a local-kind instance, an opencode
- * session was getting bound to Local LLM. Passing kind="remote" or
+ * filter applied to the active-instance fallback. Without the kind
+ * filter, an opencode session would inherit a local-kind active
+ * instance when activeInstanceId points there - opencode sessions
+ * end up bound to Local LLM by mistake. Passing kind="remote" or
  * kind="local" forces the fallback to skip a mismatched active
  * instance and pick one that fits the target. Explicit `id` lookups
  * skip the filter (callers asking for a specific instance know what
@@ -683,9 +683,9 @@ export async function handleAsk(args) {
 /** MCP resource backing `bridge://sessions/{target}` for target in
  * {opencode, local}. Returns the session alias map enriched with
  * standardized display names, the underlying session id, and the
- * bound catalog instance (model + alias) for sessions created in
- * v1.4.4 or later. Legacy entries created before instanceId tracking
- * report `instance: null`. Empty map = no active sessions. */
+ * bound catalog instance (model + alias) when the alias entry has
+ * a tracked instanceId. Legacy entries that pre-date instanceId
+ * tracking report `instance: null`. Empty map = no active sessions. */
 export async function listSessionsResource(target) {
   if (target !== "opencode" && target !== "local") {
     return { sessions: [], note: `Unknown target '${target}'.` };
@@ -714,10 +714,9 @@ export async function listSessionsResource(target) {
 }
 
 
-/** Handle `wat321_session({target, action, ...})`. Action enum
- * matches the v1.4.3 router-refactor schema: create / delete /
- * rename only. Listing moved to `bridge://sessions/{target}`
- * resource. */
+/** Handle `wat321_session({target, action, ...})`. Action enum is
+ * create / delete / rename only - listing moved to the
+ * `bridge://sessions/{target}` MCP resource. */
 export async function handleSession(args) {
   const target = args?.target;
   const action = args?.action;

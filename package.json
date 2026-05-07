@@ -83,8 +83,8 @@
         "title": "WAT321: Model Bridge - Show Output"
       },
       {
-        "command": "wat321.modelBridge.menu",
-        "title": "WAT321: Model Bridge - Menu"
+        "command": "wat321.modelBridge.legacyMenu",
+        "title": "WAT321: Model Bridge - Menu (legacy)"
       },
       {
         "command": "wat321.modelBridge.setZenApiKey",

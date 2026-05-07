@@ -163,7 +163,7 @@ const TARGET_CONFIGS: Record<SessionTarget, TargetConfig> = {
     instanceKind: "local",
     fallbackInstanceId: "local-llm",
     emptyHint:
-      "No local LLM sessions yet. Create one with NEW SESSION (requires modelBridge.localEndpoint set).",
+      "No local LLM sessions yet. Create one with NEW SESSION (requires Local Endpoint set in WAT321 settings).",
   },
 };
 

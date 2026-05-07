@@ -249,7 +249,7 @@ function buildTools(enabled) {
 }
 
 const server = new Server(
-  { name: "wat321", version: "1.4.3" },
+  { name: "wat321", version: "1.4.4" },
   { capabilities: { tools: {}, resources: {} } }
 );
 

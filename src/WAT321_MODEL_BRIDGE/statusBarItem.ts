@@ -255,9 +255,9 @@ export function createModelBridgeStatusBarItem(
   item.name = "Model Bridge";
   item.hide();
 
-  // v1.4.4+: tooltip-only widget. All session/instance management
-  // lives on the Epic Handshake dropdown (Manage OpenCode Sessions /
-  // Manage Local LLM Sessions). The legacy click-menu stays
+  // Tooltip-only widget. All session/instance management lives on
+  // the Epic Handshake dropdown (Manage OpenCode Sessions / Manage
+  // Local LLM Sessions). The legacy click-menu stays
   // registered as a command-palette entry only ('WAT321: Model
   // Bridge - Menu (legacy)') for the rare user who wants the old
   // shape; the widget itself never sets `item.command`.
