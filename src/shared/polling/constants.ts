@@ -9,11 +9,10 @@ export const POLL_INTERVAL_MS = 122_000;
 
 /** Session-token poll cadence (local file read, not an API call).
  * fs.watch in the base class fires instantly on JSONL appends so this
- * cadence is just the safety net for missed kernel notifications. 5s
- * keeps the floor responsive during active turns (TPS counter feels
- * live) without meaningful cost - one fs.stat() per provider per
- * window, kernel-cheap. */
-export const SESSION_TOKEN_POLL_MS = 5_000;
+ * cadence is just the safety net for missed kernel notifications. 3s
+ * keeps the TPS counter feeling live during active turns - one
+ * fs.stat() per provider per window, kernel-cheap. */
+export const SESSION_TOKEN_POLL_MS = 3_000;
 
 /** Fallback rescan cadence for session-token services - triggers a
  * full transcript rediscovery even when the path watcher hasn't

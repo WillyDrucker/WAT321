@@ -10,6 +10,7 @@ import {
 } from "../shared/polling/constants";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
+import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
 import {
   classifyCodexTurn,
   extractSessionId,
@@ -58,26 +59,15 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private cachedModelSlug: string | null = null;
   private cachedAutoCompactTokens: number | null = null;
   private cachedAutoCompactModel = "";
-  /** Per-session rolling token snapshots for TPS computation. Each
-   * sample records the cumulative `usage.tokens` (contextUsed) at a
-   * wall-clock instant. Rate = (newest.tokens - oldest.tokens) /
-   * (newest.atMs - oldest.atMs) over a 60s window.
-   *
-   * Why cumulative `usage.tokens` instead of `stageInfo.outputTokens`:
-   * outputTokens is parsed from the rollout's `last_token_usage`
-   * record, which OpenAI only writes at turn boundary. During a
-   * 30-second turn, outputTokens stays frozen at the previous turn's
-   * value, then jumps to the new total in a single tick - the old
-   * sample-and-pause-threshold approach would either miss the entire
-   * turn (no movement -> no samples) or take the boundary jump as
-   * a 5000-tokens-in-200ms burst and cap at 999. usage.tokens
-   * updates with every `event_msg.token_count` event mid-turn, so
-   * the rolling window sees real generation rate. Yes, contextUsed
-   * also grows from input + tool results, but over a 60s window
-   * those contributions are bounded and the noise is acceptable. */
-  private tpsPrevSessionId: string | null = null;
-  private tpsLastValue: number | null = null;
-  private tpsSamples: Array<{ atMs: number; tokens: number }> = [];
+  /** Smoothed tokens-per-second tracker. Time axis is rollout mtime
+   * (not Date.now()) so idle stretches between writes contribute zero
+   * seconds to the denominator. Source is cumulative `usage.tokens`
+   * because Codex updates that field on every mid-turn `token_count`
+   * event - `stageInfo.outputTokens` only refreshes at turn boundary
+   * and would either miss the entire turn or jump in one tick. See
+   * `shared/sessionTokens/tpsTracker.ts` for the windowing, idle-gap
+   * reset, and minimum-age guards. */
+  private readonly tpsTracker = new TpsTracker();
 
   constructor(workspacePath: string) {
     super(
@@ -226,7 +216,11 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     }
 
     const stageInfo = parseStageInfo(tail);
-    const tokensPerSecond = this.computeTps(sessionId, usage.tokens);
+    const tokensPerSecond = this.tpsTracker.add(
+      sessionId,
+      rolloutMtime,
+      usage.tokens
+    );
 
     this.emitOk({
       sessionId,
@@ -244,62 +238,4 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     });
   }
 
-  /** Compute "average tokens-per-second over the last 60s of activity"
-   * from rolling cumulative-token snapshots. Each call appends the
-   * current cumulative count + wall-clock timestamp, prunes samples
-   * older than 60s, and returns the slope of the window: total token
-   * delta divided by total elapsed across the surviving samples.
-   *
-   * Compaction handling: if cumulative tokens drop between samples
-   * (auto-compact reset), the window is cleared and a new baseline
-   * is anchored. The rate returns null until at least one positive-
-   * delta sample lands.
-   *
-   * Idle handling: if no new tokens arrive for the full 60s window,
-   * the only surviving sample is the newest, the slope is undefined,
-   * and the function returns null (widget shows no rate). When
-   * generation resumes, samples re-populate naturally. */
-  private computeTps(sessionId: string, totalTokens: number): number | null {
-    const TPS_MAX = 999;
-    const TPS_WINDOW_MS = 60_000;
-
-    if (sessionId !== this.tpsPrevSessionId) {
-      this.tpsPrevSessionId = sessionId;
-      this.tpsLastValue = null;
-      this.tpsSamples = [];
-    }
-
-    const now = Date.now();
-    // Drop the entire window on a backwards jump (compaction reset).
-    // The next positive-delta tick will re-anchor cleanly.
-    if (
-      this.tpsSamples.length > 0 &&
-      totalTokens < this.tpsSamples[this.tpsSamples.length - 1].tokens
-    ) {
-      this.tpsSamples = [];
-      this.tpsLastValue = null;
-    }
-
-    this.tpsSamples.push({ atMs: now, tokens: totalTokens });
-    const cutoff = now - TPS_WINDOW_MS;
-    while (this.tpsSamples.length > 1 && this.tpsSamples[0].atMs < cutoff) {
-      this.tpsSamples.shift();
-    }
-
-    if (this.tpsSamples.length < 2) {
-      // Single sample = no slope. Keep tpsLastValue (which may be
-      // null on a fresh session) so the widget either shows the most
-      // recent valid rate or nothing.
-      return this.tpsLastValue;
-    }
-
-    const oldest = this.tpsSamples[0];
-    const newest = this.tpsSamples[this.tpsSamples.length - 1];
-    const tokenDelta = newest.tokens - oldest.tokens;
-    const timeDeltaMs = newest.atMs - oldest.atMs;
-    if (timeDeltaMs <= 0 || tokenDelta <= 0) return this.tpsLastValue;
-
-    this.tpsLastValue = Math.min(TPS_MAX, (tokenDelta / timeDeltaMs) * 1000);
-    return this.tpsLastValue;
-  }
 }
