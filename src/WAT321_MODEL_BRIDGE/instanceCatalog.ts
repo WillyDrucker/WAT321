@@ -3,7 +3,7 @@
  * settings, so users never have to hand-edit JSON to pick a model.
  *
  * The local instance's endpoint is supplied at config-build time
- * from the `wat321.modelBridge.localEndpoint` setting (the only
+ * from the `wat321.localEndpoint` setting (the only
  * piece of instance state worth exposing - whichever LLM you have
  * loaded on that server is what the local instance answers with;
  * swap freely via the LLMs desktop shortcuts and WAT321 follows).
@@ -59,7 +59,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   {
     id: LOCAL_INSTANCE_ID,
     alias: "Local LLM",
-    endpoint: "", // overridden by wat321.modelBridge.localEndpoint
+    endpoint: "", // overridden by wat321.localEndpoint
     model: "",
     kind: "local",
     dataRetention: "local",
@@ -123,7 +123,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   },
   {
     id: "minimax-m2-5-free",
-    alias: "MiniMax M2.5",
+    alias: "MiniMax M2.7",
     endpoint: ZEN_BASE_URL,
     model: "minimax-m2.5-free",
     kind: "remote",

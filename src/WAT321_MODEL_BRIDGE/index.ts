@@ -4,11 +4,10 @@ import {
   isConfigInstallable,
   readConfigFromSettings,
   writeConfigFile,
-  type ModelBridgeConfig,
 } from "./config";
 import { MODEL_BRIDGE_DIR } from "./constants";
 import { uninstallModelBridge } from "./installer";
-import { createModelBridgeLogger, type ModelBridgeLogger } from "./outputChannel";
+import { createModelBridgeLogger } from "./outputChannel";
 import { createOpenCodeManager } from "./openCodeManager";
 import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
 import { createModelBridgeStatusBarItem } from "./statusBarItem";
@@ -64,9 +63,9 @@ export function activateModelBridge(
 
   const applyCurrentConfig = async (): Promise<void> => {
     const cfg = vscode.workspace.getConfiguration("wat321");
-    const enabled = cfg.get<boolean>(SETTING.modelBridgeEnabled, false);
+    const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
     const localEndpoint = cfg
-      .get<string>(SETTING.modelBridgeLocalEndpoint, "http://127.0.0.1:8080")
+      .get<string>(SETTING.localEndpoint, "")
       .trim()
       .replace(/\/+$/, "");
     const zenKey = (await readSecret(context, ZEN_API_KEY_SECRET)) ?? "";
@@ -93,11 +92,13 @@ export function activateModelBridge(
     lastInstallable = installable;
     everReconciled = true;
 
-    if (installable) {
-      await reconcileInstall(context, config, logger);
-    } else {
-      await uninstallModelBridge(logger);
-    }
+    // The legacy `wat321-model-bridge` MCP entry is retired - the
+    // unified `wat321` server installed by the bridge tier on Epic
+    // Handshake enable handles all dispatch. Both branches sweep any
+    // stale legacy registration; opencode serve + click-menu state
+    // continue regardless because the unified handlers depend on them.
+    void installable;
+    await uninstallModelBridge(logger);
   };
 
   // Apply once at activate so the config file exists before
@@ -112,7 +113,7 @@ export function activateModelBridge(
   // fired during startup-flush doesn't get treated as a transition.
   let lastEnabledState = vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>(SETTING.modelBridgeEnabled, false);
+    .get<boolean>(SETTING.enableOpenCode, false);
 
   // Settings watcher: rewrite config.json + reconcile MCP entry on
   // any wat321.modelBridge.* change. Cheap (atomic file write +
@@ -120,12 +121,12 @@ export function activateModelBridge(
   // is fine.
   const watcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
-      e.affectsConfiguration(`wat321.${SETTING.modelBridgeEnabled}`) ||
-      e.affectsConfiguration(`wat321.${SETTING.modelBridgeLocalEndpoint}`)
+      e.affectsConfiguration(`wat321.${SETTING.enableOpenCode}`) ||
+      e.affectsConfiguration(`wat321.${SETTING.localEndpoint}`)
     ) {
       const nowEnabled = vscode.workspace
         .getConfiguration("wat321")
-        .get<boolean>(SETTING.modelBridgeEnabled, false);
+        .get<boolean>(SETTING.enableOpenCode, false);
       if (nowEnabled !== lastEnabledState) {
         if (nowEnabled) {
           void vscode.window.showInformationMessage(
@@ -179,8 +180,8 @@ export function activateModelBridge(
     // the legacy MB click menu opens.
     vscode.commands.registerCommand(
       "wat321.modelBridge.pickActiveInstance",
-      async () => {
-        await pickActiveInstance(context);
+      async (kindFilter?: "remote" | "local") => {
+        await pickActiveInstance(context, kindFilter);
       }
     )
   );
@@ -204,20 +205,3 @@ export function activateModelBridge(
   };
 }
 
-/** Install the MCP entry. Skips registration when the `claude` CLI is
- * not available - the user can configure Model Bridge settings before
- * installing Claude Code, in which case the bridge silently waits
- * until both are present. */
-async function reconcileInstall(
-  _context: vscode.ExtensionContext,
-  _config: ModelBridgeConfig,
-  logger: ModelBridgeLogger
-): Promise<void> {
-  // The legacy `wat321-model-bridge` MCP entry is retired - everything
-  // flows through the unified `wat321` server installed by the bridge
-  // tier on Epic Handshake enable. This tier's reconcileInstall now
-  // exists only to sweep any stale legacy entry from prior installs;
-  // the opencode serve subprocess and click-menu state continue to
-  // run regardless because the unified handlers depend on them.
-  await uninstallModelBridge(logger);
-}

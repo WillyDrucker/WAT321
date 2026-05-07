@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -83,8 +83,8 @@
         "title": "WAT321: Model Bridge - Show Output"
       },
       {
-        "command": "wat321.modelBridge.menu",
-        "title": "WAT321: Model Bridge - Menu"
+        "command": "wat321.modelBridge.legacyMenu",
+        "title": "WAT321: Model Bridge - Menu (legacy)"
       },
       {
         "command": "wat321.modelBridge.setZenApiKey",
@@ -103,123 +103,137 @@
           "fontCharacter": "\\E001"
         }
       },
+      "wat321-llama": {
+        "description": "Llama (Local LLM)",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E002"
+        }
+      },
+      "wat321-opencode": {
+        "description": "OpenCode",
+        "default": {
+          "fontPath": "media/fonts/wat321-icons.woff",
+          "fontCharacter": "\\E003"
+        }
+      },
       "wat321-square-alert": {
         "description": "Square with alert bang",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E002"
+          "fontCharacter": "\\E004"
         }
       },
       "wat321-square-arrow-left": {
         "description": "Square with left arrow",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E003"
+          "fontCharacter": "\\E005"
         }
       },
       "wat321-square-arrow-right": {
         "description": "Square with right arrow",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E004"
+          "fontCharacter": "\\E006"
         }
       },
       "wat321-square-bolt": {
         "description": "Square with lightning bolt",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E005"
+          "fontCharacter": "\\E007"
         }
       },
       "wat321-square-check": {
         "description": "Square with checkmark",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E006"
+          "fontCharacter": "\\E008"
         }
       },
       "wat321-square-error": {
         "description": "Square with X",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E007"
+          "fontCharacter": "\\E009"
         }
       },
       "wat321-square-five": {
         "description": "Square with number 5",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E008"
+          "fontCharacter": "\\E00A"
         }
       },
       "wat321-square-four": {
         "description": "Square with number 4",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E009"
+          "fontCharacter": "\\E00B"
         }
       },
       "wat321-square-info": {
         "description": "Square with info i",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00A"
+          "fontCharacter": "\\E00C"
         }
       },
       "wat321-square-mail-open": {
         "description": "Square with open envelope",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00B"
+          "fontCharacter": "\\E00D"
         }
       },
       "wat321-square-mail": {
         "description": "Square with closed envelope",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00C"
+          "fontCharacter": "\\E00E"
         }
       },
       "wat321-square-one": {
         "description": "Square with number 1",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00D"
+          "fontCharacter": "\\E00F"
         }
       },
       "wat321-square-pause": {
         "description": "Square with pause bars",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00E"
+          "fontCharacter": "\\E010"
         }
       },
       "wat321-square-play": {
         "description": "Square with play triangle",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E00F"
+          "fontCharacter": "\\E011"
         }
       },
       "wat321-square-three": {
         "description": "Square with number 3",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E010"
+          "fontCharacter": "\\E012"
         }
       },
       "wat321-square-two": {
         "description": "Square with number 2",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E011"
+          "fontCharacter": "\\E013"
         }
       },
       "wat321-square": {
         "description": "Empty square",
         "default": {
           "fontPath": "media/fonts/wat321-icons.woff",
-          "fontCharacter": "\\E012"
+          "fontCharacter": "\\E014"
         }
       }
     },
@@ -232,7 +246,7 @@
             "type": "boolean",
             "default": true,
             "order": 1,
-            "markdownDescription": "Enable Claude widgets (usage bars and session tokens). Hidden automatically if the Claude CLI is not installed."
+            "markdownDescription": "Enable Claude widgets (usage bars and session tokens). Widgets hide automatically when Claude Code is not installed."
           }
         }
       },
@@ -244,7 +258,7 @@
             "type": "boolean",
             "default": true,
             "order": 1,
-            "markdownDescription": "Enable Codex widgets (usage bars and session tokens). Hidden automatically if the Codex CLI is not installed."
+            "markdownDescription": "Enable Codex widgets (usage bars and session tokens). Widgets hide automatically when the Codex CLI is not installed."
           }
         }
       },
@@ -252,12 +266,19 @@
         "title": "OpenCode",
         "order": 3,
         "properties": {
-          "wat321.modelBridge.enabled": {
+          "wat321.enableOpenCode": {
             "type": "boolean",
             "default": true,
             "scope": "application",
             "order": 1,
-            "markdownDescription": "Adds Big Pickle, GPT 5 Nano, Ling 2.6 Flash, Hy3 Preview, Nemotron 3 Super, and MiniMax M2.5 to Claude as routable models. When on, WAT321 auto-spawns a managed `opencode serve` on `127.0.0.1:4096` so the tool-using harness (`model_bridge_task`) works against any catalog instance, including your local LLM. Direct chat completions (`model_bridge_ask`, `model_bridge_thread`) keep working whether this is on or off. Hidden automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\n**Enable OpenCode**"
+            "markdownDescription": "Adds Big Pickle, GPT 5 Nano, Ling 2.6 Flash, Hy3 Preview, Nemotron 3 Super, MiniMax M2.7, and all OpenCode free models. When enabled, WAT321 auto-spawns a managed `opencode serve` so the tool-using harness works against any free instance, including your local LLM. It unloads automatically when VS Code closes.\n\nWidgets hide automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`)."
+          },
+          "wat321.localEndpoint": {
+            "type": "string",
+            "default": "",
+            "scope": "application",
+            "order": 2,
+            "markdownDescription": "URL for your local LLM server. You can have one installed directly on this computer or on a server on your local network.\n\n**Empty (default):** leave empty if you don't have a local LLM running.\n\n**Examples:**\n- `http://127.0.0.1:8080` - installed directly on this computer\n- `http://10.0.0.101:8080` - running on a server on your local network"
           }
         }
       },
@@ -324,22 +345,22 @@
             "order": 1,
             "markdownDescription": "Status bar display density. Auto adjusts based on how many providers are active. **Full + Compact** keeps usage widgets at full size while shrinking session-token labels - useful when the status bar is full and you want to free space without losing usage detail."
           },
-          "wat321.statusBarPriority": {
-            "type": "number",
-            "default": 1001,
-            "order": 2,
-            "markdownDescription": "Base priority for WAT321 status bar items. Higher values appear further left. Adjust if widgets overlap with other extensions. *Requires window reload.*"
-          },
           "wat321.enableHeatmap": {
             "type": "boolean",
             "default": true,
-            "order": 3,
+            "order": 2,
             "markdownDescription": "Enable heatmap colors on the usage progress bar. The bars gradually shift through warning colors as you get closer to your limits so tight sessions stand out at a glance."
+          },
+          "wat321.statusBarPriority": {
+            "type": "number",
+            "default": 1001,
+            "order": 3,
+            "markdownDescription": "Base priority for WAT321 status bar items. Higher values appear further left. Adjust if widgets overlap with other extensions. *Requires window reload.*"
           }
         }
       },
       {
-        "title": "Epic Handshake (Claude to Codex Only)",
+        "title": "Epic Handshake (Claude-to-Any-LLM)",
         "order": 6,
         "properties": {
           "wat321.epicHandshake.enabled": {
@@ -347,7 +368,7 @@
             "default": false,
             "scope": "application",
             "order": 1,
-            "markdownDescription": "**Enable Epic Handshake - Experimental** - Lets you say things like *\"Ask Codex to review this\"* in any Claude session and have Codex actually answer, through a small bridge WAT321 runs locally. Both the Claude and Codex widgets must be on for this to work.\n\nAfter you turn this on, any active Claude sessions will need to be restarted so they can use the bridge. New sessions pick it up automatically. Same applies in reverse: turning this off fully removes the bridge for new Claude sessions, but already active Claude sessions keep a tiny cached reference to the bridge (roughly 20 tokens per prompt) until you restart the session. *Note: resuming an existing Claude session recalculates the entire balance on first load. In other words, just leave it off until you are done with the session - it unloads automatically when the session ends.*\n\nBridge can be paused by clicking on the Epic Handshake status bar and selecting **Pause** from the top of the dropdown."
+            "markdownDescription": "**Enable Epic Handshake** - Lets you say things like *\"Ask Codex to review this\"*, *\"Have Big Pickle check this\"*, or *\"Use the Local LLM to scrape this\"* in any Claude session using natural language. WAT321 runs a small local two-way bridge that delivers responses straight back to your Claude session.\n\nRequires Claude plus Codex and/or OpenCode. Activation fails when neither Codex CLI nor OpenCode CLI is installed.\n\nAfter you turn this on, any active Claude sessions will need to be restarted so they can use the bridge. New sessions pick it up automatically. Bridge can be paused by clicking on the Epic Handshake status bar and selecting **Pause** from the top of the dropdown."
           },
           "wat321.epicHandshake.suppressCodexNotifications": {
             "type": "boolean",
@@ -355,34 +376,6 @@
             "scope": "application",
             "order": 2,
             "markdownDescription": "Suppress Codex completion notifications while the Epic Handshake bridge is active. You still get the Claude notification when Claude finishes integrating the reply, so there's no silent delivery - this just avoids two back-to-back notifications for the same exchange. Turn this off if you want Codex notifications regardless."
-          },
-          "wat321.epicHandshake.bridgeMode": {
-            "type": "string",
-            "default": "Auto (All)",
-            "scope": "application",
-            "enum": [
-              "Auto (All)",
-              "Codex + OpenCode",
-              "Codex Only",
-              "OpenCode Only",
-              "Local LLM Only"
-            ],
-            "enumDescriptions": [
-              "Register every available bridge target. Maximum routing flexibility, largest MCP tool surface (~all targets in the wat321_ask schema).",
-              "Codex and OpenCode/Big Pickle. Common case for users running both Anthropic and Zhipu/SST.",
-              "Codex via Epic Handshake only. Smallest MCP surface; useful when OpenCode is not configured.",
-              "OpenCode/Big Pickle / Local LLM via opencode serve only. Skip Codex registration entirely.",
-              "Local LLM only. Offline / cost-conscious / experimental. Requires modelBridge.localEndpoint."
-            ],
-            "order": 4,
-            "markdownDescription": "Which bridges Epic Handshake exposes to Claude. Narrowing this saves Claude system-prompt tokens by registering only the targets you actually use. Requires window reload after change - MCP tool registrations are snapshotted at connection time. Has no effect when Epic Handshake is off."
-          },
-          "wat321.modelBridge.localEndpoint": {
-            "type": "string",
-            "default": "",
-            "scope": "application",
-            "order": 5,
-            "markdownDescription": "Base URL for your local LLM server. Examples: `http://127.0.0.1:8080` for a llama.cpp `--jinja` server on the dev box, `http://10.0.0.91:8080` for a separate LLM box on the LAN, `http://localhost:11434` for Ollama. The bridge appends `/v1/chat/completions` per call.\n\n**Empty (default):** Local LLM is hidden from the catalog and not registered as a routable target - WAT321 does not assume you have a local server running. Only OpenCode/Zen routes are available.\n\n**Filled:** Local LLM appears as a catalog instance; the unified bridge routes `target=local` calls there when Model Bridge is enabled."
           }
         }
       },
@@ -404,7 +397,7 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "lint": "eslint src/",
-    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');function copy(srcDir,dstDir,files){fs.mkdirSync(dstDir,{recursive:true});for(const f of files){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}}copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin'),p.join('out','WAT321_EPIC_HANDSHAKE','bin'),['channel.mjs','stage-clipboard.mjs']);copy(p.join('src','WAT321_MODEL_BRIDGE','bin'),p.join('out','WAT321_MODEL_BRIDGE','bin'),['channel.mjs']);copy(p.join('src','WAT321_BRIDGE','bin'),p.join('out','WAT321_BRIDGE','bin'),['channel.mjs','codex.mjs','opencode.mjs']);\"",
+    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');function copy(srcDir,dstDir,files){fs.mkdirSync(dstDir,{recursive:true});for(const f of files){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}}copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin'),p.join('out','WAT321_EPIC_HANDSHAKE','bin'),['channel.mjs','stage-clipboard.mjs']);copy(p.join('src','WAT321_BRIDGE','bin'),p.join('out','WAT321_BRIDGE','bin'),['channel.mjs','codex.mjs','opencode.mjs']);\"",
     "emit-prod-modules-manifest": "node -e \"const fs=require('fs');const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));const prod=Object.entries(lock.packages||{}).filter(([k,m])=>k.startsWith('node_modules/')&&m.dev!==true).map(([k])=>k);fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/prod-modules.json',JSON.stringify(prod,null,2));console.log('prod-modules manifest:',prod.length,'entries');\"",
     "icons": "node scripts/buildIcons.mjs",
     "build": "npm run clean && npm run lint && tsc && npm run copy-assets && npm run emit-prod-modules-manifest",

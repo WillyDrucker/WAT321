@@ -104,7 +104,7 @@ export async function clearZenApiKey(
   context: vscode.ExtensionContext
 ): Promise<void> {
   const confirm = await vscode.window.showWarningMessage(
-    "Clear the OpenCode Zen API key? Every Zen instance (Big Pickle, GPT 5 Nano, Ling, Hy3, Nemotron, MiniMax M2.5) will report 'needs API key' until you set it again.",
+    "Clear the OpenCode Zen API key? Every Zen instance (Big Pickle, GPT 5 Nano, Ling, Hy3, Nemotron, MiniMax M2.7) will report 'needs API key' until you set it again.",
     { modal: true },
     "Clear"
   );

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { readAliases, writeAliases } from "../shared/bridge/sessionAliases";
 import {
   makeBackItem,
   makeCancelItem,
@@ -33,10 +33,11 @@ import { isPaused, setPaused } from "./statusBarState";
  *   - RENAME SESSION (sub-picker)
  *   - CANCEL
  *
- * Pause/Resume/Cancel/Restart/Set-Active rows queued for v1.4.2 -
- * each requires runtime infrastructure (target-scoped pause flag,
- * cancel sentinel for in-flight dispatches, restart of opencode
- * serve, default-resume preference) that doesn't exist yet.
+ * Pause/Resume/Cancel/Restart/Set-Active rows are intentionally
+ * absent: each requires runtime infrastructure (target-scoped pause
+ * flag, cancel sentinel for in-flight dispatches, restart of opencode
+ * serve, default-resume preference) that doesn't exist yet. Add the
+ * row when the runtime piece lands.
  */
 
 export type SessionTarget = "opencode" | "local";
@@ -72,11 +73,6 @@ function formatSessionDisplayName(target: SessionTarget, alias: string): string 
   return `${readProjectName()} Epic Handshake Claude-to-${targetLabel} ${alias}`;
 }
 
-interface AliasMap {
-  opencode: Record<string, string>;
-  local: Record<string, string>;
-}
-
 interface OpenCodeSessionMeta {
   id: string;
   slug?: string;
@@ -97,27 +93,6 @@ interface MbConfig {
   openCodeServerUrl?: string;
   activeInstanceId?: string;
   instances?: MbInstance[];
-}
-
-function readAliases(): AliasMap {
-  if (!existsSync(ALIAS_PATH)) return { opencode: {}, local: {} };
-  try {
-    const parsed = JSON.parse(readFileSync(ALIAS_PATH, "utf8")) as Partial<AliasMap>;
-    return {
-      opencode:
-        parsed?.opencode && typeof parsed.opencode === "object"
-          ? parsed.opencode
-          : {},
-      local:
-        parsed?.local && typeof parsed.local === "object" ? parsed.local : {},
-    };
-  } catch {
-    return { opencode: {}, local: {} };
-  }
-}
-
-function writeAliases(map: AliasMap): void {
-  writeFileAtomic(ALIAS_PATH, JSON.stringify(map, null, 2));
 }
 
 function readMbConfig(): MbConfig | null {
@@ -189,7 +164,7 @@ const TARGET_CONFIGS: Record<SessionTarget, TargetConfig> = {
     instanceKind: "local",
     fallbackInstanceId: "local-llm",
     emptyHint:
-      "No local LLM sessions yet. Create one with NEW SESSION (requires modelBridge.localEndpoint set).",
+      "No local LLM sessions yet. Create one with NEW SESSION (requires Local Endpoint set in WAT321 settings).",
   },
 };
 
@@ -211,18 +186,26 @@ function pickInstanceForTarget(
 
 async function showSessionsPicker(target: SessionTarget): Promise<void> {
   const cfg = TARGET_CONFIGS[target];
-  const aliases = readAliases();
+  const aliases = readAliases(ALIAS_PATH);
   const mb = readMbConfig();
   const serveUrl = mb?.openCodeServerUrl ?? null;
 
   const sessionMetas = serveUrl ? await fetchSessions(serveUrl) : [];
   const metaById = new Map(sessionMetas.map((s) => [s.id, s]));
+  const instancesById = new Map((mb?.instances ?? []).map((i) => [i.id, i]));
 
   const targetAliases = aliases[target];
   const sessionRows: PickerRow[] = Object.entries(targetAliases).map(
-    ([alias, id]) => {
-      const meta = metaById.get(id);
-      const modelLabel = meta?.model?.id ?? "(no model)";
+    ([alias, entry]) => {
+      const meta = metaById.get(entry.sessionId);
+      // Prefer the bound catalog alias (e.g. "Big Pickle") when the
+      // entry has an instanceId. Falls back to OpenCode's reported
+      // model.id for legacy entries that pre-date instanceId tracking.
+      const boundInstance = entry.instanceId
+        ? instancesById.get(entry.instanceId)
+        : null;
+      const modelLabel =
+        boundInstance?.alias ?? meta?.model?.id ?? "(no model)";
       const ageLabel = formatRelative(meta?.time?.updated);
       const found = meta !== undefined;
       // Standardized label first, OpenCode's auto-slug suppressed -
@@ -323,7 +306,14 @@ async function showSessionsPicker(target: SessionTarget): Promise<void> {
     // sub-picker over the catalog and writes the new active instance
     // to preferences.json. After the user picks, re-open this picker
     // so the new MODEL row label reflects the choice.
-    await vscode.commands.executeCommand("wat321.modelBridge.pickActiveInstance");
+    // Pass the target's kind so Local LLM doesn't appear in the
+    // OpenCode session manager's MODEL row (and vice versa). Local
+    // LLM has its own Manage Local LLM Sessions submenu.
+    const kindFilter = target === "local" ? "local" : "remote";
+    await vscode.commands.executeCommand(
+      "wat321.modelBridge.pickActiveInstance",
+      kindFilter
+    );
     await showSessionsPicker(target);
     return;
   }
@@ -373,8 +363,8 @@ async function showSessionsPicker(target: SessionTarget): Promise<void> {
         return;
       }
       const alias = nextAlias(Object.keys(targetAliases));
-      targetAliases[alias] = data.id;
-      writeAliases(aliases);
+      targetAliases[alias] = { sessionId: data.id, instanceId: instance.id };
+      writeAliases(ALIAS_PATH, aliases);
       void vscode.window.showInformationMessage(
         `Created ${alias} (${instance.alias}, slug ${data.slug ?? "?"}).`
       );
@@ -395,9 +385,9 @@ async function showSessionsPicker(target: SessionTarget): Promise<void> {
       { title: "Delete which session?", placeHolder: "Pick an alias to remove" }
     );
     if (!target2?.alias) return;
-    const removedId = targetAliases[target2.alias];
+    const removedId = targetAliases[target2.alias]?.sessionId;
     delete targetAliases[target2.alias];
-    writeAliases(aliases);
+    writeAliases(ALIAS_PATH, aliases);
     void vscode.window.showInformationMessage(
       `Removed alias ${target2.alias}. Underlying session (${removedId}) retained in opencode.db for recovery.`
     );
@@ -426,7 +416,7 @@ async function showSessionsPicker(target: SessionTarget): Promise<void> {
     }
     targetAliases[newName] = targetAliases[target2.alias];
     delete targetAliases[target2.alias];
-    writeAliases(aliases);
+    writeAliases(ALIAS_PATH, aliases);
     void vscode.window.showInformationMessage(
       `Renamed ${target2.alias} -> ${newName}.`
     );

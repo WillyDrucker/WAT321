@@ -58,20 +58,26 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private cachedModelSlug: string | null = null;
   private cachedAutoCompactTokens: number | null = null;
   private cachedAutoCompactModel = "";
-  /** Per-session prior snapshot for TPS computation. Keyed by sessionId
-   * so a switch to a different rollout starts the counter fresh. Uses
-   * `stageInfo.outputTokens` (per-turn output) rather than the cumulative
-   * contextUsed: contextUsed grows by both input and output and would
-   * inflate the rate. */
+  /** Per-session rolling token snapshots for TPS computation. Each
+   * sample records the cumulative `usage.tokens` (contextUsed) at a
+   * wall-clock instant. Rate = (newest.tokens - oldest.tokens) /
+   * (newest.atMs - oldest.atMs) over a 60s window.
+   *
+   * Why cumulative `usage.tokens` instead of `stageInfo.outputTokens`:
+   * outputTokens is parsed from the rollout's `last_token_usage`
+   * record, which OpenAI only writes at turn boundary. During a
+   * 30-second turn, outputTokens stays frozen at the previous turn's
+   * value, then jumps to the new total in a single tick - the old
+   * sample-and-pause-threshold approach would either miss the entire
+   * turn (no movement -> no samples) or take the boundary jump as
+   * a 5000-tokens-in-200ms burst and cap at 999. usage.tokens
+   * updates with every `event_msg.token_count` event mid-turn, so
+   * the rolling window sees real generation rate. Yes, contextUsed
+   * also grows from input + tool results, but over a 60s window
+   * those contributions are bounded and the noise is acceptable. */
   private tpsPrevSessionId: string | null = null;
-  private tpsPrevOutputTokens = 0;
-  private tpsPrevMtimeMs = 0;
   private tpsLastValue: number | null = null;
-  /** Rolling 60-second window of accepted samples. See the Claude
-   * service's matching field for the smoothing rationale - same
-   * shape, same paused-interval rejection, applied to Codex's
-   * stageInfo.outputTokens delta. */
-  private tpsSamples: Array<{ atMs: number; tokens: number; timeMs: number }> = [];
+  private tpsSamples: Array<{ atMs: number; tokens: number }> = [];
 
   constructor(workspacePath: string) {
     super(
@@ -220,11 +226,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     }
 
     const stageInfo = parseStageInfo(tail);
-    const tokensPerSecond = this.computeTps(
-      sessionId,
-      stageInfo.outputTokens,
-      rolloutMtime
-    );
+    const tokensPerSecond = this.computeTps(sessionId, usage.tokens);
 
     this.emitOk({
       sessionId,
@@ -242,63 +244,62 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     });
   }
 
-  /** Compute smoothed TPS over a rolling 60-second window. Mirrors
-   * the Claude service's smoothing implementation: rejects samples
-   * whose individual gap > 30s as paused (tool wait, agent loop, idle
-   * reasoning) so a long-paused turn that suddenly flushes a large
-   * chunk of output doesn't register as a spurious-high spike.
-   * Persistent across idle, capped at 999. */
-  private computeTps(
-    sessionId: string,
-    outputTokens: number,
-    mtimeMs: number
-  ): number | null {
+  /** Compute "average tokens-per-second over the last 60s of activity"
+   * from rolling cumulative-token snapshots. Each call appends the
+   * current cumulative count + wall-clock timestamp, prunes samples
+   * older than 60s, and returns the slope of the window: total token
+   * delta divided by total elapsed across the surviving samples.
+   *
+   * Compaction handling: if cumulative tokens drop between samples
+   * (auto-compact reset), the window is cleared and a new baseline
+   * is anchored. The rate returns null until at least one positive-
+   * delta sample lands.
+   *
+   * Idle handling: if no new tokens arrive for the full 60s window,
+   * the only surviving sample is the newest, the slope is undefined,
+   * and the function returns null (widget shows no rate). When
+   * generation resumes, samples re-populate naturally. */
+  private computeTps(sessionId: string, totalTokens: number): number | null {
     const TPS_MAX = 999;
-    // 60s window holds ~12 samples on the 5s safety-net cadence and
-    // stays smooth across long Codex turns (often 30-90s on high
-    // effort). Same reasoning as the Claude service - keep the two
-    // providers in lockstep on smoothing posture so the user reads
-    // both widgets the same way.
     const TPS_WINDOW_MS = 60_000;
-    const TPS_PAUSE_THRESHOLD_MS = 30_000;
 
     if (sessionId !== this.tpsPrevSessionId) {
       this.tpsPrevSessionId = sessionId;
-      this.tpsPrevOutputTokens = outputTokens;
-      this.tpsPrevMtimeMs = mtimeMs;
       this.tpsLastValue = null;
       this.tpsSamples = [];
-      return null;
     }
 
-    const tokenDelta = outputTokens - this.tpsPrevOutputTokens;
-    const timeDeltaMs = mtimeMs - this.tpsPrevMtimeMs;
+    const now = Date.now();
+    // Drop the entire window on a backwards jump (compaction reset).
+    // The next positive-delta tick will re-anchor cleanly.
+    if (
+      this.tpsSamples.length > 0 &&
+      totalTokens < this.tpsSamples[this.tpsSamples.length - 1].tokens
+    ) {
+      this.tpsSamples = [];
+      this.tpsLastValue = null;
+    }
 
-    if (tokenDelta < 0) {
-      this.tpsPrevOutputTokens = outputTokens;
-      this.tpsPrevMtimeMs = mtimeMs;
+    this.tpsSamples.push({ atMs: now, tokens: totalTokens });
+    const cutoff = now - TPS_WINDOW_MS;
+    while (this.tpsSamples.length > 1 && this.tpsSamples[0].atMs < cutoff) {
+      this.tpsSamples.shift();
+    }
+
+    if (this.tpsSamples.length < 2) {
+      // Single sample = no slope. Keep tpsLastValue (which may be
+      // null on a fresh session) so the widget either shows the most
+      // recent valid rate or nothing.
       return this.tpsLastValue;
     }
 
-    if (tokenDelta > 0 && timeDeltaMs > 0) {
-      this.tpsPrevOutputTokens = outputTokens;
-      this.tpsPrevMtimeMs = mtimeMs;
-      if (timeDeltaMs > TPS_PAUSE_THRESHOLD_MS) {
-        return this.tpsLastValue;
-      }
-      const now = Date.now();
-      this.tpsSamples.push({ atMs: now, tokens: tokenDelta, timeMs: timeDeltaMs });
-      const cutoff = now - TPS_WINDOW_MS;
-      while (this.tpsSamples.length > 0 && this.tpsSamples[0].atMs < cutoff) {
-        this.tpsSamples.shift();
-      }
-      const tokenSum = this.tpsSamples.reduce((s, x) => s + x.tokens, 0);
-      const timeSum = this.tpsSamples.reduce((s, x) => s + x.timeMs, 0);
-      if (timeSum > 0 && tokenSum > 0) {
-        this.tpsLastValue = Math.min(TPS_MAX, (tokenSum / timeSum) * 1000);
-      }
-    }
+    const oldest = this.tpsSamples[0];
+    const newest = this.tpsSamples[this.tpsSamples.length - 1];
+    const tokenDelta = newest.tokens - oldest.tokens;
+    const timeDeltaMs = newest.atMs - oldest.atMs;
+    if (timeDeltaMs <= 0 || tokenDelta <= 0) return this.tpsLastValue;
 
+    this.tpsLastValue = Math.min(TPS_MAX, (tokenDelta / timeDeltaMs) * 1000);
     return this.tpsLastValue;
   }
 }

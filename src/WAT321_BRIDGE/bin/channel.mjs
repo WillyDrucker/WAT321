@@ -21,7 +21,7 @@
  * tokens (down from ~1100 with the prior 4-tool surface).
  *
  * Conditional registration: at startup, the server reads enabled
- * features (epicHandshake.enabled, modelBridge.enabled) from
+ * features (epicHandshake.enabled, enableOpenCode) from
  * `~/.wat321/bridge/config.json` (the extension writes it on activate
  * and on settings change). Disabled targets are stripped from the
  * tool surface AND from the resource list - users pay zero context
@@ -182,15 +182,14 @@ function makeRouter() {
 }
 
 /** Tool descriptor builder. Returns the MCP tool definitions exposed
- * to Claude. Two tools after the v1.4.3 router refactor:
+ * to Claude. Two tools:
  *
  *   wat321_ask     - dispatch a prompt; alias picks the backend
  *   wat321_session - mutating session lifecycle (create/delete/rename)
  *
- * The previous wat321_inbox and wat321_list tools moved to MCP
- * resources (see resources/list below) - read-only state Claude only
- * fetches when the user asks for it, costing zero tool-description
- * tokens the rest of the time. The unified router resolves alias
+ * Read-only state (inbox, sessions list) lives on MCP resources (see
+ * resources/list below) so Claude pays for those descriptions only
+ * when the user asks. The unified router resolves alias
  * strings to concrete targets so Claude doesn't need to know the
  * target enum exists.
  *
@@ -249,7 +248,7 @@ function buildTools(enabled) {
 }
 
 const server = new Server(
-  { name: "wat321", version: "1.4.3" },
+  { name: "wat321", version: "1.4.4" },
   { capabilities: { tools: {}, resources: {} } }
 );
 

@@ -5,7 +5,7 @@
  * (lifecycle in `src/WAT321_MODEL_BRIDGE/openCodeManager.ts`).
  * Sessions are owned by OpenCode itself - stored in
  * `~/.local/share/opencode/opencode.db` - and accessed via the REST
- * API verified during the v1.4.1 investigation:
+ * Endpoints used:
  *
  *   GET  /session                -> list all sessions
  *   POST /session                -> create new session, returns {id, slug, ...}
@@ -154,7 +154,16 @@ function writeMbLastUsed(meta) {
  * state past the dispatch. */
 async function withMbHeartbeat(meta, runDispatch) {
   const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
   const requestId = randomUUID();
+  // Live progress closure variables. The SSE tap (see
+  // tapOpenCodeEvents) calls updateProgress(charCount) on every
+  // assistant text update; subsequent writeBeat calls pick up the
+  // new token count. Char count is used as a token-count proxy so
+  // the widget reads non-zero tokens during the blocking POST and
+  // shows live tps instead of falling back to seconds-elapsed.
+  let tokens = 0;
+  let tokensPerSec = 0;
   const writeBeat = () => {
     writeMbHeartbeat({
       phase: "calling",
@@ -165,16 +174,23 @@ async function withMbHeartbeat(meta, runDispatch) {
       dataRetention: meta.dataRetention,
       model: meta.model || "",
       timeoutMs: meta.timeoutMs,
-      tokens: 0,
-      tokensPerSec: 0,
+      tokens,
+      tokensPerSec,
       currentPhase: "DISPATCH",
       phaseTrace: [],
     });
   };
+  const updateProgress = (charCount) => {
+    if (typeof charCount !== "number" || charCount < 0) return;
+    tokens = charCount;
+    const elapsedSec = Math.max(0.001, (Date.now() - startedMs) / 1000);
+    tokensPerSec = Math.round(charCount / elapsedSec);
+    writeBeat();
+  };
   writeBeat();
   const interval = setInterval(writeBeat, HEARTBEAT_KEEPALIVE_MS);
   try {
-    const result = await runDispatch();
+    const result = await runDispatch(updateProgress);
     // Successful dispatch updates last-used so the widget can keep
     // displaying this instance's alias after the heartbeat clears.
     // Failure paths skip the write - showing "Big Pickle" after a
@@ -189,15 +205,149 @@ async function withMbHeartbeat(meta, runDispatch) {
   }
 }
 
+/** Tap OpenCode's `/event` SSE stream during a session-attached
+ * dispatch and feed live progress to the heartbeat. Char count of
+ * the assistant's accumulating reply text serves as a token-count
+ * proxy so the MB widget renders `Nt @ X/s` instead of seconds-
+ * elapsed. Best-effort: any tap failure leaves the dispatch
+ * untouched - the POST still completes and the response payload
+ * is still parsed normally.
+ *
+ * Async: returns once the SSE response headers have arrived. The
+ * caller must await this before firing the POST so the event
+ * stream is already attached when opencode serve emits the first
+ * `message.part.updated`. Without that ordering, a fast local LLM
+ * dispatch can finish generating before the SSE GET completes its
+ * handshake, leaving the heartbeat at tokens=0 for the entire
+ * dispatch and the widget falling back to elapsed-seconds. */
+async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
+  const ac = new AbortController();
+  const assistantMsgIds = new Set();
+  const partTexts = new Map();
+
+  let res;
+  try {
+    res = await fetch(`${base}/event`, {
+      headers: { Accept: "text/event-stream" },
+      signal: ac.signal,
+    });
+  } catch {
+    return { stop: () => ac.abort() };
+  }
+  if (!res.ok || !res.body) {
+    return { stop: () => ac.abort() };
+  }
+
+  const reader = res.body.getReader();
+  (async () => {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Find next event boundary (blank line, LF or CRLF framing).
+        for (;;) {
+          const lfIdx = buffer.indexOf("\n\n");
+          const crlfIdx = buffer.indexOf("\r\n\r\n");
+          let boundary;
+          let advance;
+          if (lfIdx < 0 && crlfIdx < 0) break;
+          else if (lfIdx < 0) {
+            boundary = crlfIdx;
+            advance = 4;
+          } else if (crlfIdx < 0 || lfIdx < crlfIdx) {
+            boundary = lfIdx;
+            advance = 2;
+          } else {
+            boundary = crlfIdx;
+            advance = 4;
+          }
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + advance);
+          const dataLines = block
+            .split(/\r?\n/)
+            .filter((l) => l.startsWith("data:"))
+            .map((l) => l.slice(5).replace(/^ /, ""));
+          if (dataLines.length === 0) continue;
+          let evt;
+          try {
+            evt = JSON.parse(dataLines.join("\n"));
+          } catch {
+            continue;
+          }
+          const sid = evt?.properties?.sessionID;
+          if (expectedSessionId && sid !== expectedSessionId) continue;
+          if (evt.type === "message.updated") {
+            const info = evt.properties?.info;
+            if (info?.role === "assistant" && info?.id) {
+              assistantMsgIds.add(info.id);
+            }
+          } else if (evt.type === "message.part.updated") {
+            const part = evt.properties?.part;
+            if (
+              part?.type === "text" &&
+              part?.messageID &&
+              part?.id &&
+              assistantMsgIds.has(part.messageID)
+            ) {
+              const text = typeof part.text === "string" ? part.text : "";
+              partTexts.set(part.id, text);
+              let total = 0;
+              for (const t of partTexts.values()) total += t.length;
+              try {
+                onProgress(total);
+              } catch {
+                // best-effort - heartbeat write failure is non-fatal
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // stream ended or aborted - dispatch still completes
+    }
+  })();
+
+  return { stop: () => ac.abort() };
+}
+
+/** Normalize a per-target alias bucket to `{sessionId, instanceId}`.
+ * Legacy entries stored bare session-id strings; those become
+ * `{sessionId, instanceId: null}` on read so existing users keep
+ * their sessions through upgrade. Null instanceId
+ * means "unknown" - heartbeat callers fall back to the active instance
+ * for those entries until the alias is recreated. */
+function normalizeAliasBucket(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const out = {};
+  for (const [alias, value] of Object.entries(raw)) {
+    if (typeof value === "string") {
+      out[alias] = { sessionId: value, instanceId: null };
+      continue;
+    }
+    if (value && typeof value === "object" && typeof value.sessionId === "string") {
+      out[alias] = {
+        sessionId: value.sessionId,
+        instanceId:
+          typeof value.instanceId === "string" && value.instanceId.length > 0
+            ? value.instanceId
+            : null,
+      };
+    }
+  }
+  return out;
+}
+
 function readAliases() {
   ensureDir();
   if (!existsSync(ALIAS_PATH)) return { opencode: {}, local: {} };
   try {
     const parsed = JSON.parse(readFileSync(ALIAS_PATH, "utf8"));
     return {
-      opencode:
-        parsed && typeof parsed.opencode === "object" ? parsed.opencode : {},
-      local: parsed && typeof parsed.local === "object" ? parsed.local : {},
+      opencode: normalizeAliasBucket(parsed?.opencode),
+      local: normalizeAliasBucket(parsed?.local),
     };
   } catch {
     return { opencode: {}, local: {} };
@@ -250,23 +400,31 @@ function readInstances() {
   }
 }
 
-function findInstance(id) {
+/** Resolve a catalog instance by id, with an optional target-kind
+ * filter applied to the active-instance fallback. Without the kind
+ * filter, an opencode session would inherit a local-kind active
+ * instance when activeInstanceId points there - opencode sessions
+ * end up bound to Local LLM by mistake. Passing kind="remote" or
+ * kind="local" forces the fallback to skip a mismatched active
+ * instance and pick one that fits the target. Explicit `id` lookups
+ * skip the filter (callers asking for a specific instance know what
+ * they want). */
+function findInstance(id, kind = null) {
   const instances = readInstances();
   if (!id) {
-    // Read MB config for the click-menu's active instance; fall back
-    // to the first remote (cloud) instance if no active is set; final
-    // fallback is null (caller decides whether that is acceptable).
-    if (!existsSync(MB_CONFIG_PATH)) return null;
+    if (!existsSync(MB_CONFIG_PATH)) {
+      return instances.find((i) => kind === null || i.kind === kind) || null;
+    }
     try {
       const cfg = JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8"));
       const activeId = typeof cfg?.activeInstanceId === "string" ? cfg.activeInstanceId : null;
       if (activeId) {
         const active = instances.find((i) => i.id === activeId);
-        if (active) return active;
+        if (active && (kind === null || active.kind === kind)) return active;
       }
-      return instances.find((i) => i.kind === "remote") || null;
+      return instances.find((i) => kind === null || i.kind === kind) || null;
     } catch {
-      return null;
+      return instances.find((i) => kind === null || i.kind === kind) || null;
     }
   }
   return instances.find((i) => i.id === id) || null;
@@ -315,12 +473,13 @@ async function anonymousChatCompletion(model, prompt, timeoutMs) {
  * without paying for another generation. */
 async function retrieveLatestSessionMessage(target, sessionAlias) {
   const map = readAliases();
-  const sessionId = map[target]?.[sessionAlias];
-  if (!sessionId) {
+  const aliasEntry = map[target]?.[sessionAlias];
+  if (!aliasEntry) {
     return errorResult(
       `Session alias '${sessionAlias}' not found for target=${target}.`
     );
   }
+  const sessionId = aliasEntry.sessionId;
   const serveUrl = readServeUrl();
   if (serveUrl === null) {
     return errorResult(
@@ -429,28 +588,29 @@ export async function handleAsk(args) {
   // Session-attached path: lookup alias, POST to /session/{id}/message.
   if (sessionAlias !== null) {
     const map = readAliases();
-    const sessionId = map[target]?.[sessionAlias];
-    if (!sessionId) {
+    const aliasEntry = map[target]?.[sessionAlias];
+    if (!aliasEntry) {
       return errorResult(
         `Session alias '${sessionAlias}' not found for target=${target}. Create it first via wat321_session({target:'${target}', action:'create'}).`
       );
     }
+    const sessionId = aliasEntry.sessionId;
     const serveUrl = readServeUrl();
     if (serveUrl === null) {
       return errorResult(
         `opencode serve is not running. Enable Model Bridge in WAT321 settings, then retry.`
       );
     }
-    // Resolve instance metadata for the heartbeat payload. Sessions
-    // are pinned to an instance at create time, but the alias map
-    // doesn't carry instance id - fall back to the active instance,
-    // filtered by target kind. Heartbeat tolerates missing fields so
-    // a partial resolve still lights up the MB widget.
+    // Resolve instance metadata for the heartbeat payload. Prefer the
+    // bound instanceId stored at create time so the MB widget shows the
+    // session's actual model rather than the user's currently-active
+    // instance (which may have drifted after the session was created).
+    // Legacy alias entries with null instanceId fall back to the
+    // target-kind-filtered active instance.
+    const targetKind = target === "local" ? "local" : "remote";
     const sessionInstance =
-      findInstance(null) ||
-      readInstances().find((i) =>
-        target === "local" ? i.kind === "local" : i.kind === "remote"
-      ) ||
+      (aliasEntry.instanceId ? findInstance(aliasEntry.instanceId) : null) ||
+      findInstance(null, targetKind) ||
       null;
     const meta = {
       alias: sessionInstance?.alias || (target === "local" ? "Local LLM" : "OpenCode"),
@@ -459,9 +619,21 @@ export async function handleAsk(args) {
       model: sessionInstance?.model || "",
       timeoutMs,
     };
-    const result = await withMbHeartbeat(meta, () =>
-      postSessionMessage(serveUrl, sessionId, prompt, timeoutMs)
-    );
+    // SSE-tap the /event stream during the blocking POST so the MB
+    // widget shows live tokens + tps instead of seconds-elapsed.
+    // Awaited so the SSE GET handshake completes before the POST
+    // fires - otherwise a fast local LLM dispatch can finish
+    // generating before the tap is attached and we miss every event.
+    // tap.stop() in finally releases the SSE reader as soon as the
+    // POST settles regardless of success/failure.
+    const result = await withMbHeartbeat(meta, async (updateProgress) => {
+      const tap = await tapOpenCodeEvents(serveUrl, sessionId, updateProgress);
+      try {
+        return await postSessionMessage(serveUrl, sessionId, prompt, timeoutMs);
+      } finally {
+        tap.stop();
+      }
+    });
     if (!result.ok) {
       return errorResult(`Session dispatch failed: ${result.error}`);
     }
@@ -510,27 +682,41 @@ export async function handleAsk(args) {
 
 /** MCP resource backing `bridge://sessions/{target}` for target in
  * {opencode, local}. Returns the session alias map enriched with
- * standardized display names and the underlying session id. Empty
- * map = no active sessions. JSON-friendly shape (channel.mjs wraps). */
+ * standardized display names, the underlying session id, and the
+ * bound catalog instance (model + alias) when the alias entry has
+ * a tracked instanceId. Legacy entries that pre-date instanceId
+ * tracking report `instance: null`. Empty map = no active sessions. */
 export async function listSessionsResource(target) {
   if (target !== "opencode" && target !== "local") {
     return { sessions: [], note: `Unknown target '${target}'.` };
   }
   const map = readAliases();
   const aliases = map[target] || {};
-  const sessions = Object.entries(aliases).map(([alias, id]) => ({
-    alias,
-    sessionId: id,
-    displayName: formatSessionDisplayName(target, alias),
-  }));
+  const instances = readInstances();
+  const sessions = Object.entries(aliases).map(([alias, entry]) => {
+    const boundInstance = entry.instanceId
+      ? instances.find((i) => i.id === entry.instanceId) ?? null
+      : null;
+    return {
+      alias,
+      sessionId: entry.sessionId,
+      displayName: formatSessionDisplayName(target, alias),
+      instance: boundInstance
+        ? {
+            id: boundInstance.id,
+            alias: boundInstance.alias,
+            model: boundInstance.model,
+          }
+        : null,
+    };
+  });
   return { sessions };
 }
 
 
-/** Handle `wat321_session({target, action, ...})`. Action enum
- * matches the v1.4.3 router-refactor schema: create / delete /
- * rename only. Listing moved to `bridge://sessions/{target}`
- * resource. */
+/** Handle `wat321_session({target, action, ...})`. Action enum is
+ * create / delete / rename only - listing moved to the
+ * `bridge://sessions/{target}` MCP resource. */
 export async function handleSession(args) {
   const target = args?.target;
   const action = args?.action;
@@ -550,8 +736,17 @@ export async function handleSession(args) {
     // is created model-less and OpenCode's default kicks in only
     // when the first message arrives - the session list shows
     // "model: undefined" which looks broken.
+    //
+    // Target-kind filter: when no instance_id is supplied and the
+    // user's active instance is the wrong kind (e.g. local-llm active
+    // but creating an opencode session), skip the active and fall
+    // back to a target-kind-matching instance. Without this, an
+    // opencode session would inherit a local-kind instance's empty
+    // model id and OpenCode would route it to llama.cpp instead of
+    // the cloud catalog.
     const instanceId = typeof args?.instance_id === "string" ? args.instance_id : null;
-    const instance = findInstance(instanceId);
+    const targetKind = target === "local" ? "local" : "remote";
+    const instance = findInstance(instanceId, targetKind);
     const body = {};
     if (instance?.model) {
       body.model = {
@@ -573,7 +768,7 @@ export async function handleSession(args) {
       if (!sessionId) return errorResult("opencode serve /session create did not return an id.");
       const alias = nextAlias(target);
       map[target] = map[target] || {};
-      map[target][alias] = sessionId;
+      map[target][alias] = { sessionId, instanceId: instance?.id ?? null };
       writeAliases(map);
       const modelLabel = instance?.alias || data?.model?.id || "default model";
       const displayName = formatSessionDisplayName(target, alias);
@@ -599,7 +794,7 @@ export async function handleSession(args) {
       return errorResult(`Session alias '${alias}' not found for target=${target}.`);
     }
     if (action === "delete") {
-      const sessionId = map[target][alias];
+      const sessionId = map[target][alias]?.sessionId;
       delete map[target][alias];
       writeAliases(map);
       return {

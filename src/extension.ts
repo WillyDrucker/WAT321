@@ -43,19 +43,21 @@ export function activate(context: vscode.ExtensionContext) {
 
   ctx = createEngineContext();
 
-  // One-shot migration for users upgrading from 1.4.0 - 1.4.2 who had
-  // `wat321.sessionTokens.compact: true`. The setting was removed in
-  // v1.4.3 and folded into `wat321.displayMode` as "Full + Compact".
-  // Map the old true-value onto the new enum value, then let the
-  // workspace-scope-heal sweep strip the orphan key. Idempotent - on a
-  // user with the new mode already set or a user who never used the old
-  // setting, this is a no-op. Best-effort; failure leaves both legacy
-  // and new state intact and the user can pick the mode from the UI.
+  // Migrate legacy `wat321.sessionTokens.compact: true` onto the
+  // displayMode enum value "Full + Compact"; the workspace-scope-heal
+  // sweep then strips the orphan key. Idempotent and best-effort.
   void migrateSessionTokensCompact();
 
+  // Migrate legacy modelBridge.enabled -> enableOpenCode and
+  // modelBridge.localEndpoint -> localEndpoint. Reads any explicit
+  // value at the old keys and copies to the new keys; the workspace-
+  // scope-heal sweep strips the source on the same activate.
+  // Idempotent.
+  void migrateModelBridgeKeys();
+
   // Bridge config writer maintains ~/.wat321/bridge/config.json so
-  // the unified MCP server scaffold (v1.4.1+) can read enabled-target
-  // flags. Cheap on activate, cheap on settings change. The legacy
+  // the unified MCP server scaffold can read enabled-target flags.
+  // Cheap on activate, cheap on settings change. The legacy
   // two-server registration still drives all real traffic until the
   // unified handlers ship per WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md.
   registerBridgeConfigWriter(context);
@@ -262,14 +264,14 @@ async function safeUpdate(
   }
 }
 
-/** v1.4.3: fold legacy `sessionTokens.compact: true` into the new
- * displayMode enum value "Full + Compact". Skips when the current
- * displayMode is already set to a non-Auto/non-Full value (Compact,
- * Minimal) - those users had no effect from the old boolean and
- * shouldn't be flipped to a different visible mode by the migration.
- * Skips when the user is already on "Full + Compact" or doesn't have
- * the legacy boolean set. Best-effort; the workspace-scope-heal sweep
- * strips the source key on the same activate. */
+/** Fold legacy `sessionTokens.compact: true` into the displayMode
+ * enum value "Full + Compact". Skips when the current displayMode is
+ * already set to a non-Auto/non-Full value (Compact, Minimal) - those
+ * users had no effect from the old boolean and shouldn't be flipped
+ * to a different visible mode by the migration. Skips when the user
+ * is already on "Full + Compact" or doesn't have the legacy boolean
+ * set. Best-effort; the workspace-scope-heal sweep strips the source
+ * key on the same activate. */
 async function migrateSessionTokensCompact(): Promise<void> {
   try {
     const config = vscode.workspace.getConfiguration("wat321");
@@ -289,5 +291,59 @@ async function migrateSessionTokensCompact(): Promise<void> {
     // sweep (also catches workspace-scope copies) - no need to update here.
   } catch {
     // best-effort - leaving both keys present is recoverable from the UI
+  }
+}
+
+/** Rename `modelBridge.enabled` -> `enableOpenCode` and
+ * `modelBridge.localEndpoint` -> `localEndpoint`. The "Model Bridge"
+ * naming was internal; the user-facing settings now live under the
+ * top-level OpenCode section with cleaner labels.
+ *
+ * Migration semantics: copy any explicit value at the old key onto
+ * the new key, only when the new key has no explicit value of its
+ * own (so a user who already set the new key during a prior partial
+ * upgrade isn't overwritten). Source key removal happens via the
+ * workspace-scope-heal legacy sweep on the same activate. */
+async function migrateModelBridgeKeys(): Promise<void> {
+  try {
+    const config = vscode.workspace.getConfiguration("wat321");
+
+    const oldEnabled = config.inspect<boolean>("modelBridge.enabled");
+    const newEnabled = config.inspect<boolean>("enableOpenCode");
+    if (
+      newEnabled?.globalValue === undefined &&
+      newEnabled?.workspaceValue === undefined &&
+      (oldEnabled?.globalValue !== undefined ||
+        oldEnabled?.workspaceValue !== undefined)
+    ) {
+      const value = oldEnabled.globalValue ?? oldEnabled.workspaceValue;
+      if (typeof value === "boolean") {
+        await config.update(
+          SETTING.enableOpenCode,
+          value,
+          vscode.ConfigurationTarget.Global
+        );
+      }
+    }
+
+    const oldEndpoint = config.inspect<string>("modelBridge.localEndpoint");
+    const newEndpoint = config.inspect<string>("localEndpoint");
+    if (
+      newEndpoint?.globalValue === undefined &&
+      newEndpoint?.workspaceValue === undefined &&
+      (oldEndpoint?.globalValue !== undefined ||
+        oldEndpoint?.workspaceValue !== undefined)
+    ) {
+      const value = oldEndpoint.globalValue ?? oldEndpoint.workspaceValue;
+      if (typeof value === "string") {
+        await config.update(
+          SETTING.localEndpoint,
+          value,
+          vscode.ConfigurationTarget.Global
+        );
+      }
+    }
+  } catch {
+    // best-effort - source keys remain readable until the heal sweep runs
   }
 }

@@ -213,14 +213,24 @@ async function resetSessionTotals(): Promise<void> {
 }
 
 export async function pickActiveInstance(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  kindFilter?: "remote" | "local"
 ): Promise<void> {
   const config = await readConfigFromSettings(context);
+
+  // Optional kind filter for cross-tier dispatch from the EH session
+  // pickers. The OpenCode session manager's MODEL row passes "remote"
+  // so Local LLM doesn't appear (Local LLM has its own session-
+  // management submenu and its own active-instance picker entry).
+  // The standalone palette command passes nothing, showing all kinds.
+  const visibleInstances = kindFilter
+    ? config.instances.filter((i) => i.kind === kindFilter)
+    : config.instances;
 
   const items: vscode.QuickPickItem[] = [
     makeBackItem(),
     makeSeparator(),
-    ...config.instances.map((inst) => {
+    ...visibleInstances.map((inst) => {
       const star = inst.id === config.activeInstanceId ? "$(star-full) " : "";
       const status =
         inst.kind === "remote" && inst.apiKeyMissing
@@ -569,7 +579,7 @@ async function zenKeyMenu(context: vscode.ExtensionContext): Promise<void> {
         ? "$(key) Update OpenCode Zen API Key"
         : "$(key) Set OpenCode Zen API Key",
       description: existing ? "Stored" : "Not set",
-      detail: "Used by every Zen instance (Big Pickle, GPT-5 Nano, Ling, Hy3, Nemotron, MiniMax M2.5)",
+      detail: "Used by every Zen instance (Big Pickle, GPT-5 Nano, Ling, Hy3, Nemotron, MiniMax M2.7)",
     },
   ];
   if (existing) {

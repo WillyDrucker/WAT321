@@ -6,6 +6,7 @@ import { atomicCopy } from "../shared/fs/atomicCopy";
 import {
   resolveClaudeCli,
   resolveCodexCli,
+  resolveOpenCodeCli,
 } from "../shared/mcp/cliBinaryResolver";
 import { copyProdModules } from "../shared/mcp/copyProdModules";
 import { preAllowMcpTools, unAllowMcpTools } from "../shared/mcp/preAllowTools";
@@ -212,4 +213,12 @@ export async function isClaudeAvailable(): Promise<boolean> {
  * registration / permissions.allow entries / channel.mjs extracted. */
 export async function isCodexAvailable(): Promise<boolean> {
   return (await resolveCodexCli()) !== null;
+}
+
+/** Detect whether `opencode` CLI is reachable via PATH. The OpenCode
+ * VS Code extension does not bundle a CLI, so this is PATH-only. Used
+ * by the EH activation gate to satisfy the (Codex OR OpenCode)
+ * requirement when Codex isn't installed. */
+export async function isOpenCodeAvailable(): Promise<boolean> {
+  return (await resolveOpenCodeCli()) !== null;
 }

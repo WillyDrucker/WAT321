@@ -10,7 +10,6 @@ import { join } from "node:path";
 
 export const WAT321_DIR = join(homedir(), ".wat321");
 export const MODEL_BRIDGE_DIR = join(WAT321_DIR, "model-bridge");
-export const BIN_DIR = join(MODEL_BRIDGE_DIR, "bin");
 
 /** Atomic config file the extension writes on every settings change.
  * `channel.mjs` reads this per call - the MCP server is a separate
@@ -57,14 +56,7 @@ export const SESSIONS_DIR = join(MODEL_BRIDGE_DIR, "sessions");
  * stepping on each other's tool registrations. */
 export const MCP_SERVER_NAME = "wat321-model-bridge";
 
-/** Legacy MCP server names this tier should sweep from
- * `~/.claude/settings.json` on every install. The current registration
- * is `wat321-model-bridge`; any stale earlier-named entry pointing at
- * the same channel.mjs path is removed before the new add to keep the
- * user's allow-list and registration table clean. */
+/** Earlier-named MB MCP entries the v1.4.x sweep removes from
+ * `~/.claude/settings.json` so a user upgrading from <=1.4.0 doesn't
+ * end up with stale registrations after the unified bridge takes over. */
 export const LEGACY_MCP_SERVER_NAMES = ["wat321-local-llm"] as const;
-
-/** Bundled MCP server script. Extracted to BIN_DIR on enable; Claude
- * Code spawns `node <BIN_DIR>/channel.mjs` once the MCP entry is
- * registered. */
-export const CHANNEL_SCRIPT_NAME = "channel.mjs";
