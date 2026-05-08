@@ -14,25 +14,25 @@ import { loadBridgeThreadRecordIfExists } from "./threadPersistence";
 import { workspaceHash } from "../shared/workspaceHash";
 
 /** OpenCode/Local dispatch heartbeat for this workspace. Written by
- * `bin/opencode/heartbeat.mjs:withMbHeartbeat` every 5s while a turn
- * is in flight, deleted on settle. The model-bridge dir is already
+ * `bin/opencode/heartbeat.mjs:withOpenCodeHeartbeat` every 5s while
+ * a turn is in flight, deleted on settle. The state dir is already
  * per-client (clients/<wsId>/model-bridge/), so the file needs no
  * per-instance suffix. The `wsHash` parameter is retained for caller
  * symmetry with other widgets; null skips the read entirely. */
-function mbHeartbeatPath(wsHash: string | null): string | null {
+function openCodeHeartbeatPath(wsHash: string | null): string | null {
   if (!wsHash) return null;
   return join(modelBridgeStateDir(), "heartbeat.json");
 }
 
-interface MbHeartbeatActivity {
+interface OpenCodeHeartbeatActivity {
   startedAtMs: number;
 }
 
 /** Snapshot the OpenCode dispatch heartbeat for animation timing. Returns null when
  * the file is missing, malformed, or has a startedAt that doesn't
  * parse. Best-effort - any read failure simply suppresses the cycle. */
-function readMbHeartbeatActivity(wsHash: string | null): MbHeartbeatActivity | null {
-  const path = mbHeartbeatPath(wsHash);
+function readOpenCodeHeartbeatActivity(wsHash: string | null): OpenCodeHeartbeatActivity | null {
+  const path = openCodeHeartbeatPath(wsHash);
   if (!path) return null;
   try {
     if (!existsSync(path)) return null;
@@ -54,7 +54,7 @@ function readMbHeartbeatActivity(wsHash: string | null): MbHeartbeatActivity | n
  * time-driven progression to give the user the same visual rhythm
  * during an OC/Local turn that they get during a Codex turn. Stage
  * lands on `working` for the long tail of generation. */
-function syntheticMbStage(elapsedMs: number):
+function syntheticOpenCodeStage(elapsedMs: number):
   | "dispatched"
   | "received"
   | "working" {
@@ -362,7 +362,7 @@ export function createEpicHandshakeStatusBarItem(
       // In adaptive mode the walker always reaches stage 5 with its
       // own arrow-left cycle, so this branch is mostly a fallback.
       icon = oneHz ? "$(wat321-square-arrow-left)" : "$(wat321-square)";
-    } else if (readMbHeartbeatActivity(wsHash) !== null) {
+    } else if (readOpenCodeHeartbeatActivity(wsHash) !== null) {
       // OC/Local dispatch in flight (and no Codex turn active - the
       // earlier branches would have caught that). Drives the same
       // adaptive cycle the Codex flow uses, with the stage synthesized
@@ -370,10 +370,10 @@ export function createEpicHandshakeStatusBarItem(
       // a stop-gap until Phased Messaging gives us real SSE-to-stage
       // transitions for OC/Local. Standard / fire-and-
       // forget modes fall back to the classic outbound arrow cycle.
-      const mb = readMbHeartbeatActivity(wsHash);
+      const mb = readOpenCodeHeartbeatActivity(wsHash);
       const elapsedMs = mb !== null ? Math.max(0, now - mb.startedAtMs) : 0;
       icon = adaptive
-        ? adaptiveStageCycle(syntheticMbStage(elapsedMs), oneHz, false)
+        ? adaptiveStageCycle(syntheticOpenCodeStage(elapsedMs), oneHz, false)
         : oneHz
           ? "$(wat321-square-arrow-right)"
           : "$(wat321-square)";

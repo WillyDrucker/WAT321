@@ -86,10 +86,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Server tier) handles dispatch for both. Wrapped in try/catch so a
   // fatal bug in this tier never takes down the core Claude / Codex
   // widgets - OpenCode Routes is opt-in, the usage widgets are not.
-  let modelBridge: { resetCleanup: () => Promise<void>; dispose: () => void } | null = null;
+  let openCodeRoutes: { resetCleanup: () => Promise<void>; dispose: () => void } | null = null;
   try {
-    modelBridge = activateOpenCodeRoutes(context);
-    context.subscriptions.push(modelBridge);
+    openCodeRoutes = activateOpenCodeRoutes(context);
+    context.subscriptions.push(openCodeRoutes);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     void vscode.window.showWarningMessage(
@@ -127,7 +127,7 @@ export function activate(context: vscode.ExtensionContext) {
     ctx?.providers.resetAllTokenServices();
     ctx?.events.emit("engine.reset", {});
     await epicHandshake.resetCleanup();
-    if (modelBridge) await modelBridge.resetCleanup();
+    if (openCodeRoutes) await openCodeRoutes.resetCleanup();
     // Sweep the unified bridge's MCP entry + pre-allowed tool list
     // (mcp__wat321__wat321_ask, etc.) from ~/.claude/settings.json. EH's
     // resetCleanup removes the legacy `wat321` entry, but if the user

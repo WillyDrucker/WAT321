@@ -25,9 +25,9 @@ import { isPaused, setPaused } from "./statusBarState";
  *   - BACK
  *   - <TOOL> MODEL: <name>           (one click switches catalog instance)
  *   - CURRENT <TOOL> SESSION         (click opens switch sub-picker)
- *   - RESET <TOOL> SESSION           (modal confirm; clears active alias)
- *   - DELETE <TOOL> SESSION (S#)     (modal confirm; only when active)
- *   - DELETE ALL <TOOL> SESSIONS (#) (modal confirm)
+ *   - RESET <TOOL> SESSION           (toast confirm; clears active alias)
+ *   - DELETE <TOOL> SESSION (S#)     (toast confirm; only when active)
+ *   - DELETE ALL <TOOL> SESSIONS (#) (toast confirm)
  *   - PAUSE/RESUME, CANCEL
  *
  * Active-alias state lives in `aliases.activeAliases[target]` in

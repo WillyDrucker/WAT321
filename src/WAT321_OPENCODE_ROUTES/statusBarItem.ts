@@ -37,10 +37,10 @@ function readActiveBridgeAlias(target: "opencode" | "local"): string | null {
   }
 }
 
-/** Heartbeat path. The per-client `model-bridge/` dir already
+/** OpenCode Routes heartbeat path. The per-client state dir already
  * partitions per workspace via wsId (or "default" wsId for folderless
  * windows), so the heartbeat file carries no further suffix. */
-function mbHeartbeatPath(): string {
+function heartbeatPath(): string {
   return join(MODEL_BRIDGE_DIR, "heartbeat.json");
 }
 
@@ -116,7 +116,7 @@ interface ConfigSnapshot {
 }
 
 function readHeartbeat(): Heartbeat | null {
-  const path = mbHeartbeatPath();
+  const path = heartbeatPath();
   if (!path || !existsSync(path)) return null;
   try {
     const raw = readFileSync(path, "utf8").trim();
@@ -218,7 +218,7 @@ function targetForInstance(
 }
 
 // Tooltip composition lives in `./tooltip.ts`.
-import { buildMbTooltip } from "./tooltip";
+import { buildOpenCodeRoutesTooltip } from "./tooltip";
 
 export function createOpenCodeRoutesStatusBarItem(
   context: vscode.ExtensionContext,
@@ -234,10 +234,10 @@ export function createOpenCodeRoutesStatusBarItem(
 
   // Tooltip-only widget. All session/instance management lives on
   // the Epic Handshake dropdown (Manage OpenCode Sessions / Manage
-  // Local LLM Sessions). The legacy click-menu stays
-  // registered as a command-palette entry only ('WAT321: Model
-  // Bridge - Menu (legacy)') for the rare user who wants the old
-  // shape; the widget itself never sets `item.command`.
+  // Local LLM Sessions). The legacy click-menu stays registered as a
+  // command-palette entry only ('WAT321: OpenCode Routes - Menu
+  // (legacy)') for the rare user who wants the old shape; the widget
+  // itself never sets `item.command`.
   const legacyMenuCommand = vscode.commands.registerCommand(
     "wat321.modelBridge.legacyMenu",
     async () => {
@@ -383,7 +383,7 @@ export function createOpenCodeRoutesStatusBarItem(
       if (stale) {
         text = `${idleIcon} ${idleAlias}${sessionTokensSuffix}`;
         tooltipSig = `idle:${idleAlias}:${needsKey}:${usageSig}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
-        tooltip = buildMbTooltip({
+        tooltip = buildOpenCodeRoutesTooltip({
           hb: null,
           catalogAlias: idleAlias,
           catalogContextWindow: active.contextWindow ?? null,
@@ -435,7 +435,7 @@ export function createOpenCodeRoutesStatusBarItem(
         }
         text = `${icon} ${alias} ${stat}`;
         tooltipSig = `live:${heartbeat.currentPhase || "DISPATCH"}:${(heartbeat.phaseTrace || []).length}:${usageSig}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
-        tooltip = buildMbTooltip({
+        tooltip = buildOpenCodeRoutesTooltip({
           hb: heartbeat,
           catalogAlias: alias,
           catalogContextWindow: active.contextWindow ?? null,
@@ -450,7 +450,7 @@ export function createOpenCodeRoutesStatusBarItem(
       const badge = needsKey ? " $(wat321-square-alert)" : "";
       text = `${idleIcon} ${idleAlias}${sessionTokensSuffix}${badge}`;
       tooltipSig = `idle:${idleAlias}:${needsKey}:${usageSig}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
-      tooltip = buildMbTooltip({
+      tooltip = buildOpenCodeRoutesTooltip({
         hb: null,
         catalogAlias: idleAlias,
         catalogContextWindow: active.contextWindow ?? null,

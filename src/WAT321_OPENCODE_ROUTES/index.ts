@@ -49,7 +49,7 @@ export function activateOpenCodeRoutes(
   context.subscriptions.push({ dispose: () => void openCodeManager.dispose() });
 
   // Activate-time `applyCurrentConfig` can resolve `reconcile` with
-  // "" (first-spawn failure or a races on inputs) and write config.json
+  // "" (first-spawn failure or an input race) and write config.json
   // with an empty harness URL even when a follow-up spawn ultimately
   // succeeds. The manager reports every URL transition and the
   // listener re-runs the merge so config.json always tracks the live
@@ -99,12 +99,10 @@ export function activateOpenCodeRoutes(
     lastInstallable = installable;
     everReconciled = true;
 
-    // OPENCODE_ROUTES owns no MCP entry of its own. The unified
-    // `wat321` server installed by WAT321_MCP_SERVER on Epic Handshake
-    // enable handles all dispatch and sweeps every legacy entry name
-    // there. This tier's reconcile only writes its own config / harness
-    // state; nothing here touches Claude's MCP allowlist.
-    void installable;
+    // No MCP entry of its own to register. The unified `wat321` server
+    // installed by WAT321_MCP_SERVER on Epic Handshake enable handles
+    // all dispatch; this tier's reconcile only writes its own
+    // config.json + harness state.
   };
 
   // Apply once at activate so the config file exists before

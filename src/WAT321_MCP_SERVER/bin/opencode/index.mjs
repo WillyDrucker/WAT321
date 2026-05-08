@@ -18,8 +18,8 @@
  * Module layout (this directory):
  *   common.mjs    paths, constants, logSse, errorResult, formatters
  *   aliases.mjs   per-target S<n> alias map read/write
- *   config.mjs    serveUrl, instances, findInstance from MB config
- *   heartbeat.mjs withMbHeartbeat dispatch wrapper + tps tracker
+ *   config.mjs    serveUrl, instances, findInstance from OpenCode Routes config
+ *   heartbeat.mjs withOpenCodeHeartbeat dispatch wrapper + tps tracker
  *   sse.mjs       tapOpenCodeEvents stream + poll fallback
  *   sessions.mjs  handleSession + listSessionsResource + postSessionMessage
  *   dispatch.mjs  handleAsk (session-attached, auto-create, one-shot)

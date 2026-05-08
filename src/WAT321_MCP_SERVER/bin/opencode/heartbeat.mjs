@@ -19,7 +19,7 @@ import {
  * an OpenCode dispatch is in flight. Per-workspace partition keeps a
  * sibling VS Code window from lighting up when this workspace fires.
  *
- * `withMbHeartbeat` wraps a dispatch with start/keepalive/clear so
+ * `withOpenCodeHeartbeat` wraps a dispatch with start/keepalive/clear so
  * the badge stays alive across long calls without flooding disk
  * writes. The 5s keepalive matches the widget's safety-net poll
  * cadence; the widget computes elapsed locally so a stable
@@ -31,7 +31,7 @@ import {
  * "Big Pickle" after a failed call would be misleading.
  */
 
-function writeMbHeartbeat(payload) {
+function writeOpenCodeHeartbeat(payload) {
   try {
     if (!existsSync(MB_DIR)) mkdirSync(MB_DIR, { recursive: true });
     const tmp = `${MB_HEARTBEAT_PATH}.tmp`;
@@ -42,7 +42,7 @@ function writeMbHeartbeat(payload) {
   }
 }
 
-function clearMbHeartbeat() {
+function clearOpenCodeHeartbeat() {
   try {
     if (existsSync(MB_HEARTBEAT_PATH)) unlinkSync(MB_HEARTBEAT_PATH);
   } catch {
@@ -50,7 +50,7 @@ function clearMbHeartbeat() {
   }
 }
 
-function writeMbLastUsed(meta) {
+function writeOpenCodeLastUsed(meta) {
   try {
     if (!existsSync(MB_DIR)) mkdirSync(MB_DIR, { recursive: true });
     const payload = {
@@ -160,7 +160,7 @@ function makeTpsComputer() {
   };
 }
 
-export async function withMbHeartbeat(meta, runDispatch) {
+export async function withOpenCodeHeartbeat(meta, runDispatch) {
   const startedAt = new Date().toISOString();
   const requestId = randomUUID();
   let tokens = 0;
@@ -168,7 +168,7 @@ export async function withMbHeartbeat(meta, runDispatch) {
   const computeTps = makeTpsComputer();
 
   const writeBeat = () => {
-    writeMbHeartbeat({
+    writeOpenCodeHeartbeat({
       phase: "calling",
       requestId,
       startedAt,
@@ -198,11 +198,11 @@ export async function withMbHeartbeat(meta, runDispatch) {
   try {
     const result = await runDispatch(updateProgress);
     if (result && result.ok !== false) {
-      writeMbLastUsed(meta);
+      writeOpenCodeLastUsed(meta);
     }
     return result;
   } finally {
     clearInterval(interval);
-    clearMbHeartbeat();
+    clearOpenCodeHeartbeat();
   }
 }

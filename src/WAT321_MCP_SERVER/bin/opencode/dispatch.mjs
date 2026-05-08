@@ -11,7 +11,7 @@ import {
   writeAliases,
 } from "./aliases.mjs";
 import { findInstance, readServeUrl } from "./config.mjs";
-import { withMbHeartbeat } from "./heartbeat.mjs";
+import { withOpenCodeHeartbeat } from "./heartbeat.mjs";
 import { tapOpenCodeEvents } from "./sse.mjs";
 import { postSessionMessage } from "./sessions.mjs";
 
@@ -260,7 +260,7 @@ export async function handleAsk(args) {
               modelID: sessionInstance.model,
             }
           : null;
-    const result = await withMbHeartbeat(meta, async (updateProgress) => {
+    const result = await withOpenCodeHeartbeat(meta, async (updateProgress) => {
       const tap = await tapOpenCodeEvents(serveUrl, sessionId, updateProgress);
       try {
         return await postSessionMessage(serveUrl, sessionId, prompt, timeoutMs, modelRef);
@@ -298,7 +298,7 @@ export async function handleAsk(args) {
     model: modelSlug,
     timeoutMs,
   };
-  const result = await withMbHeartbeat(oneShotMeta, () =>
+  const result = await withOpenCodeHeartbeat(oneShotMeta, () =>
     anonymousChatCompletion(modelSlug, prompt, timeoutMs)
   );
   if (!result.ok) {

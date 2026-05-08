@@ -27,8 +27,9 @@ import { promptAndStoreZenApiKey } from "./secrets";
  * Settings.json carries the master `enabled` flag plus the local
  * endpoint URL. The instance catalog is hardcoded; active-instance
  * selection is the only per-task knob, persisted in preferences.json.
- * Pause/Cancel are flag files under `~/.wat321/model-bridge/` that
- * `channel.mjs` observes per call.
+ * Pause/Cancel are flag files under the per-client
+ * `~/.wat321/clients/<wsId>/model-bridge/` directory that `channel.mjs`
+ * observes per call.
  *
  * Sessions submenu lives in `sessionsMenu.ts`; the Zen API key
  * picker lives in `zenKeyMenu.ts`.

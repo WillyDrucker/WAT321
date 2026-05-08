@@ -100,7 +100,7 @@ function formatModelLine(
   return `Model: ${name}${windowSuffix}`;
 }
 
-export function buildMbTooltip(opts: {
+export function buildOpenCodeRoutesTooltip(opts: {
   hb: Heartbeat | null;
   catalogAlias: string;
   catalogContextWindow: number | null;

@@ -57,12 +57,12 @@ interface BridgeConfig {
 function snapshotConfig(): BridgeConfig {
   const config = vscode.workspace.getConfiguration("wat321");
   const codexAvailable = config.get<boolean>(SETTING.epicHandshakeEnabled, false);
-  const modelBridge = config.get<boolean>(SETTING.enableOpenCode, false);
+  const openCodeEnabled = config.get<boolean>(SETTING.enableOpenCode, false);
   const localEndpoint = config
     .get<string>(SETTING.localEndpoint, "")
     .trim();
-  const opencodeAvailable = modelBridge;
-  const localAvailable = modelBridge && localEndpoint.length > 0;
+  const opencodeAvailable = openCodeEnabled;
+  const localAvailable = openCodeEnabled && localEndpoint.length > 0;
 
   // Workspace folder name when one is open, "Workspace" as a generic
   // fallback when the user has VS Code open with no folder. The bridge
