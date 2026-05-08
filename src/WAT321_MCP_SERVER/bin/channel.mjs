@@ -404,12 +404,13 @@ function errorResult(text) {
   return { content: [{ type: "text", text }], isError: true };
 }
 
-/** Prefix a successful wat321_ask result with a one-line summary of
- * what was asked, so the user sees both the question and the answer
- * even when the host IDE collapses the MCP tool-call input panel into
- * a single OUT row. Errors and session-retrieval calls (empty prompt)
- * pass through unchanged - errors are already self-describing and
- * "give me the latest assistant message" is not a new ask. */
+/** Prefix a successful wat321_ask result with the full prompt rendered
+ * as a markdown blockquote, so the user sees exactly what was asked
+ * alongside the answer even when the host IDE collapses the MCP tool-
+ * call input panel into a single OUT row. Multi-line prompts each get
+ * their own `>` prefix so markdown renders the whole question as one
+ * blockquote rather than dropping out after the first line. Errors
+ * and session-retrieval calls (empty prompt) pass through unchanged. */
 function decorateAskResult(result, args, target) {
   if (result?.isError) return result;
   const prompt = typeof args?.prompt === "string" ? args.prompt : "";
@@ -422,14 +423,16 @@ function decorateAskResult(result, args, target) {
     return result;
   }
   const aliasLabel = friendlyAskAlias(args, target);
-  const firstLine = prompt.split(/\r?\n/)[0].trim();
-  const SUMMARY_MAX = 100;
-  const summary =
-    firstLine.length > SUMMARY_MAX
-      ? `${firstLine.slice(0, SUMMARY_MAX).trimEnd()}…`
-      : firstLine;
-  const prefix = `> ${aliasLabel} • ${summary}`;
-  const decorated = `${prefix}\n\n${result.content[0].text}`;
+  const lines = prompt.split(/\r?\n/);
+  const head = lines[0] ?? "";
+  const tail = lines.slice(1);
+  const quoted =
+    tail.length === 0
+      ? `> **${aliasLabel}:** ${head}`
+      : [`> **${aliasLabel}:** ${head}`, ...tail.map((l) => `> ${l}`)].join(
+          "\n"
+        );
+  const decorated = `${quoted}\n\n${result.content[0].text}`;
   return {
     ...result,
     content: [
