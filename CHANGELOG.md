@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **OpenCode harness starts again on the latest opencode CLI.** OpenCode 1.14.39 tightened its config schema so a partial `limit` block (only `context`, no `output`) gets rejected with `ConfigInvalidError`, which silently killed the harness and left every Big Pickle / Local LLM / Zen-route prompt erroring with "opencode serve is not running." The local route's `limit` block is now omitted entirely - opencode falls back to its 32K default, the v1.4.7 reasoning-model headroom is preserved, and Big Pickle / Local LLM dispatches work again.
+- **Big Pickle and Local LLM stay reachable after activate-time hiccups.** The harness URL used to be written into config.json only at activate; if the activate-time spawn raced or failed and a follow-up spawn succeeded, nothing carried the new URL back into config and dispatches would error with "opencode serve is not running" while opencode was actually healthy. The harness now reports every URL transition and the bridge config rewrites itself to match, so a successful spawn is always reachable.
 
 ### Removed
 

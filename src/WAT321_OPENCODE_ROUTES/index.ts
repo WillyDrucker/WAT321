@@ -48,6 +48,17 @@ export function activateOpenCodeRoutes(
   const openCodeManager = createOpenCodeManager(logger);
   context.subscriptions.push({ dispose: () => void openCodeManager.dispose() });
 
+  // Closes a v1.5.0 race: the activate-time `applyCurrentConfig` could
+  // resolve `reconcile` with "" (first-spawn failure) and write
+  // config.json with an empty harness URL, even though a follow-up
+  // spawn succeeded later with no observer to capture its URL. The
+  // manager now reports every URL transition and we re-run the merge
+  // so config.json always tracks the live harness state.
+  const urlSub = openCodeManager.onUrlChanged(() => {
+    void applyCurrentConfig();
+  });
+  context.subscriptions.push(urlSub);
+
   let lastInstallable = false;
   // First-pass guard. Without this, the activate-time call short-
   // circuits when desired state is `false` because lastInstallable is

@@ -63,6 +63,13 @@ export interface OpenCodeManager {
   getServerUrl(): string;
   /** Lightweight status surface for health output / log lines. */
   getStatus(): OpenCodeManagerStatus;
+  /** Subscribe to URL transitions. The listener fires every time the
+   * resolved server URL changes (post-spawn-ready, post-stop, post-
+   * crash-exit). Returns a disposable. The activate path uses this to
+   * rewrite config.json whenever the URL changes, closing a race where
+   * the activate-time `reconcile` resolved with "" but a later spawn
+   * succeeded with no observer to capture the new URL. */
+  onUrlChanged(listener: (url: string) => void): { dispose(): void };
   /** Stop the subprocess and release any allocated port. */
   dispose(): Promise<void>;
 }
@@ -121,6 +128,16 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
   let cliResolvable = false;
   let desired = false;
   let inFlight: Promise<string> | null = null;
+  const urlListeners = new Set<(url: string) => void>();
+  /** Single point of mutation for `url`. Notifies listeners only on
+   * actual change so duplicate set-to-same-value calls do not refire. */
+  const setUrl = (next: string): void => {
+    if (next === url) return;
+    url = next;
+    for (const fn of urlListeners) {
+      try { fn(url); } catch { /* listener-side errors must not affect manager */ }
+    }
+  };
 
   const ensureWorkdir = (): void => {
     if (!existsSync(OPENCODE_WORKDIR)) {
@@ -137,7 +154,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     if (child === null) return;
     const handle = child;
     child = null;
-    url = "";
+    setUrl("");
     port = 0;
     // Synchronous SIGKILL up front so an extension-host teardown
     // (VS Code window close) gets the kill in flight before its event
@@ -206,7 +223,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
       logger.info(`opencode serve exited with code ${code}`);
       if (child === proc) {
         child = null;
-        url = "";
+        setUrl("");
         port = 0;
       }
     });
@@ -222,7 +239,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
       return "";
     }
 
-    url = `http://127.0.0.1:${chosenPort}`;
+    setUrl(`http://127.0.0.1:${chosenPort}`);
     lastError = "";
     lastInputs = { localEndpoint: inputs.localEndpoint, zenApiKey: inputs.zenApiKey };
     logger.info(`opencode serve ready at ${url}`);
@@ -274,6 +291,10 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
       port,
       lastError,
     }),
+    onUrlChanged(listener) {
+      urlListeners.add(listener);
+      return { dispose: () => { urlListeners.delete(listener); } };
+    },
     dispose: stop,
   };
 }
