@@ -5,7 +5,7 @@ import {
   readConfigFromSettings,
   writeConfigFile,
 } from "./config";
-import { MODEL_BRIDGE_DIR } from "./constants";
+import { OPENCODE_ROUTES_DIR } from "./constants";
 import { createOpenCodeRoutesLogger } from "./outputChannel";
 import { createOpenCodeManager } from "../WAT321_OPENCODE_HARNESS";
 import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
@@ -48,6 +48,17 @@ export function activateOpenCodeRoutes(
   const openCodeManager = createOpenCodeManager(logger);
   context.subscriptions.push({ dispose: () => void openCodeManager.dispose() });
 
+  // Activate-time `applyCurrentConfig` can resolve `reconcile` with
+  // "" (first-spawn failure or an input race) and write config.json
+  // with an empty harness URL even when a follow-up spawn ultimately
+  // succeeds. The manager reports every URL transition and the
+  // listener re-runs the merge so config.json always tracks the live
+  // harness state instead of pinning the racy first result.
+  const urlSub = openCodeManager.onUrlChanged(() => {
+    void applyCurrentConfig();
+  });
+  context.subscriptions.push(urlSub);
+
   let lastInstallable = false;
   // First-pass guard. Without this, the activate-time call short-
   // circuits when desired state is `false` because lastInstallable is
@@ -88,12 +99,10 @@ export function activateOpenCodeRoutes(
     lastInstallable = installable;
     everReconciled = true;
 
-    // OPENCODE_ROUTES owns no MCP entry of its own. The unified
-    // `wat321` server installed by WAT321_MCP_SERVER on Epic Handshake
-    // enable handles all dispatch and sweeps every legacy entry name
-    // there. This tier's reconcile only writes its own config / harness
-    // state; nothing here touches Claude's MCP allowlist.
-    void installable;
+    // No MCP entry of its own to register. The unified `wat321` server
+    // installed by WAT321_MCP_SERVER on Epic Handshake enable handles
+    // all dispatch; this tier's reconcile only writes its own
+    // config.json + harness state.
   };
 
   // Apply once at activate so the config file exists before
@@ -110,10 +119,10 @@ export function activateOpenCodeRoutes(
     .getConfiguration("wat321")
     .get<boolean>(SETTING.enableOpenCode, false);
 
-  // Settings watcher: rewrite config.json + reconcile MCP entry on
-  // any wat321.modelBridge.* change. Cheap (atomic file write +
-  // optional CLI call) so doing this every keystroke in settings.json
-  // is fine.
+  // Settings watcher: rewrite config.json + reconcile harness on any
+  // change to `wat321.enableOpenCode` or `wat321.localEndpoint`. Cheap
+  // (atomic file write + optional subprocess respawn) so doing this
+  // every keystroke in settings.json is fine.
   const watcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
       e.affectsConfiguration(`wat321.${SETTING.enableOpenCode}`) ||
@@ -152,7 +161,7 @@ export function activateOpenCodeRoutes(
   // menu, not VS Code settings). Watch the file so a click-menu edit
   // also rewrites the merged config.json that channel.mjs reads.
   const prefsPattern = new vscode.RelativePattern(
-    vscode.Uri.file(MODEL_BRIDGE_DIR),
+    vscode.Uri.file(OPENCODE_ROUTES_DIR),
     "preferences.json"
   );
   const prefsWatcher = vscode.workspace.createFileSystemWatcher(prefsPattern);

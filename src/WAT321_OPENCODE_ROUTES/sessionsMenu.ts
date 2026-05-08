@@ -93,7 +93,7 @@ async function manageThreadsMenu(): Promise<void> {
   const eraseAllItem: vscode.QuickPickItem = {
     label: "$(trash) Erase all threads",
     description: `${threads.length} thread${threads.length === 1 ? "" : "s"}`,
-    detail: "Removes every rollout in ~/.wat321/model-bridge/sessions/",
+    detail: "Removes every rollout under this workspace's OpenCode Routes sessions directory.",
   };
   const items: vscode.QuickPickItem[] = [
     makeBackItem(),

@@ -41,11 +41,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as codex from "./codex.mjs";
 import * as opencode from "./opencode/index.mjs";
-import { bridgeStateDir, modelBridgeStateDir } from "./paths.mjs";
+import { bridgeStateDir, openCodeRoutesStateDir } from "./paths.mjs";
+import { decorateAskResult } from "./replyDecorator.mjs";
+import {
+  filterEnabledResources,
+  readResourceContent,
+} from "./resources.mjs";
 
 const BRIDGE_DIR = bridgeStateDir();
 const CONFIG_PATH = join(BRIDGE_DIR, "config.json");
-const MB_CONFIG_PATH = join(modelBridgeStateDir(), "config.json");
+const OPENCODE_ROUTES_CONFIG_PATH = join(openCodeRoutesStateDir(), "config.json");
 const LOG_PATH = join(BRIDGE_DIR, "channel.log");
 const LOG_MAX_BYTES = 50_000;
 
@@ -99,8 +104,8 @@ function readEnabledTargets() {
 function readCatalog() {
   const empty = { instances: [], activeInstanceId: null };
   try {
-    if (!existsSync(MB_CONFIG_PATH)) return empty;
-    const parsed = JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8"));
+    if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return empty;
+    const parsed = JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8"));
     return {
       instances: Array.isArray(parsed?.instances) ? parsed.instances : [],
       activeInstanceId:
@@ -190,7 +195,7 @@ function makeRouter() {
  * strings to concrete targets so Claude doesn't need to know the
  * target enum exists.
  *
- * Total tool surface ~250-300 tokens vs the previous ~1100. */
+ * Total tool surface ~250-300 tokens. */
 function buildTools(enabled) {
   const tools = [];
   const anyEnabled = enabled.codex || enabled.opencode || enabled.local;
@@ -244,8 +249,13 @@ function buildTools(enabled) {
   return tools;
 }
 
+// MCP protocol version for the wat321_ask / wat321_session surface.
+// Decoupled from the WAT321 extension release - bumps only when the
+// tool inputSchema or resource layout changes in a non-additive way,
+// which lets MCP clients negotiate compatibility independently of
+// extension version stamps.
 const server = new Server(
-  { name: "wat321", version: "1.4.4" },
+  { name: "wat321", version: "1.0" },
   { capabilities: { tools: {}, resources: {} } }
 );
 
@@ -294,8 +304,10 @@ function resolveAskTarget(args, enabled) {
     };
   }
   if (resolved.useDefault) {
-    // Pick last-used from MB sidecar if present; otherwise fall back to
-    // active instance from MB config; otherwise codex if enabled.
+    // Default-route resolution: prefer the OpenCode Routes last-used
+    // sidecar, then the active-instance preference, then Codex when
+    // enabled. Mirrors what the widget shows so a default-aliased
+    // call lands on whatever the user has been using most recently.
     const lastUsed = readLastUsedInstance();
     if (lastUsed?.instanceId) {
       const inst = router.catalog.instances.find((i) => i.id === lastUsed.instanceId);
@@ -327,11 +339,11 @@ function resolveAskTarget(args, enabled) {
   return { target: resolved.target, instance_id: resolved.instance_id };
 }
 
-/** Best-effort read of the MB last-used sidecar so a default-alias
- * dispatch routes to the most recently used backend (matches the
- * widget's last-used display). */
+/** Best-effort read of the OpenCode Routes last-used sidecar so a
+ * default-alias dispatch routes to the most recently used backend
+ * (matches the widget's last-used display). */
 function readLastUsedInstance() {
-  const path = join(modelBridgeStateDir(), "last-used.json");
+  const path = join(openCodeRoutesStateDir(), "last-used.json");
   try {
     if (!existsSync(path)) return null;
     return JSON.parse(readFileSync(path, "utf8"));
@@ -372,7 +384,8 @@ async function dispatchCall(name, args, enabled) {
       target,
       ...(resolved.instance_id ? { instance_id: resolved.instance_id } : {}),
     };
-    return targetModule.handleAsk(forwardArgs);
+    const askResult = await targetModule.handleAsk(forwardArgs);
+    return decorateAskResult(askResult, args, target);
   }
 
   if (name === "wat321_session") {
@@ -418,67 +431,24 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 });
 
-// -----------------------------------------------------------------
-// Resources (read-only state Claude fetches on demand)
-// -----------------------------------------------------------------
-//
-// Resources cost ~30-50 tokens each in resources/list (URI + name +
-// short description). Their bodies are NOT loaded into Claude's
-// context until Claude reads them. Perfect for the catalog / sessions
-// / inbox / status surfaces that Claude only needs when the user
-// explicitly asks.
-
-const RESOURCE_DEFS = [
-  {
-    uri: "bridge://instances",
-    name: "Bridge instances",
-    description: "Catalog of available AI backends.",
-    mimeType: "application/json",
-  },
-  {
-    uri: "bridge://sessions/opencode",
-    name: "OpenCode sessions",
-    description: "Active OpenCode session aliases.",
-    mimeType: "application/json",
-  },
-  {
-    uri: "bridge://sessions/local",
-    name: "Local LLM sessions",
-    description: "Active Local LLM session aliases.",
-    mimeType: "application/json",
-  },
-  {
-    uri: "bridge://inbox/codex",
-    name: "Codex inbox",
-    description: "Pending late replies from Codex.",
-    mimeType: "application/json",
-  },
-  {
-    uri: "bridge://status",
-    name: "Bridge status",
-    description: "Daemon health, last-used backend, paused state.",
-    mimeType: "application/json",
-  },
-];
+// Resources are read-only state Claude fetches on demand (catalog,
+// sessions, inbox, status). Definitions + readers live in
+// `resources.mjs`; this file wires them to the MCP request handlers
+// and threads the small set of internal helpers the readers need.
 
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
-  const enabled = readEnabledTargets();
-  // Filter target-scoped resources by what's enabled. Saves tokens
-  // when only one target is on (e.g. Codex Only mode).
-  const filtered = RESOURCE_DEFS.filter((r) => {
-    if (r.uri.includes("/codex") && !enabled.codex) return false;
-    if (r.uri.includes("/opencode") && !enabled.opencode) return false;
-    if (r.uri.includes("/local") && !enabled.local) return false;
-    return true;
-  });
-  return { resources: filtered };
+  return { resources: filterEnabledResources(readEnabledTargets()) };
 });
 
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
   const uri = req.params.uri;
   log("info", `resources/read uri=${uri}`);
   try {
-    const text = await readResourceContent(uri);
+    const text = await readResourceContent(uri, {
+      makeRouter,
+      readLastUsedInstance,
+      readEnabledTargets,
+    });
     return {
       contents: [{ uri, mimeType: "application/json", text }],
     };
@@ -496,60 +466,6 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
     };
   }
 });
-
-/** Resolve a `bridge://...` URI to a JSON string Claude reads. */
-async function readResourceContent(uri) {
-  if (uri === "bridge://instances") {
-    const router = makeRouter();
-    return JSON.stringify(
-      {
-        instances: router.catalog.instances.map((i) => ({
-          id: i.id,
-          alias: i.alias,
-          kind: i.kind,
-          model: i.model,
-          dataRetention: i.dataRetention,
-          ready: i.apiKeyMissing !== true,
-        })),
-        activeInstanceId: router.catalog.activeInstanceId,
-      },
-      null,
-      2
-    );
-  }
-  if (uri === "bridge://sessions/opencode" || uri === "bridge://sessions/local") {
-    const target = uri.endsWith("/local") ? "local" : "opencode";
-    if (typeof opencode.listSessionsResource === "function") {
-      return JSON.stringify(await opencode.listSessionsResource(target), null, 2);
-    }
-    return JSON.stringify({ sessions: [] }, null, 2);
-  }
-  if (uri === "bridge://inbox/codex") {
-    if (typeof codex.listInboxResource === "function") {
-      return JSON.stringify(await codex.listInboxResource(), null, 2);
-    }
-    return JSON.stringify({ inbox: [] }, null, 2);
-  }
-  if (uri === "bridge://status") {
-    const lastUsed = readLastUsedInstance();
-    const enabled = readEnabledTargets();
-    return JSON.stringify(
-      {
-        enabled,
-        lastUsed: lastUsed
-          ? {
-              instanceId: lastUsed.instanceId,
-              alias: lastUsed.alias,
-              at: lastUsed.at,
-            }
-          : null,
-      },
-      null,
-      2
-    );
-  }
-  throw new Error(`Unknown resource URI: ${uri}`);
-}
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

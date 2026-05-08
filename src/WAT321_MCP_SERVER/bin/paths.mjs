@@ -31,6 +31,6 @@ export function bridgeStateDir() {
   return join(clientStateDir(), "bridge");
 }
 
-export function modelBridgeStateDir() {
+export function openCodeRoutesStateDir() {
   return join(clientStateDir(), "model-bridge");
 }

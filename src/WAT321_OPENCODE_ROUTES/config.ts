@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { CONFIG_PATH, MODEL_BRIDGE_DIR } from "./constants";
+import { CONFIG_PATH, OPENCODE_ROUTES_DIR } from "./constants";
 import { CATALOG, LOCAL_INSTANCE_ID } from "../shared/providers/opencode/catalog";
 import { readPreferences } from "./preferences";
 import { resolveApiKeys } from "./secrets";
@@ -174,9 +174,9 @@ function pickActiveInstanceId(
  * it up on its next read. Called both on settings changes and on
  * preferences.json edits via the click menu. */
 export function writeConfigFile(config: OpenCodeRoutesConfig): boolean {
-  if (!existsSync(MODEL_BRIDGE_DIR)) {
+  if (!existsSync(OPENCODE_ROUTES_DIR)) {
     try {
-      mkdirSync(MODEL_BRIDGE_DIR, { recursive: true });
+      mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
     } catch {
       return false;
     }

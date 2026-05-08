@@ -8,9 +8,9 @@ import {
 import { randomUUID } from "node:crypto";
 import {
   HEARTBEAT_KEEPALIVE_MS,
-  MB_DIR,
-  MB_HEARTBEAT_PATH,
-  MB_LAST_USED_PATH,
+  OPENCODE_ROUTES_DIR,
+  OPENCODE_HEARTBEAT_PATH,
+  OPENCODE_LAST_USED_PATH,
 } from "./common.mjs";
 
 /**
@@ -19,7 +19,7 @@ import {
  * an OpenCode dispatch is in flight. Per-workspace partition keeps a
  * sibling VS Code window from lighting up when this workspace fires.
  *
- * `withMbHeartbeat` wraps a dispatch with start/keepalive/clear so
+ * `withOpenCodeHeartbeat` wraps a dispatch with start/keepalive/clear so
  * the badge stays alive across long calls without flooding disk
  * writes. The 5s keepalive matches the widget's safety-net poll
  * cadence; the widget computes elapsed locally so a stable
@@ -31,28 +31,28 @@ import {
  * "Big Pickle" after a failed call would be misleading.
  */
 
-function writeMbHeartbeat(payload) {
+function writeOpenCodeHeartbeat(payload) {
   try {
-    if (!existsSync(MB_DIR)) mkdirSync(MB_DIR, { recursive: true });
-    const tmp = `${MB_HEARTBEAT_PATH}.tmp`;
+    if (!existsSync(OPENCODE_ROUTES_DIR)) mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
+    const tmp = `${OPENCODE_HEARTBEAT_PATH}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(payload)}\n`);
-    renameSync(tmp, MB_HEARTBEAT_PATH);
+    renameSync(tmp, OPENCODE_HEARTBEAT_PATH);
   } catch {
     // best-effort - widget falls back to idle on missing/invalid file
   }
 }
 
-function clearMbHeartbeat() {
+function clearOpenCodeHeartbeat() {
   try {
-    if (existsSync(MB_HEARTBEAT_PATH)) unlinkSync(MB_HEARTBEAT_PATH);
+    if (existsSync(OPENCODE_HEARTBEAT_PATH)) unlinkSync(OPENCODE_HEARTBEAT_PATH);
   } catch {
     // best-effort
   }
 }
 
-function writeMbLastUsed(meta) {
+function writeOpenCodeLastUsed(meta) {
   try {
-    if (!existsSync(MB_DIR)) mkdirSync(MB_DIR, { recursive: true });
+    if (!existsSync(OPENCODE_ROUTES_DIR)) mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
     const payload = {
       instanceId: meta.instanceId,
       alias: meta.alias,
@@ -60,9 +60,9 @@ function writeMbLastUsed(meta) {
       model: meta.model || "",
       at: new Date().toISOString(),
     };
-    const tmp = `${MB_LAST_USED_PATH}.tmp`;
+    const tmp = `${OPENCODE_LAST_USED_PATH}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(payload)}\n`);
-    renameSync(tmp, MB_LAST_USED_PATH);
+    renameSync(tmp, OPENCODE_LAST_USED_PATH);
   } catch {
     // best-effort
   }
@@ -88,12 +88,15 @@ function writeMbLastUsed(meta) {
  * against an artificially-old timestamp.
  *
  * `awaitingBaseline` mirrors the TS tracker: the first sample after
- * a session start, rollback, or idle-gap clear is consumed as a
- * baseline anchor (updates `lastObservedTokens`, does not enter
- * `samples`). Without it, the first computable window measures from
- * "tokens already accumulated when we started watching" to "tokens
- * after first new chunk", which on Codex's first turn caps the rate
- * at 999/s. */
+ * a session start or idle-gap clear is consumed as a baseline anchor
+ * (updates `lastObservedTokens`, does not enter `samples`). The
+ * rollback branch leaves `awaitingBaseline` cleared because
+ * `lastObservedTokens = totalTokens` already pins the post-compact
+ * floor; the next sample with new tokens enters the window directly.
+ * Without the baseline anchor, the first computable window measures
+ * from "tokens already accumulated when we started watching" to
+ * "tokens after first new chunk", which on Codex's first turn caps
+ * the rate at 999/s. */
 function makeTpsComputer() {
   const TPS_MAX = 999;
   const TPS_WINDOW_MS = 60_000;
@@ -104,18 +107,31 @@ function makeTpsComputer() {
   let lastValue = 0;
   let lastObservedTokens = null;
   let awaitingBaseline = true;
+  // Wall-clock millis of the last NEW (different-tokens) sample. Lets
+  // the unchanged-tokens path clear `lastValue` after TPS_IDLE_GAP_MS
+  // of real-time silence - the bridge's char-progress events stop
+  // arriving when a turn ends, so without this the tooltip pins the
+  // last in-flight rate forever.
+  let lastSampleWallMs = 0;
 
   return (atMs, totalTokens) => {
+    const nowWall = Date.now();
+    if (
+      lastSampleWallMs > 0 &&
+      nowWall - lastSampleWallMs > TPS_IDLE_GAP_MS
+    ) {
+      samples.length = 0;
+      lastValue = 0;
+      awaitingBaseline = true;
+    }
     const last = samples[samples.length - 1];
     if (lastObservedTokens !== null && totalTokens < lastObservedTokens) {
-      // Rollback path. Mirrors the TS tracker's clear-lastValue behavior
-      // even though pushProgress is monotonic-gated upstream - keeps
-      // semantics identical so a future caller cannot surface a stale
-      // rate.
+      // Rollback path. lastObservedTokens=totalTokens is the post-
+      // rollback anchor; awaitingBaseline stays cleared so the next
+      // sample with new tokens enters the window directly.
       samples.length = 0;
       lastValue = 0;
       lastObservedTokens = totalTokens;
-      awaitingBaseline = true;
     } else if (last !== undefined && atMs - last.atMs > TPS_IDLE_GAP_MS) {
       samples.length = 0;
       awaitingBaseline = true;
@@ -123,6 +139,7 @@ function makeTpsComputer() {
     if (lastObservedTokens !== null && totalTokens === lastObservedTokens) {
       return lastValue;
     }
+    lastSampleWallMs = nowWall;
     if (awaitingBaseline) {
       lastObservedTokens = totalTokens;
       awaitingBaseline = false;
@@ -146,7 +163,7 @@ function makeTpsComputer() {
   };
 }
 
-export async function withMbHeartbeat(meta, runDispatch) {
+export async function withOpenCodeHeartbeat(meta, runDispatch) {
   const startedAt = new Date().toISOString();
   const requestId = randomUUID();
   let tokens = 0;
@@ -154,7 +171,7 @@ export async function withMbHeartbeat(meta, runDispatch) {
   const computeTps = makeTpsComputer();
 
   const writeBeat = () => {
-    writeMbHeartbeat({
+    writeOpenCodeHeartbeat({
       phase: "calling",
       requestId,
       startedAt,
@@ -184,11 +201,11 @@ export async function withMbHeartbeat(meta, runDispatch) {
   try {
     const result = await runDispatch(updateProgress);
     if (result && result.ok !== false) {
-      writeMbLastUsed(meta);
+      writeOpenCodeLastUsed(meta);
     }
     return result;
   } finally {
     clearInterval(interval);
-    clearMbHeartbeat();
+    clearOpenCodeHeartbeat();
   }
 }

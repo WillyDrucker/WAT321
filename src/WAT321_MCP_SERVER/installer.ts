@@ -41,7 +41,13 @@ const LEGACY_MCP_NAMES = [
   "wat321-model-bridge",
   "wat321-local-llm",
 ] as const;
-const TOP_LEVEL_SCRIPTS = ["channel.mjs", "codex.mjs", "paths.mjs"] as const;
+const TOP_LEVEL_SCRIPTS = [
+  "channel.mjs",
+  "codex.mjs",
+  "paths.mjs",
+  "replyDecorator.mjs",
+  "resources.mjs",
+] as const;
 const OPENCODE_SUBDIR_SCRIPTS = [
   "common.mjs",
   "aliases.mjs",

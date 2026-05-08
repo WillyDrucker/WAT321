@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { clearFlag, setFlag } from "../shared/fs/flagFile";
-import { MODEL_BRIDGE_DIR } from "./constants";
+import { OPENCODE_ROUTES_DIR } from "./constants";
 
 /**
  * Flag files the click menu writes for `channel.mjs` to observe:
@@ -20,8 +20,8 @@ import { MODEL_BRIDGE_DIR } from "./constants";
  * so muscle memory carries over between the two click menus.
  */
 
-const PAUSED_FLAG_PATH = join(MODEL_BRIDGE_DIR, "paused");
-const CANCEL_FLAG_PATH = join(MODEL_BRIDGE_DIR, "cancel.flag");
+const PAUSED_FLAG_PATH = join(OPENCODE_ROUTES_DIR, "paused");
+const CANCEL_FLAG_PATH = join(OPENCODE_ROUTES_DIR, "cancel.flag");
 
 export function isPaused(): boolean {
   return existsSync(PAUSED_FLAG_PATH);

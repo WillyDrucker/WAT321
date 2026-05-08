@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -271,7 +271,7 @@
             "default": true,
             "scope": "application",
             "order": 1,
-            "markdownDescription": "**Enable OpenCode** widgets and the managed `opencode serve` for free routable models (Big Pickle, MiniMax M2.5 Free, Ling 2.6 Flash Free, Hy3 Preview Free, Nemotron 3 Super Free). Auto-spawns a serve subprocess so Claude and your tool-using harness can dispatch against any catalog instance, including your local LLM. Unloads automatically when VS Code closes. Hidden automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\n**Data usage on free models.** Per OpenCode's docs, during the free period collected data may be used to improve the model. Nemotron 3 Super Free additionally has prompts and outputs logged by NVIDIA. If you don't want training-eligible traffic, disable this and use Claude/Codex/your local LLM only."
+            "markdownDescription": "Enable OpenCode widgets (session tokens). Widgets hide automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\nAdditionally installs the OpenCode managed harness `opencode serve` to access free routable models (Big Pickle, MiniMax M2.7, Ling 2.6 Flash, Hy3 Preview, Nemotron 3 Super). Auto-spawns a serve subprocess so Claude and your tool-using harness can dispatch against any catalog instance, including your local LLM, giving it tool capabilities.\n\n**Data usage on free models ONLY.** Per OpenCode's docs, during the free period collected data may be used to improve the model. Nemotron 3 Super Free additionally has prompts and outputs logged by NVIDIA. If you don't want training-eligible traffic, disable this and use Claude / Codex / your local LLM only. Required for the local LLM harness; data usage does not apply to local routes."
           }
         }
       },
@@ -403,7 +403,7 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "lint": "eslint src/",
-    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');function copy(srcDir,dstDir,files){fs.mkdirSync(dstDir,{recursive:true});for(const f of files){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}}copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin'),p.join('out','WAT321_EPIC_HANDSHAKE','bin'),['channel.mjs','stage-clipboard.mjs']);copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin','channel'),p.join('out','WAT321_EPIC_HANDSHAKE','bin','channel'),['envelope.mjs','cleanup.mjs','waitStatus.mjs']);copy(p.join('src','WAT321_MCP_SERVER','bin'),p.join('out','WAT321_MCP_SERVER','bin'),['channel.mjs','codex.mjs','paths.mjs']);copy(p.join('src','WAT321_MCP_SERVER','bin','opencode'),p.join('out','WAT321_MCP_SERVER','bin','opencode'),['common.mjs','aliases.mjs','config.mjs','heartbeat.mjs','sse.mjs','sessions.mjs','dispatch.mjs','index.mjs']);\"",
+    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');function copy(srcDir,dstDir,files){fs.mkdirSync(dstDir,{recursive:true});for(const f of files){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}}copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin'),p.join('out','WAT321_EPIC_HANDSHAKE','bin'),['channel.mjs','stage-clipboard.mjs']);copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin','channel'),p.join('out','WAT321_EPIC_HANDSHAKE','bin','channel'),['envelope.mjs','cleanup.mjs','waitStatus.mjs']);copy(p.join('src','WAT321_MCP_SERVER','bin'),p.join('out','WAT321_MCP_SERVER','bin'),['channel.mjs','codex.mjs','paths.mjs','replyDecorator.mjs','resources.mjs']);copy(p.join('src','WAT321_MCP_SERVER','bin','opencode'),p.join('out','WAT321_MCP_SERVER','bin','opencode'),['common.mjs','aliases.mjs','config.mjs','heartbeat.mjs','sse.mjs','sessions.mjs','dispatch.mjs','index.mjs']);\"",
     "emit-prod-modules-manifest": "node -e \"const fs=require('fs');const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));const prod=Object.entries(lock.packages||{}).filter(([k,m])=>k.startsWith('node_modules/')&&m.dev!==true).map(([k])=>k);fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/prod-modules.json',JSON.stringify(prod,null,2));console.log('prod-modules manifest:',prod.length,'entries');\"",
     "icons": "node scripts/buildIcons.mjs",
     "build": "npm run clean && npm run lint && tsc && npm run copy-assets && npm run emit-prod-modules-manifest",

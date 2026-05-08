@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { MODEL_BRIDGE_DIR, PREFERENCES_PATH } from "./constants";
+import { OPENCODE_ROUTES_DIR, PREFERENCES_PATH } from "./constants";
 
 /**
  * Runtime preferences for OpenCode Routes. Persists `activeInstanceId`
@@ -29,8 +29,8 @@ export const DEFAULT_PREFERENCES: OpenCodeRoutesPreferences = {
 };
 
 function ensureDir(): void {
-  if (!existsSync(MODEL_BRIDGE_DIR)) {
-    mkdirSync(MODEL_BRIDGE_DIR, { recursive: true });
+  if (!existsSync(OPENCODE_ROUTES_DIR)) {
+    mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
   }
   const dir = dirname(PREFERENCES_PATH);
   if (!existsSync(dir)) {

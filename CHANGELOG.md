@@ -5,6 +5,27 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-05-08
+
+### Added
+
+- **Full-prompt header on bridge replies.** Recent Claude Code builds collapse MCP tool-call inputs into a single OUT row, so when Claude asked Codex / Big Pickle / Local LLM through the bridge you'd see the answer but not the question. Bridge replies now lead with the full prompt rendered as a markdown blockquote (`> Big Pickle: ...`) above the answer so you always see exactly what was asked, even for paragraph-long prompts that a truncated summary would clip.
+- **Tokens-per-second clears on its own after a turn ends.** The widget used to pin the last in-flight rate forever once the rollout stopped writing - especially noticeable over the bridge, where Codex emits token counts only at turn boundaries and the readout could sit at "944 tps" for minutes after generation actually stopped. The tracker now clears the rate after 10 seconds of real-time silence regardless of whether the transcript file moved, so an idle widget reads idle.
+
+### Changed
+
+- **Bridge reply prompt header capped at 500 chars.** Long code-review prompts used to echo back into the response in full, padding Claude's reasoning context with the same content it just sent. Long prompts now show the first 500 characters with an ellipsis; short prompts are unchanged.
+
+- **OpenCode setting description rewritten.** The Settings page entry for OpenCode now reads in parallel with the Claude and Codex entries - lead with what enabling does for widgets, then call out the managed `opencode serve` harness and the free-model catalog, then a clearly scoped data-usage notice that applies to the free Zen routes only and not to your local LLM.
+
+### Fixed
+
+- **OpenCode harness starts again on the latest opencode CLI.** OpenCode 1.14.39 tightened its config schema so a partial `limit` block (only `context`, no `output`) gets rejected with `ConfigInvalidError`, which silently killed the harness and left every Big Pickle / Local LLM / Zen-route prompt erroring with "opencode serve is not running." The local route's `limit` block is now omitted entirely - opencode falls back to its 32K default, the v1.4.7 reasoning-model headroom is preserved, and Big Pickle / Local LLM dispatches work again.
+- **Big Pickle and Local LLM stay reachable after activate-time hiccups.** The harness URL used to be written into config.json only at activate; if the activate-time spawn raced or failed and a follow-up spawn succeeded, nothing carried the new URL back into config and dispatches would error with "opencode serve is not running" while opencode was actually healthy. The harness now reports every URL transition and the bridge config rewrites itself to match, so a successful spawn is always reachable.
+- **Reset WAT321 now actually resets the Codex Session Settings.** Earlier versions could leave the sandbox permission stuck on Full-Access (or your previously picked model) after a Reset, because the global directory wipe would silently bail on Windows when any file in the tree was locked by a still-running bridge process. The Codex override flags are now swept directly during Reset's cross-tool cleanup, so the Session Settings menu always returns to Read-Only + default model regardless of what happens to the rest of the wipe.
+
+### Removed
+
 ## [1.5.0] - 2026-05-08
 
 ### Added

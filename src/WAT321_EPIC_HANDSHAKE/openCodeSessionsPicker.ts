@@ -25,9 +25,9 @@ import { isPaused, setPaused } from "./statusBarState";
  *   - BACK
  *   - <TOOL> MODEL: <name>           (one click switches catalog instance)
  *   - CURRENT <TOOL> SESSION         (click opens switch sub-picker)
- *   - RESET <TOOL> SESSION           (modal confirm; clears active alias)
- *   - DELETE <TOOL> SESSION (S#)     (modal confirm; only when active)
- *   - DELETE ALL <TOOL> SESSIONS (#) (modal confirm)
+ *   - RESET <TOOL> SESSION           (toast confirm; clears active alias)
+ *   - DELETE <TOOL> SESSION (S#)     (toast confirm; only when active)
+ *   - DELETE ALL <TOOL> SESSIONS (#) (toast confirm)
  *   - PAUSE/RESUME, CANCEL
  *
  * Active-alias state lives in `aliases.activeAliases[target]` in
@@ -39,11 +39,11 @@ import { isPaused, setPaused } from "./statusBarState";
 
 export type SessionTarget = "opencode" | "local";
 
-import { bridgeStateDir, modelBridgeStateDir } from "../shared/wat321Paths";
+import { bridgeStateDir, openCodeRoutesStateDir } from "../shared/wat321Paths";
 
 const ALIAS_PATH = join(bridgeStateDir(), "session-aliases.json");
 const BRIDGE_CONFIG_PATH = join(bridgeStateDir(), "config.json");
-const MB_CONFIG_PATH = join(modelBridgeStateDir(), "config.json");
+const OPENCODE_ROUTES_CONFIG_PATH = join(openCodeRoutesStateDir(), "config.json");
 
 /** Read the bridge config's projectName for display labels. The
  * bridge tier writes this on activate + workspace-folder change.
@@ -79,7 +79,7 @@ interface OpenCodeSessionMeta {
   time?: { created?: number; updated?: number };
 }
 
-interface MbInstance {
+interface OpenCodeRoutesInstance {
   id: string;
   alias: string;
   kind: "local" | "remote";
@@ -87,16 +87,16 @@ interface MbInstance {
   harnessProviderID: "llama.cpp" | "zen";
 }
 
-interface MbConfig {
+interface OpenCodeRoutesConfigSnapshot {
   openCodeServerUrl?: string;
   activeInstanceId?: string;
-  instances?: MbInstance[];
+  instances?: OpenCodeRoutesInstance[];
 }
 
-function readMbConfig(): MbConfig | null {
-  if (!existsSync(MB_CONFIG_PATH)) return null;
+function readOpenCodeRoutesConfigSnapshot(): OpenCodeRoutesConfigSnapshot | null {
+  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return null;
   try {
-    return JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8")) as MbConfig;
+    return JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8")) as OpenCodeRoutesConfigSnapshot;
   } catch {
     return null;
   }
@@ -161,15 +161,15 @@ const TARGET_CONFIGS: Record<SessionTarget, TargetConfig> = {
 };
 
 function pickInstanceForTarget(
-  mb: MbConfig | null,
+  opencodeCfg: OpenCodeRoutesConfigSnapshot | null,
   target: SessionTarget
-): MbInstance | null {
-  if (!mb) return null;
+): OpenCodeRoutesInstance | null {
+  if (!opencodeCfg) return null;
   const cfg = TARGET_CONFIGS[target];
-  const instances = mb.instances ?? [];
+  const instances = opencodeCfg.instances ?? [];
   const candidates = instances.filter((i) => i.kind === cfg.instanceKind);
   if (candidates.length === 0) return null;
-  const active = candidates.find((i) => i.id === mb.activeInstanceId);
+  const active = candidates.find((i) => i.id === opencodeCfg.activeInstanceId);
   if (active) return active;
   const fallback = candidates.find((i) => i.id === cfg.fallbackInstanceId);
   if (fallback) return fallback;
@@ -179,12 +179,12 @@ function pickInstanceForTarget(
 async function showSessionsPicker(target: SessionTarget): Promise<"back" | undefined> {
   const cfg = TARGET_CONFIGS[target];
   const aliases = readAliases(ALIAS_PATH);
-  const mb = readMbConfig();
-  const serveUrl = mb?.openCodeServerUrl ?? null;
+  const opencodeCfg = readOpenCodeRoutesConfigSnapshot();
+  const serveUrl = opencodeCfg?.openCodeServerUrl ?? null;
 
   const sessionMetas = serveUrl ? await fetchSessions(serveUrl) : [];
   const metaById = new Map(sessionMetas.map((s) => [s.id, s]));
-  const instancesById = new Map((mb?.instances ?? []).map((i) => [i.id, i]));
+  const instancesById = new Map((opencodeCfg?.instances ?? []).map((i) => [i.id, i]));
 
   const targetAliases = aliases[target];
   const activeAlias = aliases.activeAliases[target];
@@ -199,7 +199,7 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
   //   1. active session's `model.id` from /session metadata
   //   2. catalog instance alias ("Local LLM" by default)
   //   3. "Local LLM (detected on first prompt)" first-run hint
-  const activeInstance = pickInstanceForTarget(mb, target);
+  const activeInstance = pickInstanceForTarget(opencodeCfg, target);
   const activeAliasForLabel = aliases.activeAliases[target];
   const activeSessionMeta =
     activeAliasForLabel !== null
@@ -486,9 +486,10 @@ export async function showLocalLLMSessionsPicker(): Promise<"back" | undefined> 
   return showSessionsPicker("local");
 }
 
-/** Register the cross-tier commands so the OpenCode Routes widget click can route
- * here without violating the tier-import rule (MB cannot import from
- * EH directly; command dispatch is the engine-blessed crossing). */
+/** Register the cross-tier commands so the OpenCode Routes widget
+ * click can route here without violating the tier-import rule
+ * (OpenCode Routes cannot import from EH directly; command dispatch
+ * is the engine-blessed crossing). */
 export function registerSessionPickerCommands(
   context: vscode.ExtensionContext
 ): void {

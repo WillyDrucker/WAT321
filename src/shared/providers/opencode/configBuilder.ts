@@ -13,10 +13,13 @@ import { CATALOG } from "./catalog";
  * layered on top here because they are harness budgeting, not a model
  * fact the widget needs.
  *
- * Local llama.cpp's output ceiling is intentionally unset so reasoning
+ * Local llama.cpp's `limit` block is omitted entirely so reasoning
  * models (Qwen3, DeepSeek R1) have headroom to emit chain-of-thought
- * before tool_calls. A tight output budget pushes them to skip the
- * tool_call entirely and answer from training data instead.
+ * before tool_calls. OpenCode's schema rejects a partial limit block
+ * (1.14.39+ requires both `context` and `output` when `limit` is
+ * present), so the choice is "both fields" or "no block at all" -
+ * the latter lets OpenCode's 32K fallback apply, which matches what
+ * the widget already shows for the local route.
  *
  * When a catalog entry has no `contextWindow` (route with unknown
  * underlying model, e.g. `hy3-preview-free`), the limit block is
@@ -27,12 +30,6 @@ import { CATALOG } from "./catalog";
  * both need to fit inside OpenCode's max-tokens send to the provider.
  * The verifier checks running catalog entries against this floor. */
 export const ZEN_MODEL_OUTPUT_FLOOR = 8192;
-
-/** Local provider context advertised to opencode.json. Mid-range so
- * auto-compact triggers at a sensible point even when the runtime
- * `/props.n_ctx` probe never lands. The widget overrides this from
- * the live probe; this value only governs the harness's budgeting. */
-const LOCAL_CONTEXT_WINDOW = 40960;
 
 export function buildOpenCodeJson(localEndpoint: string): string {
   const zenModels: Record<string, { name: string; limit?: { context: number; output: number } }> = {};
@@ -64,7 +61,6 @@ export function buildOpenCodeJson(localEndpoint: string): string {
         models: {
           local: {
             name: "Local LLM",
-            limit: { context: LOCAL_CONTEXT_WINDOW },
           },
         },
       },

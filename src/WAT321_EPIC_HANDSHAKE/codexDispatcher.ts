@@ -268,7 +268,12 @@ export class CodexDispatcher {
       return;
     }
     if (env.target !== "codex") {
-      this.logger.warn(`envelope ${env.id} target=${env.target}; skipping`);
+      // Wrong-target envelope landed in inbox/codex (misrouted by an
+      // older client, or a hand-edited drop). Quarantine to sent so
+      // the next drain does not re-encounter and re-claim the same
+      // file forever.
+      this.logger.warn(`envelope ${env.id} target=${env.target}; quarantining`);
+      moveToSent(path, this.sentCodex);
       return;
     }
 

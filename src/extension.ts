@@ -65,11 +65,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Idempotent.
   void migrateModelBridgeKeys();
 
-  // Bridge config writer maintains ~/.wat321/bridge/config.json so
-  // the unified MCP server scaffold can read enabled-target flags.
-  // Cheap on activate, cheap on settings change. The legacy
-  // two-server registration still drives all real traffic until the
-  // unified handlers ship per WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md.
+  // Bridge config writer maintains the per-client
+  // `~/.wat321/clients/<wsId>/bridge/config.json` so the unified MCP
+  // server can read enabled-target flags at startup. Cheap on activate,
+  // cheap on settings change.
   registerBridgeConfigWriter(context);
   registerUnifiedBridgeCommands(context);
   registerAutoCreateOpenCodeS1(context);
@@ -87,10 +86,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Server tier) handles dispatch for both. Wrapped in try/catch so a
   // fatal bug in this tier never takes down the core Claude / Codex
   // widgets - OpenCode Routes is opt-in, the usage widgets are not.
-  let modelBridge: { resetCleanup: () => Promise<void>; dispose: () => void } | null = null;
+  let openCodeRoutes: { resetCleanup: () => Promise<void>; dispose: () => void } | null = null;
   try {
-    modelBridge = activateOpenCodeRoutes(context);
-    context.subscriptions.push(modelBridge);
+    openCodeRoutes = activateOpenCodeRoutes(context);
+    context.subscriptions.push(openCodeRoutes);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     void vscode.window.showWarningMessage(
@@ -128,7 +127,7 @@ export function activate(context: vscode.ExtensionContext) {
     ctx?.providers.resetAllTokenServices();
     ctx?.events.emit("engine.reset", {});
     await epicHandshake.resetCleanup();
-    if (modelBridge) await modelBridge.resetCleanup();
+    if (openCodeRoutes) await openCodeRoutes.resetCleanup();
     // Sweep the unified bridge's MCP entry + pre-allowed tool list
     // (mcp__wat321__wat321_ask, etc.) from ~/.claude/settings.json. EH's
     // resetCleanup removes the legacy `wat321` entry, but if the user

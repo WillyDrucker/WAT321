@@ -6,7 +6,7 @@ import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { resolveOpenCodeCli } from "../shared/providers/opencode/cliResolver";
 import { buildOpenCodeJson } from "../shared/providers/opencode/configBuilder";
 import { verifyOutputLimits } from "../shared/providers/opencode/configVerifier";
-import { modelBridgeStateDir } from "../shared/wat321Paths";
+import { openCodeRoutesStateDir } from "../shared/wat321Paths";
 
 /**
  * Lifecycle for the WAT321-managed `opencode serve` subprocess.
@@ -27,7 +27,7 @@ import { modelBridgeStateDir } from "../shared/wat321Paths";
  * readiness probe; consumers gate visibility on that.
  */
 
-export const OPENCODE_WORKDIR = join(modelBridgeStateDir(), "opencode-workdir");
+export const OPENCODE_WORKDIR = join(openCodeRoutesStateDir(), "opencode-workdir");
 export const OPENCODE_CONFIG_PATH = join(OPENCODE_WORKDIR, "opencode.json");
 
 export interface OpenCodeManagerStatus {
@@ -63,6 +63,13 @@ export interface OpenCodeManager {
   getServerUrl(): string;
   /** Lightweight status surface for health output / log lines. */
   getStatus(): OpenCodeManagerStatus;
+  /** Subscribe to URL transitions. The listener fires every time the
+   * resolved server URL changes (post-spawn-ready, post-stop, post-
+   * crash-exit). Returns a disposable. The activate path uses this to
+   * rewrite config.json whenever the URL changes, closing a race where
+   * the activate-time `reconcile` resolved with "" but a later spawn
+   * succeeded with no observer to capture the new URL. */
+  onUrlChanged(listener: (url: string) => void): { dispose(): void };
   /** Stop the subprocess and release any allocated port. */
   dispose(): Promise<void>;
 }
@@ -88,15 +95,28 @@ async function pickEphemeralPort(): Promise<number> {
 
 /** Probe `http://127.0.0.1:<port>/app` until it answers or times out.
  * OpenCode's serve mode exposes `/app` for the embedded UI; even
- * without HTML it returns a non-network-error response once bound. */
+ * without HTML it returns a non-network-error response once bound.
+ *
+ * Each probe runs under its own AbortController so a stalled fetch
+ * (TCP accept + no response) cannot pin the await past the outer
+ * deadline. Without per-probe abort, a hung connection during spawn
+ * would freeze `reconcile()` and block the pendingInputs drain. */
 async function waitForReady(port: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
+  const PROBE_TIMEOUT_MS = 1500;
   while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const probeTimer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/app`, { method: "GET" });
+      const res = await fetch(`http://127.0.0.1:${port}/app`, {
+        method: "GET",
+        signal: controller.signal,
+      });
       if (res.status < 500) return true;
     } catch {
-      // not yet listening - keep polling
+      // not yet listening or probe aborted - keep polling
+    } finally {
+      clearTimeout(probeTimer);
     }
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -121,6 +141,24 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
   let cliResolvable = false;
   let desired = false;
   let inFlight: Promise<string> | null = null;
+  /** Latest inputs that arrived while a reconcile was already running.
+   * Holds at most ONE snapshot - newer calls overwrite older ones so
+   * only the most recent setting state ever drains. Without this a
+   * burst of settings changes during a slow spawn would all collapse
+   * onto the in-flight promise and the new state would never reach
+   * the subprocess (stale endpoint, wrong Zen key, enabled flag flipped
+   * the wrong way). */
+  let pendingInputs: OpenCodeManagerInputs | null = null;
+  const urlListeners = new Set<(url: string) => void>();
+  /** Single point of mutation for `url`. Notifies listeners only on
+   * actual change so duplicate set-to-same-value calls do not refire. */
+  const setUrl = (next: string): void => {
+    if (next === url) return;
+    url = next;
+    for (const fn of urlListeners) {
+      try { fn(url); } catch { /* listener-side errors must not affect manager */ }
+    }
+  };
 
   const ensureWorkdir = (): void => {
     if (!existsSync(OPENCODE_WORKDIR)) {
@@ -137,7 +175,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     if (child === null) return;
     const handle = child;
     child = null;
-    url = "";
+    setUrl("");
     port = 0;
     // Synchronous SIGKILL up front so an extension-host teardown
     // (VS Code window close) gets the kill in flight before its event
@@ -206,7 +244,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
       logger.info(`opencode serve exited with code ${code}`);
       if (child === proc) {
         child = null;
-        url = "";
+        setUrl("");
         port = 0;
       }
     });
@@ -222,7 +260,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
       return "";
     }
 
-    url = `http://127.0.0.1:${chosenPort}`;
+    setUrl(`http://127.0.0.1:${chosenPort}`);
     lastError = "";
     lastInputs = { localEndpoint: inputs.localEndpoint, zenApiKey: inputs.zenApiKey };
     logger.info(`opencode serve ready at ${url}`);
@@ -230,8 +268,21 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     return url;
   };
 
+  /** Reconcile the running subprocess against `inputs`. Concurrency
+   * model:
+   *   - If no run is in flight, start one with these inputs.
+   *   - If a run is in flight, save `inputs` as the pending snapshot
+   *     (overwriting any older pending) and return the in-flight
+   *     promise so the caller awaits the current run, not the newer
+   *     one. After the in-flight run finishes, the pending snapshot
+   *     drains via a recursive reconcile so the LAST settings state
+   *     wins. URL transitions emitted by the second run flow through
+   *     onUrlChanged the same way as the first. */
   const reconcile = async (inputs: OpenCodeManagerInputs): Promise<string> => {
-    if (inFlight) return inFlight;
+    if (inFlight) {
+      pendingInputs = inputs;
+      return inFlight;
+    }
     inFlight = (async () => {
       try {
         desired = inputs.enabled;
@@ -258,6 +309,16 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
         return await start(inputs);
       } finally {
         inFlight = null;
+        // Drain any inputs that arrived during the run. Fire-and-
+        // forget: callers from the original reconcile have already
+        // resolved with the in-flight result; the second pass
+        // updates internal state and republishes URL transitions
+        // via onUrlChanged for downstream config rewrites.
+        if (pendingInputs !== null) {
+          const next = pendingInputs;
+          pendingInputs = null;
+          void reconcile(next);
+        }
       }
     })();
     return inFlight;
@@ -274,6 +335,10 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
       port,
       lastError,
     }),
+    onUrlChanged(listener) {
+      urlListeners.add(listener);
+      return { dispose: () => { urlListeners.delete(listener); } };
+    },
     dispose: stop,
   };
 }

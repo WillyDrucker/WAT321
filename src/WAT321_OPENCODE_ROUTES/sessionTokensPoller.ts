@@ -4,9 +4,9 @@ import { bridgeStateDir } from "../shared/wat321Paths";
 
 /**
  * Background poller that reads OpenCode session token data for the
- * bridge's active aliases and exposes a synchronous snapshot. The MB
- * status-bar widget renders at 1Hz; this poller runs every 3s to
- * keep the displayed `tokens / window  pct%` figures fresh without
+ * bridge's active aliases and exposes a synchronous snapshot. The
+ * OpenCode Routes widget renders at 1Hz; this poller runs every 3s
+ * to keep the displayed `tokens / window  pct%` figures fresh without
  * blocking the render loop on a network fetch.
  *
  * Source of truth for context-fill: OpenCode's own TUI uses the
@@ -20,10 +20,10 @@ import { bridgeStateDir } from "../shared/wat321Paths";
  * active entry rotates, so a freshly-created session never inherits
  * the prior session's snapshot.
  *
- * Lives in the OpenCode Routes tier because the data source is OpenCode (an MB
- * concern) and the consumer is the OpenCode Routes widget. Engine never imports
- * from here. Cross-tier consumers subscribe via engine events
- * rather than importing this file directly.
+ * Lives in the OpenCode Routes tier because both the data source
+ * (OpenCode harness) and the consumer (OpenCode Routes widget) belong
+ * here. Engine never imports from this file; cross-tier consumers
+ * subscribe via engine events rather than importing directly.
  */
 
 const BRIDGE_ALIAS_PATH = join(bridgeStateDir(), "session-aliases.json");

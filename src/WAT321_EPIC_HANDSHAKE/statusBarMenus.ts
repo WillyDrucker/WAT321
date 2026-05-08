@@ -245,7 +245,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // openCodeSessionsPicker.ts and mirror the Codex menu's row shape
   // (CURRENT/RESET/DELETE/DELETE ALL) on top of the unified bridge's
   // active-alias state.
-  const modelBridgeEnabled = vscode.workspace
+  const openCodeEnabled = vscode.workspace
     .getConfiguration("wat321")
     .get<boolean>("enableOpenCode", false);
   const localEndpoint = vscode.workspace
@@ -261,7 +261,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   const bridgeAliases = readBridgeAliases();
   const opencodeLatest = latestAlias(bridgeAliases.opencode);
   const localLatest = latestAlias(bridgeAliases.local);
-  const opencodeSessionsItem: Item | null = modelBridgeEnabled
+  const opencodeSessionsItem: Item | null = openCodeEnabled
     ? {
         label: opencodeLatest
           ? `MANAGE OPENCODE (${opencodeLatest})`
@@ -276,7 +276,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // local target has nothing to dispatch to and the submenu would
   // be a dead row.
   const localLlmSessionsItem: Item | null =
-    modelBridgeEnabled && localEndpoint.length > 0
+    openCodeEnabled && localEndpoint.length > 0
       ? {
           label: localLatest
             ? `MANAGE LOCAL LLM (${localLatest})`

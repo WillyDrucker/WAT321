@@ -60,7 +60,7 @@ export const WIDGET_SLOT = {
   claudeSessionTokens: 4,
   epicHandshake: 5,
   codexSessionTokens: 6,
-  modelBridge: 7,
+  openCodeRoutes: 7,
 } as const;
 
 /** Derived reverse map: slot number -> widget ID. Built from
