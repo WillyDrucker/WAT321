@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **OpenCode setting description rewritten.** The Settings page entry for OpenCode now reads in parallel with the Claude and Codex entries - lead with what enabling does for widgets, then call out the managed `opencode serve` harness and the free-model catalog, then a clearly scoped data-usage notice that applies to the free Zen routes only and not to your local LLM.
+
 ### Fixed
 
 - **OpenCode harness starts again on the latest opencode CLI.** OpenCode 1.14.39 tightened its config schema so a partial `limit` block (only `context`, no `output`) gets rejected with `ConfigInvalidError`, which silently killed the harness and left every Big Pickle / Local LLM / Zen-route prompt erroring with "opencode serve is not running." The local route's `limit` block is now omitted entirely - opencode falls back to its 32K default, the v1.4.7 reasoning-model headroom is preserved, and Big Pickle / Local LLM dispatches work again.
