@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.4.8",
+  "version": "1.5.0",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -80,19 +80,19 @@
       },
       {
         "command": "wat321.modelBridge.show",
-        "title": "WAT321: Model Bridge - Show Output"
+        "title": "WAT321: OpenCode Routes - Show Output"
       },
       {
         "command": "wat321.modelBridge.legacyMenu",
-        "title": "WAT321: Model Bridge - Menu (legacy)"
+        "title": "WAT321: OpenCode Routes - Menu (legacy)"
       },
       {
         "command": "wat321.modelBridge.setZenApiKey",
-        "title": "WAT321: Model Bridge - Set OpenCode Zen API Key"
+        "title": "WAT321: OpenCode Routes - Set OpenCode Zen API Key"
       },
       {
         "command": "wat321.modelBridge.clearZenApiKey",
-        "title": "WAT321: Model Bridge - Clear OpenCode Zen API Key"
+        "title": "WAT321: OpenCode Routes - Clear OpenCode Zen API Key"
       }
     ],
     "icons": {
@@ -344,10 +344,16 @@
             "order": 2,
             "markdownDescription": "Enable heatmap colors on the usage progress bar. The bars gradually shift through warning colors as you get closer to your limits so tight sessions stand out at a glance."
           },
+          "wat321.enableTokensPerSecondCounters": {
+            "type": "boolean",
+            "default": false,
+            "order": 3,
+            "markdownDescription": "Enable TPS counters in Session Tokens widgets. Adds a tokens-per-second readout next to the live token count for Claude, Codex, and the OpenCode/Local LLM widgets."
+          },
           "wat321.statusBarPriority": {
             "type": "number",
             "default": 1001,
-            "order": 3,
+            "order": 4,
             "markdownDescription": "Base priority for WAT321 status bar items. Higher values appear further left. Adjust if widgets overlap with other extensions. *Requires window reload.*"
           }
         }
@@ -397,7 +403,7 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "lint": "eslint src/",
-    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');function copy(srcDir,dstDir,files){fs.mkdirSync(dstDir,{recursive:true});for(const f of files){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}}copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin'),p.join('out','WAT321_EPIC_HANDSHAKE','bin'),['channel.mjs','stage-clipboard.mjs']);copy(p.join('src','WAT321_BRIDGE','bin'),p.join('out','WAT321_BRIDGE','bin'),['channel.mjs','codex.mjs','opencode.mjs']);\"",
+    "copy-assets": "node -e \"const fs=require('fs');const p=require('path');function copy(srcDir,dstDir,files){fs.mkdirSync(dstDir,{recursive:true});for(const f of files){fs.copyFileSync(p.join(srcDir,f),p.join(dstDir,f));}}copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin'),p.join('out','WAT321_EPIC_HANDSHAKE','bin'),['channel.mjs','stage-clipboard.mjs']);copy(p.join('src','WAT321_EPIC_HANDSHAKE','bin','channel'),p.join('out','WAT321_EPIC_HANDSHAKE','bin','channel'),['envelope.mjs','cleanup.mjs','waitStatus.mjs']);copy(p.join('src','WAT321_MCP_SERVER','bin'),p.join('out','WAT321_MCP_SERVER','bin'),['channel.mjs','codex.mjs','paths.mjs']);copy(p.join('src','WAT321_MCP_SERVER','bin','opencode'),p.join('out','WAT321_MCP_SERVER','bin','opencode'),['common.mjs','aliases.mjs','config.mjs','heartbeat.mjs','sse.mjs','sessions.mjs','dispatch.mjs','index.mjs']);\"",
     "emit-prod-modules-manifest": "node -e \"const fs=require('fs');const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));const prod=Object.entries(lock.packages||{}).filter(([k,m])=>k.startsWith('node_modules/')&&m.dev!==true).map(([k])=>k);fs.mkdirSync('out',{recursive:true});fs.writeFileSync('out/prod-modules.json',JSON.stringify(prod,null,2));console.log('prod-modules manifest:',prod.length,'entries');\"",
     "icons": "node scripts/buildIcons.mjs",
     "build": "npm run clean && npm run lint && tsc && npm run copy-assets && npm run emit-prod-modules-manifest",
