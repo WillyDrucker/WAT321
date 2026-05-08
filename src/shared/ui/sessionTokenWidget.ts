@@ -2,70 +2,34 @@ import * as vscode from "vscode";
 import type { BridgeStageReader } from "../../engine/bridgeTypes";
 import { getSessionTokenDisplayMode } from "../../engine/displayMode";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
-import type { StageInfo } from "../codex-rollout/types";
-import type { LastEntryKind } from "../transcriptClassifier";
 import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
 import { getSessionTokenColor } from "./textColors";
 import { formatPct, formatTokens } from "./tokenFormatters";
+import {
+  CACHE_BANNER_FLASH_MS,
+  CACHE_BANNER_FRAME_MS,
+  CACHE_LOAD_BANNER_OFF,
+  CACHE_LOAD_BANNER_ON,
+  CACHE_MISS_BANNER_OFF,
+  CACHE_MISS_BANNER_ON,
+  CACHE_REBUILD_CREATION_MIN,
+  CACHE_REBUILD_RATIO_DENOM,
+  TICK_MS,
+  isPidAlive,
+  tpsSuffix,
+} from "./sessionTokenHelpers";
+import type {
+  SessionTokenRenderData,
+  SessionTokenWidgetDescriptor,
+} from "./sessionTokenTypes";
 
-/** Cache-event classification surfaced in the Claude session-token
- * tooltip. Defined here in shared/ui rather than in the Claude tool
- * folder so the generic widget can reference the type without inverting
- * the shared -> tool dependency direction. The Claude parser module
- * re-exports both names. */
-export type CacheEventKind =
-  | "HIT-clean"
-  | "LOAD-compact"
-  | "MISS-TTL"
-  | "MISS-large-payload"
-  | "MISS-unknown";
-
-export interface CacheEvent {
-  kind: CacheEventKind;
-  /** Human-readable one-line description for the tooltip. */
-  description: string;
-  /** Timestamp (ms) of the assistant turn where the event was
-   * detected. Null when no qualifying event was found. */
-  ts: number | null;
-}
-
-/** Rich turn-state snapshot for the Claude session token tooltip.
- * Defined here (shared/ui) rather than in the Claude tool folder so
- * the generic widget can reference it without inverting the
- * shared -> tool dependency direction. Claude's parser module imports
- * this type back. Populated on every poll when state is `ok`. */
-export interface ClaudeTurnInfo {
-  /** Name of the most recent `tool_use` block if the last assistant
-   * message has an unresolved tool call. Null when the last turn was
-   * text-only or no tool calls have fired. */
-  activeToolName: string | null;
-  /** Count of `tool_use` blocks since the most recent user message. */
-  toolCallCount: number;
-  /** True if any of the last ~20 assistant entries carry a `thinking`
-   * content block. */
-  hasThinkingRecent: boolean;
-  /** Output tokens on the most recent assistant turn. */
-  outputTokens: number;
-  /** `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`
-   * on the most recent assistant turn. */
-  totalInputTokens: number;
-  /** `cache_read_input_tokens` on the most recent assistant turn. */
-  cachedInputTokens: number;
-  /** `cache_creation_input_tokens` on the most recent assistant turn. */
-  cacheCreationTokens: number;
-  /** Timestamp (ms) of the most recent `isCompactSummary` user entry
-   * sitting immediately before the latest assistant turn in the tail.
-   * Drives compact-aware banner classification: a cache rebuild on the
-   * turn following a compact reads as yellow LOAD (deliberate rebuild)
-   * rather than red MISS (involuntary eviction). Null when the latest
-   * turn is not preceded by a compact summary. */
-  lastCompactTimestamp: number | null;
-  /** Most recent classified cache event in the lookback window.
-   * Tooltip-only readout; does not drive the banner. Read-only -
-   * derived purely from the same transcript tail every other parser
-   * field comes from. See `parseMostRecentCacheEvent`. */
-  mostRecentCacheEvent: CacheEvent | null;
-}
+export type {
+  CacheEvent,
+  CacheEventKind,
+  ClaudeTurnInfo,
+  SessionTokenRenderData,
+  SessionTokenWidgetDescriptor,
+} from "./sessionTokenTypes";
 
 /**
  * Config-driven session token widget with a provider-branded idle
@@ -98,185 +62,6 @@ export interface ClaudeTurnInfo {
  * stay in sync. Ticker stops when state leaves "ok" so idle widgets
  * consume zero cycles.
  */
-
-export interface SessionTokenRenderData {
-  /** Stable identifier for the session this render represents. The
-   * widget compares it against its `lastSeenSessionId` to detect
-   * session change and reset per-session latch state (LOAD/MISS
-   * watermark, compact watermark) so each session gets its own
-   * "first load" yellow banner. */
-  sessionId: string;
-  sessionTitle: string;
-  label: string;
-  modelId: string;
-  contextUsed: number;
-  contextWindowSize: number;
-  ceiling: number;
-  baselineTokens: number;
-  /** Most recent transcript / rollout file mtime in ms. Always
-   * present when state is "ok". Backstop for the active indicator
-   * when PID is unavailable / dead. */
-  transcriptMtimeMs: number;
-  /** Tail classification. Primary driver of the active indicator. */
-  turnState: LastEntryKind;
-  /** CLI process id for live sessions (Claude only). When present
-   * and alive, keeps the active indicator on through silent
-   * thinking periods that would otherwise trip the mtime backstop.
-   * Undefined for lastKnown fallbacks and Codex. */
-  pid?: number;
-  /** When present, tooltip adds "Last active: X ago". Populated only
-   * for stale (lastKnown) sessions - live sessions leave it
-   * undefined so the tooltip does not read as "last active" on a
-   * currently-active session. */
-  lastActiveAt?: number;
-  /** Codex-only: stage + tool + plan + token breakdown parsed from
-   * the rollout. Drives the tooltip richness during active turns
-   * (current tool name, plan progress, reasoning-vs-output split,
-   * cache hit rate). Undefined for Claude sessions. */
-  stageInfo?: StageInfo;
-  /** Claude-only: tool-use name, tool call counter, thinking-block
-   * presence, and cache-hit token split from the most recent turn.
-   * Undefined for Codex sessions. */
-  claudeTurnInfo?: ClaudeTurnInfo;
-  /** Claude-only: real compaction fire point in tokens. Distinct from
-   * `ceiling` because recent Claude Code releases stack a reserve on
-   * the override rather than replacing the default formula. Drives
-   * the "Auto-Compact at ~X" tooltip line. Undefined for Codex. */
-  autoCompactEffectiveTokens?: number;
-  /** Provider-agnostic: timestamp (ms) of the most recent observed
-   * compact event in the underlying transcript / rollout. Drives the
-   * widget's compact-aware LOAD banner. Claude sources this from the
-   * `isCompactSummary` user entry; Codex from the `compacted` /
-   * `context_compacted` rollout entry. Null when no compact event is
-   * in the scanned tail window. */
-  lastCompactTimestamp: number | null;
-  /** Live tokens-per-second estimate from the most recent transcript /
-   * rollout delta. Null when no recent positive sample is available
-   * (idle, just started, transcript not advancing). Surfaced in the
-   * tooltip as a "Streaming ~X tps" line. */
-  tokensPerSecond?: number | null;
-}
-
-export interface SessionTokenWidgetDescriptor<TState extends { status: string }> {
-  id: string;
-  name: string;
-  slot: number;
-  provider: "Claude" | "Codex";
-  /** White/yellow warn thresholds for `getSessionTokenColor`. */
-  whitePct: number;
-  yellowPct: number;
-  /** Codicon shown as the prefix when idle. */
-  idlePrefix: string;
-  /** Two or more codicon frames cycled while the transcript is
-   * active. Frame n is chosen as
-   * `Math.floor(now / activeStepMs) % frames.length`. */
-  activeFrames: readonly string[];
-  /** Ms per active-frame advance. */
-  activeStepMs: number;
-  /** Ms since last mtime bump before the widget returns to idle.
-   * Keeps the indicator self-healing. */
-  activeThresholdMs: number;
-  /** Extract render data from an ok state. */
-  getRenderData(state: TState & { status: "ok" }): SessionTokenRenderData;
-}
-
-const TICK_MS = 250;
-
-/** `process.kill(pid, 0)` is the portable Node idiom for liveness
- * checking - signal 0 is test-only, never actually delivered.
- * ESRCH means the process is gone, EPERM means alive but we lack
- * permission to signal it (still alive for our purposes). */
-/** Inline TPS suffix for the widget text. Three-digit max (services
- * cap at 999), one decimal below 10 so a slow local LLM at 3.4 tps
- * does not round to 3. Suppressed in minimal mode to keep minimal
- * genuinely minimal. Returns an empty string when no reading is
- * available yet (fresh session, no completed turn) so the widget
- * does not show "0tps" before the first observation. */
-function tpsSuffix(
-  tps: number | null | undefined,
-  mode: "full" | "compact" | "minimal"
-): string {
-  if (mode === "minimal") return "";
-  if (typeof tps !== "number" || tps <= 0) return "";
-  const formatted = tps >= 10 ? `${Math.round(tps)}` : tps.toFixed(1);
-  return ` ${formatted}tps`;
-}
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    return err.code === "EPERM";
-  }
-}
-
-/** Cache-banner flash window. 2000ms total; the LOAD/MISS text
- * persists the entire window. Bullets blink at a 500ms cadence
- * between colored emoji (red MISS / yellow LOAD) and black-circle
- * emoji (off frame). After 2000ms the widget returns to the normal
- * token readout. Widget's 250ms ticker samples the frame selector
- * every render so the bullet alternation lands visibly. */
-const CACHE_BANNER_FLASH_MS = 2000;
-/** Cache-rebuild detection. Two paths qualify a turn as a rebuild
- * event the user paid input price for:
- *
- *   1. Strict ratio rule (involuntary eviction signal).
- *      `cacheCreation >= CACHE_REBUILD_CREATION_MIN`
- *      AND `cacheCreation >= cachedInput * 2`.
- *      Creation dominates this turn 2:1 over reads. Catches mid-
- *      session full rebuilds (TTL expiry, server-side eviction,
- *      mystery cold-poll on healthy sessions) without false-firing
- *      on user-pasted big content (where reads stay large).
- *
- *   2. Compact-driven rule (deliberate rebuild signal).
- *      `awaitingCompactLoad === true`
- *      AND `cacheCreation >= CACHE_REBUILD_CREATION_MIN`.
- *      Compact (auto or /compact) caches a fresh summary alongside
- *      the surviving system prompt + tools, so creation is meaningful
- *      but reads are also non-trivial - the strict ratio gate would
- *      miss most of these. The marker (parser-detected
- *      `isCompactSummary` user entry) is the source of truth; we drop
- *      the ratio gate when it's set.
- *
- * Floor thresholds derived from sampling 25k+ unique signatures across
- * pre- and post-2026-04-24 sessions: tiny creation events are normal
- * mid-turn caching of new content; real rebuilds are always >= 5k. */
-const CACHE_REBUILD_CREATION_MIN = 5_000;
-const CACHE_REBUILD_RATIO_DENOM = 2;
-
-/** Two-banner classification. Same 2000ms flash cadence for both;
- * the color signals cause:
- *
- *   yellow LOAD = deliberate cache build event - either first build
- *                 for this session lifetime (cold start, session
- *                 resume into a fresh widget) or a compact-driven
- *                 rebuild (auto or /compact). Either way the user
- *                 paid the input cost as part of an intentional
- *                 cache-load action.
- *   red    MISS = involuntary mid-session cache eviction (TTL,
- *                 server-side fault); user paid again unexpectedly.
- *
- * Each banner has an "on" form (colored emoji bullets) and an "off"
- * form (black circle bullets, U+26AB). Same emoji rendering family for
- * both frames, which is the only reliable way to keep the cell width
- * steady - mixing emoji with ASCII spaces or with codicons crosses
- * font tables and shifts the text by an unpredictable fraction on
- * every transition. The black circle reads as a quiet contrast pulse
- * against the colored on-frame; on dark themes it nearly disappears
- * for a "fades to blank" feel, on light themes it stays visible but
- * still pulses cleanly. Geometry is the load-bearing property either
- * way. */
-const CACHE_LOAD_BANNER_ON = "🟡LOAD🟡";
-const CACHE_LOAD_BANNER_OFF = "⚫LOAD⚫";
-const CACHE_MISS_BANNER_ON = "🔴MISS🔴";
-const CACHE_MISS_BANNER_OFF = "⚫MISS⚫";
-/** 500ms per frame, four frames per banner cycle. Pattern (using
- * MISS): on (0-500) / off (500-1000) / on (1000-1500) / off (1500-2000).
- * Off frame swaps the colored circle for a black circle - same emoji
- * family means guaranteed equal width across frames. */
-const CACHE_BANNER_FRAME_MS = 500;
 
 export class SessionTokenWidget<TState extends { status: string }> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
@@ -741,6 +526,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
         this.item.color = getSessionTokenColor(pctOfCeiling, d.whitePct, d.yellowPct);
 
+        const bridgeSnapshot = this.bridgeStage.snapshot();
         this.item.tooltip = buildSessionTokenTooltip({
           provider: d.provider,
           sessionTitle: data.sessionTitle,
@@ -755,8 +541,12 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           claudeTurnInfo: data.claudeTurnInfo,
           turnState: data.turnState,
           autoCompactEffectiveTokens: data.autoCompactEffectiveTokens,
-          codexEffort: this.bridgeStage.snapshot().codexEffort,
-          bridgeActive: this.bridgeStage.snapshot().phase !== "idle",
+          codexEffort: bridgeSnapshot.codexEffort,
+          bridgeActive: bridgeSnapshot.phase !== "idle",
+          bridgeWaitTimeoutSec:
+            d.provider === "Claude"
+              ? bridgeSnapshot.waitInfo?.timeoutSec ?? null
+              : null,
         });
         this.item.show();
         return;

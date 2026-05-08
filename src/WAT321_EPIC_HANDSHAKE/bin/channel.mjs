@@ -33,14 +33,15 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
-  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { buildEnvelope, parseEnvelope, writeAtomic } from "./channel/envelope.mjs";
+import { purgeOldSent, sweepStaleAttachments, SENT_TTL_MS } from "./channel/cleanup.mjs";
+import { writeWaitStatus as writeWaitStatusImpl, clearWaitStatus as clearWaitStatusImpl } from "./channel/waitStatus.mjs";
 
 const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
 const INBOX_CLAUDE_ROOT = join(EH_DIR, "inbox", "claude");
@@ -114,9 +115,22 @@ const ADAPTIVE_HARD_CAP_MS = 300_000;
 
 const POLL_INTERVAL_MS = 500;
 
+/** Wait-status sidecar path. Written when a sync `reply` enters its
+ * blocking wait loop, deleted on every exit (success, timeout, error).
+ * Read by `bridgeStageCoordinator` so the Claude session-tokens tooltip
+ * can render "Waiting on Codex: Ns" while the dispatch is in flight. */
+const WAIT_STATUS_PATH = join(EH_DIR, `wait-status.${WORKSPACE_HASH}.json`);
+
 for (const dir of [INBOX_CLAUDE, INBOX_CODEX, SENT_CLAUDE]) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
+
+// Wait-status sidecar implementation lives in `./channel/waitStatus.mjs`.
+// Bind the path + hash from this module's constants here so callsites
+// keep their existing two-arg / zero-arg shape.
+const writeWaitStatus = (envelopeId, timeoutSec) =>
+  writeWaitStatusImpl(WAIT_STATUS_PATH, WORKSPACE_HASH, envelopeId, timeoutSec);
+const clearWaitStatus = () => clearWaitStatusImpl(WAIT_STATUS_PATH);
 
 const SESSION_FP = randomUUID();
 
@@ -302,7 +316,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   // Schema validation up front. Claude Code occasionally forwards
-  // arguments under the wrong key (e.g. `prompt` from the Model Bridge
+  // arguments under the wrong key (e.g. `prompt` from a sibling
   // tool's schema), or omits `text` entirely. Without validation the
   // bridge would dispatch an empty envelope, wait the full timeout,
   // and surface a generic "no reply" failure that masks the real
@@ -317,7 +331,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       // wrong key with whatever value, the body content is irrelevant
       // to diagnosing the schema mistake.
       if ("prompt" in args) {
-        return "Expected a non-empty `text` argument. Received `prompt`; resend using `text` for Epic Handshake. (The Model Bridge tool uses `prompt`; double-check which bridge you intended.)";
+        return "Expected a non-empty `text` argument. Received `prompt`; resend using `text` for Epic Handshake. (The OpenCode Routes tool uses `prompt`; double-check which bridge you intended.)";
       }
       const otherKeys = Object.keys(args).filter((k) => k !== "text" && k !== "timeout_sec");
       if (otherKeys.length > 0) {
@@ -366,7 +380,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   // with the stage helper's own pre-stage sweep, this keeps the
   // attachments dir bounded to the 5-minute TTL window without
   // requiring a dedicated timer.
-  sweepStaleAttachments();
+  sweepAttachments();
 
   const args = req.params.arguments || {};
   const bodyText = args.text || "";
@@ -439,6 +453,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const adaptive = existsSync(ADAPTIVE_FLAG);
   const startedAt = Date.now();
   const initialDeadline = startedAt + timeoutMs;
+  // Surface the wait budget so the Claude session-tokens tooltip can
+  // render "Waiting on Codex: Ns". The widget reads this through
+  // bridgeStageCoordinator; see waitStatus.ts on the EH-tier side.
+  writeWaitStatus(id, Math.round(timeoutMs / 1000));
   // Adaptive ceiling is generous (30 min) - heartbeat freshness is
   // the actual signal governing the inner loop. Caller-supplied
   // timeout_sec governs when the heartbeat-stale check kicks in
@@ -481,6 +499,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     await sleep(POLL_INTERVAL_MS);
   }
+
+  // Wait loop exited (reply, timeout, or fall-through). Clear the
+  // sidecar before any return path so the tooltip stops showing
+  // "Waiting on Codex" the moment we stop blocking.
+  clearWaitStatus();
 
   if (replyContent === null) {
     const elapsedMs = Date.now() - startedAt;
@@ -819,125 +842,14 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// ---------------------------------------------------------------
-// Envelope ser/de (hand-rolled YAML frontmatter, no deps)
-// ---------------------------------------------------------------
-
-function buildEnvelope(fields) {
-  const now = new Date().toISOString();
-  const lines = ["---"];
-  lines.push(`id: ${fields.id}`);
-  lines.push(`chain_id: ${fields.chainId}`);
-  lines.push(`iteration: ${fields.iteration}`);
-  lines.push(`source: ${fields.source}`);
-  lines.push(`target: ${fields.target}`);
-  lines.push(`source_session_fp: ${fields.sourceSessionFp}`);
-  lines.push(`priority: ${fields.priority}`);
-  lines.push(`intent: ${fields.intent}`);
-  lines.push(`workspace_path: ${fields.workspacePath}`);
-  lines.push(`created_at: ${now}`);
-  lines.push(`reply_to: ${fields.replyTo === null ? "null" : fields.replyTo}`);
-  if (fields.title) lines.push(`title: ${escapeYaml(fields.title)}`);
-  lines.push("---");
-  lines.push("");
-  lines.push(fields.body || "");
-  lines.push("");
-  return lines.join("\n");
-}
-
-function escapeYaml(v) {
-  if (/[:#\n]/.test(v)) return JSON.stringify(v);
-  return v;
-}
-
-function parseEnvelope(raw) {
-  if (!raw.startsWith("---")) return null;
-  const sep = raw.indexOf("\n---", 3);
-  if (sep === -1) return null;
-  const frontmatter = raw.slice(3, sep).trim();
-  const body = raw.slice(sep + 4).replace(/^\s*\n/, "").trimEnd();
-  const fields = {};
-  for (const line of frontmatter.split("\n")) {
-    const m = line.match(/^([a-z_]+):\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1];
-    let val = m[2].trim();
-    if (val === "null") val = null;
-    else if (val.startsWith('"')) {
-      try { val = JSON.parse(val); } catch { /* keep raw */ }
-    }
-    fields[key] = val;
-  }
-  return { fields, body };
-}
-
-function writeAtomic(path, content) {
-  // Defensive: Reset WAT321 wipes ~/.wat321/, so a sibling Claude
-  // session calling the bridge from a never-before-seen workspace
-  // hits a missing inbox subdir on its first dispatch. Recreate the
-  // parent on every write rather than assuming it exists - mkdir
-  // recursive is cheap and the path always lives under our own dir
-  // tree.
-  const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, content, "utf8");
-  renameSync(tmp, path);
-}
-
-// ---------------------------------------------------------------
-// Sent folder housekeeping: purge items older than 5 minutes on
-// startup and again every 5 minutes. Delivered envelopes have no
-// downstream consumer - the bridge conversation lives in Claude's
-// own transcript, not in the filesystem.
-// ---------------------------------------------------------------
-
-const SENT_TTL_MS = 5 * 60 * 1000;
-
-function purgeOldSent() {
-  try {
-    const cutoff = Date.now() - SENT_TTL_MS;
-    for (const dir of [SENT_CLAUDE]) {
-      if (!existsSync(dir)) continue;
-      for (const f of readdirSync(dir)) {
-        const p = join(dir, f);
-        try {
-          const st = statSync(p);
-          if (st.mtimeMs < cutoff) unlinkSync(p);
-        } catch {
-          // best-effort
-        }
-      }
-    }
-  } catch {
-    // never throw from housekeeping
-  }
-}
-
-/** Purge clipboard-staged images older than the TTL. Called at the top
- * of every `epic_handshake_ask` dispatch so stale images don't survive
- * a turn cycle. The stage helper itself also sweeps before staging, so
- * cleanup pressure is high regardless of which side acts first. */
-function sweepStaleAttachments() {
-  try {
-    if (!existsSync(ATTACHMENTS_CLIPBOARD_DIR)) return;
-    const cutoff = Date.now() - ATTACHMENTS_TTL_MS;
-    for (const f of readdirSync(ATTACHMENTS_CLIPBOARD_DIR)) {
-      const p = join(ATTACHMENTS_CLIPBOARD_DIR, f);
-      try {
-        const st = statSync(p);
-        if (st.mtimeMs < cutoff) unlinkSync(p);
-      } catch {
-        // best-effort
-      }
-    }
-  } catch {
-    // never throw from housekeeping
-  }
-}
-
-purgeOldSent();
-setInterval(purgeOldSent, SENT_TTL_MS).unref();
+// Envelope ser/de + housekeeping live in `./channel/{envelope,cleanup}.mjs`.
+// Wrapping `purgeOldSent` and `sweepStaleAttachments` so the schedule
+// closures here pass our local SENT_CLAUDE / ATTACHMENTS_CLIPBOARD_DIR
+// constants without leaking them into the helper modules.
+const purgeSent = () => purgeOldSent(SENT_CLAUDE);
+const sweepAttachments = () => sweepStaleAttachments(ATTACHMENTS_CLIPBOARD_DIR, ATTACHMENTS_TTL_MS);
+purgeSent();
+setInterval(purgeSent, SENT_TTL_MS).unref();
 
 // ---------------------------------------------------------------
 // Connect stdio transport

@@ -11,13 +11,14 @@ import {
   setHostAppName,
 } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
+import { workspaceId } from "./shared/wat321Paths";
 import {
   registerAutoCreateOpenCodeS1,
   registerBridgeConfigWriter,
   registerUnifiedBridgeCommands,
-} from "./WAT321_BRIDGE";
+} from "./WAT321_MCP_SERVER";
 import { activateEpicHandshake } from "./WAT321_EPIC_HANDSHAKE";
-import { activateModelBridge } from "./WAT321_MODEL_BRIDGE";
+import { activateOpenCodeRoutes } from "./WAT321_OPENCODE_ROUTES";
 
 /**
  * Top-level entry point. Creates the engine context, registers
@@ -40,6 +41,15 @@ export function activate(context: vscode.ExtensionContext) {
   if (process.platform === "win32") {
     setHostAppName(vscode.env.appName);
   }
+
+  // Set WAT321_WORKSPACE_ID on the extension host's process env so any
+  // subprocess this extension spawns (the OpenCode harness, the Codex
+  // bridge channel, the warm PowerShell toast) inherits the same wsId
+  // the path helpers use. Claude Code's MCP layer doesn't read this -
+  // the installer injects WAT321_WORKSPACE_ID separately via the MCP
+  // entry's --env. Both surfaces resolve to the same value because
+  // workspaceId() is deterministic.
+  process.env.WAT321_WORKSPACE_ID = workspaceId();
 
   ctx = createEngineContext();
 
@@ -72,20 +82,19 @@ export function activate(context: vscode.ExtensionContext) {
   const epicHandshake = activateEpicHandshake(context, ctx.events);
   context.subscriptions.push(epicHandshake);
 
-  // Model Bridge tier (local + cloud LLMs). Independent of Epic
-  // Handshake - the two MCP servers register under different names
-  // (`wat321` and `wat321-model-bridge`) and never share runtime
-  // state. Wrapped in try/catch so a fatal bug in this tier never
-  // takes down the core Claude / Codex widgets - the Model Bridge is
-  // optional, the usage widgets are not.
+  // OpenCode Routes tier (local + cloud LLMs). Independent of Epic
+  // Handshake; the unified `wat321` MCP server (registered by the MCP
+  // Server tier) handles dispatch for both. Wrapped in try/catch so a
+  // fatal bug in this tier never takes down the core Claude / Codex
+  // widgets - OpenCode Routes is opt-in, the usage widgets are not.
   let modelBridge: { resetCleanup: () => Promise<void>; dispose: () => void } | null = null;
   try {
-    modelBridge = activateModelBridge(context);
+    modelBridge = activateOpenCodeRoutes(context);
     context.subscriptions.push(modelBridge);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     void vscode.window.showWarningMessage(
-      `WAT321 Model Bridge failed to activate; usage widgets continue working. (${msg})`
+      `WAT321 OpenCode Routes failed to activate; usage widgets continue working. (${msg})`
     );
   }
 
@@ -129,7 +138,7 @@ export function activate(context: vscode.ExtensionContext) {
     // surfaces have to go. Idempotent - succeeds even if neither was
     // ever installed.
     try {
-      const { uninstallUnifiedBridge } = await import("./WAT321_BRIDGE/installer");
+      const { uninstallUnifiedBridge } = await import("./WAT321_MCP_SERVER/installer");
       await uninstallUnifiedBridge();
     } catch {
       // best-effort - reset continues regardless

@@ -24,7 +24,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
     // Claude Code applies to overrides). Keeps the displayed % from
     // disagreeing with the actual fire point - if you set OVERRIDE=73
     // on a 1M window the widget reports 715k as 100% rather than the
-    // nominal 730k. Source of truth lives in claudeSettings.ts.
+    // nominal 730k. Source of truth lives in providers/claude/settings.ts.
     return {
       sessionId: session.sessionId,
       sessionTitle: session.sessionTitle,

@@ -45,7 +45,7 @@ import {
   consumeRecentCodexCompletion,
   writeCancelFlag,
 } from "./turnFlags";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /** How long the restart-bridge orchestration waits between writing
  * the cancel sentinel and force-killing the app-server child. Long

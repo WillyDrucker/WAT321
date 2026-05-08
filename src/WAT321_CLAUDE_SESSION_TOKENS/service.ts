@@ -8,7 +8,7 @@ import {
   readAutoCompactEffectiveTriggerTokens,
   readAutoCompactPct,
   SETTINGS_PATH,
-} from "../shared/claudeSettings";
+} from "../shared/providers/claude/settings";
 import { resolveContextWindow } from "../engine/contracts";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import {

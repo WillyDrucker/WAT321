@@ -16,7 +16,8 @@ import {
 } from "./turnHeartbeat";
 import { readCodexEffortOverride } from "./codexRuntimeOverrides";
 import { currentWaitMode } from "./waitMode";
-import { workspaceHash } from "./workspaceHash";
+import { readWaitStatus } from "./waitStatus";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Single source of truth for Epic Handshake bridge state across the
@@ -236,6 +237,7 @@ const IDLE_SNAPSHOT: BridgeStageSnapshot = {
   heartbeat: null,
   waitMode: "adaptive",
   codexEffort: null,
+  waitInfo: null,
 };
 
 export class BridgeStageCoordinator
@@ -438,6 +440,7 @@ export class BridgeStageCoordinator
     const busy = isBridgeBusy(workspacePath);
     const waitMode = currentWaitMode();
     const codexEffort = readCodexEffortOverride(wsHash);
+    const waitInfo = readWaitStatus(wsHash);
     const now = Date.now();
 
     // Walker-owned phase. An active latch has its own life cycle
@@ -514,6 +517,7 @@ export class BridgeStageCoordinator
             heartbeat: rawHeartbeat,
             waitMode,
             codexEffort,
+            waitInfo,
           };
         }
         // applyLatch returned null - walker fully done, latch already
@@ -541,6 +545,7 @@ export class BridgeStageCoordinator
           heartbeat: rawHeartbeat,
           waitMode,
           codexEffort,
+          waitInfo,
         };
       }
     }
@@ -559,6 +564,7 @@ export class BridgeStageCoordinator
         heartbeat: null,
         waitMode,
         codexEffort,
+        waitInfo,
       };
     }
 
@@ -570,6 +576,7 @@ export class BridgeStageCoordinator
       heartbeat: rawHeartbeat,
       waitMode,
       codexEffort,
+      waitInfo,
     };
   }
 

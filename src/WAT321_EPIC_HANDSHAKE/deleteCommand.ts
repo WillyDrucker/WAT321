@@ -12,7 +12,7 @@ import {
   type BridgeThreadRecord,
 } from "./threadPersistence";
 import type { EpicHandshakeLogger } from "./types";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Destructive delete of the current workspace's Codex bridge session.
@@ -71,12 +71,9 @@ export async function deleteCurrentCodexSession(
 
   const sessionName = bridgeThreadDisplayName(workspacePath, record.sessionCounter);
   const confirmation = await vscode.window.showWarningMessage(
-    `Delete Codex session "${sessionName}"?`,
-    {
-      modal: true,
-      detail: `Removes the rollout file and strips the entry from Codex's session index. Conversation history will be lost. Next Claude-to-Codex prompt spawns a fresh S${record.sessionCounter + 1}.`,
-    },
-    "Delete"
+    `Delete Codex session "${sessionName}"? Removes the rollout file and strips the entry from Codex's session index. Next Claude-to-Codex prompt spawns a fresh S${record.sessionCounter + 1}.`,
+    "Delete",
+    "Cancel"
   );
   if (confirmation !== "Delete") return;
 
@@ -304,12 +301,9 @@ export async function deleteAllCodexSessions(
   }
 
   const confirmation = await vscode.window.showWarningMessage(
-    `Delete ALL ${sessions.length} Codex bridge session${sessions.length === 1 ? "" : "s"} for this workspace?`,
-    {
-      modal: true,
-      detail: `Removes every rollout file and strips matching entries from Codex's session index.\n\nSessions: ${sessions.map((s) => s.displayName).join(", ")}`,
-    },
-    "Delete All"
+    `Delete ALL ${sessions.length} Codex bridge session${sessions.length === 1 ? "" : "s"} for this workspace? Sessions: ${sessions.map((s) => s.displayName).join(", ")}.`,
+    "Delete All",
+    "Cancel"
   );
   if (confirmation !== "Delete All") return;
 

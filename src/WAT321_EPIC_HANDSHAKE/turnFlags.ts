@@ -7,7 +7,7 @@ import {
   returningFlagPath,
   suppressCodexToastFlagPath,
 } from "./constants";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /** Drop the cancel sentinel for this workspace. The status-bar
  * menu's Cancel action calls this; `runTurnOnce` polls the sentinel

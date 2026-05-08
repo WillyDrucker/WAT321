@@ -3,7 +3,7 @@ import {
   getCodexModelInfo,
   listSelectableCodexModels,
   readCodexConfigModel,
-} from "../shared/codexModels";
+} from "../shared/providers/codex/models";
 import {
   readCodexEffortOverride,
   readCodexModelOverride,
@@ -24,7 +24,7 @@ import {
   type DispatchAction,
 } from "./menuCommon";
 import { currentWorkspacePath, isPaused, setPaused } from "./statusBarState";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /** Resolve the current workspace's hash for flag-file partitioning. The
  * three Codex override flags are workspace-scoped so two VS Code windows

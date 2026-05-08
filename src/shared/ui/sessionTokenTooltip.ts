@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getCodexModelInfo, isKnownCodexModel } from "../codexModels";
+import { getCodexModelInfo, isKnownCodexModel } from "../providers/codex/models";
 import { formatModelDisplayName } from "../../engine/contracts";
 import { renderStageDisplay } from "../codex-rollout/phaseRender";
 import type { StageInfo } from "../codex-rollout/types";
@@ -79,6 +79,13 @@ export interface SessionTokenTooltipInput {
    * already shows the same info inline; surfacing it twice clutters
    * the tooltip. Defaults to false at the type level. */
   bridgeActive?: boolean;
+  /** Claude-only: total wait budget (seconds) for the in-flight Codex
+   * dispatch. When set, a "Waiting on Codex: Ns" line renders below
+   * the progress bar so the user can see how long Claude will hold for
+   * before timing out. Static value - VS Code rebuilds the tooltip on
+   * each widget render cycle so the read refreshes naturally without
+   * needing a live countdown. Null when no bridge dispatch is blocking. */
+  bridgeWaitTimeoutSec?: number | null;
 }
 
 export function buildSessionTokenTooltip(
@@ -100,6 +107,7 @@ export function buildSessionTokenTooltip(
     autoCompactEffectiveTokens,
     codexEffort,
     bridgeActive = false,
+    bridgeWaitTimeoutSec = null,
   } = input;
 
   const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
@@ -149,7 +157,7 @@ export function buildSessionTokenTooltip(
     // effort, but the thinking-block presence is its closest analog).
     const effortLabel = resolveEffortLabel(provider, modelId, codexEffort, claudeTurnInfo);
     const effortSegment = effortLabel ? ` · ${effortLabel}` : "";
-    md.appendMarkdown(`${prefix}${modelName}${effortSegment}${windowLabel}  \n`);
+    md.appendMarkdown(`${prefix}Model: ${modelName}${effortSegment}${windowLabel}  \n`);
     if (codexModelInvalid) {
       md.appendMarkdown(
         `_Model not in your installed Codex's known set. The next prompt will fail; repair via the bridge menu._  \n`
@@ -163,6 +171,15 @@ export function buildSessionTokenTooltip(
     `${FOLDER} ${label} ${formatTokens(contextUsed)} / ${formatTokens(ceiling)}\n\n`
   );
   md.appendMarkdown(`${bar} ${formatPct(pctUsed)} used\n\n`);
+
+  // Claude-only: while a Claude-to-Codex bridge dispatch is blocking,
+  // surface the wait budget so the user knows how long Claude will
+  // hold before timing out. Static value - VS Code rebuilds the
+  // tooltip on each widget render cycle so the line refreshes on
+  // re-hover without needing a live countdown.
+  if (provider === "Claude" && typeof bridgeWaitTimeoutSec === "number") {
+    md.appendMarkdown(`Waiting on Codex: ${bridgeWaitTimeoutSec} seconds\n\n`);
+  }
   // Codex mid-turn richness. Only renders when (1) the Epic Handshake
   // bridge is actively driving this Codex session, (2) a turn is in
   // flight, and (3) we have structured rollout state. Standalone Codex
@@ -229,9 +246,11 @@ export function buildSessionTokenTooltip(
 /** Wrap a long session title across up to two lines, breaking on a
  * word boundary inside the first line's character budget. Titles
  * that fit on one line are returned unchanged; titles that exceed
- * two lines are ellipsis-truncated. Used to give long session names
+ * two lines are ellipsis-truncated. Exported so the OpenCode Routes widget can
+ * reuse the same wrap logic for OpenCode / Local LLM session titles.
+ * Used to give long session names
  * a fair shot at full readability before falling back to truncation. */
-function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
+export function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
   if (!sessionTitle) return "";
   if (sessionTitle.length <= MAX_TITLE_LINE_LEN) return sessionTitle;
   // Find the last space at or before MAX_TITLE_LINE_LEN so the wrap

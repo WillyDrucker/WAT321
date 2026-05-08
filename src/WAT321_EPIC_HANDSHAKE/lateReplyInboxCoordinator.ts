@@ -6,7 +6,7 @@ import {
   countPendingLateReplies,
   newestLateReplyAgeMs,
 } from "./lateReplyInbox";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Per-workspace late-reply inbox tracker. fs-watch on

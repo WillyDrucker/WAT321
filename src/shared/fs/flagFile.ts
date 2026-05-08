@@ -5,7 +5,7 @@ import { writeFileAtomic } from "./atomicWrite";
  * Flag-file primitives for cross-process sentinels. A flag is a tiny file
  * whose presence carries the signal; its contents (an ISO timestamp) are
  * only used when a freshness window matters. Both the Epic Handshake
- * dispatcher (`turnFlags.ts`) and the Model Bridge click menu
+ * dispatcher (`turnFlags.ts`) and the OpenCode Routes click menu
  * (`runtimeFlags.ts`) write the same shape; this module is the shared
  * floor so the try/catch + best-effort contract stays consistent.
  *

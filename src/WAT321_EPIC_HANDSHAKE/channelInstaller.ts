@@ -3,13 +3,14 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type * as vscode from "vscode";
 import { atomicCopy } from "../shared/fs/atomicCopy";
-import {
-  resolveClaudeCli,
-  resolveCodexCli,
-  resolveOpenCodeCli,
-} from "../shared/mcp/cliBinaryResolver";
+import { resolveClaudeCli } from "../shared/providers/claude/cliResolver";
+import { resolveCodexCli } from "../shared/providers/codex/cliResolver";
+import { resolveOpenCodeCli } from "../shared/providers/opencode/cliResolver";
 import { copyProdModules } from "../shared/mcp/copyProdModules";
-import { preAllowMcpTools, unAllowMcpTools } from "../shared/mcp/preAllowTools";
+import {
+  preAllowMcpTools,
+  unAllowMcpTools,
+} from "../shared/providers/claude/mcpAllowlist";
 import { BIN_DIR, EPIC_HANDSHAKE_DIR } from "./constants";
 import type { EpicHandshakeLogger } from "./types";
 
@@ -33,6 +34,11 @@ const INSTALLED_SCRIPT_PATH = join(BIN_DIR, CHANNEL_SCRIPT_NAME);
  * logic lives on disk instead of baked into a tool description. Keep
  * this list tight; every entry is one more file we install. */
 const HELPER_SCRIPT_NAMES = ["stage-clipboard.mjs"] as const;
+const CHANNEL_SUBDIR_SCRIPTS = [
+  "envelope.mjs",
+  "cleanup.mjs",
+  "waitStatus.mjs",
+] as const;
 
 export interface InstallResult {
   ok: boolean;
@@ -91,6 +97,21 @@ export function extractChannelScript(context: vscode.ExtensionContext): string {
     const helperSource = helperCandidates.find((c) => existsSync(c));
     if (helperSource !== undefined) {
       atomicCopy(helperSource, join(BIN_DIR, name));
+    }
+  }
+  // channel.mjs imports per-concern modules from `./channel/`. Extract
+  // the same subdir alongside the entry script so the runtime resolves
+  // them at the same relative path as in the source tree.
+  const channelSubDir = join(BIN_DIR, "channel");
+  if (!existsSync(channelSubDir)) mkdirSync(channelSubDir, { recursive: true });
+  for (const name of CHANNEL_SUBDIR_SCRIPTS) {
+    const candidates = [
+      join(context.extensionPath, "out", "WAT321_EPIC_HANDSHAKE", "bin", "channel", name),
+      join(context.extensionPath, "src", "WAT321_EPIC_HANDSHAKE", "bin", "channel", name),
+    ];
+    const source = candidates.find((c) => existsSync(c));
+    if (source !== undefined) {
+      atomicCopy(source, join(channelSubDir, name));
     }
   }
   return INSTALLED_SCRIPT_PATH;

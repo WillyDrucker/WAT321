@@ -198,7 +198,7 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     // give me a clean slate" signal; both bridges should be off after
     // it, requiring an explicit opt-in to re-enable. Epic Handshake's
     // schema default is already false (so undefined would also work),
-    // but Model Bridge defaults to true and would auto-re-enable on
+    // but OpenCode Routes defaults to true and would auto-re-enable on
     // reset without the explicit false. Reset only fires from user-
     // invoked paths (command, checkbox, click menu) - never at activate
     // - so this never accidentally disables a working bridge.

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { modelBridgeStateDir } from "../shared/wat321Paths";
 import * as vscode from "vscode";
 import type { EventHub } from "../engine/eventHub";
 import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
@@ -11,25 +11,24 @@ import {
   waitModeFlashFlagPath,
 } from "./constants";
 import { loadBridgeThreadRecordIfExists } from "./threadPersistence";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
-/** Path to the unified bridge's Model Bridge heartbeat for this
- * workspace. Written by the OC/Local dispatch path
- * (`opencode.mjs:withMbHeartbeat`) every 5s while a turn is in flight,
- * deleted on settle. Per-workspace partition keeps a sibling VS Code
- * window from rendering "calling" state when this workspace's Claude
- * Code session fires a prompt - each window watches only its own hash. */
-const MB_DIR = join(homedir(), ".wat321", "model-bridge");
+/** OpenCode/Local dispatch heartbeat for this workspace. Written by
+ * `bin/opencode/heartbeat.mjs:withMbHeartbeat` every 5s while a turn
+ * is in flight, deleted on settle. The model-bridge dir is already
+ * per-client (clients/<wsId>/model-bridge/), so the file needs no
+ * per-instance suffix. The `wsHash` parameter is retained for caller
+ * symmetry with other widgets; null skips the read entirely. */
 function mbHeartbeatPath(wsHash: string | null): string | null {
   if (!wsHash) return null;
-  return join(MB_DIR, `heartbeat.${wsHash}.json`);
+  return join(modelBridgeStateDir(), "heartbeat.json");
 }
 
 interface MbHeartbeatActivity {
   startedAtMs: number;
 }
 
-/** Snapshot the MB heartbeat for animation timing. Returns null when
+/** Snapshot the OpenCode dispatch heartbeat for animation timing. Returns null when
  * the file is missing, malformed, or has a startedAt that doesn't
  * parse. Best-effort - any read failure simply suppresses the cycle. */
 function readMbHeartbeatActivity(wsHash: string | null): MbHeartbeatActivity | null {
@@ -367,7 +366,7 @@ export function createEpicHandshakeStatusBarItem(
       // OC/Local dispatch in flight (and no Codex turn active - the
       // earlier branches would have caught that). Drives the same
       // adaptive cycle the Codex flow uses, with the stage synthesized
-      // from elapsed time since the MB heartbeat's startedAt. This is
+      // from elapsed time since the OpenCode dispatch heartbeat's startedAt. This is
       // a stop-gap until Phased Messaging gives us real SSE-to-stage
       // transitions for OC/Local. Standard / fire-and-
       // forget modes fall back to the classic outbound arrow cycle.
