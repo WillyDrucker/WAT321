@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { resolveCodexCli } from "../shared/mcp/cliBinaryResolver";
+import { releaseClaim, tryAcquireClaim } from "../shared/claimFile";
+import { resolveCodexCli } from "../shared/providers/codex/cliResolver";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { AppServerClient } from "./appServerClient";
 import {
@@ -12,7 +13,7 @@ import {
 import { newEnvelopeId, readEnvelope, writeEnvelopeAtomic, type Envelope } from "./envelope";
 import { classifyFailure } from "./failureClassifier";
 import { moveToSent, purgeSent } from "./mailbox";
-import { isKnownCodexModel, readCodexConfigModel } from "../shared/codexModels";
+import { isKnownCodexModel, readCodexConfigModel } from "../shared/providers/codex/models";
 import {
   clearBridgeErrorState,
   findRolloutPath,
@@ -35,7 +36,7 @@ import {
 import { runTurnOnce } from "./turnRunner";
 import type { EpicHandshakeLogger } from "./types";
 import { currentWaitMode } from "./waitMode";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Watches `inbox/codex/<wshash>/` for envelopes from Claude, dispatches
@@ -63,6 +64,15 @@ const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
  * thread and rotate to a fresh one. Keeps a user's S1 alive through
  * transient network blips but bails out of genuinely stuck threads. */
 const MAX_CONSECUTIVE_FAILURES = 3;
+/** Per-envelope claim TTL. Two VS Code windows on the same workspace
+ * each watch the same `inbox/codex/<wsHash>/` directory; without a
+ * claim, both would dispatch the same envelope to Codex and write
+ * duplicate replies. The claim file lives next to the envelope at
+ * `<id>.md.claim` and is released on completion. TTL exceeds the
+ * monitor's hard cap so a healthy long-running turn never reclaims;
+ * a crashed dispatcher's claim ages out and the surviving window
+ * picks up the orphan on its next inbox scan. */
+const ENVELOPE_CLAIM_TTL_MS = 30 * 60 * 1000;
 
 /** Recognize a bridge-thread `lastError` string that came from an
  * upstream "model does not exist" / "model not available" response.
@@ -231,7 +241,19 @@ export class CodexDispatcher {
       files.sort();
       for (const f of files) {
         if (this.disposed) return;
-        await this.processEnvelope(join(this.inboxCodex, f));
+        const envelopePath = join(this.inboxCodex, f);
+        const claimPath = `${envelopePath}.claim`;
+        // Cross-window arbitration: same-workspace siblings race on
+        // the same inbox dir. Claim the envelope before reading; the
+        // loser skips and lets the winner deliver. Stale claims (TTL)
+        // get reclaimed so a crashed dispatcher cannot deadlock the
+        // envelope forever.
+        if (!tryAcquireClaim(claimPath, ENVELOPE_CLAIM_TTL_MS)) continue;
+        try {
+          await this.processEnvelope(envelopePath);
+        } finally {
+          releaseClaim(claimPath);
+        }
       }
     } finally {
       this.processing = false;
