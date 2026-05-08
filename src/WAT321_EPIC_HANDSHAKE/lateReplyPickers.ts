@@ -12,7 +12,7 @@ import {
   type DispatchAction,
 } from "./menuCommon";
 import { currentWorkspacePath, isPaused } from "./statusBarState";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Late-reply inbox sub-pickers. Replies arriving after a Fire-and-Forget

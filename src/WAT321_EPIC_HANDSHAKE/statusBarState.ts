@@ -7,7 +7,7 @@ import {
   PAUSED_FLAG_PATH,
   processingFlagPath,
 } from "./constants";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Tiny shared utilities for the status bar layer. Both the refresh

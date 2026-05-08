@@ -297,7 +297,7 @@ export function parseMostRecentCacheEvent(
   }
   return {
     kind: "HIT-clean",
-    description: `HIT - clean (last ${turns.length} turn${turns.length === 1 ? "" : "s"} all hit)`,
+    description: "Clean",
     ts: null,
   };
 }

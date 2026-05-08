@@ -6,7 +6,7 @@ import {
 import { dirname, join } from "node:path";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { EPIC_HANDSHAKE_DIR } from "./constants";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Per-workspace persistence for the shared Codex bridge thread. One

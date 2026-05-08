@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { readAliases, writeAliases } from "../shared/bridge/sessionAliases";
@@ -40,10 +39,11 @@ import { isPaused, setPaused } from "./statusBarState";
 
 export type SessionTarget = "opencode" | "local";
 
-const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
-const ALIAS_PATH = join(BRIDGE_DIR, "session-aliases.json");
-const BRIDGE_CONFIG_PATH = join(BRIDGE_DIR, "config.json");
-const MB_CONFIG_PATH = join(homedir(), ".wat321", "model-bridge", "config.json");
+import { bridgeStateDir, modelBridgeStateDir } from "../shared/wat321Paths";
+
+const ALIAS_PATH = join(bridgeStateDir(), "session-aliases.json");
+const BRIDGE_CONFIG_PATH = join(bridgeStateDir(), "config.json");
+const MB_CONFIG_PATH = join(modelBridgeStateDir(), "config.json");
 
 /** Read the bridge config's projectName for display labels. The
  * bridge tier writes this on activate + workspace-folder change.
@@ -419,12 +419,9 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
       return showSessionsPicker(target);
     }
     const confirm = await vscode.window.showWarningMessage(
-      `Reset ${toolDisplay} session?`,
-      {
-        modal: true,
-        detail: `Marks the next prompt to ${toolDisplay} as starting a fresh session. The current alias (${activeAlias}) stays in the bucket and can be re-selected from CURRENT.`,
-      },
-      "Reset"
+      `Reset ${toolDisplay} session? Next prompt starts fresh. The current alias (${activeAlias}) stays in the bucket and can be re-selected from CURRENT.`,
+      "Reset",
+      "Cancel"
     );
     if (confirm !== "Reset") return showSessionsPicker(target);
     aliases.activeAliases[target] = null;
@@ -444,12 +441,9 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
     }
     const display = formatSessionDisplayName(target, activeAlias);
     const confirm = await vscode.window.showWarningMessage(
-      `Delete ${toolDisplay} session "${display}"?`,
-      {
-        modal: true,
-        detail: `Removes the alias entry for ${activeAlias}. The underlying opencode session is retained in opencode.db for recovery.`,
-      },
-      "Delete"
+      `Delete ${toolDisplay} session "${display}"? Removes the alias entry for ${activeAlias}. The underlying opencode session is retained in opencode.db for recovery.`,
+      "Delete",
+      "Cancel"
     );
     if (confirm !== "Delete") return showSessionsPicker(target);
     delete targetAliases[activeAlias];
@@ -469,12 +463,9 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
       return showSessionsPicker(target);
     }
     const confirm = await vscode.window.showWarningMessage(
-      `Delete ALL ${bucketSize} ${toolDisplay} session${bucketSize === 1 ? "" : "s"}?`,
-      {
-        modal: true,
-        detail: `Clears every alias for ${toolDisplay}. Underlying opencode sessions are retained in opencode.db for recovery.`,
-      },
-      "Delete All"
+      `Delete ALL ${bucketSize} ${toolDisplay} session${bucketSize === 1 ? "" : "s"}? Clears every alias. Underlying opencode sessions are retained in opencode.db for recovery.`,
+      "Delete All",
+      "Cancel"
     );
     if (confirm !== "Delete All") return showSessionsPicker(target);
     aliases[target] = {};
@@ -495,7 +486,7 @@ export async function showLocalLLMSessionsPicker(): Promise<"back" | undefined> 
   return showSessionsPicker("local");
 }
 
-/** Register the cross-tier commands so the MB widget click can route
+/** Register the cross-tier commands so the OpenCode Routes widget click can route
  * here without violating the tier-import rule (MB cannot import from
  * EH directly; command dispatch is the engine-blessed crossing). */
 export function registerSessionPickerCommands(

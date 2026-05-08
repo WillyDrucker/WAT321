@@ -24,6 +24,19 @@
  * milliseconds of new mtime span, blowing the rate up. The cached
  * `lastValue` survives the reset so the widget keeps showing the most
  * recent valid rate during the pause.
+ *
+ * Why a baseline-anchor on first sample after a clear: the very first
+ * sample we observe after a session change or idle-gap clear carries
+ * cumulative tokens that accumulated BEFORE we started watching
+ * (existing rollout already mid-turn at activate, or cumulative growth
+ * during a long pause). Including it as `samples[0]` makes the first
+ * computable window span from "tokens already there" to "tokens after
+ * the next chunk", which capped Codex's first-turn ratio at 999/s.
+ * Solution: consume the first post-clear sample as a baseline-anchor -
+ * update `lastObservedTokens` so the unchanged-tokens guard still
+ * works, but do not push it into `samples`. The next sample becomes
+ * `samples[0]`, and rates compute from increments observed strictly
+ * after we started watching.
  */
 
 const TPS_MAX = 999;
@@ -41,6 +54,21 @@ export class TpsTracker {
   private prevSessionId: string | null = null;
   private lastValue: number | null = null;
   private samples: Sample[] = [];
+  /** Durable record of the most recently observed token count. Survives
+   * idle-gap clears so the unchanged-tokens guard can reject a stale
+   * sample even when `samples` was just emptied. Without this, an idle
+   * clear on call N followed by a stale-token sample on call N+1 would
+   * push the stale value as a new baseline (samples is empty so `last`
+   * is undefined; the guard's `last !== undefined` short-circuits) and
+   * the next real sample would average against an artificially-old
+   * timestamp, sagging the rate. */
+  private lastObservedTokens: number | null = null;
+  /** True when the next observed sample should be consumed as a
+   * baseline anchor (updates `lastObservedTokens`, does not enter
+   * `samples`). Set on construction, on session change, and after an
+   * idle-gap clear. Cleared once a baseline has been recorded so
+   * subsequent samples accumulate normally. */
+  private awaitingBaseline = true;
 
   /** Add a new cumulative-token sample at the given mtime instant.
    * Returns the smoothed rate, or `null` when there is not yet enough
@@ -51,35 +79,58 @@ export class TpsTracker {
       this.prevSessionId = sessionId;
       this.lastValue = null;
       this.samples = [];
+      this.lastObservedTokens = null;
+      this.awaitingBaseline = true;
     }
 
     const last = this.samples[this.samples.length - 1];
 
-    if (last !== undefined && tokens < last.tokens) {
+    if (this.lastObservedTokens !== null && tokens < this.lastObservedTokens) {
       // Rollback (compaction reset). Clear `lastValue` too so the
       // widget does not keep showing the pre-reset rate until the new
       // window ages in - that reads as ghost activity on a session
-      // that just shed tokens.
+      // that just shed tokens. Reset the durable observed-tokens marker
+      // to the new lower count so the unchanged-tokens guard gates
+      // future samples against the post-rollback baseline. Re-anchor
+      // baseline so the first post-rollback sample doesn't seed an
+      // inflated window starting from the post-compact token floor.
       this.samples = [];
       this.lastValue = null;
+      this.lastObservedTokens = tokens;
+      this.awaitingBaseline = true;
     } else if (last !== undefined && atMs - last.atMs > IDLE_GAP_MS) {
       // Idle gap. Keep `lastValue` so the tooltip shows the most
       // recent valid rate during a tool wait or between-prompt pause
-      // instead of going blank.
+      // instead of going blank. `lastObservedTokens` survives the
+      // clear so the next call still gates against the durable marker
+      // even though `samples` is empty. Re-arm baseline so the first
+      // sample after the gap anchors the next window instead of seeding
+      // it with a multi-thousand-token jump accumulated during the pause.
       this.samples = [];
+      this.awaitingBaseline = true;
     }
 
-    // Unchanged-tokens guard runs AFTER rollback / idle-gap so a clear
-    // followed by a stale-token sample does not re-anchor the window
-    // without any token progress. The transcript can tick mtime for
-    // non-token-bearing writes (tool result bodies, sidecar entries),
-    // so we sample only when tokens strictly increase from the last
-    // observed value.
-    if (last !== undefined && tokens === last.tokens) {
+    // Unchanged-tokens guard reads the durable `lastObservedTokens`,
+    // not the (possibly-cleared) sample window. The transcript can
+    // tick mtime for non-token-bearing writes (tool result bodies,
+    // sidecar entries), so we sample only when tokens strictly
+    // increase from the last observed value.
+    if (this.lastObservedTokens !== null && tokens === this.lastObservedTokens) {
+      return this.lastValue;
+    }
+
+    if (this.awaitingBaseline) {
+      // Baseline anchor: record the cumulative token count we started
+      // watching at, but do not push into `samples`. The NEXT sample
+      // becomes `samples[0]`, so the first computable window measures
+      // only the increment that arrived after we started watching.
+      this.lastObservedTokens = tokens;
+      this.awaitingBaseline = false;
       return this.lastValue;
     }
 
     this.samples.push({ atMs, tokens });
+    this.lastObservedTokens = tokens;
     const cutoff = atMs - WINDOW_MS;
     while (this.samples.length > 1 && this.samples[0].atMs < cutoff) {
       this.samples.shift();
@@ -103,5 +154,7 @@ export class TpsTracker {
     this.prevSessionId = null;
     this.lastValue = null;
     this.samples = [];
+    this.lastObservedTokens = null;
+    this.awaitingBaseline = true;
   }
 }

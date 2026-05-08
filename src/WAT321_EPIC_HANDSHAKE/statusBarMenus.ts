@@ -1,7 +1,7 @@
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { bridgeStateDir } from "../shared/wat321Paths";
 import * as vscode from "vscode";
 import { waitModeFlashFlagPath } from "./constants";
 import { listLateReplies } from "./lateReplyInbox";
@@ -46,14 +46,14 @@ import {
   nextWaitMode,
   waitModeLabel,
 } from "./waitMode";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /** Read the unified bridge's alias map for the current S# suffix on
  * the parent menu's MANAGE OPENCODE/LOCAL rows. Only the alias keys
  * are consumed here, so the value shape is left as `unknown` -
  * tolerates both legacy string entries and the new `{sessionId,
  * instanceId}` form without coupling this menu to either schema. */
-const BRIDGE_ALIASES_PATH = join(homedir(), ".wat321", "bridge", "session-aliases.json");
+const BRIDGE_ALIASES_PATH = join(bridgeStateDir(), "session-aliases.json");
 function readBridgeAliases(): {
   opencode: Record<string, unknown>;
   local: Record<string, unknown>;
@@ -271,7 +271,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
         action: "manage-opencode-sessions",
       }
     : null;
-  // Local LLM submenu shows only when both Model Bridge is enabled
+  // Local LLM submenu shows only when both OpenCode Routes is enabled
   // AND a local endpoint is configured. Without an endpoint, the
   // local target has nothing to dispatch to and the submenu would
   // be a dead row.

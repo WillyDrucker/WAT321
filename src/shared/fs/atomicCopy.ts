@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, renameSync, unlinkSync } from "node:fs";
  * torn copy. Same atomic-write contract as `writeFileAtomic`, scoped
  * to a copy operation.
  *
- * Used by both Epic Handshake and Model Bridge installers when
+ * Used by both Epic Handshake and OpenCode Routes installers when
  * extracting bundled MCP server scripts from the .vsix into the user's
  * `~/.wat321/<bridge>/bin/` directory. Without atomic semantics,
  * upgrading the extension while Claude Code is mid-spawn could parse-

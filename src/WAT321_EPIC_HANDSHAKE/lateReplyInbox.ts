@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inboxClaudeDir } from "./constants";
 import { parseEnvelope } from "./envelope";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Late-reply inbox helpers. A "late reply" is an envelope that

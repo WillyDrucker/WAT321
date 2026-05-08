@@ -4,7 +4,7 @@ import {
   listKnownCodexSlugs,
   preferredRepairSlug,
   readCodexConfigModel,
-} from "../shared/codexModels";
+} from "../shared/providers/codex/models";
 import {
   bridgeThreadDisplayName,
   findRolloutPath,

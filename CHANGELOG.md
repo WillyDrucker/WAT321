@@ -5,6 +5,26 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-08
+
+### Added
+
+- **Two VS Code windows can run the bridge side by side now.** Earlier versions had every window writing to the same alias map, harness URL, and heartbeat file - asking a question in one window could lock up state in the other or land replies in the wrong place. Each window now keeps its own bridge state, MCP registration, and OpenCode harness on its own port, all under your workspace's identity. Open as many as you want; they stay out of each other's way.
+- **Same-workspace duplicate-dispatch protection.** When two windows happen to be on the same workspace, the bridge now hands each Codex envelope to exactly one window via a per-envelope claim. Earlier versions could send the same prompt to Codex twice and write two replies. The losing window simply skips; if the winning window crashes mid-turn, the claim ages out and the survivor picks the envelope back up.
+
+### Changed
+
+- **Confirm dialogs land as toasts now, not blocking modals.** Reset session totals, clear the Zen API key, erase an OpenCode Routes thread, delete a Codex session - every confirmation prompt previously interrupted you with a centered window. Same prompts now slide in from the bottom-right with the same Action / Cancel buttons. You can keep typing while you decide.
+- **Local LLM tool-calling unblocked for reasoning models.** Earlier versions capped the local route's output budget at 4K, which pushed Qwen3-style reasoning models to skip the tool call and answer from training data instead. Output budget is now unconstrained on the local route so the model has room to think before deciding to use a tool.
+- **Model Bridge widget is now OpenCode Routes.** The widget label, dropdown header, output channel, command titles, and every confirmation toast read "OpenCode Routes" - the new name reflects what the widget actually does, which is route prompts to OpenCode, Big Pickle, the Zen catalog, or your local LLM. Existing settings, on-disk state, and the historical setting key namespace all carry over without any action on your part.
+
+### Fixed
+
+- **Tokens-per-second no longer spikes on the first turn after Codex starts up.** When the widget began watching an existing Codex rollout that already had cumulative tokens on disk, the first computable rate window measured from "tokens already there" to "tokens after the next chunk", which capped at 999/s for a few seconds before the math settled. The tracker now anchors on the first sample it sees and only reports rates from increments observed strictly after that.
+- **OpenCode Routes widget lights up in folderless windows.** Without an open folder, the heartbeat reader was gated on a workspace-hash check that returned null and silently blocked every read. The per-client directory layout already covers the no-folder case, so the gate is gone and the badge renders correctly.
+
+### Removed
+
 ## [1.4.7] - 2026-05-07
 
 ### Changed
@@ -102,7 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Ask any AI by name and the bridge figures out the rest.** A new server-side router now resolves free-form names like "Big Pickle", "Codex", "Local LLM", or partial aliases like "Pickle" or "Nano" to the right backend. You don't pick from a menu - you say what you want and the router matches it against the catalog, with fuzzy lookup for partials. This shrinks the system-prompt overhead Claude carries from your bridge tools by about 75%, which matters most on long-context conversations.
 - **Live model catalog and session list, available on demand.** Claude can now read `bridge://instances`, `bridge://sessions/opencode`, `bridge://sessions/local`, `bridge://inbox/codex`, and `bridge://status` as MCP resources. Ask "what models do I have?" and Claude fetches the catalog without you paying for those tool descriptions in every other turn.
-- **Sandbox permission is back as its own row.** Manage Codex Sessions → Codex Session Settings now shows MODEL, EFFORT, and SANDBOX PERMISSION as three top-level rows. One click toggles between Read-Only and Full-Access without diving into a sub-picker.
+- **Sandbox permission is back as its own row.** Manage Codex Sessions -> Codex Session Settings now shows MODEL, EFFORT, and SANDBOX PERMISSION as three top-level rows. One click toggles between Read-Only and Full-Access without diving into a sub-picker.
 - **Smarter \*default\* tag.** The `*default*` indicator next to your sandbox setting now disappears the moment you make a deliberate choice, even if you happen to pick the schema default. Once you've touched the row, the tag stays off forever (until Reset). Says "you've made a choice" instead of "you haven't done anything."
 - **Status bar widget mirrors your last-used backend.** Run something on Big Pickle and the Model Bridge widget reads "Big Pickle" until your next dispatch flips it. Earlier versions stuck on whichever instance was set as the default; now you see what just ran.
 - **Sessions get readable names.** Every persistent session WAT321 manages now shows up as `<Project> Epic Handshake Claude-to-<Target> S<n>` in the menu list, replacing OpenCode's auto-generated slug ("eager-knight" and friends). Same naming convention across Codex, OpenCode, and Local LLM.

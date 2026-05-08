@@ -3,12 +3,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
-import {
-  peekResolvedClaudeCli,
-  peekResolvedCodexCli,
-  peekResolvedOpenCodeCli,
-  type ResolvedCli,
-} from "../shared/mcp/cliBinaryResolver";
+import { peekResolvedClaudeCli } from "../shared/providers/claude/cliResolver";
+import { peekResolvedCodexCli } from "../shared/providers/codex/cliResolver";
+import { peekResolvedOpenCodeCli } from "../shared/providers/opencode/cliResolver";
+import type { ResolvedCli } from "../shared/providers/cliResolver";
 import { EPIC_HANDSHAKE_DIR } from "./constants";
 import type { BridgeThreadRecord } from "./threadPersistence";
 

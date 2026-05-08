@@ -47,6 +47,17 @@ export type BridgeWaitMode = "standard" | "adaptive" | "fire-and-forget";
  * without importing from the EH tier. */
 export type CodexEffortOverride = "low" | "medium" | "high" | "xhigh" | null;
 
+/** Wait-budget surface for the in-flight bridge dispatch. Populated
+ * when `channel.mjs` is blocking on a Codex reply. The Claude session-
+ * tokens tooltip reads `timeoutSec` to render a "Waiting on Codex: Ns"
+ * line so the user knows how long Claude will hold for. Null when no
+ * wait is in flight. */
+export interface BridgeWaitInfo {
+  target: "codex";
+  timeoutSec: number;
+  startedAt: number;
+}
+
 export interface BridgeStageSnapshot {
   workspacePath: string | null;
   phase: BridgePhase;
@@ -58,6 +69,10 @@ export interface BridgeStageSnapshot {
   heartbeat: BridgeHeartbeatInfo | null;
   waitMode: BridgeWaitMode;
   codexEffort: CodexEffortOverride;
+  /** Active wait info when Claude is currently blocking on a Codex
+   * reply. Lets the Claude session-tokens tooltip surface the wait
+   * budget. Null when idle, fire-and-forget, or otherwise not blocking. */
+  waitInfo: BridgeWaitInfo | null;
 }
 
 /** Reader contract widgets consume. Implemented by the EH-tier

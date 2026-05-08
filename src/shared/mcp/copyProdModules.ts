@@ -9,7 +9,7 @@ import type * as vscode from "vscode";
  * dev-only footprint (eslint / typescript / etc.).
  *
  * Reads `out/prod-modules.json` emitted at build time from
- * `package-lock.json`. Both bridges (Epic Handshake and Model Bridge)
+ * `package-lock.json`. Both bridges (Epic Handshake and OpenCode Routes)
  * need an identical SDK copy, so the manifest lives at the shared
  * `out/` root rather than under either tier.
  *

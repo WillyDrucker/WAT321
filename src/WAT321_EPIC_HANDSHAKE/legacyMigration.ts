@@ -20,7 +20,7 @@ import {
 } from "./constants";
 import { parseEnvelope } from "./envelope";
 import type { EpicHandshakeLogger } from "./types";
-import { workspaceHash } from "./workspaceHash";
+import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Activate-time housekeeping. Two distinct one-time sweeps that both
