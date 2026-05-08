@@ -30,6 +30,7 @@ import {
   migrateLegacyEnvelopes,
 } from "./legacyMigration";
 import { createOutputChannelLogger } from "./outputChannel";
+import { clearAllCodexOverrideFlags } from "./codexRuntimeOverrides";
 import {
   clearClipboardStaging,
   sweepStaleClipboardStages,
@@ -312,6 +313,16 @@ class EpicHandshakeTier {
     // the user expects Reset WAT321 to clear everything the tier
     // writes to disk.
     clearClipboardStaging();
+    // Codex override flags (sandbox / model / effort + the touched
+    // sentinel) live alongside other EH state under
+    // `~/.wat321/epic-handshake/`. Reset's global rmSync would normally
+    // sweep them, but on Windows that recursive remove can bail mid-
+    // tree on a locked file (e.g. a sibling client's still-running
+    // channel.log) and leave the EH dir partially intact. Sweeping
+    // explicitly here guarantees the picker sees a clean slate -
+    // sandbox back to read-only, model override gone - regardless of
+    // whether rmSync completes cleanly afterward.
+    clearAllCodexOverrideFlags();
   }
 
   private refreshStatusBar(): void {
