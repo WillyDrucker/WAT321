@@ -39,7 +39,7 @@
  * after we started watching.
  */
 
-const TPS_MAX = 500;
+const TPS_MAX = 999;
 const WINDOW_MS = 60_000;
 const IDLE_GAP_MS = 10_000;
 const MIN_WINDOW_AGE_MS = 5_000;

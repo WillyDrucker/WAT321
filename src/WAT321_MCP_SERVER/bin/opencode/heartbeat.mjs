@@ -95,7 +95,7 @@ function writeMbLastUsed(meta) {
  * after first new chunk", which on Codex's first turn caps the rate
  * at 999/s. */
 function makeTpsComputer() {
-  const TPS_MAX = 500;
+  const TPS_MAX = 999;
   const TPS_WINDOW_MS = 60_000;
   const TPS_IDLE_GAP_MS = 10_000;
   const TPS_MIN_WINDOW_AGE_MS = 2_000;

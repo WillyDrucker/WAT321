@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Tokens-per-second ceiling lowered from 999 to 500.** The old ceiling was rarely realistic on real generation; bursts that approached it almost always reflected ingestion + cache-creation tokens being averaged into the rate window during the first second of a turn rather than actual writes-per-second. 500/s caps still well above sustained generation on every backend we route to.
+- **Bridge reply prompt header capped at 500 chars.** Long code-review prompts used to echo back into the response in full, padding Claude's reasoning context with the same content it just sent. Long prompts now show the first 500 characters with an ellipsis; short prompts are unchanged.
 
 - **OpenCode setting description rewritten.** The Settings page entry for OpenCode now reads in parallel with the Claude and Codex entries - lead with what enabling does for widgets, then call out the managed `opencode serve` harness and the free-model catalog, then a clearly scoped data-usage notice that applies to the free Zen routes only and not to your local LLM.
 

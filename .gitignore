@@ -9,3 +9,5 @@ ARCHIVE/
 .env.*
 .mcp.json
 README_PREVIEW.html
+TEMP/*
+!TEMP/.gitkeep

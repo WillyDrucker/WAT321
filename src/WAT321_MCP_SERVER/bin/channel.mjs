@@ -411,13 +411,18 @@ function errorResult(text) {
   return { content: [{ type: "text", text }], isError: true };
 }
 
-/** Prefix a successful wat321_ask result with the full prompt rendered
- * as a markdown blockquote, so the user sees exactly what was asked
- * alongside the answer even when the host IDE collapses the MCP tool-
- * call input panel into a single OUT row. Multi-line prompts each get
- * their own `>` prefix so markdown renders the whole question as one
- * blockquote rather than dropping out after the first line. Errors
- * and session-retrieval calls (empty prompt) pass through unchanged. */
+const PROMPT_ECHO_MAX = 500;
+
+/** Prefix a successful wat321_ask result with the prompt rendered as
+ * a markdown blockquote, so the user sees what was asked alongside the
+ * answer even when the host IDE collapses the MCP tool-call input
+ * panel into a single OUT row. Prompt is truncated to PROMPT_ECHO_MAX
+ * chars with an ellipsis; long code-review prompts therefore add a
+ * bounded amount of text to Claude's reasoning context rather than
+ * echoing back hundreds of lines verbatim. Multi-line prompts get a
+ * `>` per line so markdown renders the whole question as one block-
+ * quote. Errors and session-retrieval calls (empty prompt) pass
+ * through unchanged. */
 function decorateAskResult(result, args, target) {
   if (result?.isError) return result;
   const prompt = typeof args?.prompt === "string" ? args.prompt : "";
@@ -430,7 +435,11 @@ function decorateAskResult(result, args, target) {
     return result;
   }
   const aliasLabel = friendlyAskAlias(args, target);
-  const lines = prompt.split(/\r?\n/);
+  const truncated =
+    prompt.length > PROMPT_ECHO_MAX
+      ? `${prompt.slice(0, PROMPT_ECHO_MAX).trimEnd()}…`
+      : prompt;
+  const lines = truncated.split(/\r?\n/);
   const head = lines[0] ?? "";
   const tail = lines.slice(1);
   const quoted =
