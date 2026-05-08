@@ -95,7 +95,7 @@ function writeMbLastUsed(meta) {
  * after first new chunk", which on Codex's first turn caps the rate
  * at 999/s. */
 function makeTpsComputer() {
-  const TPS_MAX = 999;
+  const TPS_MAX = 500;
   const TPS_WINDOW_MS = 60_000;
   const TPS_IDLE_GAP_MS = 10_000;
   const TPS_MIN_WINDOW_AGE_MS = 2_000;
@@ -104,18 +104,31 @@ function makeTpsComputer() {
   let lastValue = 0;
   let lastObservedTokens = null;
   let awaitingBaseline = true;
+  // Wall-clock millis of the last NEW (different-tokens) sample. Lets
+  // the unchanged-tokens path clear `lastValue` after TPS_IDLE_GAP_MS
+  // of real-time silence - the bridge's char-progress events stop
+  // arriving when a turn ends, so without this the tooltip pins the
+  // last in-flight rate forever.
+  let lastSampleWallMs = 0;
 
   return (atMs, totalTokens) => {
+    const nowWall = Date.now();
+    if (
+      lastSampleWallMs > 0 &&
+      nowWall - lastSampleWallMs > TPS_IDLE_GAP_MS
+    ) {
+      samples.length = 0;
+      lastValue = 0;
+      awaitingBaseline = true;
+    }
     const last = samples[samples.length - 1];
     if (lastObservedTokens !== null && totalTokens < lastObservedTokens) {
-      // Rollback path. Mirrors the TS tracker's clear-lastValue behavior
-      // even though pushProgress is monotonic-gated upstream - keeps
-      // semantics identical so a future caller cannot surface a stale
-      // rate.
+      // Rollback path. lastObservedTokens=totalTokens is the post-
+      // rollback anchor; awaitingBaseline stays cleared so the next
+      // sample with new tokens enters the window directly.
       samples.length = 0;
       lastValue = 0;
       lastObservedTokens = totalTokens;
-      awaitingBaseline = true;
     } else if (last !== undefined && atMs - last.atMs > TPS_IDLE_GAP_MS) {
       samples.length = 0;
       awaitingBaseline = true;
@@ -123,6 +136,7 @@ function makeTpsComputer() {
     if (lastObservedTokens !== null && totalTokens === lastObservedTokens) {
       return lastValue;
     }
+    lastSampleWallMs = nowWall;
     if (awaitingBaseline) {
       lastObservedTokens = totalTokens;
       awaitingBaseline = false;

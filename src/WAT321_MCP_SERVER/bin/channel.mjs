@@ -244,8 +244,13 @@ function buildTools(enabled) {
   return tools;
 }
 
+// MCP protocol version for the wat321_ask / wat321_session surface.
+// Decoupled from the WAT321 extension release - bumps only when the
+// tool inputSchema or resource layout changes in a non-additive way,
+// which lets MCP clients negotiate compatibility independently of
+// extension version stamps.
 const server = new Server(
-  { name: "wat321", version: "1.4.4" },
+  { name: "wat321", version: "1.0" },
   { capabilities: { tools: {}, resources: {} } }
 );
 
@@ -294,8 +299,10 @@ function resolveAskTarget(args, enabled) {
     };
   }
   if (resolved.useDefault) {
-    // Pick last-used from MB sidecar if present; otherwise fall back to
-    // active instance from MB config; otherwise codex if enabled.
+    // Default-route resolution: prefer the OpenCode Routes last-used
+    // sidecar, then the active-instance preference, then Codex when
+    // enabled. Mirrors what the widget shows so a default-aliased
+    // call lands on whatever the user has been using most recently.
     const lastUsed = readLastUsedInstance();
     if (lastUsed?.instanceId) {
       const inst = router.catalog.instances.find((i) => i.id === lastUsed.instanceId);
@@ -327,9 +334,9 @@ function resolveAskTarget(args, enabled) {
   return { target: resolved.target, instance_id: resolved.instance_id };
 }
 
-/** Best-effort read of the MB last-used sidecar so a default-alias
- * dispatch routes to the most recently used backend (matches the
- * widget's last-used display). */
+/** Best-effort read of the OpenCode Routes last-used sidecar so a
+ * default-alias dispatch routes to the most recently used backend
+ * (matches the widget's last-used display). */
 function readLastUsedInstance() {
   const path = join(modelBridgeStateDir(), "last-used.json");
   try {

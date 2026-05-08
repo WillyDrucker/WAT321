@@ -48,12 +48,12 @@ export function activateOpenCodeRoutes(
   const openCodeManager = createOpenCodeManager(logger);
   context.subscriptions.push({ dispose: () => void openCodeManager.dispose() });
 
-  // Closes a v1.5.0 race: the activate-time `applyCurrentConfig` could
-  // resolve `reconcile` with "" (first-spawn failure) and write
-  // config.json with an empty harness URL, even though a follow-up
-  // spawn succeeded later with no observer to capture its URL. The
-  // manager now reports every URL transition and we re-run the merge
-  // so config.json always tracks the live harness state.
+  // Activate-time `applyCurrentConfig` can resolve `reconcile` with
+  // "" (first-spawn failure or a races on inputs) and write config.json
+  // with an empty harness URL even when a follow-up spawn ultimately
+  // succeeds. The manager reports every URL transition and the
+  // listener re-runs the merge so config.json always tracks the live
+  // harness state instead of pinning the racy first result.
   const urlSub = openCodeManager.onUrlChanged(() => {
     void applyCurrentConfig();
   });
@@ -121,10 +121,10 @@ export function activateOpenCodeRoutes(
     .getConfiguration("wat321")
     .get<boolean>(SETTING.enableOpenCode, false);
 
-  // Settings watcher: rewrite config.json + reconcile MCP entry on
-  // any wat321.modelBridge.* change. Cheap (atomic file write +
-  // optional CLI call) so doing this every keystroke in settings.json
-  // is fine.
+  // Settings watcher: rewrite config.json + reconcile harness on any
+  // change to `wat321.enableOpenCode` or `wat321.localEndpoint`. Cheap
+  // (atomic file write + optional subprocess respawn) so doing this
+  // every keystroke in settings.json is fine.
   const watcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
       e.affectsConfiguration(`wat321.${SETTING.enableOpenCode}`) ||

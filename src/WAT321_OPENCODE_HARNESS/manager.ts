@@ -128,6 +128,14 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
   let cliResolvable = false;
   let desired = false;
   let inFlight: Promise<string> | null = null;
+  /** Latest inputs that arrived while a reconcile was already running.
+   * Holds at most ONE snapshot - newer calls overwrite older ones so
+   * only the most recent setting state ever drains. Without this a
+   * burst of settings changes during a slow spawn would all collapse
+   * onto the in-flight promise and the new state would never reach
+   * the subprocess (stale endpoint, wrong Zen key, enabled flag flipped
+   * the wrong way). */
+  let pendingInputs: OpenCodeManagerInputs | null = null;
   const urlListeners = new Set<(url: string) => void>();
   /** Single point of mutation for `url`. Notifies listeners only on
    * actual change so duplicate set-to-same-value calls do not refire. */
@@ -247,8 +255,21 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     return url;
   };
 
+  /** Reconcile the running subprocess against `inputs`. Concurrency
+   * model:
+   *   - If no run is in flight, start one with these inputs.
+   *   - If a run is in flight, save `inputs` as the pending snapshot
+   *     (overwriting any older pending) and return the in-flight
+   *     promise so the caller awaits the current run, not the newer
+   *     one. After the in-flight run finishes, the pending snapshot
+   *     drains via a recursive reconcile so the LAST settings state
+   *     wins. URL transitions emitted by the second run flow through
+   *     onUrlChanged the same way as the first. */
   const reconcile = async (inputs: OpenCodeManagerInputs): Promise<string> => {
-    if (inFlight) return inFlight;
+    if (inFlight) {
+      pendingInputs = inputs;
+      return inFlight;
+    }
     inFlight = (async () => {
       try {
         desired = inputs.enabled;
@@ -275,6 +296,16 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
         return await start(inputs);
       } finally {
         inFlight = null;
+        // Drain any inputs that arrived during the run. Fire-and-
+        // forget: callers from the original reconcile have already
+        // resolved with the in-flight result; the second pass
+        // updates internal state and republishes URL transitions
+        // via onUrlChanged for downstream config rewrites.
+        if (pendingInputs !== null) {
+          const next = pendingInputs;
+          pendingInputs = null;
+          void reconcile(next);
+        }
       }
     })();
     return inFlight;

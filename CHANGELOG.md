@@ -10,8 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Full-prompt header on bridge replies.** Recent Claude Code builds collapse MCP tool-call inputs into a single OUT row, so when Claude asked Codex / Big Pickle / Local LLM through the bridge you'd see the answer but not the question. Bridge replies now lead with the full prompt rendered as a markdown blockquote (`> Big Pickle: ...`) above the answer so you always see exactly what was asked, even for paragraph-long prompts that a truncated summary would clip.
+- **Tokens-per-second clears on its own after a turn ends.** The widget used to pin the last in-flight rate forever once the rollout stopped writing - especially noticeable over the bridge, where Codex emits token counts only at turn boundaries and the readout could sit at "944 tps" for minutes after generation actually stopped. The tracker now clears the rate after 10 seconds of real-time silence regardless of whether the transcript file moved, so an idle widget reads idle.
 
 ### Changed
+
+- **Tokens-per-second ceiling lowered from 999 to 500.** The old ceiling was rarely realistic on real generation; bursts that approached it almost always reflected ingestion + cache-creation tokens being averaged into the rate window during the first second of a turn rather than actual writes-per-second. 500/s caps still well above sustained generation on every backend we route to.
 
 - **OpenCode setting description rewritten.** The Settings page entry for OpenCode now reads in parallel with the Claude and Codex entries - lead with what enabling does for widgets, then call out the managed `opencode serve` harness and the free-model catalog, then a clearly scoped data-usage notice that applies to the free Zen routes only and not to your local LLM.
 

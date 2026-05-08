@@ -30,3 +30,4 @@ media/fonts/wat321-icons.codepoints.json
 scripts/**
 .env
 .env.*
+.mcp.json

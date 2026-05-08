@@ -65,11 +65,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Idempotent.
   void migrateModelBridgeKeys();
 
-  // Bridge config writer maintains ~/.wat321/bridge/config.json so
-  // the unified MCP server scaffold can read enabled-target flags.
-  // Cheap on activate, cheap on settings change. The legacy
-  // two-server registration still drives all real traffic until the
-  // unified handlers ship per WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md.
+  // Bridge config writer maintains the per-client
+  // `~/.wat321/clients/<wsId>/bridge/config.json` so the unified MCP
+  // server can read enabled-target flags at startup. Cheap on activate,
+  // cheap on settings change.
   registerBridgeConfigWriter(context);
   registerUnifiedBridgeCommands(context);
   registerAutoCreateOpenCodeS1(context);

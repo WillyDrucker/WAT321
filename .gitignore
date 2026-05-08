@@ -7,4 +7,5 @@ ARCHIVE/
 .vscode/
 .env
 .env.*
+.mcp.json
 README_PREVIEW.html
