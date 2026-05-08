@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **One-line `Asked` summary on bridge replies.** Recent Claude Code builds collapse MCP tool-call inputs into a single OUT row, so when Claude asked Codex / Big Pickle / Local LLM through the bridge you'd see the answer but not the question that produced it. Bridge replies now lead with a single `> {alias} • {first 100 chars of the prompt}` line so you can read both at a glance, without paying for repeated MCP description tokens or echoing the entire prompt back into Claude's reasoning context.
+
 ### Changed
 
 - **OpenCode setting description rewritten.** The Settings page entry for OpenCode now reads in parallel with the Claude and Codex entries - lead with what enabling does for widgets, then call out the managed `opencode serve` harness and the free-model catalog, then a clearly scoped data-usage notice that applies to the free Zen routes only and not to your local LLM.

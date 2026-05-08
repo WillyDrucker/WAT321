@@ -372,7 +372,8 @@ async function dispatchCall(name, args, enabled) {
       target,
       ...(resolved.instance_id ? { instance_id: resolved.instance_id } : {}),
     };
-    return targetModule.handleAsk(forwardArgs);
+    const askResult = await targetModule.handleAsk(forwardArgs);
+    return decorateAskResult(askResult, args, target);
   }
 
   if (name === "wat321_session") {
@@ -401,6 +402,52 @@ async function dispatchCall(name, args, enabled) {
 
 function errorResult(text) {
   return { content: [{ type: "text", text }], isError: true };
+}
+
+/** Prefix a successful wat321_ask result with a one-line summary of
+ * what was asked, so the user sees both the question and the answer
+ * even when the host IDE collapses the MCP tool-call input panel into
+ * a single OUT row. Errors and session-retrieval calls (empty prompt)
+ * pass through unchanged - errors are already self-describing and
+ * "give me the latest assistant message" is not a new ask. */
+function decorateAskResult(result, args, target) {
+  if (result?.isError) return result;
+  const prompt = typeof args?.prompt === "string" ? args.prompt : "";
+  if (prompt.trim().length === 0) return result;
+  if (
+    !Array.isArray(result?.content) ||
+    result.content.length === 0 ||
+    result.content[0]?.type !== "text"
+  ) {
+    return result;
+  }
+  const aliasLabel = friendlyAskAlias(args, target);
+  const firstLine = prompt.split(/\r?\n/)[0].trim();
+  const SUMMARY_MAX = 100;
+  const summary =
+    firstLine.length > SUMMARY_MAX
+      ? `${firstLine.slice(0, SUMMARY_MAX).trimEnd()}…`
+      : firstLine;
+  const prefix = `> ${aliasLabel} • ${summary}`;
+  const decorated = `${prefix}\n\n${result.content[0].text}`;
+  return {
+    ...result,
+    content: [
+      { type: "text", text: decorated },
+      ...result.content.slice(1),
+    ],
+  };
+}
+
+/** Resolve the user-facing alias label for the prefix line. Prefer
+ * what Claude actually said in the call; fall back to a sensible
+ * default tied to the resolved target. */
+function friendlyAskAlias(args, target) {
+  const raw = typeof args?.alias === "string" ? args.alias.trim() : "";
+  if (raw.length > 0) return raw;
+  if (target === "codex") return "Codex";
+  if (target === "local") return "Local LLM";
+  return "OpenCode";
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
