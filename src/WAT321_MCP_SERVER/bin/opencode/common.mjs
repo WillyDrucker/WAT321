@@ -5,26 +5,26 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { bridgeStateDir, modelBridgeStateDir } from "../paths.mjs";
+import { bridgeStateDir, openCodeRoutesStateDir } from "../paths.mjs";
 
 /**
  * Shared paths, constants, and small helpers used across the OpenCode
  * bin modules (dispatch, sessions, aliases, heartbeat, sse).
  *
  * Per-workspace partitioning is handled at the directory level by
- * `WAT321_WORKSPACE_ID` - `modelBridgeStateDir()` resolves to
+ * `WAT321_WORKSPACE_ID` - `openCodeRoutesStateDir()` resolves to
  * `~/.wat321/clients/<wsId>/model-bridge/`, so heartbeat and alias
  * files inside that dir need no per-file hash suffix.
  */
 
 export const BRIDGE_DIR = bridgeStateDir();
-export const MB_DIR = modelBridgeStateDir();
+export const OPENCODE_ROUTES_DIR = openCodeRoutesStateDir();
 export const ALIAS_PATH = join(BRIDGE_DIR, "session-aliases.json");
-export const MB_CONFIG_PATH = join(MB_DIR, "config.json");
+export const OPENCODE_ROUTES_CONFIG_PATH = join(OPENCODE_ROUTES_DIR, "config.json");
 export const BRIDGE_CONFIG_PATH = join(BRIDGE_DIR, "config.json");
 export const CHANNEL_LOG_PATH = join(BRIDGE_DIR, "channel.log");
-export const MB_HEARTBEAT_PATH = join(MB_DIR, "heartbeat.json");
-export const MB_LAST_USED_PATH = join(MB_DIR, "last-used.json");
+export const OPENCODE_HEARTBEAT_PATH = join(OPENCODE_ROUTES_DIR, "heartbeat.json");
+export const OPENCODE_LAST_USED_PATH = join(OPENCODE_ROUTES_DIR, "last-used.json");
 
 export const ANON_BASE_URL = "https://opencode.ai/zen/v1";
 export const DEFAULT_TIMEOUT_SEC = 120;

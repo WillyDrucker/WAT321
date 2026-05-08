@@ -25,18 +25,20 @@
  * `lastValue` survives the reset so the widget keeps showing the most
  * recent valid rate during the pause.
  *
- * Why a baseline-anchor on first sample after a clear: the very first
- * sample we observe after a session change or idle-gap clear carries
- * cumulative tokens that accumulated BEFORE we started watching
- * (existing rollout already mid-turn at activate, or cumulative growth
- * during a long pause). Including it as `samples[0]` makes the first
- * computable window span from "tokens already there" to "tokens after
- * the next chunk", which capped Codex's first-turn ratio at 999/s.
- * Solution: consume the first post-clear sample as a baseline-anchor -
- * update `lastObservedTokens` so the unchanged-tokens guard still
- * works, but do not push it into `samples`. The next sample becomes
- * `samples[0]`, and rates compute from increments observed strictly
- * after we started watching.
+ * Why a baseline-anchor on first sample after a session-change or
+ * idle-gap clear: the very first sample observed in those paths
+ * carries cumulative tokens that accumulated BEFORE we started
+ * watching (existing rollout already mid-turn at activate, or
+ * cumulative growth during a long pause). Including it as `samples[0]`
+ * makes the first computable window span from "tokens already there"
+ * to "tokens after the next chunk", which capped Codex's first-turn
+ * ratio at 999/s. Solution: consume the first post-clear sample as a
+ * baseline-anchor - update `lastObservedTokens` so the unchanged-
+ * tokens guard still works, but do not push into `samples`. The next
+ * sample becomes `samples[0]` and rates compute from increments
+ * observed strictly after we started watching. Rollback path skips
+ * the baseline anchor: `lastObservedTokens = tokens` already pins the
+ * post-compact floor, so the next new-tokens sample is a real delta.
  */
 
 const TPS_MAX = 999;

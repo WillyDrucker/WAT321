@@ -8,9 +8,9 @@ import {
 import { randomUUID } from "node:crypto";
 import {
   HEARTBEAT_KEEPALIVE_MS,
-  MB_DIR,
-  MB_HEARTBEAT_PATH,
-  MB_LAST_USED_PATH,
+  OPENCODE_ROUTES_DIR,
+  OPENCODE_HEARTBEAT_PATH,
+  OPENCODE_LAST_USED_PATH,
 } from "./common.mjs";
 
 /**
@@ -33,10 +33,10 @@ import {
 
 function writeOpenCodeHeartbeat(payload) {
   try {
-    if (!existsSync(MB_DIR)) mkdirSync(MB_DIR, { recursive: true });
-    const tmp = `${MB_HEARTBEAT_PATH}.tmp`;
+    if (!existsSync(OPENCODE_ROUTES_DIR)) mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
+    const tmp = `${OPENCODE_HEARTBEAT_PATH}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(payload)}\n`);
-    renameSync(tmp, MB_HEARTBEAT_PATH);
+    renameSync(tmp, OPENCODE_HEARTBEAT_PATH);
   } catch {
     // best-effort - widget falls back to idle on missing/invalid file
   }
@@ -44,7 +44,7 @@ function writeOpenCodeHeartbeat(payload) {
 
 function clearOpenCodeHeartbeat() {
   try {
-    if (existsSync(MB_HEARTBEAT_PATH)) unlinkSync(MB_HEARTBEAT_PATH);
+    if (existsSync(OPENCODE_HEARTBEAT_PATH)) unlinkSync(OPENCODE_HEARTBEAT_PATH);
   } catch {
     // best-effort
   }
@@ -52,7 +52,7 @@ function clearOpenCodeHeartbeat() {
 
 function writeOpenCodeLastUsed(meta) {
   try {
-    if (!existsSync(MB_DIR)) mkdirSync(MB_DIR, { recursive: true });
+    if (!existsSync(OPENCODE_ROUTES_DIR)) mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
     const payload = {
       instanceId: meta.instanceId,
       alias: meta.alias,
@@ -60,9 +60,9 @@ function writeOpenCodeLastUsed(meta) {
       model: meta.model || "",
       at: new Date().toISOString(),
     };
-    const tmp = `${MB_LAST_USED_PATH}.tmp`;
+    const tmp = `${OPENCODE_LAST_USED_PATH}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(payload)}\n`);
-    renameSync(tmp, MB_LAST_USED_PATH);
+    renameSync(tmp, OPENCODE_LAST_USED_PATH);
   } catch {
     // best-effort
   }
@@ -88,12 +88,15 @@ function writeOpenCodeLastUsed(meta) {
  * against an artificially-old timestamp.
  *
  * `awaitingBaseline` mirrors the TS tracker: the first sample after
- * a session start, rollback, or idle-gap clear is consumed as a
- * baseline anchor (updates `lastObservedTokens`, does not enter
- * `samples`). Without it, the first computable window measures from
- * "tokens already accumulated when we started watching" to "tokens
- * after first new chunk", which on Codex's first turn caps the rate
- * at 999/s. */
+ * a session start or idle-gap clear is consumed as a baseline anchor
+ * (updates `lastObservedTokens`, does not enter `samples`). The
+ * rollback branch leaves `awaitingBaseline` cleared because
+ * `lastObservedTokens = totalTokens` already pins the post-compact
+ * floor; the next sample with new tokens enters the window directly.
+ * Without the baseline anchor, the first computable window measures
+ * from "tokens already accumulated when we started watching" to
+ * "tokens after first new chunk", which on Codex's first turn caps
+ * the rate at 999/s. */
 function makeTpsComputer() {
   const TPS_MAX = 999;
   const TPS_WINDOW_MS = 60_000;

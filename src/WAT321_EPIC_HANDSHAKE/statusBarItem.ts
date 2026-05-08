@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { modelBridgeStateDir } from "../shared/wat321Paths";
+import { openCodeRoutesStateDir } from "../shared/wat321Paths";
 import * as vscode from "vscode";
 import type { EventHub } from "../engine/eventHub";
 import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
@@ -21,7 +21,7 @@ import { workspaceHash } from "../shared/workspaceHash";
  * symmetry with other widgets; null skips the read entirely. */
 function openCodeHeartbeatPath(wsHash: string | null): string | null {
   if (!wsHash) return null;
-  return join(modelBridgeStateDir(), "heartbeat.json");
+  return join(openCodeRoutesStateDir(), "heartbeat.json");
 }
 
 interface OpenCodeHeartbeatActivity {
@@ -48,9 +48,9 @@ function readOpenCodeHeartbeatActivity(wsHash: string | null): OpenCodeHeartbeat
   }
 }
 
-/** Synthesize a Codex-style stage from elapsed time since the MB
- * dispatch started. The unified bridge's OC/Local handlers don't
- * emit real stage transitions yet, so the EH widget runs a
+/** Synthesize a Codex-style stage from elapsed time since the
+ * OpenCode dispatch started. The unified bridge's OC/Local handlers
+ * don't emit real stage transitions yet, so the EH widget runs a
  * time-driven progression to give the user the same visual rhythm
  * during an OC/Local turn that they get during a Codex turn. Stage
  * lands on `working` for the long tail of generation. */

@@ -6,7 +6,7 @@ import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
 import {
   CONFIG_PATH,
   LAST_USED_PATH,
-  MODEL_BRIDGE_DIR,
+  OPENCODE_ROUTES_DIR,
   USAGE_PATH,
 } from "./constants";
 import type { OpenCodeRoutesLogger } from "./outputChannel";
@@ -41,7 +41,7 @@ function readActiveBridgeAlias(target: "opencode" | "local"): string | null {
  * partitions per workspace via wsId (or "default" wsId for folderless
  * windows), so the heartbeat file carries no further suffix. */
 function heartbeatPath(): string {
-  return join(MODEL_BRIDGE_DIR, "heartbeat.json");
+  return join(OPENCODE_ROUTES_DIR, "heartbeat.json");
 }
 
 /**
@@ -227,7 +227,7 @@ export function createOpenCodeRoutesStatusBarItem(
   const item = vscode.window.createStatusBarItem(
     "wat321.modelBridge",
     vscode.StatusBarAlignment.Right,
-    getWidgetPriority(WIDGET_SLOT.modelBridge)
+    getWidgetPriority(WIDGET_SLOT.openCodeRoutes)
   );
   item.name = "OpenCode Routes";
   item.hide();

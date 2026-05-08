@@ -7,10 +7,11 @@ import { workspaceHash } from "./workspaceHash";
  * Per-client filesystem layout for WAT321 state.
  *
  * Two VS Code windows (or any two MCP clients) hitting the same
- * `~/.wat321/` would race on shared state files: bridge config, MB
- * config, session aliases, usage counters, harness URL, channel log.
- * This module is the single source of truth for "where does this
- * client's state live", keyed off `WAT321_WORKSPACE_ID`.
+ * `~/.wat321/` would race on shared state files: bridge config,
+ * OpenCode Routes config, session aliases, usage counters, harness
+ * URL, channel log. This module is the single source of truth for
+ * "where does this client's state live", keyed off
+ * `WAT321_WORKSPACE_ID`.
  *
  * Layout:
  *
@@ -63,6 +64,10 @@ export function bridgeStateDir(): string {
   return join(clientStateDir(), "bridge");
 }
 
-export function modelBridgeStateDir(): string {
+/** Per-client OpenCode Routes state dir. The on-disk literal stays
+ * `model-bridge/` because v1.5.0 preserved that path for upgraders;
+ * the helper name reflects the LOGICAL purpose (OpenCode Routes
+ * tier state) rather than the historical literal. */
+export function openCodeRoutesStateDir(): string {
   return join(clientStateDir(), "model-bridge");
 }

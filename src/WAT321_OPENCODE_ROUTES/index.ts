@@ -5,7 +5,7 @@ import {
   readConfigFromSettings,
   writeConfigFile,
 } from "./config";
-import { MODEL_BRIDGE_DIR } from "./constants";
+import { OPENCODE_ROUTES_DIR } from "./constants";
 import { createOpenCodeRoutesLogger } from "./outputChannel";
 import { createOpenCodeManager } from "../WAT321_OPENCODE_HARNESS";
 import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
@@ -161,7 +161,7 @@ export function activateOpenCodeRoutes(
   // menu, not VS Code settings). Watch the file so a click-menu edit
   // also rewrites the merged config.json that channel.mjs reads.
   const prefsPattern = new vscode.RelativePattern(
-    vscode.Uri.file(MODEL_BRIDGE_DIR),
+    vscode.Uri.file(OPENCODE_ROUTES_DIR),
     "preferences.json"
   );
   const prefsWatcher = vscode.workspace.createFileSystemWatcher(prefsPattern);

@@ -578,5 +578,3 @@ export function activateEpicHandshake(
     lateReplyInbox: tier.lateReplyInbox,
   };
 }
-
-export { appendEpicHandshakeHealth };

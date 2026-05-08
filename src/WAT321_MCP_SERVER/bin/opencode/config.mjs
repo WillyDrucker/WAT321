@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { MB_CONFIG_PATH } from "./common.mjs";
+import { OPENCODE_ROUTES_CONFIG_PATH } from "./common.mjs";
 
 /**
  * Read-only accessors for the per-client OpenCode Routes config the
@@ -11,9 +11,9 @@ import { MB_CONFIG_PATH } from "./common.mjs";
 /** WAT321-managed `opencode serve` URL. Null when OpenCode is
  * disabled or the subprocess hasn't spawned yet. */
 export function readServeUrl() {
-  if (!existsSync(MB_CONFIG_PATH)) return null;
+  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return null;
   try {
-    const cfg = JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8"));
+    const cfg = JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8"));
     const url = cfg?.openCodeServerUrl;
     return typeof url === "string" && url.length > 0 ? url : null;
   } catch {
@@ -23,9 +23,9 @@ export function readServeUrl() {
 
 /** Configured catalog (model id, kind, retention) snapshot. */
 export function readInstances() {
-  if (!existsSync(MB_CONFIG_PATH)) return [];
+  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return [];
   try {
-    const cfg = JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8"));
+    const cfg = JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8"));
     return Array.isArray(cfg?.instances) ? cfg.instances : [];
   } catch {
     return [];
@@ -44,11 +44,11 @@ export function readInstances() {
 export function findInstance(id, kind = null) {
   const instances = readInstances();
   if (!id) {
-    if (!existsSync(MB_CONFIG_PATH)) {
+    if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) {
       return instances.find((i) => kind === null || i.kind === kind) || null;
     }
     try {
-      const cfg = JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8"));
+      const cfg = JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8"));
       const activeId = typeof cfg?.activeInstanceId === "string" ? cfg.activeInstanceId : null;
       if (activeId) {
         const active = instances.find((i) => i.id === activeId);

@@ -8,12 +8,4 @@
  * lifecycle - spawn, ready probe, exit, dispose.
  */
 
-export {
-  createOpenCodeManager,
-  OPENCODE_CONFIG_PATH,
-  OPENCODE_WORKDIR,
-  type HarnessLogger,
-  type OpenCodeManager,
-  type OpenCodeManagerInputs,
-  type OpenCodeManagerStatus,
-} from "./manager";
+export { createOpenCodeManager } from "./manager";

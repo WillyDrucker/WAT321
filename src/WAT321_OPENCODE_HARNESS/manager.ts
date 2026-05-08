@@ -6,7 +6,7 @@ import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { resolveOpenCodeCli } from "../shared/providers/opencode/cliResolver";
 import { buildOpenCodeJson } from "../shared/providers/opencode/configBuilder";
 import { verifyOutputLimits } from "../shared/providers/opencode/configVerifier";
-import { modelBridgeStateDir } from "../shared/wat321Paths";
+import { openCodeRoutesStateDir } from "../shared/wat321Paths";
 
 /**
  * Lifecycle for the WAT321-managed `opencode serve` subprocess.
@@ -27,7 +27,7 @@ import { modelBridgeStateDir } from "../shared/wat321Paths";
  * readiness probe; consumers gate visibility on that.
  */
 
-export const OPENCODE_WORKDIR = join(modelBridgeStateDir(), "opencode-workdir");
+export const OPENCODE_WORKDIR = join(openCodeRoutesStateDir(), "opencode-workdir");
 export const OPENCODE_CONFIG_PATH = join(OPENCODE_WORKDIR, "opencode.json");
 
 export interface OpenCodeManagerStatus {
@@ -95,15 +95,28 @@ async function pickEphemeralPort(): Promise<number> {
 
 /** Probe `http://127.0.0.1:<port>/app` until it answers or times out.
  * OpenCode's serve mode exposes `/app` for the embedded UI; even
- * without HTML it returns a non-network-error response once bound. */
+ * without HTML it returns a non-network-error response once bound.
+ *
+ * Each probe runs under its own AbortController so a stalled fetch
+ * (TCP accept + no response) cannot pin the await past the outer
+ * deadline. Without per-probe abort, a hung connection during spawn
+ * would freeze `reconcile()` and block the pendingInputs drain. */
 async function waitForReady(port: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
+  const PROBE_TIMEOUT_MS = 1500;
   while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const probeTimer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/app`, { method: "GET" });
+      const res = await fetch(`http://127.0.0.1:${port}/app`, {
+        method: "GET",
+        signal: controller.signal,
+      });
       if (res.status < 500) return true;
     } catch {
-      // not yet listening - keep polling
+      // not yet listening or probe aborted - keep polling
+    } finally {
+      clearTimeout(probeTimer);
     }
     await new Promise((r) => setTimeout(r, 250));
   }

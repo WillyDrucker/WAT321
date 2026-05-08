@@ -3,7 +3,7 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import { readAliases, writeAliases } from "../shared/bridge/sessionAliases";
 import { SETTING } from "../engine/settingsKeys";
-import { bridgeStateDir, modelBridgeStateDir } from "../shared/wat321Paths";
+import { bridgeStateDir, openCodeRoutesStateDir } from "../shared/wat321Paths";
 
 // Resolve paths via `wat321Paths` rather than `./index` - this module
 // is re-exported from index.ts, so a `from "./index"` import returns
@@ -28,12 +28,12 @@ import { bridgeStateDir, modelBridgeStateDir } from "../shared/wat321Paths";
  */
 
 const ALIAS_PATH = join(bridgeStateDir(), "session-aliases.json");
-const MB_CONFIG_PATH = join(modelBridgeStateDir(), "config.json");
+const OPENCODE_ROUTES_CONFIG_PATH = join(openCodeRoutesStateDir(), "config.json");
 
 const RETRY_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 8_000;
 
-interface MbInstance {
+interface OpenCodeRoutesInstance {
   id: string;
   alias: string;
   kind: "local" | "remote";
@@ -41,22 +41,22 @@ interface MbInstance {
   harnessProviderID: "llama.cpp" | "zen";
 }
 
-interface MbConfig {
+interface OpenCodeRoutesConfigSnapshot {
   openCodeServerUrl?: string;
   activeInstanceId?: string;
-  instances?: MbInstance[];
+  instances?: OpenCodeRoutesInstance[];
 }
 
-function readMbConfig(): MbConfig | null {
-  if (!existsSync(MB_CONFIG_PATH)) return null;
+function readOpenCodeRoutesConfigSnapshot(): OpenCodeRoutesConfigSnapshot | null {
+  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return null;
   try {
-    return JSON.parse(readFileSync(MB_CONFIG_PATH, "utf8")) as MbConfig;
+    return JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8")) as OpenCodeRoutesConfigSnapshot;
   } catch {
     return null;
   }
 }
 
-function pickInstance(cfg: MbConfig): MbInstance | null {
+function pickInstance(cfg: OpenCodeRoutesConfigSnapshot): OpenCodeRoutesInstance | null {
   const instances = Array.isArray(cfg.instances) ? cfg.instances : [];
   // Prefer the user's active instance when it's a remote (the auto-S1
   // exists for OpenCode targets specifically; local instances get a
@@ -70,7 +70,7 @@ function pickInstance(cfg: MbConfig): MbInstance | null {
   return instances.find((i) => i.kind === "remote") ?? null;
 }
 
-async function attemptCreate(cfg: MbConfig, instance: MbInstance): Promise<string | null> {
+async function attemptCreate(cfg: OpenCodeRoutesConfigSnapshot, instance: OpenCodeRoutesInstance): Promise<string | null> {
   const url = cfg.openCodeServerUrl;
   if (!url) return null;
   try {
@@ -92,13 +92,13 @@ async function attemptCreate(cfg: MbConfig, instance: MbInstance): Promise<strin
   }
 }
 
-/** Wait for opencode serve URL to appear in MB's config (it gets
+/** Wait for opencode serve URL to appear in OpenCode Routes config (it gets
  * written when the subprocess passes its readiness probe). Returns
  * the resolved config or null if the deadline elapses. */
-async function waitForOpencodeServe(): Promise<MbConfig | null> {
+async function waitForOpencodeServe(): Promise<OpenCodeRoutesConfigSnapshot | null> {
   const deadline = Date.now() + MAX_WAIT_MS;
   while (Date.now() < deadline) {
-    const cfg = readMbConfig();
+    const cfg = readOpenCodeRoutesConfigSnapshot();
     if (cfg?.openCodeServerUrl && cfg.openCodeServerUrl.length > 0) {
       return cfg;
     }
