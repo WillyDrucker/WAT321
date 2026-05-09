@@ -2,7 +2,7 @@
  * OpenCode + Local LLM target handlers for the unified WAT321 bridge.
  *
  * Routes through the WAT321-managed `opencode serve` subprocess
- * (lifecycle in `src/WAT321_OPENCODE_HARNESS/manager.ts`).
+ * (lifecycle in `src/WAT321_OPENCODE_ROUTES/harness.ts`).
  * Sessions are owned by OpenCode itself - stored in
  * `~/.local/share/opencode/opencode.db` - and accessed via REST.
  *

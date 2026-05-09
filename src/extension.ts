@@ -170,7 +170,8 @@ function handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
 
   if (
     e.affectsConfiguration(`wat321.${SETTING.displayMode}`) ||
-    e.affectsConfiguration(`wat321.${SETTING.enableHeatmap}`)
+    e.affectsConfiguration(`wat321.${SETTING.enableHeatmap}`) ||
+    e.affectsConfiguration(`wat321.${SETTING.enableTokensPerSecondCounters}`)
   ) {
     ctx.providers.rebroadcastAll();
   }

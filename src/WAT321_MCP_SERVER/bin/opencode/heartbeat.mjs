@@ -74,11 +74,10 @@ function writeOpenCodeLastUsed(meta) {
  *
  * Idle gaps reset the window (a tool-wait pause would otherwise smear
  * the rate). Min window age + min token delta block the first
- * sample-pair from spiking when the first SSE chunk lands. Bridge
- * dispatches often complete in 4-6 seconds, so the window threshold
- * matches the 2s poll cadence rather than the 5s used for long-running
- * transcripts - a short dispatch otherwise reports 0/s for its
- * entire duration.
+ * sample-pair from spiking when the first SSE chunk lands. Window
+ * threshold (2s) matches the 2s poll cadence so a short bridge
+ * dispatch (4-6 seconds is common) reports a real rate before
+ * completing instead of staying at 0/s.
  *
  * `lastObservedTokens` is durable across the idle-gap clear: the
  * unchanged-tokens guard reads this marker, not `samples`. Without

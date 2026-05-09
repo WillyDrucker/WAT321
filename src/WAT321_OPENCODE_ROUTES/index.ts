@@ -1,13 +1,12 @@
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
 import {
-  isConfigInstallable,
   readConfigFromSettings,
   writeConfigFile,
 } from "./config";
 import { OPENCODE_ROUTES_DIR } from "./constants";
 import { createOpenCodeRoutesLogger } from "./outputChannel";
-import { createOpenCodeManager } from "../WAT321_OPENCODE_HARNESS";
+import { createOpenCodeManager } from "./harness";
 import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
 import { createOpenCodeRoutesStatusBarItem } from "./statusBarItem";
 import { pickActiveInstance } from "./statusBarMenu";
@@ -59,15 +58,6 @@ export function activateOpenCodeRoutes(
   });
   context.subscriptions.push(urlSub);
 
-  let lastInstallable = false;
-  // First-pass guard. Without this, the activate-time call short-
-  // circuits when desired state is `false` because lastInstallable is
-  // already `false` - leaving any stale MCP entry from a sibling VS
-  // Code instance (or from a prior crash) registered in Claude's user
-  // scope. Forcing the first reconcile to actually run install or
-  // uninstall closes that leakage path.
-  let everReconciled = false;
-
   const applyCurrentConfig = async (): Promise<void> => {
     const cfg = vscode.workspace.getConfiguration("wat321");
     const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
@@ -91,18 +81,6 @@ export function activateOpenCodeRoutes(
     if (!written) {
       logger.warn("config.json write failed; channel.mjs will see prior values");
     }
-
-    const installable = isConfigInstallable(config);
-    if (everReconciled && installable === lastInstallable) {
-      return;
-    }
-    lastInstallable = installable;
-    everReconciled = true;
-
-    // No MCP entry of its own to register. The unified `wat321` server
-    // installed by WAT321_MCP_SERVER on Epic Handshake enable handles
-    // all dispatch; this tier's reconcile only writes its own
-    // config.json + harness state.
   };
 
   // Apply once at activate so the config file exists before
@@ -110,37 +88,18 @@ export function activateOpenCodeRoutes(
   // settings are complete enough to call out.
   void applyCurrentConfig();
 
-  // Track OpenCode Routes enable transitions so we toast the user on
-  // off->on (with the same "what to do next" voice as Epic Handshake's
-  // enable toast) and on on->off (matches EH "disabled." toast).
-  // Initialized from current setting at activate so a settings event
-  // fired during startup-flush doesn't get treated as a transition.
-  let lastEnabledState = vscode.workspace
-    .getConfiguration("wat321")
-    .get<boolean>(SETTING.enableOpenCode, false);
-
   // Settings watcher: rewrite config.json + reconcile harness on any
   // change to `wat321.enableOpenCode` or `wat321.localEndpoint`. Cheap
   // (atomic file write + optional subprocess respawn) so doing this
-  // every keystroke in settings.json is fine.
+  // every keystroke in settings.json is fine. No toast on enable /
+  // disable - Epic Handshake already owns the enable-flow toast and
+  // the OpenCode widget visibility flip is its own visual signal.
   const watcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
       e.affectsConfiguration(`wat321.${SETTING.enableOpenCode}`) ||
-      e.affectsConfiguration(`wat321.${SETTING.localEndpoint}`)
+      e.affectsConfiguration(`wat321.${SETTING.localEndpoint}`) ||
+      e.affectsConfiguration(`wat321.${SETTING.openCodeToolUseHint}`)
     ) {
-      const nowEnabled = vscode.workspace
-        .getConfiguration("wat321")
-        .get<boolean>(SETTING.enableOpenCode, false);
-      if (nowEnabled !== lastEnabledState) {
-        if (nowEnabled) {
-          void vscode.window.showInformationMessage(
-            "OpenCode Routes is ready. Send prompts to OpenCode/Local LLM using natural language like \"Ask Big Pickle to ...\" or \"Ask the local LLM ...\" to use. New Claude sessions pick up the new tools automatically; active sessions need to be restarted. Note: resuming existing Claude sessions counts toward usage."
-          );
-        } else {
-          void vscode.window.showInformationMessage("OpenCode Routes disabled.");
-        }
-        lastEnabledState = nowEnabled;
-      }
       void applyCurrentConfig();
     }
   });
@@ -198,7 +157,6 @@ export function activateOpenCodeRoutes(
         // best-effort
       }
       await openCodeManager.dispose();
-      lastInstallable = false;
     },
     dispose(): void {
       watcher.dispose();

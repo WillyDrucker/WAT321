@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { bridgeStateDir } from "../shared/wat321Paths";
 import * as vscode from "vscode";
+import { SETTING } from "../engine/settingsKeys";
 import { waitModeFlashFlagPath } from "./constants";
 import { listLateReplies } from "./lateReplyInbox";
 import {
@@ -247,10 +248,10 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // active-alias state.
   const openCodeEnabled = vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>("enableOpenCode", false);
+    .get<boolean>(SETTING.enableOpenCode, false);
   const localEndpoint = vscode.workspace
     .getConfiguration("wat321")
-    .get<string>("localEndpoint", "")
+    .get<string>(SETTING.localEndpoint, "")
     .trim();
   // S# suffix on the parent label so the user sees the active session
   // count at a glance, mirroring the Codex menu's `MANAGE CODEX

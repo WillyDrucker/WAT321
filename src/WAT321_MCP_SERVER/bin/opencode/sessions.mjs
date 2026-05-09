@@ -23,13 +23,29 @@ import { findInstance, readInstances, readServeUrl } from "./config.mjs";
  * change which sampling path runs. The empirical symptom is the model
  * hallucinating tool-call results inline as text instead of emitting
  * a structured `tool_calls` array. Sending the binding every turn
- * pins behavior to the route the user actually selected. */
-export async function postSessionMessage(serveUrl, sessionId, prompt, timeoutMs, modelRef) {
+ * pins behavior to the route the user actually selected.
+ *
+ * `system` is the per-message directive channel exposed by OpenCode's
+ * session API. WAT321 routes the tool-use hint through here when the
+ * setting is on so the model receives it as a system-role instruction
+ * with provider-native weighting, rather than bolting onto the user
+ * prompt where small-model tool-skip classifiers ignore it.
+ *
+ * `agent` selects which OpenCode agent profile runs the turn. The
+ * default-built `build` agent is a coding assistant whose system prompt
+ * suppresses URL guessing on non-coding questions (the source of the
+ * "Local LLM gives up on webfetch" regression). WAT321 declares its own
+ * `wat321-research` agent in `opencode.json` and dispatches against it
+ * so research / current-events questions actually fire webfetch. Pass
+ * null to fall through to OpenCode's default. */
+export async function postSessionMessage(serveUrl, sessionId, prompt, timeoutMs, modelRef, system, agent) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const body = { parts: [{ type: "text", text: prompt }] };
     if (modelRef) body.model = modelRef;
+    if (typeof system === "string" && system.length > 0) body.system = system;
+    if (typeof agent === "string" && agent.length > 0) body.agent = agent;
     const res = await fetch(`${serveUrl}/session/${sessionId}/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

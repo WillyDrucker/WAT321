@@ -26,8 +26,10 @@ import { createBridgeLogger } from "./outputChannel";
  *      accumulate across upgrades.
  *   2. Extract bin scripts to `~/.wat321/bridge/bin/` and copy
  *      `node_modules/` for prod deps.
- *   3. Register the project-scope MCP entry with the workspace's
- *      wsId injected via `--env`.
+ *   3. Register the MCP entry with the wsId injected via `--env`.
+ *      Project scope when a workspace folder is open; user scope with
+ *      the sentinel `default` wsId when VS Code is folderless, so a
+ *      window with no folder still gets a working bridge.
  *   4. Pre-allow the unified tool surface in Claude's settings.
  *
  * Uninstall reverses the registration plus the pre-allow list.
@@ -234,36 +236,30 @@ export async function installUnifiedBridge(
     return { ok: false, error: msg };
   }
 
-  // Resolve the workspace folder + per-client wsId. Project-scope MCP
-  // registration writes to `<workspace>/.claude/settings.json`; the CLI
-  // takes its target from the spawn cwd, so pass the folder explicitly
-  // rather than relying on the extension host's cwd. The wsId env is
-  // read by channel.mjs / opencode.mjs to derive their state paths -
-  // each workspace gets its own client dir without the runtime needing
-  // to introspect the workspace itself.
+  // Resolve the workspace folder + per-client wsId. With a folder open
+  // the registration writes to `<workspace>/.claude/settings.json` at
+  // project scope; the CLI takes its target from the spawn cwd, so pass
+  // the folder explicitly. With no folder open the registration falls
+  // back to user scope (`~/.claude/settings.json`) with the sentinel
+  // `default` wsId, so a folderless VS Code window still gets a working
+  // bridge - state lands at `~/.wat321/clients/default/`. The next time
+  // the user opens a folder, project-scope wins by Claude Code's normal
+  // precedence and that folder gets its own hashed wsId; the leftover
+  // user-scope entry is swept on the next install (sweepLegacy already
+  // covers the unified `wat321` name in user scope).
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const workspaceCwd = workspaceFolder?.uri.fsPath;
   const wsId = workspaceId();
+  const scope: "project" | "user" = workspaceCwd ? "project" : "user";
 
   await sweepLegacy(logger, workspaceCwd);
-
-  if (!workspaceCwd) {
-    logger.error(
-      "claude mcp add skipped: no workspace folder open. Open a folder so the bridge can register at project scope."
-    );
-    return {
-      ok: false,
-      error:
-        "no workspace folder; cannot register project-scope MCP entry",
-    };
-  }
 
   const add = await runClaudeCli(
     [
       "mcp",
       "add",
       "-s",
-      "project",
+      scope,
       UNIFIED_MCP_NAME,
       "--env",
       `WAT321_WORKSPACE_ID=${wsId}`,
@@ -279,15 +275,18 @@ export async function installUnifiedBridge(
     return { ok: false, error: msg };
   }
   logger.info(
-    `claude mcp add ${UNIFIED_MCP_NAME} succeeded (project scope, wsId=${wsId})`
+    workspaceCwd
+      ? `claude mcp add ${UNIFIED_MCP_NAME} succeeded (project scope, wsId=${wsId})`
+      : `claude mcp add ${UNIFIED_MCP_NAME} succeeded (user scope, folderless wsId=${wsId})`
   );
   preAllowMcpTools(UNIFIED_ALLOWED_TOOLS, logger);
   return { ok: true, scriptPath };
 }
 
-/** Uninstall the unified bridge. Sweeps both project-scope (the
- * current 1.4.8+ layout) and user-scope (legacy from prior installs)
- * so a user toggling EH off twice doesn't leave stale entries behind. */
+/** Uninstall the unified bridge. Sweeps both project-scope (folder
+ * mode, 1.4.8+ layout) and user-scope (folderless mode 1.5.2+, plus
+ * legacy from pre-1.4.8 installs) so a user toggling EH off doesn't
+ * leave stale entries behind regardless of whether a folder is open. */
 export async function uninstallUnifiedBridge(
   logger: UnifiedLogger = consoleLogger
 ): Promise<void> {

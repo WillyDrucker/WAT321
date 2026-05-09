@@ -21,6 +21,7 @@ export const SETTING = {
   displayMode: "displayMode",
   statusBarPriority: "statusBarPriority",
   enableHeatmap: "enableHeatmap",
+  enableTokensPerSecondCounters: "enableTokensPerSecondCounters",
   notificationsMode: "notifications.mode",
   notificationsClaude: "notifications.claude",
   notificationsCodex: "notifications.codex",
@@ -29,4 +30,5 @@ export const SETTING = {
   epicHandshakeSuppressCodexToasts: "epicHandshake.suppressCodexNotifications",
   enableOpenCode: "enableOpenCode",
   localEndpoint: "localEndpoint",
+  openCodeToolUseHint: "openCode.toolUseHint",
 } as const satisfies Record<string, string>;
