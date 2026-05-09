@@ -272,6 +272,13 @@
             "scope": "application",
             "order": 1,
             "markdownDescription": "Enable OpenCode widgets (session tokens). Widgets hide automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\nAdditionally installs the OpenCode managed harness `opencode serve` to access free routable models (Big Pickle, MiniMax M2.7, Ling 2.6 Flash, Hy3 Preview, Nemotron 3 Super). Auto-spawns a serve subprocess so Claude and your tool-using harness can dispatch against any catalog instance, including your local LLM, giving it tool capabilities.\n\n**Data usage on free models ONLY.** Per OpenCode's docs, during the free period collected data may be used to improve the model. Nemotron 3 Super Free additionally has prompts and outputs logged by NVIDIA. If you don't want training-eligible traffic, disable this and use Claude / Codex / your local LLM only. Required for the local LLM harness; data usage does not apply to local routes."
+          },
+          "wat321.openCode.toolUseHint": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "order": 2,
+            "markdownDescription": "Prepend a short hint to every OpenCode / Local-LLM / Zen dispatch nudging the model to call `webfetch` first for opinion / 'best of' / current-events / specific-people / real-time questions.\n\nWorks around a tool-classifier bias where some routable models (Big Pickle, Qwen3, etc.) decline to invoke tools on broad questions and answer from training data instead. The hint is applied only to the prompt sent through the bridge - your displayed prompt and reply remain unchanged.\n\nDisable to send prompts verbatim."
           }
         }
       },
@@ -348,7 +355,7 @@
             "type": "boolean",
             "default": false,
             "order": 3,
-            "markdownDescription": "Enable TPS counters in Session Tokens widgets. Adds a tokens-per-second readout next to the live token count for Claude, Codex, and the OpenCode/Local LLM widgets."
+            "markdownDescription": "**WIP** - Enable TPS counters in Session Tokens widgets. Adds a tokens-per-second readout next to the live token count for Claude, Codex, and the OpenCode/Local LLM widgets."
           },
           "wat321.statusBarPriority": {
             "type": "number",

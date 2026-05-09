@@ -190,6 +190,7 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes("sessionTokens.compact", undefined),
     updateSettingAllScopes(SETTING.statusBarPriority, undefined),
     updateSettingAllScopes(SETTING.enableHeatmap, undefined),
+    updateSettingAllScopes(SETTING.enableTokensPerSecondCounters, undefined),
     updateSettingAllScopes(SETTING.notificationsMode, undefined),
     updateSettingAllScopes(SETTING.notificationsClaude, undefined),
     updateSettingAllScopes(SETTING.notificationsCodex, undefined),
@@ -209,6 +210,7 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     // strips it for users upgrading from <=1.4.0.
     updateSettingAllScopes("epicHandshake.defaultWaitMode", undefined),
     updateSettingAllScopes(SETTING.enableOpenCode, false),
+    updateSettingAllScopes(SETTING.openCodeToolUseHint, undefined),
     updateSettingAllScopes(SETTING.localEndpoint, undefined),
     // Legacy: modelBridge.enabled / modelBridge.localEndpoint renamed
     // in v1.4.4 to enableOpenCode / localEndpoint. Sweep the old keys
