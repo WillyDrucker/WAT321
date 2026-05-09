@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { readAliases, writeAliases } from "../shared/bridge/sessionAliases";
+import { readAliases, writeAliases, type SessionTarget } from "../shared/bridge/sessionAliases";
 import {
   makeBackItem,
   makeCancelItem,
@@ -36,8 +36,6 @@ import { isPaused, setPaused } from "./statusBarState";
  * value, so the menu's CURRENT row is the user-facing source of truth
  * and dispatch follows automatically.
  */
-
-export type SessionTarget = "opencode" | "local";
 
 import { bridgeStateDir, openCodeRoutesStateDir } from "../shared/wat321Paths";
 

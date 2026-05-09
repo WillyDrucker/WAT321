@@ -191,17 +191,6 @@ async function probeLocalProps(endpoint: string): Promise<LocalProps> {
   }
 }
 
-/** Reader contract the OpenCode Routes widget consumes. The poller implements it;
- * widgets depend on the interface so the concrete polling lifecycle
- * stays internal to this file. */
-export interface BridgeSessionTokensReader {
-  /** Get the most recent snapshot for the given target's active
-   * alias. Returns null when no active alias is bound, the bridge
-   * is disabled, or no qualifying assistant message exists yet
-   * (fresh session before the first turn lands). */
-  snapshot(target: BridgeTarget): BridgeSessionTokens | null;
-}
-
 interface PollerInputs {
   /** Live OpenCode serve URL. Empty when the manager has not
    * spawned the subprocess yet. The poller no-ops while empty and
@@ -217,7 +206,7 @@ interface PollerInputs {
 
 const LOCAL_NCTX_TTL_MS = 30_000;
 
-export class BridgeSessionTokensPoller implements BridgeSessionTokensReader {
+export class BridgeSessionTokensPoller {
   private timer: ReturnType<typeof setInterval> | null = null;
   private cache = new Map<string, BridgeSessionTokens>();
   private localPropsCache: { at: number; props: LocalProps } | null = null;

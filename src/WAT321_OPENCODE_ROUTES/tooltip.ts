@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
+import { SETTING } from "../engine/settingsKeys";
 import { bridgeStateDir } from "../shared/wat321Paths";
 import { formatPct, formatTokens, makeTokenBar } from "../shared/ui/tokenFormatters";
 import { wrapAndTruncateTitle } from "../shared/ui/sessionTokenTooltip";
@@ -195,7 +196,7 @@ export function buildOpenCodeRoutesTooltip(opts: {
     if (typeof hb.tokens === "number" && hb.tokens > 0) {
       const tpsEnabled = vscode.workspace
         .getConfiguration("wat321")
-        .get<boolean>("enableTokensPerSecondCounters", false);
+        .get<boolean>(SETTING.enableTokensPerSecondCounters, false);
       const rateSuffix = tpsEnabled ? ` at ${hb.tokensPerSec ?? 0} tok/s` : "";
       md.appendMarkdown(`\nGeneration: ${hb.tokens} tokens${rateSuffix}\n`);
     }

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { SETTING } from "../../engine/settingsKeys";
 
 /**
  * Small helpers and constants the SessionTokenWidget composes from.
@@ -24,7 +25,7 @@ export function tpsSuffix(
   if (
     !vscode.workspace
       .getConfiguration("wat321")
-      .get<boolean>("enableTokensPerSecondCounters", false)
+      .get<boolean>(SETTING.enableTokensPerSecondCounters, false)
   ) {
     return "";
   }
