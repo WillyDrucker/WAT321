@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { bridgeStateDir } from "../shared/wat321Paths";
 import * as vscode from "vscode";
+import { SETTING } from "../engine/settingsKeys";
 import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
 import {
   CONFIG_PATH,
@@ -12,6 +13,7 @@ import {
 import type { OpenCodeRoutesLogger } from "./outputChannel";
 import { showOpenCodeRoutesMenu, showOpenCodeRoutesSessions } from "./statusBarMenu";
 import { formatPct } from "../shared/ui/tokenFormatters";
+import { TpsThrottle } from "../shared/ui/tpsThrottle";
 import {
   BridgeSessionTokensPoller,
   type BridgeTarget,
@@ -286,6 +288,14 @@ export function createOpenCodeRoutesStatusBarItem(
 
   let lastText: string | undefined;
   let lastTooltipSig: string | undefined;
+  // Display-refresh throttle for the in-flight `@ N/s` rate suffix.
+  // Caches the displayed rate on a flat 1s cadence so the heartbeat's
+  // sub-second tokensPerSec updates do not flicker the readout. Reset
+  // whenever the active instance changes so a fresh route's first
+  // reading lands immediately rather than waiting out the prior
+  // route's throttle interval.
+  const tpsThrottle = new TpsThrottle();
+  let lastInstanceId: string | undefined;
 
   function refresh(): void {
     const snap = readConfigSnapshot();
@@ -305,6 +315,14 @@ export function createOpenCodeRoutesStatusBarItem(
         lastTooltipSig = undefined;
       }
       return;
+    }
+
+    if (active.id !== lastInstanceId) {
+      // Active instance switched - drop the prior route's TPS cadence
+      // state so the new route's first heartbeat reading appears
+      // immediately rather than waiting out a stale throttle interval.
+      tpsThrottle.reset();
+      lastInstanceId = active.id;
     }
 
     const idleAlias = active.alias || active.id || "OpenCode";
@@ -419,12 +437,13 @@ export function createOpenCodeRoutesStatusBarItem(
         //      cold-session dispatch).
         const liveTokens =
           typeof heartbeat.tokens === "number" ? heartbeat.tokens : 0;
-        const rate =
+        const rawRate =
           typeof heartbeat.tokensPerSec === "number" ? heartbeat.tokensPerSec : 0;
+        const throttledRate = tpsThrottle.next(rawRate) ?? 0;
         const tpsEnabled = vscode.workspace
           .getConfiguration("wat321")
-          .get<boolean>("enableTokensPerSecondCounters", false);
-        const tpsLiveSuffix = tpsEnabled && rate > 0 ? ` @ ${rate}/s` : "";
+          .get<boolean>(SETTING.enableTokensPerSecondCounters, false);
+        const tpsLiveSuffix = tpsEnabled && throttledRate > 0 ? ` @ ${throttledRate}/s` : "";
         let stat: string;
         if (sessionTokensSuffix.length > 0) {
           stat = `${sessionTokensSuffix.trim()}${tpsLiveSuffix}`;

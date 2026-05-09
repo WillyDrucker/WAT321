@@ -18,6 +18,7 @@ import {
   isPidAlive,
   tpsSuffix,
 } from "./sessionTokenHelpers";
+import { TpsThrottle } from "./tpsThrottle";
 import type {
   SessionTokenRenderData,
   SessionTokenWidgetDescriptor,
@@ -112,6 +113,12 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    * picks up the transition immediately instead of waiting up to
    * the service's next 15s poll. */
   private bridgeSub: { dispose(): void } | null = null;
+  /** Display-refresh throttle for the visible TPS suffix. Caches the
+   * displayed value on a flat 1-second cadence so the "NNtps" string
+   * does not flicker faster than the user can read it. Reset on
+   * session change so the new session's first reading appears
+   * immediately rather than waiting out the prior session's interval. */
+  private tpsThrottle = new TpsThrottle();
 
   constructor(
     descriptor: SessionTokenWidgetDescriptor<TState>,
@@ -172,6 +179,11 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    *   detection - Codex doesn't surface eviction signals. */
   private maybeLatchCacheBanner(data: SessionTokenRenderData): void {
     if (data.sessionId !== this.lastSeenSessionId) {
+      // Session change resets all per-session display state, including
+      // the TPS throttle - the new session's first reading should
+      // appear immediately rather than waiting out the prior session's
+      // throttle interval.
+      this.tpsThrottle.reset();
       // Session attach: adopt watermarks without firing on history
       // we never observed live. Three watermarks pinned here:
       //   - lastSeenSessionId tracks the current attachment target
@@ -519,9 +531,9 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           // flash still gives you session info.
           this.item.text = `${prefix} ${banner}`;
         } else if (mode === "minimal" || mode === "compact") {
-          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}${tpsSuffix(data.tokensPerSecond, mode)}`;
+          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}${tpsSuffix(this.tpsThrottle.next(data.tokensPerSecond), mode)}`;
         } else {
-          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} / ${formatTokens(data.ceiling)} ${formatPct(pctOfCeiling)}${tpsSuffix(data.tokensPerSecond, mode)}`;
+          this.item.text = `${prefix} ${formatTokens(data.contextUsed)} / ${formatTokens(data.ceiling)} ${formatPct(pctOfCeiling)}${tpsSuffix(this.tpsThrottle.next(data.tokensPerSecond), mode)}`;
         }
 
         this.item.color = getSessionTokenColor(pctOfCeiling, d.whitePct, d.yellowPct);

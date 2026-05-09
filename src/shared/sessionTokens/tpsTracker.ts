@@ -44,7 +44,15 @@
 const TPS_MAX = 999;
 const WINDOW_MS = 60_000;
 const IDLE_GAP_MS = 10_000;
-const MIN_WINDOW_AGE_MS = 5_000;
+/** Window must span at least this many ms of mtime before a rate is
+ * computable. The very first sample-pair after a session starts captures
+ * a step function (cache-creation tokens roll in all at once); waiting a
+ * couple of seconds lets that spike smooth out before a number reaches
+ * the widget. 2s is the sweet spot - long enough to skip past the
+ * cache-creation pair, short enough that the user sees TPS appear
+ * within a few seconds of an active turn instead of staring at a blank
+ * suffix for 5+ seconds while wondering if the feature is broken. */
+const MIN_WINDOW_AGE_MS = 2_000;
 const MIN_TOKEN_DELTA = 5;
 
 interface Sample {
