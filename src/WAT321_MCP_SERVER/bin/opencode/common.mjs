@@ -28,6 +28,47 @@ export const OPENCODE_LAST_USED_PATH = join(OPENCODE_ROUTES_DIR, "last-used.json
 
 export const ANON_BASE_URL = "https://opencode.ai/zen/v1";
 export const DEFAULT_TIMEOUT_SEC = 120;
+
+/** Custom OpenCode agent the harness declares (in `opencode.json` via
+ * `shared/providers/opencode/configBuilder.ts`). The harness writes the
+ * agent block at every spawn; channel.mjs and dispatch.mjs name it on
+ * `/session/{id}/message`. Replaces OpenCode's default `build` agent,
+ * whose coder-focused system prompt was suppressing webfetch on non-
+ * coding questions (the "ask LLM about current events" regression).
+ *
+ * Mirrored from `WAT321_RESEARCH_AGENT` in `configBuilder.ts`. The two
+ * surfaces (extension config-write side, MCP runtime read side) cannot
+ * import each other - .mjs runs in a separate Node process - so the
+ * literal lives in both places. Either side renaming without the other
+ * breaks dispatch immediately. */
+export const WAT321_RESEARCH_AGENT = "wat321-research";
+
+/** Tool-use bias hint sent as a system-role directive when
+ * `wat321.openCode.toolUseHint` is on. Some routable models (Big
+ * Pickle, Qwen3, etc.) classify broad / opinion / current-events
+ * questions as "answerable from training data" and skip tool_calls
+ * entirely - the resulting reply is stale or hallucinated. The hint
+ * is delivered through the OpenCode `system` field (per-message) /
+ * the chat-completions `role:"system"` slot (one-shot) so the model
+ * weights it ahead of the user prompt instead of treating it as just
+ * more user text. The original user prompt is preserved unmodified
+ * for the reply blockquote.
+ *
+ * Wording is imperative and pattern-listed because small models
+ * (Qwen3-8B in particular) do not reliably override their tool-skip
+ * classifier from advisory phrasing - they need explicit "MUST" plus
+ * concrete trigger shapes to look for. */
+export const TOOL_USE_HINT =
+  "TOOL-USE POLICY (mandatory):\n" +
+  "Call the webfetch tool BEFORE writing any answer when the user's question matches ANY of these patterns:\n" +
+  "- contains 'right now', 'currently', 'today', 'this week', 'this month', 'this year', 'recent', 'latest'\n" +
+  "- asks 'who is the best', 'what is the best', 'top X', 'most popular', 'leaderboard', 'ranking'\n" +
+  "- names a specific living person, team, game, product, or service whose status changes over time\n" +
+  "- asks about prices, scores, standings, releases, versions, news, or events\n" +
+  "- asks for an opinion or recommendation that depends on current state\n" +
+  "If you skip webfetch on a matching question and answer from training data, your answer will be stale or wrong. Webfetch FIRST, then synthesize.\n" +
+  "Skip webfetch only for questions answerable from stable general knowledge (math, definitions, well-established history, code logic).";
+
 export const HEARTBEAT_KEEPALIVE_MS = 5_000;
 /** Hard ceiling on `/session` POST. Session creation is local-disk
  * work in opencode serve; without this cap a hung server would wedge

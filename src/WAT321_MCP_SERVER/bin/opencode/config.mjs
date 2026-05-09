@@ -21,6 +21,20 @@ export function readServeUrl() {
   }
 }
 
+/** Tool-use hint toggle. True when dispatch.mjs should prepend the
+ * webfetch-bias hint to ask prompts. Defaults true on missing config
+ * or parse error so the bridge biases toward tool-use even before the
+ * extension first writes config. */
+export function readToolUseHint() {
+  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return true;
+  try {
+    const cfg = JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8"));
+    return cfg?.toolUseHint !== false;
+  } catch {
+    return true;
+  }
+}
+
 /** Configured catalog (model id, kind, retention) snapshot. */
 export function readInstances() {
   if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return [];

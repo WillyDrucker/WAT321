@@ -15,8 +15,8 @@ import { resolveApiKeys } from "./secrets";
  * and cannot reach VS Code; this file is the bridge between the
  * three state surfaces and the MCP server.
  *
- * The instance catalog is hardcoded (`instanceCatalog.ts`); only the
- * local endpoint is user-configurable via settings. All Zen
+ * The instance catalog is hardcoded (`shared/providers/opencode/catalog.ts`);
+ * only the local endpoint is user-configurable via settings. All Zen
  * instances share one SecretStorage-backed API key. Active-instance
  * selection is the only per-task knob in `preferences.json`, driven
  * by the click menu's Active Instance picker.
@@ -70,6 +70,13 @@ export interface OpenCodeRoutesConfig {
    * otherwise. The bridge bin reads this to decide whether session-
    * attached dispatches can route. */
   openCodeServerUrl: string;
+
+  /** When true, dispatch.mjs prepends a short tool-use hint to every
+   * ask prompt to bias broad / opinion / current-events questions
+   * toward `webfetch` instead of training-data answers. Default true.
+   * The wrap is per-call; the original prompt sent by the user is
+   * unchanged in the visible reply. */
+  toolUseHint: boolean;
 }
 
 /** Read settings + preferences + SecretStorage and produce a merged
@@ -77,15 +84,17 @@ export interface OpenCodeRoutesConfig {
  *
  * `managedOpenCodeUrl` is the URL of the WAT321-spawned local
  * `opencode serve` process when the bridge is enabled and the
- * manager has a live process. Empty otherwise. The caller (Model
- * Bridge `index.ts`) owns the manager and passes the URL in,
- * keeping `config.ts` free of subprocess lifecycle concerns. */
+ * manager has a live process. Empty otherwise. The caller
+ * (`WAT321_OPENCODE_ROUTES/index.ts`) owns the manager and passes
+ * the URL in, keeping `config.ts` free of subprocess lifecycle
+ * concerns. */
 export async function readConfigFromSettings(
   context: vscode.ExtensionContext,
   managedOpenCodeUrl = ""
 ): Promise<OpenCodeRoutesConfig> {
   const cfg = vscode.workspace.getConfiguration("wat321");
   const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
+  const toolUseHint = cfg.get<boolean>(SETTING.openCodeToolUseHint, true);
   const localEndpoint = cfg
     .get<string>(SETTING.localEndpoint, "")
     .trim()
@@ -151,6 +160,7 @@ export async function readConfigFromSettings(
     instances,
     activeInstanceId,
     openCodeServerUrl,
+    toolUseHint,
   };
 }
 
@@ -191,9 +201,3 @@ export function writeConfigFile(config: OpenCodeRoutesConfig): boolean {
   return writeFileAtomic(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
 }
 
-/** The MCP entry only registers when the bridge is enabled. The
- * local instance is always available, so a single `enabled: true`
- * is enough to install. */
-export function isConfigInstallable(config: OpenCodeRoutesConfig): boolean {
-  return config.enabled;
-}

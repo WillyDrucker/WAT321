@@ -2,6 +2,8 @@ import {
   ANON_BASE_URL,
   DEFAULT_TIMEOUT_SEC,
   SESSION_CREATE_TIMEOUT_MS,
+  TOOL_USE_HINT,
+  WAT321_RESEARCH_AGENT,
   errorResult,
   fetchWithTimeout,
 } from "./common.mjs";
@@ -10,10 +12,28 @@ import {
   readAliases,
   writeAliases,
 } from "./aliases.mjs";
-import { findInstance, readServeUrl } from "./config.mjs";
+import { findInstance, readServeUrl, readToolUseHint } from "./config.mjs";
 import { withOpenCodeHeartbeat } from "./heartbeat.mjs";
 import { tapOpenCodeEvents } from "./sse.mjs";
 import { postSessionMessage } from "./sessions.mjs";
+
+/** Resolve the tool-use-hint system directive for this dispatch.
+ * Returns the hint string when the setting is on AND the prompt is
+ * non-empty, null otherwise. Callers thread the result into the
+ * provider-appropriate system channel:
+ *   - session path: OpenCode's per-message `system` field on
+ *     `/session/{id}/message`.
+ *   - one-shot anonymous Zen: a `role:"system"` entry prepended to
+ *     the chat-completions `messages` array.
+ * Both channels weight the directive ahead of the user message in a
+ * way prompt-prefix injection does not, which matters for small
+ * models (Qwen3-8B in particular) whose tool-skip classifier ignores
+ * advisory text appearing as part of the user prompt. */
+function resolveToolUseHint(prompt) {
+  if (!readToolUseHint()) return null;
+  if (prompt.trim().length === 0) return null;
+  return TOOL_USE_HINT;
+}
 
 /**
  * `wat321_ask` dispatch handler. Routes prompts to one of:
@@ -27,17 +47,24 @@ import { postSessionMessage } from "./sessions.mjs";
  *     to anonymous Big Pickle, a routing bug).
  */
 
-/** POST a chat completion to opencode.ai's anonymous Zen endpoint. */
-async function anonymousChatCompletion(model, prompt, timeoutMs) {
+/** POST a chat completion to opencode.ai's anonymous Zen endpoint.
+ * `system` is optional - when supplied, prepends as a `role:"system"`
+ * message so the directive weights ahead of the user prompt instead
+ * of riding along inside it. Caller passes null to skip. */
+async function anonymousChatCompletion(model, prompt, timeoutMs, system) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const messages =
+      system !== null && system.length > 0
+        ? [{ role: "system", content: system }, { role: "user", content: prompt }]
+        : [{ role: "user", content: prompt }];
     const res = await fetch(`${ANON_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: prompt }],
+        messages,
         max_tokens: 4096,
       }),
       signal: controller.signal,
@@ -260,10 +287,19 @@ export async function handleAsk(args) {
               modelID: sessionInstance.model,
             }
           : null;
+    const systemDirective = resolveToolUseHint(prompt);
     const result = await withOpenCodeHeartbeat(meta, async (updateProgress) => {
       const tap = await tapOpenCodeEvents(serveUrl, sessionId, updateProgress);
       try {
-        return await postSessionMessage(serveUrl, sessionId, prompt, timeoutMs, modelRef);
+        return await postSessionMessage(
+          serveUrl,
+          sessionId,
+          prompt,
+          timeoutMs,
+          modelRef,
+          systemDirective,
+          WAT321_RESEARCH_AGENT
+        );
       } finally {
         tap.stop();
       }
@@ -298,8 +334,9 @@ export async function handleAsk(args) {
     model: modelSlug,
     timeoutMs,
   };
+  const oneShotSystemDirective = resolveToolUseHint(prompt);
   const result = await withOpenCodeHeartbeat(oneShotMeta, () =>
-    anonymousChatCompletion(modelSlug, prompt, timeoutMs)
+    anonymousChatCompletion(modelSlug, prompt, timeoutMs, oneShotSystemDirective)
   );
   if (!result.ok) {
     return errorResult(`One-shot dispatch failed: ${result.error}`);
