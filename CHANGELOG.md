@@ -5,13 +5,23 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.2] - unreleased
+## [1.5.2] - 2026-05-09
 
 ### Added
 
+- **Bridge nudges Big Pickle and your Local LLM toward `webfetch` on broad questions.** Some routable models classify "best of right now", opinion, current-events, or specific-people questions as answerable from training data and skip tool calls entirely - the reply ends up stale or hallucinated even when `webfetch` was available. The bridge now ships a short tool-use directive to every dispatch via OpenCode's per-message system channel and the chat-completions `system` slot for one-shots, with imperative wording and concrete trigger shapes so smaller models can match the patterns and webfetch first instead of answering from training. The directive is invisible in the displayed prompt and reply, and you can disable it from the OpenCode section of WAT321 settings (`wat321.openCode.toolUseHint`) if you'd rather send prompts verbatim.
+- **The bridge works in folderless VS Code windows now.** Enabling Epic Handshake without an open workspace folder used to leave the bridge widget visible but unreachable - the MCP registration silently skipped, so asking the bridge for codex or your local LLM fell through to whatever Claude could improvise (raw `codex exec` calls, curl probes for ollama). Folderless windows now get a user-scope MCP registration with their own `default` client state, so a window with no folder still has a working bridge. Open a folder later and the per-folder registration takes over automatically; the folderless state stays out of the way under its own client dir with no leak between modes.
+- **Bridge dispatches now run as a research agent instead of OpenCode's coding agent.** Every Big Pickle / Local LLM / Zen-route prompt going through `wat321_ask` was inheriting OpenCode's default `build` agent, whose system prompt explicitly tells the model not to guess URLs unless they're for programming help - the cause of the "I cannot access live data" refusal you'd see when asking about current events, sports leaderboards, or product listings. The bridge now declares its own `wat321-research` agent in the OpenCode harness and dispatches every session against it; the research agent's prompt encourages plausible-URL guessing, includes pattern hints for Wikipedia / Cars.com / Steam / IMDb / Reddit / GitHub / DuckDuckGo, and restricts the toolset to `webfetch` only so the model isn't tempted into bash/edit/write paths irrelevant to research questions.
+
 ### Changed
 
+- **Toggling Enable OpenCode is silent now.** The "OpenCode Routes is ready" / "OpenCode Routes disabled" toasts that fired on the setting flip were redundant - Epic Handshake's enable toast already covers what to do next, and the OpenCode widget appearing or disappearing in the status bar is its own state signal. Same toggle, no popup.
+- **Tokens-per-second appears faster and reads steadier.** The widget used to stare blank for ~5 seconds at the start of an active turn while the underlying tracker waited for its smoothing window to mature, then once it appeared the displayed value would flicker rapidly as new readings landed sub-second. The tracker now reports a rate after about 2 seconds of streaming, and the visible "NNtps" number updates once per second so the readout reads as signal instead of noise.
+
 ### Fixed
+
+- **The TPS counter setting now applies immediately when you toggle it.** Earlier versions cached the prior value until the next 15-second service emission, so checking or unchecking the box looked like nothing happened. The widget now re-renders on the toggle directly.
+- **The Tool-use hint setting now applies when you flip it.** The setting wrote to package.json correctly but no listener was wired into the OpenCode Routes settings watcher, so toggling it didn't take effect until you reopened VS Code. The watcher now reacts on the toggle and rewrites the bridge config immediately, so the next prompt picks up your new preference without a reload.
 
 ### Removed
 
