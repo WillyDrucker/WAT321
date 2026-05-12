@@ -118,22 +118,29 @@ export function renderUsageNonOkState<TData>(
       refreshIfStale(opts.providerKey);
       const status = getCachedStatus(opts.providerKey);
       // Tooltip order (per design):
-      //   1. Anthropic / OpenAI status line (only when an incident
-      //      is live - `indicator !== "none"`)
-      //   2. API server message (when present on the state)
-      //   3. Temporarily paused / reconnecting countdown line
-      // Status and server message are additive context; the paused
-      // line is the original tooltip and stays at the bottom as the
-      // primary action summary.
+      //   1. Provider status-page line (only when an incident is
+      //      live - `indicator !== "none"`)
+      //   2. API server message (verbatim from the upstream response
+      //      when present on the state)
+      //   3. Plain-language attribution line so the user knows the
+      //      pause is on the provider's side, not their network or
+      //      WAT321
+      //   4. Temporarily paused / reconnecting countdown line
+      // Status and server message stay technical and unmodified;
+      // attribution is the only user-visible "what does this mean"
+      // line; the paused line is the primary action summary at the
+      // bottom.
+      const owner = getProviderOwner(opts.providerKey);
       const lines: string[] = [];
       if (status && status.indicator !== "none") {
-        lines.push(
-          `${getProviderOwner(opts.providerKey)} status: ${status.description}`
-        );
+        lines.push(`${owner} status: ${status.description}`);
       }
       if (state.serverMessage) {
         lines.push(`API: ${state.serverMessage}`);
       }
+      lines.push(
+        `${opts.providerName}'s API server is throttling our reads right now (their side, not yours).`
+      );
       lines.push(pausedLine);
       item.tooltip = lines.join("\n");
       item.color = undefined;
