@@ -88,6 +88,19 @@ export const STARTUP_JITTER_MS = 5_000;
 /** How many consecutive failures before surfacing an error to the user. */
 export const ERROR_ABSORPTION_THRESHOLD = 3;
 
+/** Network-class errors (DNS failure, TCP reset, timeout) almost
+ * always recur, so the absorption window is tighter than the HTTP
+ * error path. One absorbed attempt preserves the "still trying"
+ * spinner as visible feedback, then the second hit flips to the
+ * offline skin. */
+export const NETWORK_ERROR_ABSORPTION_THRESHOLD = 2;
+
+/** Retry interval used while absorbing a network-class error. The
+ * normal 122s poll cadence would stretch the spinner past the user's
+ * "still trying" expectation; 30s lands the second retry in the
+ * 35-40s total spin range before the offline skin renders. */
+export const NETWORK_ERROR_RETRY_MS = 30_000;
+
 /**
  * Exponential discovery backoff for detecting when a provider CLI becomes
  * installed after the extension is already running. Fast early to catch

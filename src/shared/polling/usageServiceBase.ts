@@ -7,6 +7,8 @@ import {
   CACHE_FRESHNESS_OK_MS,
   CLAIM_TTL_MS,
   ERROR_ABSORPTION_THRESHOLD,
+  NETWORK_ERROR_ABSORPTION_THRESHOLD,
+  NETWORK_ERROR_RETRY_MS,
   POLL_INTERVAL_MS,
   RATE_LIMIT_BACKOFF_MS,
 } from "./constants";
@@ -413,8 +415,24 @@ export abstract class UsageServiceBase<TResponse> {
     }
 
     this.consecutiveErrors++;
-    if (this.consecutiveErrors < ERROR_ABSORPTION_THRESHOLD) {
-      if (this.state.status === "ok" || this.state.status === "loading") return;
+    // Network-class errors (DNS failure, TCP reset, timeout) absorb
+    // a single attempt for the "still trying" spinner UX, then flip
+    // to the offline skin on the second hit at the shorter network-
+    // retry cadence so total spin time stays in the 30-40s range
+    // instead of stretching to 3 * POLL_INTERVAL_MS (~6 minutes).
+    // HTTP-class errors (5xx, transient blips) keep the original
+    // 3-attempt absorption because they often resolve next poll.
+    const isNetworkLevelError = statusCode === null && isNetworkError(message);
+    const threshold = isNetworkLevelError
+      ? NETWORK_ERROR_ABSORPTION_THRESHOLD
+      : ERROR_ABSORPTION_THRESHOLD;
+    if (this.consecutiveErrors < threshold) {
+      if (this.state.status === "ok" || this.state.status === "loading") {
+        if (isNetworkLevelError) {
+          this.setPollInterval(NETWORK_ERROR_RETRY_MS);
+        }
+        return;
+      }
     }
 
     let newState: ServiceState<TResponse>;
