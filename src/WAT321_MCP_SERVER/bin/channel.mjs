@@ -217,6 +217,11 @@ function buildTools(enabled) {
         session: { type: "string", description: "Session alias (S1, S2, ...)." },
         thread_name: { type: "string", description: "Codex thread name." },
         timeout_sec: { type: "integer", description: "Override timeout." },
+        fire_and_forget: {
+          type: "boolean",
+          description:
+            "Codex only. Return immediately; reply lands in the EH inbox and auto-includes on the next prompt. Omit to honor the EH wait-mode toggle. Use for long-running Codex tasks.",
+        },
       },
       required: ["prompt"],
     },
@@ -375,6 +380,17 @@ async function dispatchCall(name, args, enabled) {
       target === "codex" ? codex : target === "opencode" || target === "local" ? opencode : null;
     if (targetModule === null) {
       return errorResult(`Unknown target '${target}'.`);
+    }
+    // Fire-and-forget only applies to Codex - OpenCode and Local LLM
+    // routes return synchronously via HTTP/SSE and have no late-reply
+    // inbox to drop the result into, so an immediate return would
+    // strand the reply on the server with no way for the caller to
+    // retrieve it. Explicit param=true on a non-Codex target is a
+    // caller bug; surface it instead of silently dropping the request.
+    if (args?.fire_and_forget === true && target !== "codex") {
+      return errorResult(
+        `fire_and_forget=true only applies to target='codex'. OpenCode/Local LLM routes return synchronously via HTTP; there is no late-reply inbox to drop a deferred reply into. Drop the parameter or route to Codex.`
+      );
     }
     // Forward to the existing handler with target + instance_id baked
     // back in. handleAsk's signature predates the router; rather than
