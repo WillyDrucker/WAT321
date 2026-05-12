@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Usage widgets stop spinning forever when the network is unreachable.** Earlier versions absorbed the first three consecutive errors at the normal 122-second poll cadence before flipping the widget out of its spinning state - intentional cover for transient 429 cold-polls on Anthropic's stats endpoint, but it stranded the widget on the `$(loading~spin)` glyph for about six minutes when the underlying network was genuinely down (DNS failure, TCP reset, timeout). The spinner is still useful "still trying" feedback, so genuine network errors now absorb one retry at a tighter 30-second cadence and flip to the offline skin around the 30-40 second mark instead of six minutes in. The 429 cold-poll absorption is untouched.
+
 ### Removed
 
 ## [1.5.3] - 2026-05-12
