@@ -11,8 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-### Changed
-
 - **Rate-limited usage widget tooltip names who's throttling.** When the Claude or Codex usage widget shows the Offline pill because the API server returned 429, the tooltip used to lead with the verbatim API response and a "Temporarily paused" line, leaving the user to guess whether the issue was their network, WAT321, or the provider. The technical content is unchanged, but a plain-language line now sits in between explaining that the throttle is on the provider's side and recovers automatically.
 
 ### Fixed
