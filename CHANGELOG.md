@@ -5,6 +5,27 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-05-12
+
+### Added
+
+- **Fire-and-forget mode is back for Codex dispatches over the unified bridge.** The v1.5.0 refactor folded `epic_handshake_ask` into the new `wat321_ask` tool but didn't carry the fire-and-forget short-circuit across, so flipping the wait-mode toggle in the Epic Handshake status bar had no effect on real dispatches - Claude would block on a long Codex turn until timeout regardless of what the toggle said. The unified bridge now honors the toggle exactly like the old path did, and `wat321_ask` also accepts an explicit `fire_and_forget` parameter that overrides the toggle per call. Long-running Codex tasks (multi-minute scrapes, large audits) return immediately with a dispatch id; Codex's reply lands in the Epic Handshake inbox and auto-includes on your next Claude-to-Codex prompt.
+- **Claude's session-token widget shows the wait animation during Local LLM and OpenCode calls too.** Previously the 1Hz claude/blank blink only fired when Claude was waiting on Codex via Epic Handshake; calls to Big Pickle, your Local LLM, or any Zen route looked indistinguishable from Claude idle. The widget now reads the OpenCode dispatch heartbeat directly so you can see at a glance that Claude is blocked on another backend, with the same visual signal regardless of which backend.
+
+### Changed
+
+- **OpenCode stays enabled across Reset and fresh installs.** OpenCode Routes was already enabled by default in the schema, but Reset WAT321 was explicitly disabling it on every clear and several internal reads still defaulted to off, which meant a Reset could leave you staring at an empty status bar wondering where Big Pickle went. Reset now clears the override so the schema default takes effect, and every place that reads the setting matches that default.
+- **Bridge failure replies now invite you to investigate before bailing.** When Codex's dispatcher couldn't complete a turn, the bridge used to return a terse "couldn't complete this turn" with no path forward - even though Codex's underlying work often landed on disk before the bridge gave up. The reply now includes the chain id, hints that workspace artifacts may already exist (worth checking before declaring failure), and suggests retrying by reissuing the same prompt. The lower-layer error detail still goes only to the WAT321 Bridge output channel.
+
+### Fixed
+
+- **The "Waiting on Codex: Ns" tooltip line works again.** The v1.5.0 unified-bridge refactor stopped writing the wait-status sidecar that drove this tooltip line; it had been silently missing on every Codex dispatch since. The unified bridge writes the sidecar again, with a `finally`-block guarantee that it clears even when the dispatch throws or times out, so the tooltip never sticks on a phantom wait.
+
+### Removed
+
+- **Tool-use hint setting is gone (redundant).** The `wat321.openCode.toolUseHint` setting added in v1.5.2 was a system-channel directive sent on every dispatch to nudge small models toward calling `webfetch` on broad questions. The custom `wat321-research` agent shipped in the same release already has the same imperative pattern list in its own system prompt, so the hint was duplicating the rule across two surfaces with ~600 tokens of extra overhead per dispatch. Setting + plumbing removed; behavior is unchanged because the agent prompt continues to drive the same webfetch bias.
+- **Dead legacy bridge channel files purged.** The pre-v1.5.0 Epic Handshake MCP server (`bin/channel.mjs` plus three internal helpers) stopped being registered with Claude Code when the unified bridge took over, but the files were still being copied into every .vsix and extracted to disk on every Epic Handshake activate. ~400 LOC of dead code removed from the extension; the vsix is slightly smaller and there's one less "is this still load-bearing" decision for future maintenance.
+
 ## [1.5.2] - 2026-05-09
 
 ### Added

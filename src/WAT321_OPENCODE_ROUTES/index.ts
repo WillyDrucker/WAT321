@@ -60,7 +60,7 @@ export function activateOpenCodeRoutes(
 
   const applyCurrentConfig = async (): Promise<void> => {
     const cfg = vscode.workspace.getConfiguration("wat321");
-    const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
+    const enabled = cfg.get<boolean>(SETTING.enableOpenCode, true);
     const localEndpoint = cfg
       .get<string>(SETTING.localEndpoint, "")
       .trim()
@@ -97,8 +97,7 @@ export function activateOpenCodeRoutes(
   const watcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
       e.affectsConfiguration(`wat321.${SETTING.enableOpenCode}`) ||
-      e.affectsConfiguration(`wat321.${SETTING.localEndpoint}`) ||
-      e.affectsConfiguration(`wat321.${SETTING.openCodeToolUseHint}`)
+      e.affectsConfiguration(`wat321.${SETTING.localEndpoint}`)
     ) {
       void applyCurrentConfig();
     }

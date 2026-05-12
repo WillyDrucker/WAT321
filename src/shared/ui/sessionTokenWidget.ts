@@ -1,7 +1,10 @@
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import type { BridgeStageReader } from "../../engine/bridgeTypes";
 import { getSessionTokenDisplayMode } from "../../engine/displayMode";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
+import { openCodeRoutesStateDir } from "../wat321Paths";
 import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
 import { getSessionTokenColor } from "./textColors";
 import { formatPct, formatTokens } from "./tokenFormatters";
@@ -31,6 +34,25 @@ export type {
   SessionTokenRenderData,
   SessionTokenWidgetDescriptor,
 } from "./sessionTokenTypes";
+
+/** OpenCode dispatch heartbeat. The MCP server's dispatch path writes
+ * this file at `~/.wat321/clients/<wsId>/model-bridge/heartbeat.json`
+ * for the duration of every Claude-to-OpenCode / Claude-to-Local-LLM call
+ * with a 5s keepalive cadence; the file is unlinked on completion.
+ * The 15s staleness budget covers one missed keepalive plus normal
+ * filesystem latency without ever lingering past a real dispatch. */
+const OPENCODE_HEARTBEAT_PATH = join(openCodeRoutesStateDir(), "heartbeat.json");
+const OPENCODE_HEARTBEAT_STALE_MS = 15_000;
+
+function isOpenCodeDispatchActive(): boolean {
+  try {
+    if (!existsSync(OPENCODE_HEARTBEAT_PATH)) return false;
+    const stat = statSync(OPENCODE_HEARTBEAT_PATH);
+    return Date.now() - stat.mtimeMs < OPENCODE_HEARTBEAT_STALE_MS;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Config-driven session token widget with a provider-branded idle
@@ -327,6 +349,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
    * stretches when the user is not interacting with either CLI. */
   private animationsActive(): boolean {
     if (this.bridgeStage.snapshot().phase !== "idle") return true;
+    if (this.descriptor.provider === "Claude" && isOpenCodeDispatchActive()) return true;
     if (this.cacheLoadFlashStartedAt !== null) {
       const elapsed = Date.now() - this.cacheLoadFlashStartedAt;
       if (elapsed < CACHE_BANNER_FLASH_MS) return true;
@@ -418,6 +441,25 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
     // actual work regardless of which mode Claude waited in.
     const claudeBypassesBridge =
       d.provider === "Claude" && snapshot.waitMode === "fire-and-forget";
+    // Claude-to-OpenCode / Local LLM dispatches don't flow through the
+    // Epic Handshake bridge stage coordinator (different backend, no
+    // Codex rollout file lifecycle). The dispatch handler writes a
+    // heartbeat under the OpenCode Routes state dir; while that file
+    // is fresh, Claude's MCP call is blocked on the OpenCode reply.
+    // Render the same 1Hz claude/blank blink the EH bridge wait uses,
+    // so the user sees "Claude is waiting on another backend" with
+    // the same visual signal regardless of which backend.
+    const claudeWaitingOnOpenCode =
+      d.provider === "Claude" && isOpenCodeDispatchActive();
+    if (claudeWaitingOnOpenCode && snapshot.phase === "idle") {
+      // 1Hz claude/blank blink, same shape as the EH bridge-wait
+      // animation. Returning early before the bridge-stage branch
+      // means an OpenCode call that happens to overlap a Codex turn
+      // still defers to the richer EH animation; the OpenCode case
+      // only fires when the bridge stage itself is idle.
+      const tick = Math.floor(now / 1000) % 2;
+      return tick === 0 ? "$(blank)" : "$(claude)";
+    }
     if (snapshot.phase !== "idle" && !claudeBypassesBridge) {
       if (snapshot.phase === "pre-ceremony") {
         const tick = Math.floor(now / 1000) % 2;

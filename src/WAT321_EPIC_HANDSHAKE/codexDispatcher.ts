@@ -292,8 +292,20 @@ export class CodexDispatcher {
       // the user-facing reply that lands back in Claude's inbox stays
       // brief and never echoes raw lower-layer messages.
       this.logger.error(`dispatch failed for ${env.id}: ${msg}`);
+      // Body wording invites the caller to investigate before declaring
+      // failure. Pattern from issues #73 / #75 / #69: many "couldn't
+      // complete" verdicts arrive AFTER Codex's underlying work has
+      // landed on disk (the failure is in the reply-marshal step, not
+      // the work itself). Tersely refusing here strands Claude with no
+      // path forward; surfacing the on-disk-check hint plus the
+      // retry-by-reissue option keeps the caller productive instead of
+      // bailing on a turn that may have succeeded.
       this.writeReply(env, {
-        body: `The Codex bridge couldn't complete this turn. Open the WAT321: Epic Handshake output channel for details, or pick Restart Epic Handshake Bridge from the bridge menu to recover.`,
+        body:
+          `Codex bridge turn ended without a reply payload (chain ${env.chainId}). ` +
+          "Codex's underlying work may still have landed on disk - check the workspace for new files / commits / artifacts before treating this as a failure. " +
+          "To retry, re-issue the same prompt; to fully recover bridge state, pick Restart Epic Handshake Bridge from the status bar. " +
+          "Open the WAT321: Epic Handshake output channel for the lower-layer error detail.",
         intent: "blocker",
       });
       moveToSent(path, this.sentCodex);

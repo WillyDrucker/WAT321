@@ -57,7 +57,7 @@ interface BridgeConfig {
 function snapshotConfig(): BridgeConfig {
   const config = vscode.workspace.getConfiguration("wat321");
   const codexAvailable = config.get<boolean>(SETTING.epicHandshakeEnabled, false);
-  const openCodeEnabled = config.get<boolean>(SETTING.enableOpenCode, false);
+  const openCodeEnabled = config.get<boolean>(SETTING.enableOpenCode, true);
   const localEndpoint = config
     .get<string>(SETTING.localEndpoint, "")
     .trim();

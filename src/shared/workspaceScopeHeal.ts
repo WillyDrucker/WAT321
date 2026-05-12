@@ -51,7 +51,6 @@ const APPLICATION_SCOPE_KEYS = [
   // workspace-scope override gets it stripped automatically.
   `wat321.epicHandshake.defaultWaitMode`,
   `wat321.${SETTING.enableOpenCode}`,
-  `wat321.${SETTING.openCodeToolUseHint}`,
   `wat321.${SETTING.localEndpoint}`,
   // Legacy: modelBridge.enabled and modelBridge.localEndpoint were
   // renamed in v1.4.4 to enableOpenCode and localEndpoint. Migration

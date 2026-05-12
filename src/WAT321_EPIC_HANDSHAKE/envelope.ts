@@ -5,7 +5,8 @@ import { writeFileAtomic } from "../shared/fs/atomicWrite";
 /**
  * Envelope format for Epic Handshake messages passed between agents
  * via the filesystem mailbox. Shape matches exactly what
- * `bin/channel.mjs` writes, so both sides stay in sync.
+ * `WAT321_MCP_SERVER/bin/codex.mjs` writes on the dispatch side, so
+ * both sides stay in sync.
  *
  * YAML frontmatter + markdown body, atomic tmp+rename on write.
  * Hand-rolled serializer keeps the module dependency-free.

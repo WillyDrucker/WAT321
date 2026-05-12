@@ -1,22 +1,22 @@
 /**
  * Codex target handlers for the unified WAT321 bridge. Covers the
- * happy path (write envelope, await reply, return body) and late-
- * reply collection.
+ * happy path (write envelope, await reply, return body), late-reply
+ * collection, and fire-and-forget dispatch (per-call override or
+ * sticky wait-mode toggle from the Epic Handshake status bar).
  *
- * Advanced modes live in `src/WAT321_EPIC_HANDSHAKE/bin/channel.mjs`
- * rather than here:
+ * Advanced modes that the pre-1.5.0 channel had but this bridge does
+ * NOT (carry-forward backlog for future ports):
  *
  *   - adaptive heartbeat (ADAPTIVE_FLAG) - extends timeout while the
  *     dispatcher's per-turn heartbeat stays fresh
- *   - fire-and-forget mode (FIRE_AND_FORGET_FLAG) - returns immediately
- *     after writing the envelope
  *   - stale-heartbeat auto-abort (7-min watchdog with synthetic abort
  *     envelope deposit)
  *   - clipboard attachment sweeping
  *   - queue summary tail line
  *   - schema-fix hint when caller passes 'prompt' instead of 'text'
  *
- * See WDDOCS/WAT321_V141_MCP_MERGE_PLAN.md for the migration outline.
+ * Track regressions against
+ * https://github.com/WillyDrucker/WAT321/issues.
  */
 
 import {
@@ -26,6 +26,7 @@ import {
   readdirSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -37,6 +38,11 @@ const INBOX_CLAUDE_ROOT = join(EH_DIR, "inbox", "claude");
 const INBOX_CODEX_ROOT = join(EH_DIR, "inbox", "codex");
 const SENT_CLAUDE_ROOT = join(EH_DIR, "sent", "claude");
 const PAUSED_FLAG = join(EH_DIR, "paused.flag");
+const FIRE_AND_FORGET_FLAG = join(EH_DIR, "fire-and-forget.flag");
+// Sidecar consumed by `WAT321_EPIC_HANDSHAKE/waitStatus.ts` so the
+// Claude session-token tooltip can render "Waiting on Codex: Ns"
+// while a synchronous reply wait is in flight. Per-workspace
+// filename so sibling VS Code windows don't see each other's waits.
 
 const POLL_INTERVAL_MS = 500;
 const DEFAULT_TIMEOUT_SEC = 120;
@@ -246,6 +252,20 @@ function findReplyEnvelope(promptId) {
   return null;
 }
 
+/** Fire-and-forget safety cap. The happy path returns sub-100ms
+ * (envelope write + immediate return); this race exists as a
+ * defensive belt against any future regression that lets the FF
+ * branch fall through to a wait. Adaptive/standard dispatches are
+ * intentionally not capped here; long waits there are expected and
+ * bounded by `timeout_sec`.
+ *
+ * Limitation: `runDispatch`'s I/O is sync (`writeFileSync`,
+ * `renameSync`, `existsSync`). A truly pathological FS hang would
+ * block the whole event loop and prevent the timer from firing
+ * anyway, so the race is structural insurance against future code
+ * shape changes, not a defense against current sync-FS-blocking. */
+const FF_SAFETY_CAP_MS = 60_000;
+
 /** Handle a `wat321_ask({target: "codex", ...})` call. */
 export async function handleAsk(args) {
   ensureDirs();
@@ -274,6 +294,54 @@ export async function handleAsk(args) {
     };
   }
 
+  // Detect fire-and-forget intent before any I/O so the safety race
+  // below covers every step (preamble scan, envelope write, late-
+  // reply consume). Per-call `fire_and_forget: true` always wins;
+  // per-call `fire_and_forget: false` always forces a synchronous
+  // wait even if the user's wait-mode toggle is set. When the param
+  // is omitted, the sticky flag file written by the Epic Handshake
+  // status bar's wait-mode toggle (`waitMode.ts`) decides.
+  const explicitFireAndForget =
+    typeof args?.fire_and_forget === "boolean" ? args.fire_and_forget : null;
+  const fireAndForget =
+    explicitFireAndForget !== null
+      ? explicitFireAndForget
+      : existsSync(FIRE_AND_FORGET_FLAG);
+
+  if (!fireAndForget) return runDispatch(args, prompt, false);
+
+  // Clearable timer so the happy path (sub-100ms) does not leave a
+  // dangling 60s setTimeout sitting in the Node event queue. The
+  // inner runDispatch is sync-heavy and not cancellable; if the cap
+  // ever wins, the dispatch keeps running to completion in the
+  // background (envelope still lands, late-reply file still moves -
+  // both idempotent against later state).
+  let safetyTimer = null;
+  const safetyCap = new Promise((resolve) => {
+    safetyTimer = setTimeout(() => {
+      safetyTimer = null;
+      resolve({
+        content: [
+          {
+            type: "text",
+            text:
+              `Fire-and-forget safety cap reached at ${Math.round(FF_SAFETY_CAP_MS / 1000)}s. ` +
+              "The bridge held the dispatch longer than fire-and-forget's no-wait contract allows; this is unexpected. " +
+              "Codex's reply, if any, will still land in the Epic Handshake inbox. " +
+              "If this recurs, restart the bridge from the status bar widget.",
+          },
+        ],
+      });
+    }, FF_SAFETY_CAP_MS);
+  });
+  try {
+    return await Promise.race([runDispatch(args, prompt, true), safetyCap]);
+  } finally {
+    if (safetyTimer !== null) clearTimeout(safetyTimer);
+  }
+}
+
+async function runDispatch(args, prompt, fireAndForget) {
   const { preamble: latePreamble, found: latePending } =
     peekLateRepliesForPreamble();
 
@@ -305,43 +373,99 @@ export async function handleAsk(args) {
   // late replies would still be in the inbox for the next dispatch.
   consumeLateReplyFiles(latePending);
 
-  const deadline = Date.now() + timeoutMs;
-  let replyMatch = null;
-  while (Date.now() < deadline) {
-    replyMatch = findReplyEnvelope(id);
-    if (replyMatch !== null) break;
-    await sleep(POLL_INTERVAL_MS);
+  // Fire-and-forget short-circuit. Wording is load-bearing - the
+  // legacy `epic_handshake/bin/channel.mjs` path used the same
+  // phrasing and at least one operator playbook grew up around
+  // recognizing it as "intentional, not a timeout."
+  if (fireAndForget) {
+    const ffMessage =
+      `Fire-and-forget dispatch complete. The prompt was delivered to Codex and this tool returned immediately as intended - no wait was attempted and this is not a timeout. Dispatch id: ${id}. ` +
+      "Codex will reply on its own schedule; the reply will appear in the Epic Handshake inbox (retrieve via the status bar widget, or it will auto-include on your next Claude-to-Codex prompt).";
+    return {
+      content: [
+        {
+          type: "text",
+          text: latePreamble ? `${latePreamble}\n\n---\n\n${ffMessage}` : ffMessage,
+        },
+      ],
+    };
   }
 
-  if (replyMatch === null) {
-    // Final-tick rescue before returning timeout.
-    replyMatch = findReplyEnvelope(id);
-  }
-
-  if (replyMatch !== null) {
-    try {
-      renameSync(
-        join(INBOX_CLAUDE, replyMatch.filename),
-        join(SENT_CLAUDE, replyMatch.filename)
-      );
-    } catch {
-      // best-effort
+  // Wait-status sidecar drives the "Waiting on Codex: Ns" tooltip
+  // line on the Claude session-tokens widget. Written before the
+  // poll loop, cleared on every exit (reply, timeout, throw) via
+  // the try/finally below so the tooltip never sticks on a stale
+  // wait. Best-effort - failing to write/clear must never break
+  // the dispatch.
+  const waitStatusPath = join(EH_DIR, `wait-status.${WORKSPACE_HASH}.json`);
+  writeWaitStatus(waitStatusPath, id, timeoutSec);
+  try {
+    const deadline = Date.now() + timeoutMs;
+    let replyMatch = null;
+    while (Date.now() < deadline) {
+      replyMatch = findReplyEnvelope(id);
+      if (replyMatch !== null) break;
+      await sleep(POLL_INTERVAL_MS);
     }
-    const text = latePreamble
-      ? `${latePreamble}\n\n---\n\n${replyMatch.body}`
-      : replyMatch.body;
-    return { content: [{ type: "text", text }] };
-  }
 
-  const timeoutMsg = `No reply from Codex within ${Math.round(timeoutMs / 1000)}s. The dispatcher may still be running; the reply will land in the Epic Handshake inbox if it completes. Retry with timeout_sec for longer-running analyses.`;
-  return {
-    content: [
-      {
-        type: "text",
-        text: latePreamble ? `${latePreamble}\n\n---\n\n${timeoutMsg}` : timeoutMsg,
-      },
-    ],
-  };
+    if (replyMatch === null) {
+      // Final-tick rescue before returning timeout.
+      replyMatch = findReplyEnvelope(id);
+    }
+
+    if (replyMatch !== null) {
+      try {
+        renameSync(
+          join(INBOX_CLAUDE, replyMatch.filename),
+          join(SENT_CLAUDE, replyMatch.filename)
+        );
+      } catch {
+        // best-effort
+      }
+      const text = latePreamble
+        ? `${latePreamble}\n\n---\n\n${replyMatch.body}`
+        : replyMatch.body;
+      return { content: [{ type: "text", text }] };
+    }
+
+    const timeoutMsg = `No reply from Codex within ${Math.round(timeoutMs / 1000)}s. The dispatcher may still be running; the reply will land in the Epic Handshake inbox if it completes. Retry with timeout_sec for longer-running analyses.`;
+    return {
+      content: [
+        {
+          type: "text",
+          text: latePreamble ? `${latePreamble}\n\n---\n\n${timeoutMsg}` : timeoutMsg,
+        },
+      ],
+    };
+  } finally {
+    clearWaitStatus(waitStatusPath);
+  }
+}
+
+function writeWaitStatus(path, envelopeId, timeoutSec) {
+  try {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        envelopeId,
+        workspaceHash: WORKSPACE_HASH,
+        target: "codex",
+        timeoutSec,
+        startedAt: Date.now(),
+      }),
+      "utf8"
+    );
+  } catch {
+    // best-effort
+  }
+}
+
+function clearWaitStatus(path) {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    // best-effort
+  }
 }
 
 /** MCP resource backing `bridge://inbox/codex`. Read-only (peek):

@@ -30,5 +30,4 @@ export const SETTING = {
   epicHandshakeSuppressCodexToasts: "epicHandshake.suppressCodexNotifications",
   enableOpenCode: "enableOpenCode",
   localEndpoint: "localEndpoint",
-  openCodeToolUseHint: "openCode.toolUseHint",
 } as const satisfies Record<string, string>;

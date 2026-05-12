@@ -248,7 +248,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // active-alias state.
   const openCodeEnabled = vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>(SETTING.enableOpenCode, false);
+    .get<boolean>(SETTING.enableOpenCode, true);
   const localEndpoint = vscode.workspace
     .getConfiguration("wat321")
     .get<string>(SETTING.localEndpoint, "")
