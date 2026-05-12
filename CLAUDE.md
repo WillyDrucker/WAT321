@@ -16,8 +16,6 @@ Top-of-chain session-start file. Orients a new session in under a minute, then p
 
 **System 2 - Memory (meta/process).** Owned by `/watmemory-update` (manual only, never auto-invoked). Updated rarely - only when architecture, rules, or process pitfalls change.
 
-Two state coordinators (`bridgeStageCoordinator`, `lateReplyInboxCoordinator`) live in the Epic Handshake tier. They own the canonical view of in-flight bridge state, react via fs.watch with a polling backstop, and republish transitions through typed events on `EventHub`. Widgets subscribe to events and read snapshots rather than polling source-of-truth files directly. See `WD_WAT321_MEMORY.md` Engine section for the event inventory.
-
 - `CLAUDE.md` - this file (orchestrator + read orders)
 - `AIDOCS/WD_WAT321_MEMORY.md` - stable architecture + key pitfalls
 - `AIDOCS/WD_WAT321_MEMORY_EXTENDED.md` - process scratchpad (pitfall root-causes, formulas, carried-forward pitfalls)
@@ -87,7 +85,7 @@ Full access. Do not prompt for permission. All tools unrestricted. Git exception
 
 Windows 10 Pro. VS Code + Claude Code. Shell is bash (Unix syntax, forward slashes). Working directory: `C:\Dev\WAT321`. Primary test instance: `C:\Dev\WAT321-testing\` auto-installs the newest `wat321-*.vsix` from repo root at every launch via `launch.cmd`.
 
-Bridge iteration requires `npm run package` + test-instance relaunch (not F5 - F5 runs from `out/` and does not refresh the bridge's MCP server at `~/.wat321/epic-handshake/bin/`). See auto-memory `user_workflow_bridge_testing.md`.
+Bridge iteration requires `npm run package` + test-instance relaunch (not F5 - F5 runs from `out/` and does not refresh the bridge's MCP server at `~/.wat321/bridge/bin/`). See auto-memory `user_workflow_bridge_testing.md`.
 
 ## Conventions
 
