@@ -10,12 +10,11 @@ import {
 } from "../engine/toastNotifier";
 import { BridgeStageCoordinator } from "./bridgeStageCoordinator";
 import {
-  extractChannelScript,
   isClaudeAvailable,
   isCodexAvailable,
   isOpenCodeAvailable,
-  uninstallChannel,
-} from "./channelInstaller";
+} from "./cliAvailability";
+import { extractStageClipboardScript } from "./stageClipboardInstaller";
 import { CodexDispatcher } from "./codexDispatcher";
 import { registerEpicHandshakeCommands } from "./commandRegistration";
 import { LateReplyInboxCoordinator } from "./lateReplyInboxCoordinator";
@@ -186,9 +185,9 @@ class EpicHandshakeTier {
       // that has EH disabled in its own settings would still see the
       // bridge tools advertised on every Claude session, paying the
       // catalog token cost for a feature it never opted into. The
-      // CLI call is idempotent and best-effort - cheap when nothing is
+      // command is idempotent and best-effort - cheap when nothing is
       // registered, no-op if Claude CLI is missing.
-      void uninstallChannel(this.logger);
+      void vscode.commands.executeCommand("wat321.bridge.uninstallUnified");
     }
     this.applyDefaultWaitModeSetting();
   }
@@ -305,7 +304,7 @@ class EpicHandshakeTier {
   async resetCleanup(): Promise<void> {
     await this.stopEnabled();
     try {
-      await uninstallChannel(this.logger);
+      await vscode.commands.executeCommand("wat321.bridge.uninstallUnified");
     } catch {
       // best-effort - reset must not fail if CLI removal glitches
     }
@@ -347,7 +346,7 @@ class EpicHandshakeTier {
     const cfg = vscode.workspace.getConfiguration("wat321");
     const claudeOn = cfg.get<boolean>(SETTING.enableClaude, true) === true;
     const codexOn = cfg.get<boolean>(SETTING.enableCodex, true) === true;
-    const openCodeOn = cfg.get<boolean>(SETTING.enableOpenCode, false) === true;
+    const openCodeOn = cfg.get<boolean>(SETTING.enableOpenCode, true) === true;
     return claudeOn && (codexOn || openCodeOn);
   }
 
@@ -441,12 +440,11 @@ class EpicHandshakeTier {
         }
 
         progress.report({ message: "registering bridge channel..." });
-        // Sweep any stale `wat321` channel registration left over from
-        // a previous EH-only install path before the unified bridge
-        // takes over the same MCP entry name. uninstallChannel is
-        // idempotent so a missing entry is silently absorbed.
-        await uninstallChannel(this.logger);
         try {
+          // installUnifiedBridge sweeps every legacy `wat321*` MCP
+          // entry (`LEGACY_MCP_NAMES`) before adding the fresh
+          // registration, so a stale registration from a pre-1.5.0
+          // install path is reconciled in the same step.
           await vscode.commands.executeCommand("wat321.bridge.installUnified");
         } catch (err) {
           await this.unflipAndWarn(
@@ -487,12 +485,10 @@ class EpicHandshakeTier {
 
   private async disableFlow(): Promise<void> {
     await this.stopEnabled();
-    // EH is the single switch now - disabling sweeps the unified
-    // bridge MCP entry (the only registration in play) AND any stale
-    // legacy `wat321` channel that might have been left over from
-    // pre-1.4.x installs. Both removes are idempotent so a missing
-    // entry is silently absorbed.
-    await uninstallChannel(this.logger);
+    // EH is the single switch now - the unified `wat321` MCP entry
+    // is the only registration in play, and uninstallUnifiedBridge
+    // sweeps both user and project scope on its own. Idempotent so a
+    // missing entry is silently absorbed.
     try {
       await vscode.commands.executeCommand("wat321.bridge.uninstallUnified");
     } catch {
@@ -512,20 +508,19 @@ class EpicHandshakeTier {
     const ws =
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
     this.logger.info(`startEnabled workspace=${ws}`);
-    // Refresh the bundled channel.mjs on every activate. Without this
-    // the extension upgrade path leaves a stale channel.mjs on disk -
-    // the script is only re-extracted during the Epic Handshake
-    // enable-flow, so if the user already had EH enabled and just
-    // reinstalled the vsix, new Claude sessions would still spawn
-    // the old channel.mjs. Idempotent: writes are the same bytes
-    // across concurrent VS Code instances. Best-effort: failure to
-    // refresh leaves whatever is already on disk, which is no worse
-    // than today.
+    // Refresh stage-clipboard.mjs on every activate. The script is
+    // invoked by Claude via Bash (absolute path under
+    // ~/.wat321/epic-handshake/bin/) when staging clipboard images
+    // for bridge prompts; without this refresh, an extension upgrade
+    // would leave the old helper on disk and Claude sessions would
+    // run stale code. Idempotent: writes are the same bytes across
+    // concurrent VS Code instances. Best-effort: failure leaves
+    // whatever is already on disk, which is no worse than today.
     try {
-      extractChannelScript(this.context);
+      extractStageClipboardScript(this.context);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`channel.mjs refresh on activate failed: ${msg}`);
+      this.logger.warn(`stage-clipboard.mjs refresh on activate failed: ${msg}`);
     }
     if (this.dispatcher !== null) return;
     this.dispatcher = new CodexDispatcher(ws, this.logger);

@@ -3,16 +3,17 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
- * Reader for the per-workspace `wait-status.<wsHash>.json` sidecar that
- * `bin/channel.mjs` writes whenever a sync `reply` enters its blocking
- * wait loop. Surfaces the wait budget so the Claude session-tokens
- * tooltip can render a "Waiting on Codex: Ns" line without the widget
- * having to import from the bridge bin.
+ * Reader for the per-workspace `wait-status.<wsHash>.json` sidecar
+ * that the unified MCP server's `WAT321_MCP_SERVER/bin/codex.mjs`
+ * writes whenever a sync `wat321_ask` enters its blocking poll loop.
+ * Surfaces the wait budget so the Claude session-tokens tooltip can
+ * render a "Waiting on Codex: Ns" line without the widget having to
+ * import from the bridge bin.
  *
- * Read-only: the bin owns the write/clear lifecycle. A stale file
- * (channel.mjs crashed mid-wait without clearing) is filtered out by
- * the budget-elapsed check inside `readWaitStatus` so the tooltip
- * never sticks on a phantom wait.
+ * Read-only: the MCP server owns the write/clear lifecycle. A stale
+ * file (the bridge process crashed mid-wait without clearing) is
+ * filtered out by the budget-elapsed check inside `readWaitStatus`
+ * so the tooltip never sticks on a phantom wait.
  */
 
 const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
