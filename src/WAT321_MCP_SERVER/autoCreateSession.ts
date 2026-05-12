@@ -110,7 +110,7 @@ async function waitForOpencodeServe(): Promise<OpenCodeRoutesConfigSnapshot | nu
 /** Run the auto-create flow. Idempotent. Best-effort. */
 export async function ensureOpenCodeS1(): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
-  const mbEnabled = config.get<boolean>(SETTING.enableOpenCode, false);
+  const mbEnabled = config.get<boolean>(SETTING.enableOpenCode, true);
   if (!mbEnabled) return;
 
   const aliases = readAliases(ALIAS_PATH);

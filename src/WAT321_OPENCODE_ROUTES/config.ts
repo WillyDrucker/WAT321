@@ -70,13 +70,6 @@ export interface OpenCodeRoutesConfig {
    * otherwise. The bridge bin reads this to decide whether session-
    * attached dispatches can route. */
   openCodeServerUrl: string;
-
-  /** When true, dispatch.mjs prepends a short tool-use hint to every
-   * ask prompt to bias broad / opinion / current-events questions
-   * toward `webfetch` instead of training-data answers. Default true.
-   * The wrap is per-call; the original prompt sent by the user is
-   * unchanged in the visible reply. */
-  toolUseHint: boolean;
 }
 
 /** Read settings + preferences + SecretStorage and produce a merged
@@ -93,8 +86,7 @@ export async function readConfigFromSettings(
   managedOpenCodeUrl = ""
 ): Promise<OpenCodeRoutesConfig> {
   const cfg = vscode.workspace.getConfiguration("wat321");
-  const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
-  const toolUseHint = cfg.get<boolean>(SETTING.openCodeToolUseHint, true);
+  const enabled = cfg.get<boolean>(SETTING.enableOpenCode, true);
   const localEndpoint = cfg
     .get<string>(SETTING.localEndpoint, "")
     .trim()
@@ -160,7 +152,6 @@ export async function readConfigFromSettings(
     instances,
     activeInstanceId,
     openCodeServerUrl,
-    toolUseHint,
   };
 }
 

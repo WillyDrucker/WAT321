@@ -198,19 +198,19 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     // reset-to-schema-default. Reset is the user's "something is wrong,
     // give me a clean slate" signal; both bridges should be off after
     // it, requiring an explicit opt-in to re-enable. Epic Handshake's
-    // schema default is already false (so undefined would also work),
-    // but OpenCode Routes defaults to true and would auto-re-enable on
-    // reset without the explicit false. Reset only fires from user-
+    // schema default is false so undefined would also work; explicit
+    // false makes the intent unambiguous. Reset only fires from user-
     // invoked paths (command, checkbox, click menu) - never at activate
-    // - so this never accidentally disables a working bridge.
+    // - so this never accidentally disables a working bridge. OpenCode
+    // clears to undefined so the schema default (true) takes effect -
+    // OpenCode is enabled-by-default and reset should respect that.
     updateSettingAllScopes(SETTING.epicHandshakeEnabled, false),
     updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexToasts, undefined),
     // Legacy: epicHandshake.defaultWaitMode removed in v1.4.1. Sweep
     // any stale value at every scope so reset-to-defaults still
     // strips it for users upgrading from <=1.4.0.
     updateSettingAllScopes("epicHandshake.defaultWaitMode", undefined),
-    updateSettingAllScopes(SETTING.enableOpenCode, false),
-    updateSettingAllScopes(SETTING.openCodeToolUseHint, undefined),
+    updateSettingAllScopes(SETTING.enableOpenCode, undefined),
     updateSettingAllScopes(SETTING.localEndpoint, undefined),
     // Legacy: modelBridge.enabled / modelBridge.localEndpoint renamed
     // in v1.4.4 to enableOpenCode / localEndpoint. Sweep the old keys
