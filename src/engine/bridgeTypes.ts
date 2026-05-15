@@ -25,11 +25,18 @@ export type BridgeStage =
 
 /** Minimal heartbeat info the snapshot exposes. The full `TurnHeartbeat`
  * type lives inside the EH tier; status-bar widgets only need
- * `turnStartedAt` to compute ceremony elapsed-since-start, so the
- * structural subset stays in engine and the wider type stays where its
- * fields are produced. */
+ * `turnStartedAt` to compute ceremony elapsed-since-start plus
+ * `target` to suppress their debug ceremony on off-target dispatches,
+ * so the structural subset stays in engine and the wider type stays
+ * where its fields are produced. */
 export interface BridgeHeartbeatInfo {
   turnStartedAt?: number;
+  /** Backend producing this heartbeat. Lets a session-tokens widget
+   * filter ceremony / stage-driven animations to its own provider so
+   * the Codex widget stops playing `debug-disconnect`/`debug-connected`
+   * during a non-Codex (Big Pickle / Local LLM) dispatch. Optional for
+   * legacy heartbeat files that pre-date the unified writer. */
+  target?: "codex" | "opencode" | "local";
 }
 
 /** Active wait mode at snapshot time. Drives downstream widget
@@ -50,12 +57,15 @@ export type CodexEffortOverride = "low" | "medium" | "high" | "xhigh" | null;
 /** Wait-budget surface for the in-flight bridge dispatch. Populated
  * when `channel.mjs` is blocking on a Codex reply. The Claude session-
  * tokens tooltip reads `timeoutSec` to render a "Waiting on Codex: Ns"
- * line so the user knows how long Claude will hold for. Null when no
- * wait is in flight. */
+ * line so the user knows how long Claude will hold for. `mode`
+ * distinguishes sync (fixed budget) from adaptive (extends while the
+ * dispatcher heartbeat stays fresh) so the tooltip can render the
+ * right wait shape. Null when no wait is in flight. */
 export interface BridgeWaitInfo {
   target: "codex";
   timeoutSec: number;
   startedAt: number;
+  mode: "sync" | "adaptive";
 }
 
 export interface BridgeStageSnapshot {

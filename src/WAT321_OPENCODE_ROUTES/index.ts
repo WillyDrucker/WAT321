@@ -1,12 +1,14 @@
 import * as vscode from "vscode";
+import { OutboundWatcher } from "../engine/dispatcher";
 import { SETTING } from "../engine/settingsKeys";
 import {
   readConfigFromSettings,
   writeConfigFile,
 } from "./config";
 import { OPENCODE_ROUTES_DIR } from "./constants";
-import { createOpenCodeRoutesLogger } from "./outputChannel";
 import { createOpenCodeManager } from "./harness";
+import { createOpenCodeDispatcher } from "./openCodeDispatcher";
+import { createOpenCodeRoutesLogger } from "./outputChannel";
 import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
 import { createOpenCodeRoutesStatusBarItem } from "./statusBarItem";
 import { pickActiveInstance } from "./statusBarMenu";
@@ -46,6 +48,33 @@ export function activateOpenCodeRoutes(
 
   const openCodeManager = createOpenCodeManager(logger);
   context.subscriptions.push({ dispose: () => void openCodeManager.dispose() });
+
+  // OutboundWatcher + per-target OpenCodeDispatcher. The watcher
+  // fs-watches `<bridgeStateDir>/dispatch/<target>/` for outbound
+  // envelopes written by the MCP server's fire-and-forget path and
+  // hands each to the matching dispatcher; the dispatcher makes the
+  // actual HTTP/SSE call to opencode serve (or anonymous Zen) and
+  // returns a `DispatchResult`. The engine writes the inbound reply
+  // envelope so `wat321_bridge()` picks it up on next drain.
+  //
+  // Graceful shutdown happens through `OutboundWatcher.dispose()`:
+  // it aborts every in-flight dispatch's signal, the dispatchers
+  // propagate to their AbortControllers, and the watcher deposits
+  // synthetic "cancelled by shutdown" inbound envelopes so a user
+  // reopening VS Code sees a clear outcome instead of pending work
+  // ghosting forever.
+  const outboundWatcher = new OutboundWatcher();
+  const opencodeDispatcher = createOpenCodeDispatcher("opencode");
+  const localDispatcher = createOpenCodeDispatcher("local");
+  outboundWatcher.register(opencodeDispatcher);
+  outboundWatcher.register(localDispatcher);
+  outboundWatcher.start();
+  context.subscriptions.push({
+    dispose: () => {
+      void outboundWatcher.dispose();
+    },
+  });
+  context.subscriptions.push(opencodeDispatcher, localDispatcher);
 
   // Activate-time `applyCurrentConfig` can resolve `reconcile` with
   // "" (first-spawn failure or an input race) and write config.json
