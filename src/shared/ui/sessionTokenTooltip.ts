@@ -86,6 +86,13 @@ export interface SessionTokenTooltipInput {
    * each widget render cycle so the read refreshes naturally without
    * needing a live countdown. Null when no bridge dispatch is blocking. */
   bridgeWaitTimeoutSec?: number | null;
+  /** Claude-only: which wait mode is driving the in-flight dispatch.
+   * `"adaptive"` renders a different wait line ("Adaptive wait on
+   * Codex (extends while making progress)") because adaptive has no
+   * fixed deadline - showing a fixed seconds budget would mislead.
+   * Defaults to `"sync"` when omitted so older callers keep the
+   * existing "Waiting on Codex: Ns" line. */
+  bridgeWaitMode?: "sync" | "adaptive";
 }
 
 export function buildSessionTokenTooltip(
@@ -108,6 +115,7 @@ export function buildSessionTokenTooltip(
     codexEffort,
     bridgeActive = false,
     bridgeWaitTimeoutSec = null,
+    bridgeWaitMode = "sync",
   } = input;
 
   const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
@@ -173,12 +181,24 @@ export function buildSessionTokenTooltip(
   md.appendMarkdown(`${bar} ${formatPct(pctUsed)} used\n\n`);
 
   // Claude-only: while a Claude-to-Codex bridge dispatch is blocking,
-  // surface the wait budget so the user knows how long Claude will
-  // hold before timing out. Static value - VS Code rebuilds the
-  // tooltip on each widget render cycle so the line refreshes on
-  // re-hover without needing a live countdown.
+  // surface the wait shape so the user knows whether Claude is on a
+  // fixed budget (sync) or extending while Codex makes progress
+  // (adaptive). Static value - VS Code rebuilds the tooltip on each
+  // widget render cycle so the line refreshes on re-hover without
+  // needing a live countdown. Adaptive intentionally omits a numeric
+  // budget because its useful "expected to finish by" answer is "as
+  // long as the dispatcher keeps refreshing its heartbeat sidecar".
+  // Adaptive does have a 30-minute hard ceiling enforced by the MCP
+  // server and dispatcher, but surfacing that as a countdown reads
+  // as the wrong signal - users expect adaptive to "just work".
   if (provider === "Claude" && typeof bridgeWaitTimeoutSec === "number") {
-    md.appendMarkdown(`Waiting on Codex: ${bridgeWaitTimeoutSec} seconds\n\n`);
+    if (bridgeWaitMode === "adaptive") {
+      md.appendMarkdown(
+        `Adaptive wait on Codex (extends while making progress)\n\n`
+      );
+    } else {
+      md.appendMarkdown(`Waiting on Codex: ${bridgeWaitTimeoutSec} seconds\n\n`);
+    }
   }
   // Codex mid-turn richness. Only renders when (1) the Epic Handshake
   // bridge is actively driving this Codex session, (2) a turn is in

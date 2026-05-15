@@ -307,7 +307,14 @@ export function createOpenCodeRoutesStatusBarItem(
       }
       return;
     }
-    const active = activeInstanceFrom(snap);
+    // In-flight heartbeat's instance overrides `last-used.json` since
+    // `last-used.json` only flips on success at dispatch end. Falls
+    // back to `activeInstanceFrom` between dispatches.
+    const liveHeartbeat = readHeartbeat();
+    const liveInstance = liveHeartbeat
+      ? snap.instances.find((i) => i.id === liveHeartbeat.instanceId) ?? null
+      : null;
+    const active = liveInstance ?? activeInstanceFrom(snap);
     if (!active) {
       if (lastText !== undefined) {
         item.hide();
@@ -388,7 +395,9 @@ export function createOpenCodeRoutesStatusBarItem(
         activeTotalTokens > 0 ? ` ${formatTokens(activeTotalTokens)}` : "";
     }
 
-    const heartbeat = readHeartbeat();
+    // Reuse the top-of-refresh read; avoids a mid-write race between
+    // two reads in the same tick.
+    const heartbeat = liveHeartbeat;
     let text: string;
     let tooltipSig: string;
     let tooltip: vscode.MarkdownString;
@@ -421,20 +430,19 @@ export function createOpenCodeRoutesStatusBarItem(
         const oneHz = Math.floor(Date.now() / 1000) % 2 === 0;
         const icon = oneHz ? "$(comment)" : "$(comment-discussion-quote)";
         const alias = heartbeat.alias || idleAlias;
-        // In-flight status text. Resolution order:
-        //   1. Cumulative session tokens + percentage (matches the
-        //      idle vocabulary AND the tooltip's 📁 line). Used when
-        //      the session has any prior assistant turn with output -
-        //      the poller has populated the snapshot.
-        //   2. Live per-turn token count from the heartbeat. Used on
-        //      fresh sessions before the first turn lands or when the
-        //      session-tokens poller has not yet cached a value. The
-        //      char-count proxy from the SSE tap gives the user a
-        //      moving number rather than a static elapsed-seconds
-        //      counter while the model generates.
-        //   3. Elapsed seconds fallback. Used when neither token
-        //      source has produced a number yet (very early in a
-        //      cold-session dispatch).
+        // In-flight resolution: project the current turn on top of the
+        // last completed turn's cumulative. OpenCode's `/session/<id>
+        // /message` only surfaces the assistant turn after completion,
+        // so `sessionTokens.contextUsed` is frozen mid-dispatch.
+        // `liveTokens` from the heartbeat IS updating continuously
+        // (~4Hz from the SSE / poll tap). Adding the two gives a
+        // smooth count growth during dispatch with the session percent
+        // remaining accurate against the context window. Post-
+        // completion the heartbeat clears, the session poller picks
+        // up the new cumulative on its next cycle, and the displayed
+        // count settles from "projected" to "actual" (small under-
+        // count delta because liveTokens approximates output-only,
+        // missing the input tokens for this turn - usually 1-3%).
         const liveTokens =
           typeof heartbeat.tokens === "number" ? heartbeat.tokens : 0;
         const rawRate =
@@ -444,11 +452,27 @@ export function createOpenCodeRoutesStatusBarItem(
           .getConfiguration("wat321")
           .get<boolean>(SETTING.enableTokensPerSecondCounters, false);
         const tpsLiveSuffix = tpsEnabled && throttledRate > 0 ? ` @ ${throttledRate}/s` : "";
+        const projectedSuffix = (() => {
+          if (sessionTokens) {
+            const projectedUsed = sessionTokens.contextUsed + liveTokens;
+            const pctSuffix =
+              sessionTokens.contextWindow !== null && sessionTokens.contextWindow > 0
+                ? ` ${formatPct(
+                    Math.min(
+                      100,
+                      Math.round((projectedUsed / sessionTokens.contextWindow) * 100)
+                    )
+                  )}`
+                : "";
+            return ` ${formatTokens(projectedUsed)}${pctSuffix}`;
+          }
+          return sessionTokensSuffix;
+        })();
         let stat: string;
-        if (sessionTokensSuffix.length > 0) {
-          stat = `${sessionTokensSuffix.trim()}${tpsLiveSuffix}`;
+        if (projectedSuffix.length > 0) {
+          stat = `${projectedSuffix.trim()}${tpsLiveSuffix}`;
         } else if (liveTokens > 0) {
-          stat = `${liveTokens}t${tpsLiveSuffix}`;
+          stat = `${formatTokens(liveTokens)}t${tpsLiveSuffix}`;
         } else {
           stat = `${elapsedSec}s`;
         }

@@ -364,7 +364,21 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
       );
       const turnInProgress =
         data.turnState === "user" || data.turnState === "assistant-pending";
-      if (turnInProgress) return true;
+      // PID + mtime backstop. Without it, a stale `assistant-pending`
+      // classification (auto-compact summary the parser misreads as
+      // mid-turn, partial entry from a Claude API error, cold launch
+      // with the prior session's tail unchanged) keeps the ticker
+      // ticking forever. Matches the guard in currentPrefix() so the
+      // visible glyph and the ticker liveness agree on idle vs active.
+      // A new prompt landing later still triggers update() ->
+      // ensureTicker() to restart, so this is a self-healing
+      // suspension, not a permanent shutdown.
+      if (turnInProgress) {
+        const pidAlive = data.pid !== undefined && isPidAlive(data.pid);
+        const mtimeFreshForTurn =
+          Date.now() - data.transcriptMtimeMs < this.descriptor.activeThresholdMs;
+        if (pidAlive || mtimeFreshForTurn) return true;
+      }
       const mtimeFresh =
         Date.now() - data.transcriptMtimeMs < this.descriptor.activeThresholdMs;
       if (mtimeFresh) return true;
@@ -460,7 +474,20 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
       const tick = Math.floor(now / 1000) % 2;
       return tick === 0 ? "$(blank)" : "$(claude)";
     }
-    if (snapshot.phase !== "idle" && !claudeBypassesBridge) {
+    // Codex widget suppresses every bridge-driven animation (ceremony,
+    // stage 1 fallback, post-walk handoff) when the active bridge
+    // dispatch is targeted at OpenCode / Local LLM. The Codex side is
+    // doing nothing during a Big Pickle FF dispatch - playing the
+    // debug-disconnect / debug-connected ceremony on that widget reads
+    // as "Codex is reconnecting" when nothing is happening. Missing
+    // target on the heartbeat (legacy files / pre-target-plumbing)
+    // assumes codex, matching prior behavior.
+    const heartbeatTarget = snapshot.heartbeat?.target;
+    const codexOffTarget =
+      d.provider === "Codex" &&
+      heartbeatTarget !== undefined &&
+      heartbeatTarget !== "codex";
+    if (snapshot.phase !== "idle" && !claudeBypassesBridge && !codexOffTarget) {
       if (snapshot.phase === "pre-ceremony") {
         const tick = Math.floor(now / 1000) % 2;
         return tick === 0 ? "$(blank)" : d.idlePrefix;
@@ -601,6 +628,10 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
             d.provider === "Claude"
               ? bridgeSnapshot.waitInfo?.timeoutSec ?? null
               : null,
+          bridgeWaitMode:
+            d.provider === "Claude"
+              ? bridgeSnapshot.waitInfo?.mode ?? "sync"
+              : "sync",
         });
         this.item.show();
         return;

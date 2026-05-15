@@ -287,7 +287,7 @@ export function createEpicHandshakeStatusBarItem(
     // walker, the latch, and the synthetic post-heartbeat-cleanup
     // continuation. Standard and Fire-and-Forget modes skip the
     // numbered-stage override so existing visuals stay unchanged.
-    const adaptive = isAdaptive();
+    const adaptive = opts.workspacePath ? isAdaptive(opts.workspacePath) : false;
     const walkerActive = adaptive && snapshot.latchedStage !== null;
 
     // Walker-end transition: arms the delivered-flash on the falling
