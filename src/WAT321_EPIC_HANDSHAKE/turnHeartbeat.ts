@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { EPIC_HANDSHAKE_DIR } from "./constants";
+import type { WaitMode } from "./waitMode";
 
 /**
  * Reader for the per-turn heartbeat file the dispatcher writes on
@@ -35,8 +36,18 @@ function isStage(value: unknown): value is Stage {
   return typeof value === "string" && VALID_STAGES.has(value as Stage);
 }
 
+export type BridgeTarget = "codex" | "opencode" | "local";
+
 export interface TurnHeartbeat {
   envelopeId: string;
+  /** Backend that produced this heartbeat. Codex / OpenCode / Local
+   * each write their own heartbeats; the session-token widgets read
+   * this to skip the debug-connect ceremony for off-target dispatches
+   * (the Codex widget should NOT animate when a Big Pickle FF call
+   * is in flight). Optional for back-compat with older heartbeat
+   * files that predate the unified engine writer - missing = "codex"
+   * (the only writer at the time those files were produced). */
+  target?: BridgeTarget;
   workspacePath: string;
   workspaceHash: string;
   stage: Stage;
@@ -51,6 +62,13 @@ export interface TurnHeartbeat {
    * "wait time" counter that ticks up regardless of which stage is
    * active. Set when the dispatcher writes the very first heartbeat. */
   turnStartedAt?: number;
+  /** Wait mode the dispatcher is running this turn under. Drives the
+   * Claude session-tokens widget animation gate (FF bypasses the
+   * bridge ceremony). Without carrying this on the heartbeat the
+   * widget can only read the sticky flag, which lags behind per-call
+   * args passed to `wat321_ask`. Optional for back-compat with older
+   * dispatchers; absent means fall back to the flag. */
+  waitMode?: WaitMode;
 }
 
 const HEARTBEAT_STALENESS_MS = 120_000;
@@ -94,10 +112,27 @@ export function readNewestHeartbeat(wsHash: string | null): TurnHeartbeat | null
         continue;
       }
       if (parsed.workspaceHash !== wsHash) continue;
-      if (typeof parsed.envelopeId !== "string") continue;
+      // Engine-tier dispatchers (non-Codex) write the per-turn id as
+      // `dispatchId`; the Codex dispatcher (which predates the unified
+      // engine) writes it as `envelopeId`. Both name the same UUID -
+      // accept either so the bridge stage coordinator sees every
+      // backend's heartbeat through a single reader.
+      const heartbeatId =
+        typeof parsed.envelopeId === "string"
+          ? parsed.envelopeId
+          : typeof (parsed as { dispatchId?: unknown }).dispatchId === "string"
+            ? ((parsed as { dispatchId: string }).dispatchId)
+            : null;
+      if (heartbeatId === null) continue;
       if (!isStage(parsed.stage)) continue;
       const normalized: TurnHeartbeat = {
-        envelopeId: parsed.envelopeId,
+        envelopeId: heartbeatId,
+        target:
+          parsed.target === "opencode" ||
+          parsed.target === "local" ||
+          parsed.target === "codex"
+            ? parsed.target
+            : undefined,
         workspacePath: parsed.workspacePath ?? "",
         workspaceHash: parsed.workspaceHash,
         stage: parsed.stage,
@@ -116,6 +151,12 @@ export function readNewestHeartbeat(wsHash: string | null): TurnHeartbeat | null
         turnStartedAt:
           typeof parsed.turnStartedAt === "number"
             ? parsed.turnStartedAt
+            : undefined,
+        waitMode:
+          parsed.waitMode === "standard" ||
+          parsed.waitMode === "adaptive" ||
+          parsed.waitMode === "fire-and-forget"
+            ? parsed.waitMode
             : undefined,
       };
       if (!newest || mtime > newest.mtime) {

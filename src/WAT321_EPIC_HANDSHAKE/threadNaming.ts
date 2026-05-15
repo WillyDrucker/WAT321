@@ -34,20 +34,22 @@ export function bridgeThreadNamePattern(workspacePath: string): RegExp {
   return new RegExp(`^${escaped} Epic Handshake Claude-to-Codex S(\\d+)$`);
 }
 
-/** Scan Codex's `~/.codex/session_index.jsonl` for any existing
- * threads whose `thread_name` matches our bridge naming pattern
- * for this workspace. Returns the max `S<N>` seen, or 0 if none.
+/** Scan Codex's `~/.codex/session_index.jsonl` for every existing
+ * thread whose `thread_name` matches our bridge naming pattern for
+ * this workspace and return the set of session-counter integers
+ * currently in use. Read-only - we never modify Codex's state files.
  *
- * Used to pick a collision-free counter even when the user has
- * deleted sessions externally (which doesn't touch our state) or
- * manually renamed things. Read-only - we never modify Codex's
- * own state files. */
-export function maxExistingSessionCounter(workspacePath: string): number {
+ * Used by `nextCollisionFreeCounter` to gap-fill freed numbers. If
+ * Codex hasn't created its index yet (first-ever launch) or the file
+ * is unreadable, returns an empty set so the counter starts at 1. */
+export function collectExistingSessionCounters(
+  workspacePath: string
+): Set<number> {
   const pattern = bridgeThreadNamePattern(workspacePath);
   const indexPath = join(homedir(), ".codex", "session_index.jsonl");
-  if (!existsSync(indexPath)) return 0;
+  const taken = new Set<number>();
+  if (!existsSync(indexPath)) return taken;
 
-  let maxSeen = 0;
   try {
     const raw = readFileSync(indexPath, "utf8");
     for (const line of raw.split("\n")) {
@@ -57,26 +59,35 @@ export function maxExistingSessionCounter(workspacePath: string): number {
         const m = pattern.exec(entry.thread_name ?? "");
         if (m !== null) {
           const n = parseInt(m[1], 10);
-          if (Number.isFinite(n) && n > maxSeen) maxSeen = n;
+          if (Number.isFinite(n) && n > 0) taken.add(n);
         }
       } catch {
         // skip malformed line
       }
     }
   } catch {
-    // read error - fall through with maxSeen=0
+    // read error - fall through with empty set
   }
-  return maxSeen;
+  return taken;
 }
 
 /** Pick the next collision-free session counter for this workspace.
- * Returns max(our current counter, maxExistingSessionCounter + 1).
- * Guarantees no name collision in the Codex TUI even if the user
- * has deleted sessions externally without using our Reset command. */
+ * Gap-fills: returns the lowest positive integer NOT currently in
+ * the workspace's set of existing thread names. Matches the policy
+ * the OpenCode alias path uses (`aliases.mjs:nextAlias`), so deleting
+ * threads in Codex's TUI naturally recycles S1, S2, ... rather than
+ * climbing monotonically forever.
+ *
+ * `currentCounter` is kept on the call signature for back-compat but
+ * ignored - the canonical source is now Codex's session_index. The
+ * stored counter on `bridge-thread.<wsHash>.json` is a hint only;
+ * this function trusts what's actually present in the TUI. */
 export function nextCollisionFreeCounter(
   workspacePath: string,
-  currentCounter: number
+  _currentCounter: number
 ): number {
-  const maxSeen = maxExistingSessionCounter(workspacePath);
-  return Math.max(currentCounter, maxSeen + 1);
+  const taken = collectExistingSessionCounters(workspacePath);
+  let n = 1;
+  while (taken.has(n)) n++;
+  return n;
 }

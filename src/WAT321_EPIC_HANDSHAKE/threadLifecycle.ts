@@ -86,14 +86,22 @@ export async function spawnFreshThread(opts: {
   return { threadId, record: updated };
 }
 
-/** Null out threadId and bump counter so the next call creates a
- * fresh S<N+1>. Called on definitive "thread not found" or
+/** Null out threadId so the next call creates a fresh thread. Counter
+ * mirrors what `spawnFreshThread` will actually pick on the next
+ * dispatch (gap-fill, lowest unused S<n> in this workspace's pattern)
+ * so the menu label + tooltip read the same value the spawn will
+ * use. Without this, a rotation after threshold failures would bump
+ * the stored counter past freed slots and the menu would surface a
+ * stale "next" number. Called on definitive "thread not found" or
  * threshold-exceeded failures. */
-export function rotateThreadRecord(record: BridgeThreadRecord): BridgeThreadRecord {
+export function rotateThreadRecord(
+  record: BridgeThreadRecord,
+  workspacePath: string
+): BridgeThreadRecord {
   const next: BridgeThreadRecord = {
     ...record,
     threadId: null,
-    sessionCounter: record.sessionCounter + 1,
+    sessionCounter: nextCollisionFreeCounter(workspacePath, record.sessionCounter),
     lastResetAt: new Date().toISOString(),
     consecutiveFailures: 0,
     lastError: null,
