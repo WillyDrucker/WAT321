@@ -376,7 +376,7 @@ export class CodexDispatcher {
       this.logger.warn(
         `thread ${record.threadId} hit ${MAX_CONSECUTIVE_FAILURES} consecutive failures; rotating`
       );
-      record = rotateThreadRecord(record);
+      record = rotateThreadRecord(record, this.workspacePath);
     }
 
     let threadId = record.threadId;
@@ -428,7 +428,7 @@ export class CodexDispatcher {
         const msg = err instanceof Error ? err.message : String(err);
         if (cls === "rotate") {
           this.logger.warn(`resume failed (${msg}); thread unrecoverable, rotating`);
-          record = rotateThreadRecord(record);
+          record = rotateThreadRecord(record, this.workspacePath);
           const spawned = await spawnFreshThread({
             client,
             record,
@@ -466,7 +466,7 @@ export class CodexDispatcher {
         this.logger.warn(
           `runTurn rotate (${msg}); rotating + spawning fresh thread for retry`
         );
-        record = rotateThreadRecord(record);
+        record = rotateThreadRecord(record, this.workspacePath);
         const spawned = await spawnFreshThread({
           client,
           record,
@@ -575,12 +575,15 @@ export class CodexDispatcher {
     threadId: string,
     env: Envelope
   ): Promise<string> {
-    // Capture wait mode at dispatch time. Fire-and-Forget widens the
-    // monitor's hard cap + stall windows because Claude already returned
-    // from the MCP tool and no one is waiting. Wait mode is locked
-    // during in-flight turns (menu guard), so this snapshot holds for
-    // the full turn even if the user tries to flip mid-turn.
-    const waitMode = currentWaitMode();
+    // Wait mode resolution: prefer the envelope's `wait_mode` field,
+    // which the MCP caller (`codex.mjs:resolveMode`) locked in at
+    // dispatch time. This is the only place per-call args (the FF /
+    // adaptive params on `wat321_ask`) can reach the dispatcher; the
+    // sticky flag fallback is for back-compat with envelopes written
+    // by older MCP servers that did not emit the field. Wait mode is
+    // locked during in-flight turns (menu guard) so the snapshot
+    // holds for the full turn even if the user flips the toggle.
+    const waitMode = env.waitMode ?? currentWaitMode(this.workspacePath);
     const opts = {
       client,
       threadId,

@@ -190,6 +190,15 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   const currentRecord = ws ? loadBridgeThreadRecord(ws) : null;
   const hasError = (currentRecord?.consecutiveFailures ?? 0) > 0;
   const sessionCounter = currentRecord?.sessionCounter ?? 1;
+  // Only show MANAGE CODEX (S<n>) when an active session exists. After
+  // delete-all / reset the stored counter holds the projected-next for
+  // the upcoming spawn, but showing it as if it's already live confuses
+  // users who just cleared their sessions. Matches the submenu's
+  // "Created on next prompt to Codex" pattern in `menuPickers.ts` and
+  // mirrors how MANAGE OPENCODE / MANAGE LOCAL LLM omit an alias when
+  // no session is bound.
+  const hasActiveCodexSession =
+    currentRecord?.threadId !== null && currentRecord?.threadId !== undefined;
 
   const pauseItem = makePauseResumeItem(paused, opts.inFlight);
   const cancelItem = makeCancelItem(opts.inFlight);
@@ -207,7 +216,13 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
     action: "retrieve",
   };
 
-  const current = currentWaitMode();
+  // Normalize the read: `currentWaitMode` returns "standard" when
+  // neither flag exists on disk, but the menu only exposes ADAPTIVE
+  // and FIRE & FORGET. Display STANDARD as ADAPTIVE (the implicit
+  // default) so the user never sees an unselectable label, and the
+  // toggle on click resolves to FIRE & FORGET as expected.
+  const rawCurrent = ws ? currentWaitMode(ws) : "standard";
+  const current = rawCurrent === "standard" ? "adaptive" : rawCurrent;
   const next = nextWaitMode(current);
   // Wait mode locks while a turn is in flight. Switching mid-turn
   // would let the in-flight envelope's dispatcher flags go out of
@@ -234,7 +249,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
         };
 
   const sessionsItem: Item = {
-    label: `MANAGE CODEX (S${sessionCounter})`,
+    label: hasActiveCodexSession ? `MANAGE CODEX (S${sessionCounter})` : "MANAGE CODEX",
     description: "Switch, reset, delete, or change model settings.",
     iconPath: new vscode.ThemeIcon("wat321-square-info"),
     action: "manage-sessions",
@@ -460,11 +475,15 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       });
       break;
     case "wait-mode-toggle": {
-      // Three-way cycle: Standard -> Adaptive -> Fire-and-Forget ->
-      // Standard. No toast; the 2500ms bolt-square flash on the
-      // status bar is the visual confirmation regardless of which
-      // direction the cycle advanced. Flash flag is workspace-scoped
-      // so only THIS window flashes; sibling windows ignore.
+      // Binary toggle between Adaptive and Fire-and-Forget (see
+      // `nextWaitMode` in waitMode.ts). Standard mode is internal-only
+      // and unreachable from the menu - if currentWaitMode returns
+      // "standard" the toggle resolves to FF, and the next click
+      // re-grounds the workspace to Adaptive. No toast; the 2500ms
+      // bolt-square flash on the status bar is the visual confirmation
+      // regardless of which direction the toggle advanced. Flash flag
+      // is workspace-scoped so only THIS window flashes; sibling
+      // windows ignore.
       //
       // Race guard: a bridge turn may have started between menu
       // build and click. Re-check `isBridgeBusy` here and fall
@@ -477,7 +496,9 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
         );
         break;
       }
-      applyWaitMode(nextWaitMode(currentWaitMode()));
+      if (ctx.ws) {
+        applyWaitMode(nextWaitMode(currentWaitMode(ctx.ws)), ctx.ws);
+      }
       if (ctx.ws) {
         try {
           writeFileAtomic(

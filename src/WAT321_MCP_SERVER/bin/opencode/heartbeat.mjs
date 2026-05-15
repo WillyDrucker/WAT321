@@ -6,12 +6,72 @@ import {
   writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { WAT321_ROOT, workspaceId } from "../paths.mjs";
 import {
   HEARTBEAT_KEEPALIVE_MS,
   OPENCODE_ROUTES_DIR,
   OPENCODE_HEARTBEAT_PATH,
   OPENCODE_LAST_USED_PATH,
 } from "./common.mjs";
+
+/** Engine-tier heartbeat path that the bridge stage coordinator reads
+ * for the 5-stage glyph walker. Sync (MCP-runtime) dispatches now
+ * mirror the FF (extension-side) writes here so the bridge widget
+ * animates uniformly across adaptive / sync / FF instead of staying
+ * blank for sync calls. Per-dispatch filename; the coordinator
+ * filters by `workspaceHash` field, so colocating files for many
+ * workspaces in one dir is safe. */
+const EH_ROOT_DIR = join(WAT321_ROOT, "epic-handshake");
+function engineHeartbeatPath(dispatchId) {
+  return join(EH_ROOT_DIR, `turn-heartbeat.${dispatchId}.json`);
+}
+
+function writeEngineHeartbeat(payload) {
+  try {
+    if (!existsSync(EH_ROOT_DIR)) mkdirSync(EH_ROOT_DIR, { recursive: true });
+    const path = engineHeartbeatPath(payload.dispatchId);
+    const tmp = `${path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(payload, null, 2));
+    renameSync(tmp, path);
+  } catch {
+    // best-effort - widget falls back to idle on missing file
+  }
+}
+
+function deleteEngineHeartbeat(dispatchId) {
+  try {
+    const path = engineHeartbeatPath(dispatchId);
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    // best-effort
+  }
+}
+
+/** Drop the per-workspace `returning.<wsHash>.flag` for 3s so the
+ * bridge widget's stage 4 alternating frame flips from blank to
+ * left-arrow. Mirrors the Codex turnRunner's `writeReturningFlag` -
+ * sync MCP dispatches now play the same return ceremony Codex /
+ * FF non-Codex play. The unref'd timeout lets the MCP runtime exit
+ * without waiting on this cleanup. */
+function writeReturningFlag(wsHash) {
+  if (typeof wsHash !== "string" || wsHash.length === 0) return;
+  try {
+    if (!existsSync(EH_ROOT_DIR)) mkdirSync(EH_ROOT_DIR, { recursive: true });
+    const path = join(EH_ROOT_DIR, `returning.${wsHash}.flag`);
+    writeFileSync(path, new Date().toISOString());
+    const t = setTimeout(() => {
+      try {
+        if (existsSync(path)) unlinkSync(path);
+      } catch {
+        // best-effort
+      }
+    }, 3_000);
+    t.unref?.();
+  } catch {
+    // best-effort
+  }
+}
 
 /**
  * Cross-tier dispatch heartbeat. The OpenCode Routes widget + Epic Handshake widgets
@@ -50,7 +110,25 @@ function clearOpenCodeHeartbeat() {
   }
 }
 
+/** Skip writing last-used.json when meta.instanceId is missing or is
+ * a bare target keyword ("local" / "opencode" / "codex"). The widget's
+ * `activeInstanceFrom` resolves last-used by id against the catalog;
+ * a target-keyword id never matches an entry there and silently flips
+ * the widget back to `activeInstanceId` (typically Big Pickle), which
+ * the user reads as "I dispatched to Local LLM but the widget jumped
+ * back to Big Pickle". Skipping the write preserves whatever real
+ * last-used was there before, OR leaves the widget on activeInstanceId
+ * if nothing was ever set - either of which is a true outcome. */
+const TARGET_KEYWORDS = new Set(["local", "opencode", "codex"]);
+
 function writeOpenCodeLastUsed(meta) {
+  if (
+    typeof meta?.instanceId !== "string" ||
+    meta.instanceId.length === 0 ||
+    TARGET_KEYWORDS.has(meta.instanceId)
+  ) {
+    return;
+  }
   try {
     if (!existsSync(OPENCODE_ROUTES_DIR)) mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
     const payload = {
@@ -164,10 +242,36 @@ function makeTpsComputer() {
 
 export async function withOpenCodeHeartbeat(meta, runDispatch) {
   const startedAt = new Date().toISOString();
+  const startedAtMs = Date.now();
   const requestId = randomUUID();
   let tokens = 0;
   let tokensPerSec = 0;
   const computeTps = makeTpsComputer();
+
+  // Engine heartbeat lets the bridge stage coordinator animate the
+  // 5-stage glyph walker for SYNC (and adaptive-falls-through-to-sync)
+  // non-Codex dispatches. Previously only the FF path wrote engine
+  // heartbeats (extension-side OpenCodeDispatcher); sync dispatches
+  // here only wrote the OpenCode widget heartbeat, leaving the bridge
+  // widget blank. wsHash falls back to `workspaceId()` (which is
+  // already a hash of workspacePath; the extension installer injects
+  // it as `WAT321_WORKSPACE_ID`). Target defaults to "opencode" when
+  // meta.target isn't set so a legacy caller still emits a usable
+  // heartbeat - readers filter on workspaceHash first, so the wrong
+  // target value here just means the post-dispatch resource tooltip
+  // attributes the turn to the wrong backend, not a missed animation.
+  const wsHash =
+    typeof meta?.workspaceHash === "string" && meta.workspaceHash.length > 0
+      ? meta.workspaceHash
+      : workspaceId();
+  const target = meta?.target === "local" ? "local" : "opencode";
+  const waitMode =
+    meta?.waitMode === "standard" ||
+    meta?.waitMode === "adaptive" ||
+    meta?.waitMode === "fire-and-forget"
+      ? meta.waitMode
+      : undefined;
+  let currentStage = "dispatched";
 
   const writeBeat = () => {
     writeOpenCodeHeartbeat({
@@ -184,6 +288,19 @@ export async function withOpenCodeHeartbeat(meta, runDispatch) {
       currentPhase: "DISPATCH",
       phaseTrace: [],
     });
+    writeEngineHeartbeat({
+      dispatchId: requestId,
+      target,
+      workspacePath: "",
+      workspaceHash: wsHash,
+      stage: currentStage,
+      activeTool: null,
+      toolCallCount: 0,
+      elapsedMs: Date.now() - startedAtMs,
+      lastProgressAt: Date.now(),
+      turnStartedAt: startedAtMs,
+      waitMode,
+    });
   };
   // ~4 chars/token English approximation so the widget reads in the
   // same magnitude as Claude/Codex (which read real
@@ -193,6 +310,10 @@ export async function withOpenCodeHeartbeat(meta, runDispatch) {
     const approxTokens = Math.round(charCount / 4);
     tokens = approxTokens;
     tokensPerSec = Math.round(computeTps(Date.now(), approxTokens));
+    // First real progress = response is streaming back. Coordinator
+    // moves stage 1 (dispatched) -> stage 3 (working) target, walker
+    // min-holds carry it through stage 2 naturally.
+    if (currentStage === "dispatched") currentStage = "working";
     writeBeat();
   };
   writeBeat();
@@ -201,10 +322,19 @@ export async function withOpenCodeHeartbeat(meta, runDispatch) {
     const result = await runDispatch(updateProgress);
     if (result && result.ok !== false) {
       writeOpenCodeLastUsed(meta);
+      // Final stage push so the coordinator's walker advances to
+      // stage 5 (complete) via fast-walk instead of orphan-grace-
+      // dropping the latch at the last seen target. Returning flag
+      // is what flips stage 4's alternating glyph to the left-arrow
+      // "reply imminent" frame.
+      currentStage = "complete";
+      writeBeat();
+      writeReturningFlag(wsHash);
     }
     return result;
   } finally {
     clearInterval(interval);
     clearOpenCodeHeartbeat();
+    deleteEngineHeartbeat(requestId);
   }
 }

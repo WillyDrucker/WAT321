@@ -14,6 +14,15 @@ import { writeFileAtomic } from "../shared/fs/atomicWrite";
 
 export type EnvelopeAgent = "claude" | "codex";
 
+/** Per-call wait mode the MCP caller asked for. Carried in envelope
+ * frontmatter so the dispatcher honors the same mode the MCP server
+ * resolved (per-call args win over the sticky flag, but the
+ * dispatcher reads from disk where args are not visible without this
+ * field). Optional for back-compat: older envelopes without the field
+ * fall through to `currentWaitMode()` flag-based resolution on the
+ * dispatcher side. */
+export type EnvelopeWaitMode = "standard" | "adaptive" | "fire-and-forget";
+
 export interface Envelope {
   id: string;
   chainId: string;
@@ -27,6 +36,7 @@ export interface Envelope {
   createdAt: string;
   replyTo: string | null;
   title?: string;
+  waitMode?: EnvelopeWaitMode;
   body: string;
 }
 
@@ -53,6 +63,7 @@ export function serializeEnvelope(env: Envelope): string {
   lines.push(`created_at: ${env.createdAt}`);
   lines.push(`reply_to: ${env.replyTo === null ? "null" : env.replyTo}`);
   if (env.title) lines.push(`title: ${esc(env.title)}`);
+  if (env.waitMode) lines.push(`wait_mode: ${env.waitMode}`);
   lines.push("---");
   lines.push("");
   lines.push(env.body);
@@ -100,6 +111,14 @@ export function parseEnvelope(raw: string): Envelope | null {
     if (fields[k] === undefined || fields[k] === null) return null;
   }
 
+  const rawWaitMode = fields.wait_mode;
+  const waitMode: EnvelopeWaitMode | undefined =
+    rawWaitMode === "standard" ||
+    rawWaitMode === "adaptive" ||
+    rawWaitMode === "fire-and-forget"
+      ? rawWaitMode
+      : undefined;
+
   return {
     id: fields.id as string,
     chainId: fields.chain_id as string,
@@ -113,6 +132,7 @@ export function parseEnvelope(raw: string): Envelope | null {
     createdAt: fields.created_at as string,
     replyTo: fields.reply_to,
     title: (fields.title as string) || undefined,
+    waitMode,
     body,
   };
 }

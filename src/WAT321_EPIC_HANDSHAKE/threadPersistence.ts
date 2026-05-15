@@ -11,7 +11,7 @@
 
 export {
   bridgeThreadDisplayName,
-  maxExistingSessionCounter,
+  collectExistingSessionCounters,
   nextCollisionFreeCounter,
 } from "./threadNaming";
 export {

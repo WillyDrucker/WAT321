@@ -1,9 +1,13 @@
 import { existsSync, statSync, unlinkSync } from "node:fs";
-import { parseLastAssistantText } from "../shared/codex-rollout/assistantTextParser";
-import { extractCurrentTurn, parseStageInfo } from "../shared/codex-rollout/phaseParser";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { readTail } from "../shared/fs/fileReaders";
 import type { AppServerClient } from "./appServerClient";
+import {
+  recoverOrRejectViaRolloutPolling,
+  ROLLOUT_RECOVERY_FAST_WINDOW_MS,
+  ROLLOUT_RECOVERY_POLL_MS,
+  ROLLOUT_RECOVERY_WINDOW_MS,
+  tryRolloutRecovery,
+} from "./rolloutRecovery";
 import {
   readCodexEffortOverride,
   readCodexModelOverride,
@@ -44,25 +48,6 @@ import type { WaitMode } from "./waitMode";
  * the recovered text instead of the synthetic error reply.
  */
 
-/** Total wall-clock budget for rollout recovery after an interrupt.
- * Long bridge prompts (multi-thousand-token audits, deep code reads)
- * can need substantially longer than the original 3s flush window
- * before Codex commits its final assistant message, especially when
- * the interrupt arrives mid-stream. 30s is generous enough to catch
- * realistic post-interrupt flushes without keeping the bridge UI
- * frozen indefinitely on a turn that is genuinely stuck. */
-const ROLLOUT_RECOVERY_WINDOW_MS = 30_000;
-/** Tighter recovery window for `turn/completed` failure paths
- * (non-success status, empty items). The notification already arrived,
- * so any rollout-recovery either succeeds quickly or never will - long
- * polling adds latency without payoff. 5s catches the common "items
- * array missing but task_complete already on disk" race without
- * stretching the user's wait. */
-const ROLLOUT_RECOVERY_FAST_WINDOW_MS = 5_000;
-/** Poll cadence inside the recovery window. 1s balances reactivity
- * (recovery resolves within a second of Codex finishing its flush)
- * against I/O cost (one stat + tail read per poll, cheap). */
-const ROLLOUT_RECOVERY_POLL_MS = 1_000;
 
 interface AgentMessageDelta {
   itemId: string;
@@ -212,6 +197,11 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
         lastProgressAt: Date.now(),
         turnStartedAt,
         stageEnteredAt,
+        // Stamp the resolved wait mode so the BridgeStageCoordinator
+        // can drive `snapshot.waitMode` from the active turn instead
+        // of from the sticky flag files - per-call FF / adaptive
+        // would otherwise be invisible to the widget animation gate.
+        waitMode,
       });
       // best-effort - heartbeat loss just means channel.mjs uses its
       // fallback timeout
@@ -283,6 +273,13 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
     // 60-second default. Standard stays tight; Fire-and-Forget disables
     // timers entirely below.
     const ADAPTIVE_STALL_FLOOR_MS = 120_000;
+    // Adaptive's whole premise is "extend while making progress" - a
+    // flat 5-minute hard cap from the monitor would interrupt the
+    // underlying Codex turn well before the MCP-side adaptive ceiling
+    // (10-30 min) gives up. Match the MCP ceiling here so the two
+    // sides agree. Stall detection still fires earlier when the turn
+    // genuinely hangs; the hard cap is the upper-bound safety net.
+    const ADAPTIVE_HARD_CAP_MS = 30 * 60_000;
     const monitor = new TurnMonitor({
       resolveRolloutPath,
       logger,
@@ -292,6 +289,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       // the status-bar action if the turn truly goes off the rails.
       disableAllTimeouts: isFireAndForget,
       stallFloorMs: isAdaptive ? ADAPTIVE_STALL_FLOOR_MS : undefined,
+      hardCapMs: isAdaptive ? ADAPTIVE_HARD_CAP_MS : undefined,
       onProgress: (stage, info) => {
         // Monitor progress (heartbeat + rollout-poller observation)
         // is unambiguous proof the turn is happening. Set the gate
@@ -599,82 +597,3 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
   });
 }
 
-/** Read the rollout file and see if Codex finished writing this turn
- * even though the turn/completed notification never arrived. Codex can
- * write task_complete to disk seconds after our timeout fires when our
- * subscription has already been disposed, so the rollout is the source
- * of truth for "did the turn actually finish" once the notification
- * path has given up.
- *
- * Turn-scoping is load-bearing here. `parseStageInfo` and
- * `parseLastAssistantText` are both called on the current-turn slice
- * only. Without that, a failed current turn would happily "recover"
- * with stale assistant text from a prior completed turn in the same
- * rollout - a silent wrong-answer bug. */
-function tryRolloutRecovery(rolloutPath: string | null): string | null {
-  if (!rolloutPath) return null;
-  const tail = readTail(rolloutPath);
-  if (!tail) return null;
-  const scoped = extractCurrentTurn(tail);
-  const info = parseStageInfo(scoped);
-  if (info.stage !== "complete") return null;
-  const text = parseLastAssistantText(scoped);
-  if (!text || text.trim().length === 0) return null;
-  return text;
-}
-
-interface RecoveryPollOptions {
-  deadlineMs: number;
-  pollMs: number;
-  getRolloutPath: () => string | null;
-  isSettled: () => boolean;
-  /** Optional gate: only resolve with recovered text when it differs
-   * from a baseline captured before this turn dispatched. Without
-   * this gate, a thread that resumed an earlier completed turn would
-   * happily "recover" the prior turn's final answer when our turn
-   * never produced one. Treat undefined as "always fresh" so existing
-   * stall / hard-cap callers keep their pre-gate behavior unless they
-   * opt in. */
-  isFreshText?: (text: string) => boolean;
-  /** Optional gate: refuse to resolve until our turn was observed
-   * starting (via `turn/started` or first delta). Same purpose as
-   * `isFreshText` but anchors on the RPC notifications instead of
-   * rollout content - belts and suspenders against transport-layer
-   * reorderings. Undefined = no constraint. */
-  requireTurnObserved?: () => boolean;
-  onRecovered: (text: string) => void;
-  onTimeout: () => void;
-}
-
-/** Poll the rollout for a final assistant message until either recovery
- * succeeds or the deadline elapses. Replaces the previous single-shot
- * setTimeout grace window: a long Codex reply that was mid-stream when
- * the interrupt fired can take longer than a fixed window to flush, and
- * a single short wait would miss it - producing a synthetic
- * "max turn duration" error reply when Codex actually had a real reply
- * one second later. The polling loop catches that late commit. */
-function recoverOrRejectViaRolloutPolling(opts: RecoveryPollOptions): void {
-  const startedAt = Date.now();
-  const tick = (): void => {
-    if (opts.isSettled()) return;
-    const recovered = tryRolloutRecovery(opts.getRolloutPath());
-    if (recovered !== null) {
-      const turnObserved = opts.requireTurnObserved?.() ?? true;
-      const fresh = opts.isFreshText?.(recovered) ?? true;
-      if (turnObserved && fresh) {
-        opts.onRecovered(recovered);
-        return;
-      }
-      // Recovery skipped: the rollout's "current turn" slice belongs
-      // to a prior turn that completed before our dispatch (seed text
-      // matches, or our turn never started). Keep polling - a fresh
-      // turn might still land before the deadline.
-    }
-    if (Date.now() - startedAt >= opts.deadlineMs) {
-      opts.onTimeout();
-      return;
-    }
-    setTimeout(tick, opts.pollMs);
-  };
-  setTimeout(tick, opts.pollMs);
-}

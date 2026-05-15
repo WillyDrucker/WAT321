@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { writeFileAtomic } from "../../fs/atomicWrite";
 
 /**
  * Read-only accessor for `~/.codex/models_cache.json`, the
@@ -206,72 +205,6 @@ function modelEntryToInfo(entry: ModelsCacheEntry): CodexModelInfo | null {
       )
       .map((e) => ({ effort: e.effort, description: e.description ?? "" })),
   };
-}
-
-/** Write a top-level string key to `~/.codex/config.toml`. Replaces the
- * line if the key already exists in the header (before any
- * `[section]` block); appends a new line above the first section
- * otherwise. Atomic via tmp + rename so a partial write never leaves
- * Codex with a torn config.
- *
- * Returns true on success. Returns false on rename failure (Windows
- * EBUSY when Codex itself has the file open is the realistic case);
- * the caller can surface a "try again with Codex idle" hint. */
-export function writeCodexConfigTopLevelKey(
-  key: string,
-  value: string
-): boolean {
-  const configPath = join(homedir(), ".codex", "config.toml");
-  let content = "";
-  if (existsSync(configPath)) {
-    try {
-      content = readFileSync(configPath, "utf8");
-    } catch {
-      return false;
-    }
-  }
-  const lines = content.length > 0 ? content.split("\n") : [];
-  // Quote the value as a basic TOML string. Escape backslash + quote.
-  const quoted = `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-  const newLine = `${key} = ${quoted}`;
-
-  // Locate the first `[section]` header - top-level keys must come before it.
-  let firstSection = lines.length;
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-      firstSection = i;
-      break;
-    }
-  }
-
-  // Replace existing line if present in the header range.
-  const keyRegex = new RegExp(`^${key}\\s*=`);
-  let replaced = false;
-  for (let i = 0; i < firstSection; i++) {
-    const trimmed = lines[i].trim();
-    if (trimmed.startsWith("#")) continue;
-    if (keyRegex.test(trimmed)) {
-      lines[i] = newLine;
-      replaced = true;
-      break;
-    }
-  }
-
-  if (!replaced) {
-    // Insert above the first section header. If the line right above
-    // the section is non-blank, add a blank separator first so the
-    // resulting file keeps a clean visual gap between top-level keys
-    // and the first table.
-    const insertAt = firstSection;
-    if (insertAt > 0 && lines[insertAt - 1].trim().length > 0) {
-      lines.splice(insertAt, 0, newLine, "");
-    } else {
-      lines.splice(insertAt, 0, newLine);
-    }
-  }
-
-  return writeFileAtomic(configPath, lines.join("\n"));
 }
 
 /** Pick a repair target for an invalid model slug. Priority:

@@ -32,19 +32,9 @@ import { CATALOG } from "./catalog";
 export const ZEN_MODEL_OUTPUT_FLOOR = 8192;
 
 /** Agent name dispatched against on every WAT321 bridge call.
- *
- * OpenCode's default `build` agent is a coding assistant whose system
- * prompt explicitly tells the model NOT to guess URLs unless the
- * question is for programming help. That's the regression source for
- * "ask the LLM about current events / best of right now" - the model
- * sees `webfetch` in the tool list but refuses to call it on non-coding
- * questions. The custom agent below replaces the coder framing with a
- * research-assistant framing and ONLY exposes `webfetch` so the model
- * can't be tempted into bash/edit/write paths irrelevant to Q&A.
- *
- * Same agent applies to Local LLM and Zen routes (Big Pickle, etc.) -
- * both flow through the same `/session/{id}/message` API and inherit
- * whichever agent the dispatcher names. */
+ * Replaces OpenCode's default `build` (coding-assistant) framing with
+ * a research-assistant framing that only exposes `webfetch`. Same
+ * agent serves Local LLM and Zen routes. */
 export const WAT321_RESEARCH_AGENT = "wat321-research";
 
 const RESEARCH_AGENT_PROMPT =

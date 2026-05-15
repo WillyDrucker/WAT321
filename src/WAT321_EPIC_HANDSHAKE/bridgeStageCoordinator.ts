@@ -6,6 +6,7 @@ import type {
   BridgeStage,
   BridgeStageReader,
   BridgeStageSnapshot,
+  BridgeWaitMode,
 } from "../engine/bridgeTypes";
 import type { EventHub } from "../engine/eventHub";
 import { returningFlagPath } from "./constants";
@@ -47,9 +48,10 @@ import { workspaceHash } from "../shared/workspaceHash";
  *
  *   1 dispatched   square-one   <-> arrow-right   outbound to Codex
  *     Codex side:  app-server child spawning OR thread/start +
- *                  turn/start being dialed in. Pre-warm at activate
- *                  collapses the spawn portion to zero on first
- *                  dispatch; without pre-warm this can run ~20s.
+ *                  turn/start being dialed in. First dispatch in a
+ *                  cold session can run ~20s while the app-server
+ *                  spawns; subsequent dispatches over the same
+ *                  connection move through this stage in <1s.
  *     Entry:       writeHeartbeat("dispatched") fires immediately
  *                  when turnRunner starts the turn.
  *     Exit:        observeRpcProgress("turn-started") on JSON-RPC
@@ -116,9 +118,11 @@ const STAGE_LATCH_MS: Record<BridgeStage, number> = {
  *
  * Stage 1 (dispatched) ceiling guards against codex app-server cold
  * start where neither `turn/started` RPC nor a rollout file exists
- * yet. Pre-warm at activate normally drops this to <2s, but the
- * 30s ceiling stays as a defensive net so the user always sees the
- * walker move past stage 1 on a turn that ultimately succeeds.
+ * yet. Cold first-dispatch can sit here ~20s while the app-server
+ * spawns; subsequent dispatches over the same connection move through
+ * stage 1 in <1s. The 30s ceiling is a defensive net so the user
+ * always sees the walker move past stage 1 on a turn that ultimately
+ * succeeds.
  *
  * Stage 5 (complete) intentionally left at 0: must be driven by
  * `task_complete` in the rollout so we never claim a turn is done
@@ -205,6 +209,19 @@ interface LatchState {
    * (cancel, error) and dropped. Reset to null whenever a fresh
    * heartbeat read succeeds. */
   lostHeartbeatAt: number | null;
+  /** Wait mode the dispatcher resolved for this turn, captured from
+   * the first heartbeat. Plumbs per-call FF / adaptive args (passed
+   * to `wat321_ask`) through to `snapshot.waitMode` so the Claude
+   * session-tokens widget bypasses the bridge ceremony correctly on
+   * FF dispatches. Without this, the snapshot's waitMode would only
+   * reflect the sticky flag and per-call args would be invisible to
+   * the widget. */
+  waitMode?: BridgeWaitMode;
+  /** Backend that owns this turn, captured from the first heartbeat.
+   * Persists across the walker lifetime so off-target ceremony
+   * suppression in the Codex session-tokens widget reads a stable
+   * value even after the raw heartbeat clears. */
+  target?: "codex" | "opencode" | "local";
 }
 
 /** Grace window before dropping a latch whose heartbeat has gone
@@ -254,6 +271,13 @@ export class BridgeStageCoordinator
    * (fs-watch keeps state correct without it). The next fs-watch
    * event or a manual tick() call restarts the timer. */
   private lastNonIdleAt = Date.now();
+  /** Envelope id of the most-recently-completed turn the walker
+   * finished. The heartbeat file lingers on disk for ~120s past turn
+   * end (the dispatcher leaves it for status readers), so without
+   * this latch-suppression the next compute tick would start a fresh
+   * latch on the stale heartbeat and replay stages 1-5. Cleared when
+   * a new envelope id appears in a heartbeat. */
+  private lastCompletedEnvelopeId: string | null = null;
 
   constructor(private readonly events: EventHub) {}
 
@@ -438,7 +462,17 @@ export class BridgeStageCoordinator
     const returning = existsSync(returningFlagPath(wsHash));
     const rawHeartbeat = readNewestHeartbeat(wsHash);
     const busy = isBridgeBusy(workspacePath);
-    const waitMode = currentWaitMode();
+    // Wait-mode resolution prefers the active turn's resolved mode
+    // (captured in the latch state at start, sourced from the
+    // heartbeat the dispatcher writes after reading envelope
+    // wait_mode). Falls through to the sticky flag when no latch
+    // is active. Without this layering, per-call FF / adaptive args
+    // passed to `wat321_ask` would be invisible to the Claude
+    // session-tokens widget's ceremony-bypass gate.
+    const waitMode: BridgeWaitMode =
+      this.latchState?.waitMode ??
+      (rawHeartbeat?.waitMode as BridgeWaitMode | undefined) ??
+      currentWaitMode(workspacePath);
     const codexEffort = readCodexEffortOverride(wsHash);
     const waitInfo = readWaitStatus(wsHash);
     const now = Date.now();
@@ -479,15 +513,17 @@ export class BridgeStageCoordinator
       if (orphaned) {
         this.latchState = null;
       } else {
-        // Walker continues. Synthesize a heartbeat from cached state
-        // when the real one is unreadable so applyLatch always has a
-        // target (the lastTargetStage tracked above).
+        // Synthesize from latch when the raw heartbeat is unreadable
+        // so applyLatch always has a target stage. Carries latch.target
+        // so off-target ceremony gates see a stable backend through
+        // the walker's full lifetime.
         const hbForLatch: TurnHeartbeat =
           rawHeartbeat !== null &&
           rawHeartbeat.envelopeId === this.latchState.envelopeId
             ? rawHeartbeat
             : {
                 envelopeId: this.latchState.envelopeId,
+                target: this.latchState.target,
                 workspacePath,
                 workspaceHash: wsHash,
                 stage: this.latchState.lastTargetStage,
@@ -504,6 +540,8 @@ export class BridgeStageCoordinator
             ? this.latchState.turnStartedAt
             : (hbForLatch.turnStartedAt ?? now);
           const ceremonyActive = now - turnStartedAt < CEREMONY_MS;
+          // Surface hbForLatch (always non-null) so target-filtering
+          // widgets see the backend through the walker walk.
           return {
             workspacePath,
             phase: ceremonyActive ? "ceremony" : "stage",
@@ -514,7 +552,7 @@ export class BridgeStageCoordinator
             ceremonyActive,
             returning,
             paused: false,
-            heartbeat: rawHeartbeat,
+            heartbeat: hbForLatch,
             waitMode,
             codexEffort,
             waitInfo,
@@ -525,9 +563,23 @@ export class BridgeStageCoordinator
       }
     }
 
-    // No active latch. If a fresh heartbeat is in for a busy bridge,
-    // start a new latch at stage 1.
-    if (busy && rawHeartbeat !== null) {
+    // No active latch. Start a new one when there's a heartbeat - that
+    // covers both the normal pre-ceremony -> stage 1 path AND the "VS
+    // Code reloaded mid long-adaptive-turn" case where in-flight /
+    // processing flags went stale (~5 min) but the dispatcher is
+    // still emitting heartbeats. The heartbeat reader already filters
+    // by workspace hash + staleness window (120s), so a heartbeat
+    // present here is current and ours.
+    //
+    // Suppression: the heartbeat file lingers on disk for the full
+    // 120s staleness window past turn end, so without this gate the
+    // next compute tick after a turn completes would start a fresh
+    // latch on the stale heartbeat and replay stages 1-5. Skip when
+    // the heartbeat's envelopeId matches the just-completed turn.
+    if (
+      rawHeartbeat !== null &&
+      rawHeartbeat.envelopeId !== this.lastCompletedEnvelopeId
+    ) {
       const latched = this.applyLatch(rawHeartbeat);
       if (latched !== null) {
         const turnStartedAt = this.latchState?.turnStartedAt ?? now;
@@ -592,6 +644,10 @@ export class BridgeStageCoordinator
       // turnRunner happens microseconds before turn/started RPC and
       // the coordinator reads on its 1s tick), which would otherwise
       // skip the stage 1 display.
+      // New envelope appearing means the heartbeat we suppressed
+      // last turn is replaced by a fresh one. Clear the just-finished
+      // marker so the new envelope's latch is allowed to run.
+      this.lastCompletedEnvelopeId = null;
       this.latchState = {
         envelopeId: hb.envelopeId,
         displayedStage: "dispatched",
@@ -600,6 +656,12 @@ export class BridgeStageCoordinator
         completeWalkAt: null,
         lastTargetStage: hb.stage,
         lostHeartbeatAt: null,
+        waitMode: hb.waitMode as BridgeWaitMode | undefined,
+        // Capture target on the latch so the synthesized hbForLatch
+        // (when the raw heartbeat clears mid-walker) keeps the right
+        // target. Off-target ceremony suppression in the Codex
+        // session-tokens widget reads this throughout the walker walk.
+        target: hb.target,
       };
       return "dispatched";
     }
@@ -636,7 +698,10 @@ export class BridgeStageCoordinator
         now - this.latchState.completeWalkAt >= COMPLETE_WALK_HOLD_MS
       ) {
         // Release the envelope - widget transitions to returning /
-        // delivered animation outside the coordinator.
+        // delivered animation outside the coordinator. Remember the
+        // completed id so the stale heartbeat that's still on disk
+        // doesn't trigger a fresh latch and replay stages 1-5.
+        this.lastCompletedEnvelopeId = this.latchState.envelopeId;
         this.latchState = null;
         return null;
       }
@@ -679,6 +744,8 @@ export class BridgeStageCoordinator
       completeWalkAt: null,
       lastTargetStage: newLastTarget,
       lostHeartbeatAt: this.latchState.lostHeartbeatAt,
+      waitMode: this.latchState.waitMode,
+      target: this.latchState.target,
     };
     return next;
   }

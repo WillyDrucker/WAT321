@@ -14,6 +14,7 @@ images/icon.svg
 AIDOCS/**
 WDDOCS/**
 CLAUDE.md
+AGENTS.md
 .claude/**
 .vscode/**
 .github/**

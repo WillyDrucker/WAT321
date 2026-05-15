@@ -1,37 +1,58 @@
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { ADAPTIVE_FLAG_PATH, FIRE_AND_FORGET_FLAG_PATH } from "./constants";
+import { workspaceHash } from "../shared/workspaceHash";
+import { adaptiveFlagPath, EPIC_HANDSHAKE_DIR, fireAndForgetFlagPath } from "./constants";
 
 /**
  * Three-way wait mode for the Epic Handshake bridge:
  *   - `standard`        - flag files absent. MCP tool blocks up to
- *                         `timeout_sec` (default 120s).
- *   - `adaptive`        - `adaptive.flag` present. MCP tool blocks
- *                         while the dispatcher's heartbeat is fresh,
+ *                         `timeout_sec` (default 120s). Dispatcher
  *                         hard cap 5 min.
- *   - `fire-and-forget` - `fire-and-forget.flag` present. MCP tool
- *                         returns immediately; reply lands in inbox.
+ *   - `adaptive`        - per-workspace `adaptive.<wsHash>.flag`
+ *                         present. MCP tool blocks while the
+ *                         dispatcher's heartbeat is fresh, hard cap
+ *                         30 min on both MCP and dispatcher sides
+ *                         (kept in sync so neither interrupts the
+ *                         other early).
+ *   - `fire-and-forget` - per-workspace `fire-and-forget.<wsHash>.flag`
+ *                         present. MCP tool returns immediately;
+ *                         reply lands in inbox. Dispatcher runs with
+ *                         all timers disabled.
+ *
+ * Per-workspace partition: both flags carry the workspace-hash suffix
+ * so toggling the mode in one VS Code window does not flip the mode
+ * in a sibling window on the same machine. Matches the partitioning
+ * pattern of `inFlightFlagPath` / `processingFlagPath` / etc. Account-
+ * global wait-mode flags from the pre-partition era are retired via
+ * `LEGACY_FLAG_PATHS` on activate.
+ *
+ * Mode resolution precedence at the MCP boundary: per-call `args`
+ * (FF / adaptive booleans on `wat321_ask`) win over sticky flag
+ * files. The selected mode is written into the envelope as
+ * `wait_mode` so the dispatcher honors the per-call value, not its
+ * own reading of the sticky flag.
  *
  * Exactly one flag (or neither) at a time under `applyWaitMode`'s
  * clear-then-set discipline. Persisted across VS Code restarts. The
- * tier's activate hook applies the user's `defaultWaitMode` setting
- * only when no flag is currently on disk (Standard / fresh install).
- * An existing flag (set by this window's prior session, this window's
- * menu click, or another VS Code window) is respected; the global
- * flag-file location means clobbering it would silently flip another
- * window's mode. Explicit settings-change events force-apply.
+ * tier's activate hook applies Adaptive as the fixed default when no
+ * flag is currently on disk (fresh window).
  */
 
 export type WaitMode = "standard" | "adaptive" | "fire-and-forget";
 
-export function isAdaptive(): boolean {
-  return existsSync(ADAPTIVE_FLAG_PATH);
+function hashFor(workspacePath: string): string {
+  return workspaceHash(workspacePath);
 }
 
-/** Resolve the current mode from flag files. */
-export function currentWaitMode(): WaitMode {
-  if (existsSync(FIRE_AND_FORGET_FLAG_PATH)) return "fire-and-forget";
-  if (existsSync(ADAPTIVE_FLAG_PATH)) return "adaptive";
+export function isAdaptive(workspacePath: string): boolean {
+  return existsSync(adaptiveFlagPath(hashFor(workspacePath)));
+}
+
+/** Resolve the current mode from the per-workspace flag files. */
+export function currentWaitMode(workspacePath: string): WaitMode {
+  const hash = hashFor(workspacePath);
+  if (existsSync(fireAndForgetFlagPath(hash))) return "fire-and-forget";
+  if (existsSync(adaptiveFlagPath(hash))) return "adaptive";
   return "standard";
 }
 
@@ -54,12 +75,26 @@ export function waitModeLabel(mode: WaitMode): string {
   }
 }
 
-/** Clear both flags first, then set the target. Prevents a transient
- * "both present" state that a sequential set-A-then-clear-B ordering
- * would expose (a consumer reading during that window would see
- * inconsistent mode). The "both absent" transient that remains is
- * harmless because it's the Standard mode state anyway. */
-export function applyWaitMode(mode: WaitMode): void {
+/** Clear both per-workspace flags first, then set the target.
+ * Prevents a transient "both present" state that a sequential
+ * set-A-then-clear-B ordering would expose (a consumer reading
+ * during that window would see inconsistent mode). The "both absent"
+ * transient that remains is harmless because it is the Standard
+ * mode state anyway. */
+export function applyWaitMode(mode: WaitMode, workspacePath: string): void {
+  const hash = hashFor(workspacePath);
+  // Ensure the EH dir exists before any flag write. Activate-time
+  // calls hit before other EH initialization that would create the
+  // directory, and `writeFileAtomic` returns false silently on ENOENT,
+  // which would leave both flags absent and the menu reading STANDARD.
+  try {
+    if (!existsSync(EPIC_HANDSHAKE_DIR)) {
+      mkdirSync(EPIC_HANDSHAKE_DIR, { recursive: true });
+    }
+  } catch {
+    // best-effort - if mkdir fails the writes below also fail and the
+    // caller's next refresh observes the actual on-disk state
+  }
   const clear = (path: string): void => {
     try {
       if (existsSync(path)) unlinkSync(path);
@@ -75,10 +110,12 @@ export function applyWaitMode(mode: WaitMode): void {
       // actually achieved
     }
   };
-  clear(FIRE_AND_FORGET_FLAG_PATH);
-  clear(ADAPTIVE_FLAG_PATH);
-  if (mode === "fire-and-forget") set(FIRE_AND_FORGET_FLAG_PATH);
-  else if (mode === "adaptive") set(ADAPTIVE_FLAG_PATH);
+  const ffPath = fireAndForgetFlagPath(hash);
+  const adPath = adaptiveFlagPath(hash);
+  clear(ffPath);
+  clear(adPath);
+  if (mode === "fire-and-forget") set(ffPath);
+  else if (mode === "adaptive") set(adPath);
   // mode === "standard" leaves both cleared - that's the Standard state.
 }
 
@@ -86,6 +123,9 @@ export function applyWaitMode(mode: WaitMode): void {
  * default - the user-facing `defaultWaitMode` setting is gone.
  * Subsequent runtime toggles via the menu override this until the
  * next restart. */
-export function applyDefaultWaitMode(mode: WaitMode): void {
-  applyWaitMode(mode);
+export function applyDefaultWaitMode(
+  mode: WaitMode,
+  workspacePath: string
+): void {
+  applyWaitMode(mode, workspacePath);
 }

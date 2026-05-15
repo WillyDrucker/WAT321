@@ -38,22 +38,18 @@ export function sentClaudeDir(wsHash: string): string {
   return join(SENT_CLAUDE_ROOT, wsHash);
 }
 
-/** Bin directory. Holds `channel.mjs` plus its prod-only
- * `node_modules/` copy extracted from the extension at install
- * time. Claude's own CLI points at `channel.mjs` via
- * `claude mcp add -s user wat321 -- node <path>`. */
+/** EH-owned bin directory. Holds the clipboard-staging helper
+ * (`stage-clipboard.mjs`). The unified MCP server (`channel.mjs`) now
+ * lives under `~/.wat321/bridge/bin/` at project scope - see
+ * `WAT321_MCP_SERVER/installer.ts`. */
 export const BIN_DIR = join(EPIC_HANDSHAKE_DIR, "bin");
 
-/** Per-workspace turn flag path helpers. Each flag is partitioned by
- * workspace hash so one workspace's in-flight turn does not light up
- * the Epic Handshake status bar in a sibling VS Code instance on the
- * same machine.
- *
- * Kept user-scope on purpose:
- *   - `paused.flag` - pausing the bridge applies to all workspaces.
- *   - `adaptive.flag` / `fire-and-forget.flag` - user preference.
- *   - `turn-heartbeat.<envelopeId>.json` - already unique per envelope.
- */
+/** Per-workspace turn flag path helpers. Every runtime sentinel is
+ * partitioned by workspace hash so toggling wait mode, pausing the
+ * bridge, or running a turn in one VS Code window never leaks into a
+ * sibling. `turn-heartbeat.<envelopeId>.json` is keyed by envelope
+ * (per-call) rather than by workspace, but its reader filters on the
+ * `workspaceHash` field inside the JSON. */
 export function inFlightFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `in-flight.${wsHash}.flag`);
 }
@@ -129,41 +125,41 @@ export function codexEffortFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-effort.${wsHash}.flag`);
 }
 
-/** Legacy root-level flag paths from before workspace partitioning.
- * Only referenced by the one-time activate-time migration sweep
- * that deletes any leftovers on disk. Runtime code never reads these
- * - the active dispatcher only consumes per-workspace flag paths. */
+/** Pre-partition root-level sentinels. Retired by the activate-time
+ * sweep; runtime code only reads `<name>.<wsHash>.flag` paths. */
 export const LEGACY_FLAG_PATHS: readonly string[] = [
   join(EPIC_HANDSHAKE_DIR, "in-flight.flag"),
   join(EPIC_HANDSHAKE_DIR, "processing.flag"),
   join(EPIC_HANDSHAKE_DIR, "returning.flag"),
   join(EPIC_HANDSHAKE_DIR, "cancel.flag"),
   join(EPIC_HANDSHAKE_DIR, "wait-mode-flash.flag"),
+  join(EPIC_HANDSHAKE_DIR, "fire-and-forget.flag"),
+  join(EPIC_HANDSHAKE_DIR, "adaptive.flag"),
+  join(EPIC_HANDSHAKE_DIR, "paused.flag"),
 ];
 
-/** Fire-and-forget mode sentinel. User preference, applies to all
- * workspaces on this user account. Status bar toggles it; channel.mjs
- * reads it at the start of each `epic_handshake_ask` invocation. When
- * present, the tool returns immediately with a "dispatched, check
- * inbox later" message instead of blocking for up to 120s. Per-session
- * by design: the tier's clearStaleRuntimeFiles sweep deletes this on
- * every activate so a fresh VS Code window always starts in Standard
- * (blocking) mode. */
-export const FIRE_AND_FORGET_FLAG_PATH = join(EPIC_HANDSHAKE_DIR, "fire-and-forget.flag");
+/** Per-workspace fire-and-forget sticky-mode sentinel read by
+ * `channel.mjs` when no per-call `fire_and_forget` arg is passed.
+ * Session-scoped: `clearStaleRuntimeFiles` deletes on every activate
+ * so a fresh window starts in sync mode. */
+export function fireAndForgetFlagPath(wsHash: string): string {
+  return join(EPIC_HANDSHAKE_DIR, `fire-and-forget.${wsHash}.flag`);
+}
 
-/** Pause sentinel. Body is the ISO timestamp the user paused at.
- * When present, the dispatcher skips new envelopes and the status
- * bar renders the pause glyph. Persists across VS Code restarts by
- * design: a paused bridge should stay paused until the user un-pauses. */
-export const PAUSED_FLAG_PATH = join(EPIC_HANDSHAKE_DIR, "paused.flag");
+/** Per-workspace pause sentinel. ISO timestamp body. While present,
+ * this window's dispatcher skips new envelopes and the status bar
+ * renders the pause glyph. Persists across VS Code restarts. */
+export function pausedFlagPath(wsHash: string): string {
+  return join(EPIC_HANDSHAKE_DIR, `paused.${wsHash}.flag`);
+}
 
-/** Adaptive wait mode sentinel. When present (and fire-and-forget is
- * absent), the bridge uses TurnMonitor's progress-aware stall
- * detection instead of the fixed 120s Standard timeout. Channel.mjs
- * polls the heartbeat file to extend its blocking window while
- * Codex is demonstrably working. Persists across VS Code restarts
- * like paused so user's wait-mode choice sticks. */
-export const ADAPTIVE_FLAG_PATH = join(EPIC_HANDSHAKE_DIR, "adaptive.flag");
+/** Per-workspace adaptive sticky-mode sentinel. When present (and
+ * fire-and-forget is absent), `channel.mjs` extends the MCP blocking
+ * window while the heartbeat is fresh instead of using the 120s
+ * standard cap. Persists across VS Code restarts. */
+export function adaptiveFlagPath(wsHash: string): string {
+  return join(EPIC_HANDSHAKE_DIR, `adaptive.${wsHash}.flag`);
+}
 
 /** Path for the per-turn heartbeat file the dispatcher writes on
  * every monitor stage transition. Body is JSON: stage, fraction,

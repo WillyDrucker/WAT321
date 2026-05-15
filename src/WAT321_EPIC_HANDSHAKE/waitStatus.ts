@@ -18,18 +18,25 @@ import { join } from "node:path";
 
 const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
 
+export type WaitMode = "sync" | "adaptive";
+
 interface WaitStatusFile {
   envelopeId: string;
   workspaceHash: string;
   target: "codex";
   timeoutSec: number;
   startedAt: number;
+  /** Wait mode the MCP server is using for this dispatch. Optional
+   * for back-compat with older sidecars that did not write the field
+   * (those are treated as sync since that was the only mode then). */
+  mode?: WaitMode;
 }
 
 export interface WaitStatus {
   target: "codex";
   timeoutSec: number;
   startedAt: number;
+  mode: WaitMode;
 }
 
 /** Parse the sidecar for the given workspace hash. Returns `null` when
@@ -57,14 +64,24 @@ export function readWaitStatus(wsHash: string | null): WaitStatus | null {
   if (parsed.target !== "codex") return null;
   if (typeof parsed.timeoutSec !== "number" || parsed.timeoutSec <= 0) return null;
   if (typeof parsed.startedAt !== "number") return null;
-  // Crash safety: if the sidecar has outlived twice its declared
-  // timeout, channel.mjs almost certainly died mid-wait. Treat as
-  // cleared so the tooltip does not stick.
+  const mode: WaitMode =
+    parsed.mode === "adaptive" || parsed.mode === "sync" ? parsed.mode : "sync";
+  // Crash safety: filter out sidecars from a crashed/killed bridge
+  // process. Sync mode uses 2x its declared timeout (typical 120s
+  // declared -> 4 min stale cutoff). Adaptive declares the hard
+  // ceiling (10-30 min) so 2x that would leave a stuck tooltip for
+  // up to an hour; cap adaptive cleanup at a flat 15 min instead,
+  // which is generous for the adaptive stall threshold (2 min) and
+  // covers any legitimate long turn without trailing past a real
+  // crash.
   const ageMs = Date.now() - parsed.startedAt;
-  if (ageMs > parsed.timeoutSec * 1000 * 2) return null;
+  const staleCutoffMs =
+    mode === "adaptive" ? 15 * 60_000 : parsed.timeoutSec * 1000 * 2;
+  if (ageMs > staleCutoffMs) return null;
   return {
     target: "codex",
     timeoutSec: parsed.timeoutSec,
     startedAt: parsed.startedAt,
+    mode,
   };
 }

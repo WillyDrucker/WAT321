@@ -8,13 +8,14 @@ import { bridgeStateDir } from "../shared/wat321Paths";
 /**
  * WAT321 Bridge - extension-side ownership of the unified MCP server.
  *
- * The unified `channel.mjs` reads enabled-feature flags from
- * `~/.wat321/bridge/config.json` to decide which targets and tools to
+ * The unified `channel.mjs` reads enabled-feature flags from the
+ * per-client bridge state dir to decide which targets and tools to
  * advertise to Claude. This module owns:
  *
  *   - bridge config writer (refreshes on activate + settings change)
  *   - auto-install on Epic Handshake enable (idempotent)
- *   - session-alias map storage at `~/.wat321/bridge/session-aliases.json`
+ *   - session-alias map storage at
+ *     `~/.wat321/clients/<wsId>/bridge/session-aliases.json`
  *   - project-name stamp for standardized session display labels
  *   - auto-create OpenCode S1 session on OpenCode Routes enable
  *

@@ -42,7 +42,7 @@ function consumeRecentBridgeCompletion(): boolean {
 function isCodexToastSuppressionEnabled(): boolean {
   return vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>(SETTING.epicHandshakeSuppressCodexToasts, true);
+    .get<boolean>(SETTING.epicHandshakeSuppressCodexNotifications, true);
 }
 
 /**

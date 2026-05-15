@@ -5,7 +5,8 @@ import { writeFileAtomic } from "../fs/atomicWrite";
 /**
  * Session alias storage shared by the unified bridge MCP server, the
  * Epic Handshake session pickers, and the status-bar widget. The file
- * lives at `~/.wat321/bridge/session-aliases.json` and carries:
+ * lives at `~/.wat321/clients/<wsId>/bridge/session-aliases.json` and
+ * carries:
  *   - per-target alias bucket (`opencode`, `local`) mapping S1, S2, ...
  *     to `{sessionId, instanceId}`
  *   - `activeAliases` per target - the alias the bridge consumer

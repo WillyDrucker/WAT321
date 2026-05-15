@@ -1,44 +1,9 @@
 /**
  * Smoothed tokens-per-second tracker shared by Claude and Codex
- * session-token services. Each provider feeds in cumulative token
- * counts at transcript-mtime instants; the tracker reports a stable
- * rate that reflects only periods of actual write activity.
- *
- * Why mtime instead of Date.now() as the time axis: mtime advances
- * only when the transcript is written. Long idle stretches (user
- * thinking, tool waits, between-prompt pauses) leave mtime frozen so
- * they contribute zero seconds to the denominator instead of dragging
- * the rate toward zero.
- *
- * Why a minimum window age: the very first sample-pair after a session
- * starts captures a step function (cache-creation tokens roll in all
- * at once) which produces nonsense rates capped at TPS_MAX. Holding
- * the previous value until the window spans at least
- * `MIN_WINDOW_AGE_MS` of mtime lets that spike smooth out before any
- * number reaches the widget.
- *
- * Why an idle-gap reset: if the gap since the last accepted sample
- * exceeds `IDLE_GAP_MS`, we treat the window as stale and re-anchor
- * from the new sample. Without this, the first active sample after a
- * 5-minute pause averages thousands of new tokens against tens of
- * milliseconds of new mtime span, blowing the rate up. The cached
- * `lastValue` survives the reset so the widget keeps showing the most
- * recent valid rate during the pause.
- *
- * Why a baseline-anchor on first sample after a session-change or
- * idle-gap clear: the very first sample observed in those paths
- * carries cumulative tokens that accumulated BEFORE we started
- * watching (existing rollout already mid-turn at activate, or
- * cumulative growth during a long pause). Including it as `samples[0]`
- * makes the first computable window span from "tokens already there"
- * to "tokens after the next chunk", which capped Codex's first-turn
- * ratio at 999/s. Solution: consume the first post-clear sample as a
- * baseline-anchor - update `lastObservedTokens` so the unchanged-
- * tokens guard still works, but do not push into `samples`. The next
- * sample becomes `samples[0]` and rates compute from increments
- * observed strictly after we started watching. Rollback path skips
- * the baseline anchor: `lastObservedTokens = tokens` already pins the
- * post-compact floor, so the next new-tokens sample is a real delta.
+ * session-token services. Cumulative-count samples at transcript-mtime
+ * instants in; stable rate reflecting only active write periods out.
+ * Mtime time axis, minimum window age, idle-gap reset, and
+ * baseline-anchor design all documented in `WAT321_MEMORY_EXTENDED.md`.
  */
 
 const TPS_MAX = 999;

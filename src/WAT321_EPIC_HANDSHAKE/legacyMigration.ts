@@ -3,14 +3,17 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import {
+  adaptiveFlagPath,
   cancelFlagPath,
-  FIRE_AND_FORGET_FLAG_PATH,
+  EPIC_HANDSHAKE_DIR,
+  fireAndForgetFlagPath,
   inboxClaudeDir,
   inboxCodexDir,
   INBOX_CLAUDE_ROOT,
   INBOX_CODEX_ROOT,
   inFlightFlagPath,
   LEGACY_FLAG_PATHS,
+  pausedFlagPath,
   processingFlagPath,
   returningFlagPath,
   sentClaudeDir,
@@ -112,6 +115,26 @@ function migrateLegacyDir(
   }
 }
 
+/** Copy an account-global legacy sentinel into the active window's
+ * per-workspace path, first-window-wins. Idempotent via the empty
+ * per-workspace gate; the legacy sweep below removes the global file
+ * after this runs so subsequent activates skip. Best-effort. */
+function migrateLegacyFlag(globalPath: string, perWorkspacePath: string): void {
+  try {
+    if (!existsSync(globalPath)) return;
+    if (existsSync(perWorkspacePath)) return;
+    let body: string;
+    try {
+      body = readFileSync(globalPath, "utf8");
+    } catch {
+      return;
+    }
+    writeFileAtomic(perWorkspacePath, body);
+  } catch {
+    // best-effort
+  }
+}
+
 /** Sweep any orphan runtime files left behind by a prior crash or
  * abrupt VS Code exit. Called once on activate. The 1h safety TTL
  * for in-inbox mail (`sweepStaleInboxMail` in mailbox.ts, fires on
@@ -123,11 +146,11 @@ function migrateLegacyDir(
  * **Pending late replies in inbox/claude/ are preserved.** Issue #64:
  * a Codex reply that landed in the inbox immediately before VS Code
  * restarted (long-running fire-and-forget scrape, mid-flight close)
- * must survive activation so the next `epic_handshake_inbox` /
- * `epic_handshake_ask` call can deliver it. The earlier "clean slate"
- * sweep that moved every pending reply to sent/ on activate caused
- * silent reply loss; the 1h TTL on subsequent dispatches catches truly
- * stale entries without stranding fresh ones. */
+ * must survive activation so the next `wat321_ask` or `wat321_bridge`
+ * call can deliver it. A "clean slate" sweep that moved every pending
+ * reply to sent/ on activate would cause silent reply loss; the 1h
+ * TTL on subsequent dispatches catches truly stale entries without
+ * stranding fresh ones. */
 export function clearStaleRuntimeFiles(): void {
   const ws0 = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const hash = ws0 ? workspaceHash(ws0) : null;
@@ -146,18 +169,35 @@ export function clearStaleRuntimeFiles(): void {
       // otherwise eat the first unrelated Codex toast in this session.
       removeIfExists(suppressCodexToastFlagPath(hash));
     }
-    // Legacy root-level flag files from before workspace partitioning.
-    // Delete so the partitioned dispatcher never reads them - the
-    // active dispatcher only consumes per-workspace flag paths.
+    // Inherit-first-window migration for the two account-global
+    // sentinels that were intentionally persistent pre-1.5.5:
+    // `paused.flag` and `adaptive.flag`. Fire-and-forget was already
+    // session-scoped so nothing to inherit. Run before the legacy
+    // sweep so the global file is still readable.
+    if (hash) {
+      migrateLegacyFlag(
+        join(EPIC_HANDSHAKE_DIR, "paused.flag"),
+        pausedFlagPath(hash)
+      );
+      migrateLegacyFlag(
+        join(EPIC_HANDSHAKE_DIR, "adaptive.flag"),
+        adaptiveFlagPath(hash)
+      );
+    }
+    // Retire pre-partition root-level sentinels. The partitioned
+    // dispatcher only reads `<name>.<wsHash>.flag` paths.
     for (const legacyPath of LEGACY_FLAG_PATHS) {
       if (existsSync(legacyPath)) unlinkSync(legacyPath);
     }
-    // Fire-and-forget is per-session by design: clearing the sentinel
-    // here lets activation restore the configured default wait mode
-    // (Adaptive unless the user picked Fire-and-Forget in settings).
-    // Adaptive flag intentionally survives so the user's preference
-    // is preserved across reloads.
-    if (existsSync(FIRE_AND_FORGET_FLAG_PATH)) unlinkSync(FIRE_AND_FORGET_FLAG_PATH);
+    // Per-workspace fire-and-forget is session-scoped by design:
+    // clearing this window's sentinel on activate restores Adaptive
+    // (the default) for the fresh session. The per-workspace adaptive
+    // sentinel intentionally survives so the user's wait-mode choice
+    // for THIS window persists across reloads.
+    if (hash) {
+      const ffPath = fireAndForgetFlagPath(hash);
+      if (existsSync(ffPath)) unlinkSync(ffPath);
+    }
     // Paused state intentionally persists across restarts: if the
     // user paused the bridge, they expect it to stay paused after a
     // VS Code reload, not silently un-pause.

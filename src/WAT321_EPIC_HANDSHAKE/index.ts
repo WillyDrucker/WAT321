@@ -20,7 +20,7 @@ import { registerEpicHandshakeCommands } from "./commandRegistration";
 import { LateReplyInboxCoordinator } from "./lateReplyInboxCoordinator";
 import {
   inFlightFlagPath,
-  PAUSED_FLAG_PATH,
+  pausedFlagPath,
   processingFlagPath,
   returningFlagPath,
 } from "./constants";
@@ -57,19 +57,17 @@ const RESTART_CANCEL_GRACE_MS = 500;
 /**
  * Epic Handshake tier entry point. Sync MCP architecture:
  *
- *   - Enable flow runs `claude mcp add -s user wat321 -- node <path>`
- *     and extracts the MCP server plus its prod-only node_modules
- *     into `~/.wat321/epic-handshake/bin/`.
- *   - Any Claude session (extension panel or terminal) automatically
- *     sees the `epic_handshake_ask` and `epic_handshake_inbox` tools
- *     via MCP auto-discovery.
+ *   - Enable flow runs `claude mcp add -s project wat321 -- node <path>`
+ *     against the unified MCP installer, which extracts the bridge
+ *     scripts plus prod-only node_modules into `~/.wat321/bridge/bin/`.
+ *   - Any Claude session sees `wat321_ask` (dispatch), `wat321_session`
+ *     (session lifecycle), and `wat321_bridge` (single-purpose inbox
+ *     drain) via MCP auto-discovery.
  *   - The extension-side `CodexDispatcher` watches `inbox/codex/` and
  *     drives `codex app-server` to produce replies; replies land in
- *     `inbox/claude/` where the blocked `epic_handshake_ask` tool
- *     call picks them up synchronously.
- *
- * Current scope: Claude -> Codex forward direction. Reverse
- * direction is future work.
+ *     `inbox/claude/` where the blocking `wat321_ask` call picks them
+ *     up synchronously, or where `wat321_bridge()` drains them when
+ *     the caller used fire-and-forget.
  */
 
 class EpicHandshakeTier {
@@ -214,19 +212,22 @@ class EpicHandshakeTier {
    * menu pick up the change on the next refresh tick. */
   private applyDefaultWaitModeSetting(opts: { force?: boolean } = {}): void {
     try {
-      if (!opts.force && currentWaitMode() !== "standard") {
-        // A flag is already on disk - either this window set it
-        // earlier in the activate cycle, this window's menu click
-        // set it during the prior session, or another VS Code window
-        // has it set right now. In all three cases, leaving it alone
-        // is correct: the user's "default" is what applies on a clean
-        // launch, not on every activation.
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!ws) return;
+      if (!opts.force && currentWaitMode(ws) !== "standard") {
+        // A flag is already on disk for THIS workspace - this window
+        // set it earlier in the activate cycle, or its menu click set
+        // it during the prior session. Leaving it alone is correct:
+        // the user's "default" applies on a clean launch only, not on
+        // every activation. With per-workspace partitioning, sibling
+        // windows on the same machine never read this window's flag,
+        // so no cross-instance contamination is possible.
         return;
       }
       // Adaptive is the fixed default at activate. The click menu still
       // toggles between Adaptive and Fire-and-Forget at runtime, but the
       // launch default is hardcoded - no user-facing setting.
-      applyDefaultWaitMode("adaptive");
+      applyDefaultWaitMode("adaptive", ws);
     } catch {
       // best-effort
     }
@@ -495,9 +496,15 @@ class EpicHandshakeTier {
       // best-effort - sweep is meant to be idempotent
     }
     // Clean paused sentinel so a later re-enable starts active, not
-    // stuck-paused because the file lingered from prior use.
+    // stuck-paused because the file lingered from prior use. Per
+    // workspace - only clears THIS window's paused state; siblings
+    // keep their own paused choice.
     try {
-      if (existsSync(PAUSED_FLAG_PATH)) unlinkSync(PAUSED_FLAG_PATH);
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (ws) {
+        const path = pausedFlagPath(workspaceHash(ws));
+        if (existsSync(path)) unlinkSync(path);
+      }
     } catch {
       // best-effort
     }

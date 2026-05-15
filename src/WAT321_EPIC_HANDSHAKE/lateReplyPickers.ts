@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { dirname } from "node:path";
 import * as vscode from "vscode";
-import { sentClaudeDir } from "./constants";
 import { listLateReplies, type LateReply } from "./lateReplyInbox";
 import {
   makeBackItem,
@@ -12,7 +11,6 @@ import {
   type DispatchAction,
 } from "./menuCommon";
 import { currentWorkspacePath, isPaused } from "./statusBarState";
-import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Late-reply inbox sub-pickers. Replies arriving after a Fire-and-Forget
@@ -39,14 +37,15 @@ export async function discardAllLateReplies(
   );
   if (confirm !== "Discard") return;
 
-  const ws = currentWorkspacePath();
-  if (!ws) return;
-  const sentDir = sentClaudeDir(workspaceHash(ws));
-  if (!existsSync(sentDir)) mkdirSync(sentDir, { recursive: true });
+  // Per-reply sent destination: pre-computed by `listLateReplies` so
+  // each source (codex / opencode / local) lands in its own sent/
+  // subtree without the discard path having to know per-source layout.
   let moved = 0;
   for (const r of replies) {
     try {
-      renameSync(r.fullPath, join(sentDir, r.filename));
+      const sentDir = dirname(r.sentDestPath);
+      if (!existsSync(sentDir)) mkdirSync(sentDir, { recursive: true });
+      renameSync(r.fullPath, r.sentDestPath);
       moved++;
     } catch {
       // best-effort
@@ -128,14 +127,13 @@ export async function showLateRepliesPicker(
     await vscode.env.clipboard.writeText(pick.reply.body);
 
     // Move envelope out of inbox so the mail icon clears and the
-    // next refresh does not re-surface the same reply.
+    // next refresh does not re-surface the same reply. Each reply
+    // carries its own `sentDestPath` so codex / opencode / local all
+    // land in their respective sent/ subtrees.
     try {
-      const wsForMove = currentWorkspacePath();
-      if (wsForMove) {
-        const sentDir = sentClaudeDir(workspaceHash(wsForMove));
-        if (!existsSync(sentDir)) mkdirSync(sentDir, { recursive: true });
-        renameSync(pick.reply.fullPath, join(sentDir, pick.reply.filename));
-      }
+      const sentDir = dirname(pick.reply.sentDestPath);
+      if (!existsSync(sentDir)) mkdirSync(sentDir, { recursive: true });
+      renameSync(pick.reply.fullPath, pick.reply.sentDestPath);
     } catch {
       // best-effort
     }

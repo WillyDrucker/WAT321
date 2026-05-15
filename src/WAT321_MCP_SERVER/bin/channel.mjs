@@ -5,17 +5,35 @@
  * surface plus MCP resources for read-only state:
  *
  *   wat321_ask         - alias-driven dispatch (router resolves)
- *   wat321_session     - mutating session lifecycle (create/delete/rename)
+ *   wat321_session     - session lifecycle for opencode/local (action enum)
+ *   wat321_bridge      - single-purpose inbox drain (Codex-gated)
  *
  *   bridge://instances         - catalog of configured backends
  *   bridge://sessions/{target} - session aliases per target
- *   bridge://inbox/codex       - pending Codex late replies
+ *   bridge://inbox/codex       - pending Codex late replies (peek, not drain)
  *   bridge://status            - daemon health, last-used backend
+ *   bridge://docs/dispatch     - dispatch reference (wait modes, routing)
+ *   bridge://docs/inbox        - inbox reference (drain mechanics)
  *
- * The router collapses target + instance routing into a free-form
- * `alias` string ("Big Pickle", "Codex", "Local LLM") with fuzzy
- * matching against the catalog. Total system-prompt overhead is
- * ~250-300 tokens.
+ * MCP surface philosophy: STAY LEAN. Every tool registered here adds
+ * its description + inputSchema to every Claude session's context
+ * forever (cached on the first turn but billed against the budget).
+ * Three tools is the cap. New capabilities prefer in order:
+ *   1. Extending an existing tool's response shape or action enum
+ *      (zero surface growth, e.g. `wat321_session.action` covers
+ *      create / delete / rename in one tool)
+ *   2. A standalone script under `bin/` invoked via Bash
+ *   3. A new MCP resource (read-only, separate token bucket)
+ *   4. Only when none of the above fit: a new tool, with description
+ *      pulling its weight against the per-session cost
+ * The router collapses target + instance routing into a single free-
+ * form `alias` string ("Big Pickle", "Codex", "Local LLM") with fuzzy
+ * matching against the catalog, so Claude doesn't need to know the
+ * target enum or backend URLs exists. Adding a new instance is a
+ * catalog edit; the router gets it for free. Tool descriptions name
+ * the canonical-entry contract so agents don't reach for the
+ * underlying CLIs directly. Total system-prompt overhead ~250-300
+ * tokens with all three tools enabled.
  *
  * Conditional registration: at startup, the server reads enabled
  * features (epicHandshake.enabled, enableOpenCode) from the per-client
@@ -39,13 +57,15 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import * as bridgeInbox from "./bridgeInbox.mjs";
 import * as codex from "./codex.mjs";
 import * as opencode from "./opencode/index.mjs";
-import { bridgeStateDir, openCodeRoutesStateDir } from "./paths.mjs";
+import { WAT321_ROOT, bridgeStateDir, openCodeRoutesStateDir } from "./paths.mjs";
 import { decorateAskResult } from "./replyDecorator.mjs";
 import {
   filterEnabledResources,
   readResourceContent,
+  resourceMimeType,
 } from "./resources.mjs";
 
 const BRIDGE_DIR = bridgeStateDir();
@@ -53,6 +73,16 @@ const CONFIG_PATH = join(BRIDGE_DIR, "config.json");
 const OPENCODE_ROUTES_CONFIG_PATH = join(openCodeRoutesStateDir(), "config.json");
 const LOG_PATH = join(BRIDGE_DIR, "channel.log");
 const LOG_MAX_BYTES = 50_000;
+
+/** Per-workspace sticky FF flag. Read here only to gate the
+ * "sticky FF + non-Codex target" path; mirrors
+ * `WAT321_EPIC_HANDSHAKE/constants.ts:fireAndForgetFlagPath(wsHash)`. */
+const WAT321_WS_ID = process.env.WAT321_WORKSPACE_ID || "default";
+const FIRE_AND_FORGET_FLAG_PATH = join(
+  WAT321_ROOT,
+  "epic-handshake",
+  `fire-and-forget.${WAT321_WS_ID}.flag`
+);
 
 /** Best-effort log writer. Truncates the log when it crosses
  * LOG_MAX_BYTES to bound disk use; never throws into the MCP loop. */
@@ -184,51 +214,78 @@ function makeRouter() {
 }
 
 /** Tool descriptor builder. Returns the MCP tool definitions exposed
- * to Claude. Two tools:
+ * to Claude. Up to three tools:
  *
  *   wat321_ask     - dispatch a prompt; alias picks the backend
- *   wat321_session - mutating session lifecycle (create/delete/rename)
+ *   wat321_session - opencode/local session lifecycle (action enum,
+ *                    only registered when opencode or local is enabled)
+ *   wat321_bridge  - single-purpose inbox drain (only registered when
+ *                    codex is enabled)
  *
- * Read-only state (inbox, sessions list) lives on MCP resources (see
- * resources/list below) so Claude pays for those descriptions only
- * when the user asks. The unified router resolves alias
- * strings to concrete targets so Claude doesn't need to know the
- * target enum exists.
+ * Read-only state (inbox peek, sessions list, instances catalog,
+ * status, dispatch/inbox docs) lives on MCP resources (see resources/
+ * list below) so Claude pays for those descriptions only when the
+ * user asks. The unified router resolves alias strings to concrete
+ * targets so Claude doesn't need to know the target enum exists.
  *
- * Total tool surface ~250-300 tokens. */
+ * Total tool surface ~250-300 tokens when all three tools register. */
 function buildTools(enabled) {
   const tools = [];
   const anyEnabled = enabled.codex || enabled.opencode || enabled.local;
   if (!anyEnabled) return tools;
 
-  // Bare-minimum tool description. Server router does the work; Claude
-  // only needs to know "this is the ask tool, pass prompt + alias."
-  // A handful of example aliases seed pattern recognition; the full
-  // catalog is the bridge://instances resource for when the user asks.
+  // Lean tool description. Carries the three load-bearing signals:
+  //   1. Trigger phrase ("when user says ask/tell/prompt Codex").
+  //   2. False-positive guard ("not for past references or hypotheticals").
+  //   3. Required-read pointer to `bridge://docs/dispatch` for
+  //      everything else (wait modes, alias rules, sticky-flag
+  //      semantics, error recovery).
+  // Per-param descriptions stripped - names are self-documenting and
+  // the resource doc covers the non-obvious cases. The doc-deferral
+  // pattern keeps the per-turn system-prompt tax lean: every prompt
+  // pays the tool description; only the prompts that actually dispatch
+  // pay for the dispatch doc when Claude calls ReadResource on it.
   tools.push({
     name: "wat321_ask",
     description:
-      "Ask another AI model. `alias` is who (e.g. 'Codex', 'Big Pickle', 'Local LLM') - fuzzy-matched, omit for default. See bridge://instances for full catalog. `session` continues a prior conversation.",
+      "Send a prompt to Codex, OpenCode, or Local LLM (or any configured alias like Big Pickle) via the WAT321 bridge. Use when the user says ask/tell/prompt one of those - not for past references or hypotheticals. Read `bridge://docs/dispatch` before your first dispatch.",
     inputSchema: {
       type: "object",
       properties: {
-        prompt: { type: "string", description: "Message to send." },
-        alias: { type: "string", description: "Which backend." },
-        session: { type: "string", description: "Session alias (S1, S2, ...)." },
-        thread_name: { type: "string", description: "Codex thread name." },
-        timeout_sec: { type: "integer", description: "Override timeout." },
-        fire_and_forget: {
-          type: "boolean",
-          description:
-            "Codex only. Return immediately; reply lands in the EH inbox and auto-includes on the next prompt. Omit to honor the EH wait-mode toggle. Use for long-running Codex tasks.",
-        },
+        prompt: { type: "string" },
+        alias: { type: "string" },
+        session: { type: "string" },
+        thread_name: { type: "string" },
+        timeout_sec: { type: "integer" },
+        fire_and_forget: { type: "boolean" },
+        adaptive: { type: "boolean" },
       },
       required: ["prompt"],
     },
   });
 
-  // Session mutations only - listing moved to bridge://sessions/{target}
-  // resource. Description stays short; the action enum self-documents.
+  // wat321_bridge: single-purpose drain tool. Drains pending late
+  // replies from EVERY enabled backend's inbox - Codex (Epic Handshake
+  // filesystem mailbox) plus any non-Codex target that received a
+  // fire-and-forget dispatch this session. Registered whenever any
+  // backend is enabled because every target can produce FF replies.
+  tools.push({
+    name: "wat321_bridge",
+    description:
+      "Drain pending fire-and-forget replies from the WAT321 bridge inbox (Codex + OpenCode + Local). Read `bridge://docs/inbox` before use.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reply_id: { type: "string" },
+      },
+    },
+  });
+
+  // Session mutations for opencode/local. Action enum self-documents
+  // the three operations (create / delete / rename). Description
+  // names WHY to use it (alias persistence across windows, avoid
+  // orphan sessions) so AI callers don't try to manage sessions via
+  // direct backend API calls.
   if (enabled.opencode || enabled.local) {
     const sessionTargets = [];
     if (enabled.opencode) sessionTargets.push("opencode");
@@ -236,7 +293,7 @@ function buildTools(enabled) {
     tools.push({
       name: "wat321_session",
       description:
-        "Manage session aliases for opencode/local. To list, read bridge://sessions/{target}.",
+        "Create, delete, or rename a named session for OpenCode or Local LLM. Aliases (S1, S2, ...) persist across VS Code windows so a `wat321_ask` with `session: 'S2'` reaches the same conversation context as before. Use this instead of calling the backend HTTP API directly; the bridge tracks the alias map and routes future dispatches to the right server-side session. To list existing sessions, read `bridge://sessions/{target}` (resource, not this tool).",
       inputSchema: {
         type: "object",
         properties: {
@@ -381,17 +438,28 @@ async function dispatchCall(name, args, enabled) {
     if (targetModule === null) {
       return errorResult(`Unknown target '${target}'.`);
     }
-    // Fire-and-forget only applies to Codex - OpenCode and Local LLM
-    // routes return synchronously via HTTP/SSE and have no late-reply
-    // inbox to drop the result into, so an immediate return would
-    // strand the reply on the server with no way for the caller to
-    // retrieve it. Explicit param=true on a non-Codex target is a
-    // caller bug; surface it instead of silently dropping the request.
-    if (args?.fire_and_forget === true && target !== "codex") {
+    // Resolve effective wait mode for the call. Per-call `true` wins,
+    // per-call `false` suppresses the matching sticky flag for this
+    // call only, otherwise the sticky flag on disk decides. Codex has
+    // its own resolveMode in codex.mjs; for non-Codex we resolve here
+    // because the wrapper has to choose between sync handleAsk vs the
+    // detached FF path before calling into the target module.
+    const explicitFFTrue = args?.fire_and_forget === true;
+    const explicitFFFalse = args?.fire_and_forget === false;
+    const stickyFFOn =
+      !explicitFFFalse && existsSync(FIRE_AND_FORGET_FLAG_PATH);
+    const effectiveFF = explicitFFTrue || stickyFFOn;
+
+    // Adaptive is Codex-only - non-Codex backends have no progress
+    // heartbeat for adaptive to extend against. Reject explicit
+    // adaptive on a non-Codex target; sticky adaptive falls through to
+    // sync silently (functionally identical, no error needed).
+    if (args?.adaptive === true && target !== "codex") {
       return errorResult(
-        `fire_and_forget=true only applies to target='codex'. OpenCode/Local LLM routes return synchronously via HTTP; there is no late-reply inbox to drop a deferred reply into. Drop the parameter or route to Codex.`
+        `adaptive is only supported for target='codex'. The ${target} backend has no progress heartbeat for adaptive to extend against. Reissue the same prompt without the adaptive parameter and use timeout_sec if you need a longer fixed wait (this is not a dispatch failure; nothing was sent to ${target}).`
       );
     }
+
     // Forward to the existing handler with target + instance_id baked
     // back in. handleAsk's signature predates the router; rather than
     // refactor every call site we synthesize the legacy args shape.
@@ -400,8 +468,49 @@ async function dispatchCall(name, args, enabled) {
       target,
       ...(resolved.instance_id ? { instance_id: resolved.instance_id } : {}),
     };
+
+    // Non-Codex fire-and-forget: write an outbound envelope to the
+    // dispatch queue and return immediately. The extension-side
+    // `OpenCodeDispatcher` (registered with the engine's
+    // `OutboundWatcher`) picks up the envelope, runs the HTTP/SSE
+    // call, and writes the inbound reply to
+    // `<bridgeStateDir>/inbox/<target>/<id>.md`. `wat321_bridge()`
+    // drains both Codex's Epic Handshake inbox and these per-target
+    // inboxes in a single call. Codex FF stays on its own envelope-
+    // based path inside codex.handleAsk.
+    //
+    // Lifecycle: the dispatcher lives in the extension host, not the
+    // MCP runtime process, so an MCP-side restart no longer aborts
+    // in-flight FF work. Graceful shutdown writes a synthetic
+    // "cancelled by shutdown" inbound envelope for anything still
+    // running when VS Code closes.
+    if (effectiveFF && target !== "codex") {
+      return bridgeInbox.dispatchFireAndForget(target, forwardArgs);
+    }
+
     const askResult = await targetModule.handleAsk(forwardArgs);
     return decorateAskResult(askResult, args, target);
+  }
+
+  if (name === "wat321_bridge") {
+    const anyEnabled =
+      enabled.codex === true ||
+      enabled.opencode === true ||
+      enabled.local === true;
+    if (!anyEnabled) {
+      return errorResult(
+        "wat321_bridge requires at least one backend to be enabled. Turn on Epic Handshake or OpenCode in WAT321 settings and reload."
+      );
+    }
+    // Single-purpose drain across every per-target inbox. Codex
+    // late-replies live in Epic Handshake's filesystem mailbox; non-
+    // Codex FF replies live under the per-client bridge state dir.
+    // Both contribute to the same drain so the agent doesn't have to
+    // know which target produced which reply. handleBridge in codex.mjs
+    // also validates a legacy `action: "consume"` field for callers
+    // cached against the pre-collapse schema; anything else returns an
+    // error WITHOUT side effects.
+    return dispatchBridgeDrain(args, enabled);
   }
 
   if (name === "wat321_session") {
@@ -430,6 +539,84 @@ async function dispatchCall(name, args, enabled) {
 
 function errorResult(text) {
   return { content: [{ type: "text", text }], isError: true };
+}
+
+/** Combine Codex (Epic Handshake) and non-Codex (per-target) inbox
+ * drains into a single tool response. Both drain functions return
+ * tool-response-shaped content. The combiner concatenates only the
+ * non-empty drains; if both come back empty it emits a single unified
+ * empty-state message instead of stacking per-source empty texts -
+ * agents misread a mixed "no pending replies / here is your reply"
+ * response as a partial failure even though the data was attached.
+ *
+ * `codex.handleBridge` signals empty via `{ content: [] }`. Errors
+ * (e.g. unknown action, missing reply_id) come back with isError=true
+ * and short-circuit the drain so the agent sees the original error
+ * verbatim instead of "no pending replies" stapled to the failure. */
+async function dispatchBridgeDrain(args, enabled) {
+  const replyId =
+    typeof args?.reply_id === "string" && args.reply_id.trim().length > 0
+      ? args.reply_id.trim()
+      : null;
+
+  const sections = [];
+
+  if (enabled.codex === true) {
+    const codexResult = await codex.handleBridge(args);
+    if (codexResult?.isError === true) return codexResult;
+    const codexText = (codexResult?.content ?? [])
+      .filter((c) => c?.type === "text" && typeof c.text === "string")
+      .map((c) => c.text)
+      .join("\n\n")
+      .trim();
+    if (codexText.length > 0) sections.push(codexText);
+  }
+
+  const nonCodex = await bridgeInbox.consumeNonCodexInbox(replyId);
+  for (const item of nonCodex) {
+    sections.push(
+      `[${item.target} reply ${item.filename}]\n\n${item.content.trim()}`
+    );
+  }
+
+  if (sections.length === 0) {
+    // Surface in-flight non-Codex FF dispatches in the empty-state so
+    // the agent can report "still working" honestly instead of hedging
+    // "the reply may or may not be coming". Counting drives the report:
+    // empty + nothing in flight = nothing to wait on; empty + N in flight
+    // = the dispatches are running and the next drain will catch them.
+    const inFlight = bridgeInbox.inFlightNonCodexSummary();
+    if (inFlight.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "No pending replies in the bridge inbox, and no in-flight fire-and-forget dispatches detected. Nothing to wait on - if the user expected a reply, the dispatch may have never been queued (re-issue) or it already drained on a previous `wat321_bridge()` call.",
+          },
+        ],
+      };
+    }
+    const lines = inFlight.map((d) => {
+      const aliasPart = d.alias ? ` to ${d.alias}` : "";
+      const previewPart = d.promptPreview ? ` "${d.promptPreview}"` : "";
+      return `  - ${d.target}${aliasPart} (${d.ageSec}s ago, id=${d.id})${previewPart}`;
+    });
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `No replies have landed yet. ${inFlight.length} fire-and-forget dispatch${inFlight.length === 1 ? " is" : "es are"} still in flight:\n\n${lines.join("\n")}\n\n` +
+            "Report this to the user as a wait, not a failure - the extension-side dispatcher is running. Call `wat321_bridge()` again when the user asks for the reply. Do not re-issue the same prompt; that would queue a duplicate dispatch.",
+        },
+      ],
+    };
+  }
+
+  return {
+    content: [{ type: "text", text: sections.join("\n\n---\n\n") }],
+  };
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -466,7 +653,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
       readEnabledTargets,
     });
     return {
-      contents: [{ uri, mimeType: "application/json", text }],
+      contents: [{ uri, mimeType: resourceMimeType(uri), text }],
     };
   } catch (err) {
     const msg = err?.message || String(err);

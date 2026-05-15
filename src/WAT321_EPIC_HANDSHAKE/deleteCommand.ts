@@ -9,8 +9,10 @@ import {
   bridgeThreadDisplayName,
   findRolloutPath,
   listRecoverableSessions,
+  nextCollisionFreeCounter,
   type BridgeThreadRecord,
 } from "./threadPersistence";
+import { bridgeThreadNamePattern } from "./threadNaming";
 import type { EpicHandshakeLogger } from "./types";
 import { workspaceHash } from "../shared/workspaceHash";
 
@@ -71,7 +73,7 @@ export async function deleteCurrentCodexSession(
 
   const sessionName = bridgeThreadDisplayName(workspacePath, record.sessionCounter);
   const confirmation = await vscode.window.showWarningMessage(
-    `Delete Codex session "${sessionName}"? Removes the rollout file and strips the entry from Codex's session index. Next Claude-to-Codex prompt spawns a fresh S${record.sessionCounter + 1}.`,
+    `Delete Codex session "${sessionName}"? Removes the rollout file and strips the entry from Codex's session index. The next Claude-to-Codex prompt spawns a fresh session at the lowest free S<n>.`,
     "Delete",
     "Cancel"
   );
@@ -120,11 +122,23 @@ export async function deleteCurrentCodexSession(
     }
   }
 
-  // 3. Null our bridge-thread state
+  // 3. Null our bridge-thread state. Counter mirrors what
+  // `spawnFreshThread` will actually pick on the next prompt - the
+  // gap-fill (lowest unused integer in this workspace's bridge-pattern
+  // set) instead of the legacy monotonic `+1`. Without this, the menu
+  // label `MANAGE CODEX (S<n>)` and the post-delete toast would show
+  // an inflated next-counter (e.g. S16 after deleting S15) while the
+  // actual spawn lands at S1 because gap-fill is the authoritative
+  // policy. Read session_index AFTER the strip so the just-deleted
+  // entry is excluded.
+  const projectedNext = nextCollisionFreeCounter(
+    workspacePath,
+    record.sessionCounter
+  );
   const next: BridgeThreadRecord = {
     ...record,
     threadId: null,
-    sessionCounter: record.sessionCounter + 1,
+    sessionCounter: projectedNext,
     lastResetAt: new Date().toISOString(),
     consecutiveFailures: 0,
     lastError: null,
@@ -332,7 +346,21 @@ export async function deleteAllCodexSessions(
     logger.warn(`bulk rollout delete partial: ${msg}`);
   }
 
-  // 2. One-shot session_index strip covering every targeted id.
+  // 2. One-shot session_index strip. Drops:
+  //   (a) every entry whose id is in `threadIds` (intact sessions we
+  //       just walked), and
+  //   (b) any orphan whose `thread_name` matches this workspace's
+  //       bridge pattern but whose rollout file is gone. Orphans
+  //       arise when rollouts get deleted out-of-band (manual rm,
+  //       prior Reset that missed the index strip, etc). Codex never
+  //       cleans its own index on rollout deletion, so without this
+  //       sweep the orphan S# stays in the index and pollutes
+  //       `nextCollisionFreeCounter`'s gap-fill - the user deletes
+  //       everything they can see and the next spawn still picks S2
+  //       because S1/S3/S4/... are orphan-taken. delete-all is the
+  //       right scope for this cleanup: the user explicitly asked
+  //       for "all" of this workspace's bridge state.
+  const pattern = bridgeThreadNamePattern(workspacePath);
   const indexPath = join(homedir(), ".codex", "session_index.jsonl");
   let strippedIndexLines = 0;
   if (existsSync(indexPath)) {
@@ -342,8 +370,13 @@ export async function deleteAllCodexSessions(
       const kept = lines.filter((line) => {
         if (!line.trim()) return false;
         try {
-          const obj = JSON.parse(line) as { id?: string };
-          return obj.id === undefined || !threadIds.has(obj.id);
+          const obj = JSON.parse(line) as { id?: string; thread_name?: string };
+          if (obj.id !== undefined && threadIds.has(obj.id)) return false;
+          const name = obj.thread_name ?? "";
+          if (pattern.test(name) && obj.id !== undefined) {
+            if (findRolloutPath(obj.id) === null) return false;
+          }
+          return true;
         } catch {
           return true;
         }
@@ -358,22 +391,34 @@ export async function deleteAllCodexSessions(
     }
   }
 
-  // 3. Null our bridge-thread state, bump counter past the highest
-  // session number we just deleted so the next prompt spawns with
-  // a clean S<N+1> that cannot collide with any leftover.
+  // 3. Null our bridge-thread state. Counter mirrors what
+  // `spawnFreshThread` will actually pick on the next prompt: the
+  // gap-fill (lowest unused integer for this workspace's bridge-pattern
+  // set) instead of the legacy `Math.max(record, maxSeen) + 1`. With
+  // every targeted entry stripped from session_index AND the rollout
+  // files removed above, the gap-fill set is empty for this workspace
+  // (modulo any siblings the lister filtered out via cwd-mismatch),
+  // so a true clean state typically yields S1. The menu label
+  // `MANAGE CODEX (S<n>)` and the post-delete toast then read the
+  // same value the spawn will actually use - no more S16 ghost after
+  // a delete-all that collapses to S1.
   const recordPath = join(
     EPIC_HANDSHAKE_DIR,
     `bridge-thread.${workspaceHash(workspacePath)}.json`
   );
-  const maxSeen = sessions.reduce((m, s) => Math.max(m, s.sessionCounter), 0);
+  let projectedNext: number | null = null;
   if (existsSync(recordPath)) {
     try {
       const raw = readFileSync(recordPath, "utf8");
       const record = JSON.parse(raw) as BridgeThreadRecord;
+      projectedNext = nextCollisionFreeCounter(
+        workspacePath,
+        record.sessionCounter
+      );
       const next: BridgeThreadRecord = {
         ...record,
         threadId: null,
-        sessionCounter: Math.max(record.sessionCounter, maxSeen) + 1,
+        sessionCounter: projectedNext,
         lastResetAt: new Date().toISOString(),
         consecutiveFailures: 0,
         lastError: null,
@@ -389,9 +434,9 @@ export async function deleteAllCodexSessions(
   }
 
   logger.info(
-    `bulk codex session delete: ${sessions.length} threads targeted, ${removedRollouts} rollouts removed, ${strippedIndexLines} index entries stripped`
+    `bulk codex session delete: ${sessions.length} threads targeted, ${removedRollouts} rollouts removed, ${strippedIndexLines} index entries stripped${projectedNext !== null ? `, next=S${projectedNext}` : ""}`
   );
   void vscode.window.showInformationMessage(
-    `Epic Handshake: deleted ${sessions.length} Codex session${sessions.length === 1 ? "" : "s"}. Next Claude to Codex prompt spawns a fresh session.`
+    `Epic Handshake: deleted ${sessions.length} Codex session${sessions.length === 1 ? "" : "s"}. Next Claude to Codex prompt spawns ${projectedNext !== null ? `S${projectedNext}` : "a fresh session"}.`
   );
 }

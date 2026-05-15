@@ -3,44 +3,11 @@ import type { ProviderKey } from "./contracts";
 import type { EventHub } from "./eventHub";
 
 /**
- * Generic bridge that watches a session token service for contextUsed
- * growth and emits `session.responseComplete` on the EventHub.
- *
- * Two independent triggers can cause a notification to fire, whichever
- * happens first per turn:
- *   1. `contextUsed` increase + classifier says done. Handles the
- *      common case where the service's state-change emission carries
- *      both signals at once.
- *   2. Classifier transitions `not-done` -> `done`. Catches a race on
- *      fast Codex replies where multiple events (`user_message`,
- *      `token_count`, `agent_message`, `task_complete`) land in a
- *      single watcher-debounce window. Without the transition
- *      trigger, the first emission sees `contextUsed` jump with the
- *      tail ending on `user_message` and is classified mid-turn;
- *      the second emission sees the tail ending on `agent_message`
- *      but `contextUsed` no longer changed, so neither emission
- *      would fire. The transition check does.
- *
- * Gating lives here so services stay notification-unaware:
- *   - Skip the initial subscription replay (first emission is state,
- *     not an event).
- *   - Skip contextUsed decreases (auto-compact summaries can drop
- *     token count; that is not a new response).
- *   - Skip stale-transcript emissions where the last write was more
- *     than `RECENT_ACTIVITY_WINDOW_MS` ago. This catches two session-
- *     switch artifacts: clicking into an older session whose tail
- *     still shows a completed assistant turn would otherwise fire a
- *     fresh toast for an hours-old message, and service-discovery
- *     replays that reach us from cached state would fire a toast
- *     the moment the extension activates.
- *   - Skip preview parsing when notifications are disabled upstream
- *     (`shouldParsePreview`). The tail is still read when a classifier
- *     is provided, since the classifier needs it - only the assistant-
- *     text parse is gated.
- *
- * Dependencies are injected so this module lives cleanly in engine
- * without reaching into shared/. Tool independence preserved - each
- * provider supplies its own parser, classifier, and tail reader.
+ * Generic bridge that watches a session-token service for contextUsed
+ * growth and emits `session.responseComplete`. Dependencies injected
+ * so engine stays free of tool-tier reach and each provider supplies
+ * its own parser, classifier, and tail reader. See `WAT321_MEMORY_EXTENDED.md`
+ * for the dual-trigger rationale and the freshness-gating details.
  */
 
 /** Transcript writes older than this are treated as state replay /

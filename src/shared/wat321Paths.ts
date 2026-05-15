@@ -65,9 +65,10 @@ export function bridgeStateDir(): string {
 }
 
 /** Per-client OpenCode Routes state dir. The on-disk literal stays
- * `model-bridge/` because v1.5.0 preserved that path for upgraders;
- * the helper name reflects the LOGICAL purpose (OpenCode Routes
- * tier state) rather than the historical literal. */
+ * `model-bridge/` for upgrader compatibility; the helper name reflects
+ * the LOGICAL purpose (OpenCode Routes tier state) rather than the
+ * historical literal. Renaming the dir would look like lost sessions
+ * and config to existing installs. */
 export function openCodeRoutesStateDir(): string {
   return join(clientStateDir(), "model-bridge");
 }
