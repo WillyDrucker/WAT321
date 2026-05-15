@@ -44,6 +44,7 @@ const LEGACY_MCP_NAMES = [
   "wat321-local-llm",
 ] as const;
 const TOP_LEVEL_SCRIPTS = [
+  "bridgeInbox.mjs",
   "channel.mjs",
   "codex.mjs",
   "paths.mjs",
@@ -60,18 +61,36 @@ const OPENCODE_SUBDIR_SCRIPTS = [
   "dispatch.mjs",
   "index.mjs",
 ] as const;
+/** Markdown docs loaded as MCP resources (bridge://docs/*). Kept as
+ * separate files instead of string literals so the source is editable
+ * markdown and the per-turn tool description budget stays lean - the
+ * docs only land in Claude's context when Claude explicitly reads the
+ * resource URI. */
+const DOCS_SUBDIR_FILES = [
+  "dispatch.md",
+  "dispatch-errors.md",
+  "dispatch-routing.md",
+  "dispatch-judgement.md",
+  "inbox.md",
+] as const;
 
-// Tool surface: dispatch + session lifecycle. Inbox / list moved to
-// MCP resources, which don't need pre-allowance because resources/read
-// is a different permission surface than tool calls.
+// Tool surface: dispatch + session lifecycle + inbox consume. Inbox
+// peek and other read-only state moved to MCP resources, which don't
+// need pre-allowance because resources/read is a different permission
+// surface than tool calls.
 const UNIFIED_ALLOWED_TOOLS = [
   "mcp__wat321__wat321_ask",
   "mcp__wat321__wat321_session",
+  "mcp__wat321__wat321_bridge",
 ] as const;
 
 const LEGACY_ALLOWED_TOOLS = [
   "mcp__wat321__epic_handshake_ask",
   "mcp__wat321__epic_handshake_inbox",
+  // Retired dev name for the inbox-drain operation; the shipped tool
+  // is `wat321_bridge`. Sweep this from any allowlist that captured
+  // the dev name during pre-release testing.
+  "mcp__wat321__wat321_consume",
   "mcp__wat321-model-bridge__model_bridge_ask",
   "mcp__wat321-model-bridge__model_bridge_inbox",
   "mcp__wat321-model-bridge__model_bridge_thread",
@@ -151,6 +170,8 @@ export function extractUnifiedScripts(
   if (!existsSync(BIN_DIR)) mkdirSync(BIN_DIR, { recursive: true });
   const opencodeBinDir = join(BIN_DIR, "opencode");
   if (!existsSync(opencodeBinDir)) mkdirSync(opencodeBinDir, { recursive: true });
+  const docsBinDir = join(BIN_DIR, "docs");
+  if (!existsSync(docsBinDir)) mkdirSync(docsBinDir, { recursive: true });
 
   const subdirs = ["out", "src"] as const;
   const copyOne = (relParts: string[], fileName: string, destDir: string) => {
@@ -182,6 +203,9 @@ export function extractUnifiedScripts(
   }
   for (const fileName of OPENCODE_SUBDIR_SCRIPTS) {
     copyOne(["opencode"], fileName, opencodeBinDir);
+  }
+  for (const fileName of DOCS_SUBDIR_FILES) {
+    copyOne(["docs"], fileName, docsBinDir);
   }
   return join(BIN_DIR, "channel.mjs");
 }

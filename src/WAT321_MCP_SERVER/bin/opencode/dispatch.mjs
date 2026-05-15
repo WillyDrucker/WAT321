@@ -242,10 +242,26 @@ export async function handleAsk(args) {
       null;
     const meta = {
       alias: sessionInstance?.alias || (target === "local" ? "Local LLM" : "OpenCode"),
-      instanceId: sessionInstance?.id || target,
+      // Pass null (not the bare target keyword) when no real instance
+      // is resolved. The heartbeat writer skips last-used.json on a
+      // null/keyword instanceId so the widget's `activeInstanceFrom`
+      // doesn't silently fall back to `activeInstanceId` (typically
+      // Big Pickle) after a Local LLM dispatch - the user reads that
+      // as "I dispatched to Local LLM but the widget jumped to Big
+      // Pickle". A null id here is a true outcome: we couldn't pin
+      // the dispatch to a catalog entry, so the widget should keep
+      // showing the prior last-used entry (or `activeInstanceId` if
+      // none exists), not invent one.
+      instanceId: sessionInstance?.id || null,
       dataRetention: sessionInstance?.dataRetention || (target === "local" ? "local" : "retained"),
       model: sessionInstance?.model || "",
       timeoutMs,
+      // target + waitMode plumb through so withOpenCodeHeartbeat can
+      // write the engine heartbeat the bridge stage coordinator
+      // reads. Without these, sync dispatches leave the bridge widget
+      // blank instead of animating the 5-stage walker.
+      target,
+      waitMode: "standard",
     };
     // Per-message model binding. Local: hardcoded (catalog model is
     // empty by design - llama.cpp ignores the field - but OpenCode's
@@ -306,6 +322,8 @@ export async function handleAsk(args) {
     dataRetention: instance?.dataRetention || "retained",
     model: modelSlug,
     timeoutMs,
+    target,
+    waitMode: "standard",
   };
   const result = await withOpenCodeHeartbeat(oneShotMeta, () =>
     anonymousChatCompletion(modelSlug, prompt, timeoutMs)
