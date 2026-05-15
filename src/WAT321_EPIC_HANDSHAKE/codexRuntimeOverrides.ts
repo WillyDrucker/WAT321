@@ -1,12 +1,10 @@
-import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import {
   codexEffortFlagPath,
   codexModelFlagPath,
   codexSandboxFlagPath,
   codexSandboxTouchedFlagPath,
-  EPIC_HANDSHAKE_DIR,
 } from "./constants";
 
 /**
@@ -161,41 +159,3 @@ export function writeCodexEffortOverride(
   }
 }
 
-// -----------------------------------------------------------------
-// Reset support
-// -----------------------------------------------------------------
-
-/** Sweep every codex-{sandbox,model,effort,sandbox-touched} flag in
- * the EH dir, regardless of wsHash. Reset WAT321 leans on
- * `rmSync(~/.wat321/)` for the global wipe, but on Windows that
- * recursive remove can fail mid-tree if any file is locked (e.g. a
- * still-running channel.mjs holding `channel.log` open) and leave
- * sibling subtrees untouched. The codex override flags then survive
- * and the picker re-reads stale full-access / model overrides on the
- * next click - the user sees their pre-reset choice instead of the
- * platform read-only default. Calling this from EH's resetCleanup
- * before the disk wipe guarantees the override slate is clean even
- * when `rmSync` only partially completes. */
-export function clearAllCodexOverrideFlags(): void {
-  if (!existsSync(EPIC_HANDSHAKE_DIR)) return;
-  let entries: string[];
-  try {
-    entries = readdirSync(EPIC_HANDSHAKE_DIR);
-  } catch {
-    return;
-  }
-  for (const name of entries) {
-    if (
-      name.startsWith("codex-sandbox.") ||
-      name.startsWith("codex-sandbox-touched.") ||
-      name.startsWith("codex-model.") ||
-      name.startsWith("codex-effort.")
-    ) {
-      try {
-        unlinkSync(join(EPIC_HANDSHAKE_DIR, name));
-      } catch {
-        // best-effort - reset must continue regardless
-      }
-    }
-  }
-}
