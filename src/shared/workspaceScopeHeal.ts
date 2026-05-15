@@ -38,7 +38,7 @@ const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.notificationsClaude}`,
   `wat321.${SETTING.notificationsCodex}`,
   `wat321.${SETTING.epicHandshakeEnabled}`,
-  `wat321.${SETTING.epicHandshakeSuppressCodexToasts}`,
+  `wat321.${SETTING.epicHandshakeSuppressCodexNotifications}`,
   // Legacy: epicHandshake.bridgeMode was removed in v1.4.4 - the
   // unified bridge exposes every enabled target without a per-mode
   // mask now. Keep the key in the heal sweep so a user upgrading

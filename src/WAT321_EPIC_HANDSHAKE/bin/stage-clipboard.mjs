@@ -7,7 +7,7 @@
 // clipboard has no image or the platform tool is unavailable.
 //
 // Trigger discipline (IMPORTANT):
-//   Run this ONLY when about to send a bridge prompt (epic_handshake_ask)
+//   Run this ONLY when about to send a bridge prompt (wat321_ask)
 //   that references the staged image. Do NOT pre-stage speculatively,
 //   do NOT run on every clipboard paste. The user pastes a screenshot,
 //   says "send to Codex", THEN this runs once.

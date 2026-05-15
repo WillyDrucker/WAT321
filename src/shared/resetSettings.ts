@@ -205,7 +205,7 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     // clears to undefined so the schema default (true) takes effect -
     // OpenCode is enabled-by-default and reset should respect that.
     updateSettingAllScopes(SETTING.epicHandshakeEnabled, false),
-    updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexToasts, undefined),
+    updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexNotifications, undefined),
     // Legacy: epicHandshake.defaultWaitMode removed in v1.4.1. Sweep
     // any stale value at every scope so reset-to-defaults still
     // strips it for users upgrading from <=1.4.0.
