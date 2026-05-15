@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import * as vscode from "vscode";
+import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { atomicCopy } from "../shared/fs/atomicCopy";
 import { resolveClaudeCli } from "../shared/providers/claude/cliResolver";
 import {
@@ -22,15 +23,18 @@ import { createBridgeLogger } from "./outputChannel";
  * registration directly.
  *
  * Install:
- *   1. Sweep legacy MCP entries by name so duplicates can't
- *      accumulate across upgrades.
- *   2. Extract bin scripts to `~/.wat321/bridge/bin/` and copy
+ *   1. Extract bin scripts to `~/.wat321/bridge/bin/` and copy
  *      `node_modules/` for prod deps.
- *   3. Register the MCP entry with the wsId injected via `--env`.
+ *   2. Sweep dormant `wat321` entries from `~/.claude.json`'s
+ *      projects tree whose args[0] points at a path that no longer
+ *      exists (artifacts from an earlier registration mechanism).
+ *   3. Sweep any existing MCP entry by name so `claude mcp add` can
+ *      re-register without duplicate-name errors.
+ *   4. Register the MCP entry with the wsId injected via `--env`.
  *      Project scope when a workspace folder is open; user scope with
  *      the sentinel `default` wsId when VS Code is folderless, so a
  *      window with no folder still gets a working bridge.
- *   4. Pre-allow the unified tool surface in Claude's settings.
+ *   5. Pre-allow the unified tool surface in Claude's settings.
  *
  * Uninstall reverses the registration plus the pre-allow list.
  */
@@ -38,11 +42,12 @@ import { createBridgeLogger } from "./outputChannel";
 const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
 const BIN_DIR = join(BRIDGE_DIR, "bin");
 const UNIFIED_MCP_NAME = "wat321";
-const LEGACY_MCP_NAMES = [
-  "wat321",
-  "wat321-model-bridge",
-  "wat321-local-llm",
-] as const;
+// Defensive user-scope sweep before re-registering at project scope.
+// `claude mcp add` errors on duplicate-name rather than overwriting,
+// and an earlier install path wrote the entry at user scope - if any
+// install still has that, the project-scope add would fail until the
+// user-scope entry is gone.
+const USER_SCOPE_SWEEP_NAMES = [UNIFIED_MCP_NAME] as const;
 const TOP_LEVEL_SCRIPTS = [
   "bridgeInbox.mjs",
   "channel.mjs",
@@ -84,23 +89,6 @@ const UNIFIED_ALLOWED_TOOLS = [
   "mcp__wat321__wat321_bridge",
 ] as const;
 
-const LEGACY_ALLOWED_TOOLS = [
-  "mcp__wat321__epic_handshake_ask",
-  "mcp__wat321__epic_handshake_inbox",
-  // Retired dev name for the inbox-drain operation; the shipped tool
-  // is `wat321_bridge`. Sweep this from any allowlist that captured
-  // the dev name during pre-release testing.
-  "mcp__wat321__wat321_consume",
-  "mcp__wat321-model-bridge__model_bridge_ask",
-  "mcp__wat321-model-bridge__model_bridge_inbox",
-  "mcp__wat321-model-bridge__model_bridge_thread",
-  "mcp__wat321-model-bridge__model_bridge_task",
-  "mcp__wat321-model-bridge__model_bridge_list",
-  "mcp__wat321-local-llm__local_llm_ask",
-  "mcp__wat321-local-llm__local_llm_inbox",
-  "mcp__wat321-local-llm__local_llm_thread",
-  "mcp__wat321-local-llm__local_llm_task",
-] as const;
 
 interface CliResult {
   code: number;
@@ -210,25 +198,82 @@ export function extractUnifiedScripts(
   return join(BIN_DIR, "channel.mjs");
 }
 
-/** Sweep legacy MCP entries via `claude mcp remove`. Best-effort -
- * non-zero exits are normal when the entry was never registered.
- * Sweeps user-scope (pre-1.4.8 layout) for both names; project-scope
- * for the unified `wat321` is swept separately at re-install time so a
- * stale per-workspace entry from a prior session gets replaced. */
-async function sweepLegacy(
+/** Strip dormant `wat321` MCP entries from `~/.claude.json`'s
+ * per-project `mcpServers` map when their args[0] does not match the
+ * current bin path. Claude Code reads project-scope MCP from each
+ * workspace's `.mcp.json`; the entries under `~/.claude.json`
+ * `projects.X.mcpServers.wat321` are dormant artifacts from an
+ * earlier registration mechanism that point at a path which no
+ * longer exists. Harmless but accumulating - sweep once on every
+ * install so the user-wide config stays clean. */
+function sweepStaleClaudeJsonEntries(logger: UnifiedLogger): void {
+  const claudeJsonPath = join(homedir(), ".claude.json");
+  if (!existsSync(claudeJsonPath)) return;
+  let raw: string;
+  try {
+    raw = readFileSync(claudeJsonPath, "utf8");
+  } catch {
+    return;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (typeof parsed !== "object" || parsed === null) return;
+  const expected = normalize(join(BIN_DIR, "channel.mjs")).toLowerCase();
+
+  const root = parsed as { projects?: Record<string, unknown> };
+  const projects = root.projects;
+  if (typeof projects !== "object" || projects === null) return;
+
+  let stripped = 0;
+  for (const projectKey of Object.keys(projects)) {
+    const project = projects[projectKey];
+    if (typeof project !== "object" || project === null) continue;
+    const servers = (project as { mcpServers?: Record<string, unknown> })
+      .mcpServers;
+    if (typeof servers !== "object" || servers === null) continue;
+    const entry = servers[UNIFIED_MCP_NAME];
+    if (typeof entry !== "object" || entry === null) continue;
+    const args = (entry as { args?: unknown }).args;
+    if (!Array.isArray(args) || args.length === 0) continue;
+    const arg0 = typeof args[0] === "string" ? args[0] : "";
+    if (normalize(arg0).toLowerCase() === expected) continue;
+    delete servers[UNIFIED_MCP_NAME];
+    stripped++;
+  }
+
+  if (stripped === 0) return;
+  try {
+    writeFileAtomic(claudeJsonPath, `${JSON.stringify(parsed, null, 2)}\n`);
+    logger.info(
+      `swept ${stripped} stale wat321 entry/entries from ~/.claude.json projects tree`
+    );
+  } catch {
+    // best-effort - dormant entries are inert; next install retries
+  }
+}
+
+/** Sweep prior MCP entries via `claude mcp remove` before re-adding.
+ * Required because `claude mcp add` errors on duplicate-name rather
+ * than overwriting. Best-effort - non-zero exits are normal when the
+ * entry was never registered. */
+async function sweepBeforeAdd(
   logger: UnifiedLogger,
   workspaceCwd?: string
 ): Promise<void> {
-  for (const legacyName of LEGACY_MCP_NAMES) {
+  for (const name of USER_SCOPE_SWEEP_NAMES) {
     const result = await runClaudeCli([
       "mcp",
       "remove",
       "-s",
       "user",
-      legacyName,
+      name,
     ]);
     if (result.code === 0) {
-      logger.info(`swept user-scope MCP entry '${legacyName}'`);
+      logger.info(`swept user-scope MCP entry '${name}'`);
     }
   }
   if (workspaceCwd) {
@@ -240,7 +285,6 @@ async function sweepLegacy(
       logger.info(`swept project-scope MCP entry '${UNIFIED_MCP_NAME}'`);
     }
   }
-  unAllowMcpTools(LEGACY_ALLOWED_TOOLS, logger);
 }
 
 /** Install the unified bridge: extract scripts, sweep legacy entries,
@@ -276,7 +320,8 @@ export async function installUnifiedBridge(
   const wsId = workspaceId();
   const scope: "project" | "user" = workspaceCwd ? "project" : "user";
 
-  await sweepLegacy(logger, workspaceCwd);
+  sweepStaleClaudeJsonEntries(logger);
+  await sweepBeforeAdd(logger, workspaceCwd);
 
   const add = await runClaudeCli(
     [
@@ -307,10 +352,11 @@ export async function installUnifiedBridge(
   return { ok: true, scriptPath };
 }
 
-/** Uninstall the unified bridge. Sweeps both project-scope (folder
- * mode, 1.4.8+ layout) and user-scope (folderless mode 1.5.2+, plus
- * legacy from pre-1.4.8 installs) so a user toggling EH off doesn't
- * leave stale entries behind regardless of whether a folder is open. */
+/** Uninstall the unified bridge. Sweeps both project-scope (the
+ * folder-mode registration) and user-scope (the folderless-mode
+ * registration plus any defensive sweep target) so a user toggling
+ * EH off doesn't leave stale entries behind regardless of whether
+ * a folder is open. */
 export async function uninstallUnifiedBridge(
   logger: UnifiedLogger = consoleLogger
 ): Promise<void> {

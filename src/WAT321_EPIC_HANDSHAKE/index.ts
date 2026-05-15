@@ -29,11 +29,11 @@ import {
   migrateLegacyEnvelopes,
 } from "./legacyMigration";
 import { createOutputChannelLogger } from "./outputChannel";
-import { clearAllCodexOverrideFlags } from "./codexRuntimeOverrides";
 import {
   clearClipboardStaging,
   sweepStaleClipboardStages,
 } from "./stageClipboardImage";
+import { wipeWorkspaceEpicHandshakeState } from "./resetWipe";
 import { registerSessionPickerCommands } from "./openCodeSessionsPicker";
 import {
   applyDefaultWaitMode,
@@ -296,12 +296,11 @@ class EpicHandshakeTier {
     prewarmTimer.unref?.();
   }
 
-  /** Reset hook: ensure cross-tool state is cleaned up synchronously
-   * before Reset WAT321 wipes `~/.wat321/`. The listener-driven
-   * disableFlow cannot be relied on here - it fires async from the
-   * settings change and is not awaited by performClear, so the
-   * `rmSync` would otherwise race ahead and leave a zombie MCP
-   * entry in Claude's config. */
+  /** Reset hook: tear down EH services and wipe THIS workspace's
+   * EH state. Runs synchronously before performClear's scoped disk
+   * wipe so a stuck MCP entry cannot survive into the post-reset
+   * state. Peer windows' wsHash subfolders and shared bin/ are
+   * intentionally untouched - reset is workspace-scoped. */
   async resetCleanup(): Promise<void> {
     await this.stopEnabled();
     try {
@@ -309,20 +308,11 @@ class EpicHandshakeTier {
     } catch {
       // best-effort - reset must not fail if CLI removal glitches
     }
-    // Wipe any staged clipboard screenshots; they are disposable and
-    // the user expects Reset WAT321 to clear everything the tier
-    // writes to disk.
     clearClipboardStaging();
-    // Codex override flags (sandbox / model / effort + the touched
-    // sentinel) live alongside other EH state under
-    // `~/.wat321/epic-handshake/`. Reset's global rmSync would normally
-    // sweep them, but on Windows that recursive remove can bail mid-
-    // tree on a locked file (e.g. a sibling client's still-running
-    // channel.log) and leave the EH dir partially intact. Sweeping
-    // explicitly here guarantees the picker sees a clean slate -
-    // sandbox back to read-only, model override gone - regardless of
-    // whether rmSync completes cleanly afterward.
-    clearAllCodexOverrideFlags();
+    const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (ws) {
+      wipeWorkspaceEpicHandshakeState(workspaceHash(ws));
+    }
   }
 
   private refreshStatusBar(): void {

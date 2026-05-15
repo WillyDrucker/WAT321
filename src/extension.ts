@@ -53,18 +53,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   ctx = createEngineContext();
 
-  // Migrate legacy `wat321.sessionTokens.compact: true` onto the
-  // displayMode enum value "Full + Compact"; the workspace-scope-heal
-  // sweep then strips the orphan key. Idempotent and best-effort.
-  void migrateSessionTokensCompact();
-
-  // Migrate legacy modelBridge.enabled -> enableOpenCode and
-  // modelBridge.localEndpoint -> localEndpoint. Reads any explicit
-  // value at the old keys and copies to the new keys; the workspace-
-  // scope-heal sweep strips the source on the same activate.
-  // Idempotent.
-  void migrateModelBridgeKeys();
-
   // Bridge config writer maintains the per-client
   // `~/.wat321/clients/<wsId>/bridge/config.json` so the unified MCP
   // server can read enabled-target flags at startup. Cheap on activate,
@@ -273,86 +261,3 @@ async function safeUpdate(
   }
 }
 
-/** Fold legacy `sessionTokens.compact: true` into the displayMode
- * enum value "Full + Compact". Skips when the current displayMode is
- * already set to a non-Auto/non-Full value (Compact, Minimal) - those
- * users had no effect from the old boolean and shouldn't be flipped
- * to a different visible mode by the migration. Skips when the user
- * is already on "Full + Compact" or doesn't have the legacy boolean
- * set. Best-effort; the workspace-scope-heal sweep strips the source
- * key on the same activate. */
-async function migrateSessionTokensCompact(): Promise<void> {
-  try {
-    const config = vscode.workspace.getConfiguration("wat321");
-    const inspect = config.inspect<boolean>("sessionTokens.compact");
-    const compact =
-      inspect?.globalValue === true || inspect?.workspaceValue === true;
-    if (!compact) return;
-    const currentMode = config.get<string>(SETTING.displayMode, "Auto");
-    if (currentMode === "Auto" || currentMode === "Full") {
-      await config.update(
-        SETTING.displayMode,
-        "Full + Compact",
-        vscode.ConfigurationTarget.Global
-      );
-    }
-    // Source key removal happens via workspaceScopeHeal's APPLICATION_SCOPE_KEYS
-    // sweep (also catches workspace-scope copies) - no need to update here.
-  } catch {
-    // best-effort - leaving both keys present is recoverable from the UI
-  }
-}
-
-/** Rename `modelBridge.enabled` -> `enableOpenCode` and
- * `modelBridge.localEndpoint` -> `localEndpoint`. The "Model Bridge"
- * naming was internal; the user-facing settings now live under the
- * top-level OpenCode section with cleaner labels.
- *
- * Migration semantics: copy any explicit value at the old key onto
- * the new key, only when the new key has no explicit value of its
- * own (so a user who already set the new key during a prior partial
- * upgrade isn't overwritten). Source key removal happens via the
- * workspace-scope-heal legacy sweep on the same activate. */
-async function migrateModelBridgeKeys(): Promise<void> {
-  try {
-    const config = vscode.workspace.getConfiguration("wat321");
-
-    const oldEnabled = config.inspect<boolean>("modelBridge.enabled");
-    const newEnabled = config.inspect<boolean>("enableOpenCode");
-    if (
-      newEnabled?.globalValue === undefined &&
-      newEnabled?.workspaceValue === undefined &&
-      (oldEnabled?.globalValue !== undefined ||
-        oldEnabled?.workspaceValue !== undefined)
-    ) {
-      const value = oldEnabled.globalValue ?? oldEnabled.workspaceValue;
-      if (typeof value === "boolean") {
-        await config.update(
-          SETTING.enableOpenCode,
-          value,
-          vscode.ConfigurationTarget.Global
-        );
-      }
-    }
-
-    const oldEndpoint = config.inspect<string>("modelBridge.localEndpoint");
-    const newEndpoint = config.inspect<string>("localEndpoint");
-    if (
-      newEndpoint?.globalValue === undefined &&
-      newEndpoint?.workspaceValue === undefined &&
-      (oldEndpoint?.globalValue !== undefined ||
-        oldEndpoint?.workspaceValue !== undefined)
-    ) {
-      const value = oldEndpoint.globalValue ?? oldEndpoint.workspaceValue;
-      if (typeof value === "string") {
-        await config.update(
-          SETTING.localEndpoint,
-          value,
-          vscode.ConfigurationTarget.Global
-        );
-      }
-    }
-  } catch {
-    // best-effort - source keys remain readable until the heal sweep runs
-  }
-}

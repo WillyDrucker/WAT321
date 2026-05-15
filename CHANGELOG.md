@@ -5,6 +5,16 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-05-15
+
+### Changed
+
+- **Reset is now scoped to the current workspace instead of your whole machine.** Earlier, resetting WAT321 in one VS Code window wiped every WAT321 file on disk, which silently killed the bridge servers running in your other open windows. Reset now clears only this workspace's state and refreshes the shared usage caches, leaving other windows' bridges and their state untouched. Toggling Epic Handshake off and on in any window remains the universal self-heal if you do want a clean slate for that window.
+
+### Fixed
+
+- **Dormant bridge entries left over from an older WAT321 layout get cleaned up automatically.** A previous registration mechanism wrote entries into your Claude config pointing at a script path WAT321 hasn't used in several releases. They were harmless but accumulating across workspaces; they're now swept on the next Epic Handshake activation. One-time and silent.
+
 ## [1.5.5] - 2026-05-15
 
 ### Added

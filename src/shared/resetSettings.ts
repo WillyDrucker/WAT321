@@ -1,7 +1,9 @@
 import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING, WAT321_DIR } from "../engine/settingsKeys";
 import { getAllWidgetIds } from "../engine/widgetCatalog";
+import { clientStateDir } from "./wat321Paths";
 import { healStaleApplicationScopeKeys } from "./workspaceScopeHeal";
 
 /** Update a single wat321.* setting at every applicable configuration
@@ -154,6 +156,12 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
 
   if (confirm !== "Clear Everything") return;
 
+  // Heal stuck workspace-scope overrides before the setting writes
+  // below, so a stale `.vscode/settings.json` copy can't re-shadow
+  // the cleared values. Reset is the natural moment for this; the
+  // sweep never finds anything on a clean install.
+  healStaleApplicationScopeKeys();
+
   // Reset hook: awaited so cross-tool cleanup (MCP uninstall,
   // globalState clears) completes BEFORE the disk wipe below. Also
   // clears kickstart escalation counters on running services so a
@@ -183,63 +191,44 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes(SETTING.enableClaude, undefined),
     updateSettingAllScopes(SETTING.enableCodex, undefined),
     updateSettingAllScopes(SETTING.displayMode, undefined),
-    // Legacy: sessionTokens.compact removed in v1.4.3 (folded into the
-    // displayMode enum as "Full + Compact"). Sweep stale value at every
-    // scope so reset-to-defaults still strips it for users upgrading
-    // from 1.4.0 - 1.4.2.
-    updateSettingAllScopes("sessionTokens.compact", undefined),
     updateSettingAllScopes(SETTING.statusBarPriority, undefined),
     updateSettingAllScopes(SETTING.enableHeatmap, undefined),
     updateSettingAllScopes(SETTING.enableTokensPerSecondCounters, undefined),
     updateSettingAllScopes(SETTING.notificationsMode, undefined),
     updateSettingAllScopes(SETTING.notificationsClaude, undefined),
     updateSettingAllScopes(SETTING.notificationsCodex, undefined),
-    // Bridge `enabled` flags are force-written to `false` rather than
-    // reset-to-schema-default. Reset is the user's "something is wrong,
-    // give me a clean slate" signal; both bridges should be off after
-    // it, requiring an explicit opt-in to re-enable. Epic Handshake's
-    // schema default is false so undefined would also work; explicit
-    // false makes the intent unambiguous. Reset only fires from user-
-    // invoked paths (command, checkbox, click menu) - never at activate
-    // - so this never accidentally disables a working bridge. OpenCode
-    // clears to undefined so the schema default (true) takes effect -
-    // OpenCode is enabled-by-default and reset should respect that.
+    // Epic Handshake force-written to `false`: reset is the user's
+    // "something is wrong, clean slate" signal, so the bridge should
+    // require an explicit opt-in to re-enable. OpenCode clears to
+    // undefined so its schema default (true) takes effect.
     updateSettingAllScopes(SETTING.epicHandshakeEnabled, false),
     updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexNotifications, undefined),
-    // Legacy: epicHandshake.defaultWaitMode removed in v1.4.1. Sweep
-    // any stale value at every scope so reset-to-defaults still
-    // strips it for users upgrading from <=1.4.0.
-    updateSettingAllScopes("epicHandshake.defaultWaitMode", undefined),
     updateSettingAllScopes(SETTING.enableOpenCode, undefined),
     updateSettingAllScopes(SETTING.localEndpoint, undefined),
-    // Legacy: modelBridge.enabled / modelBridge.localEndpoint renamed
-    // in v1.4.4 to enableOpenCode / localEndpoint. Sweep the old keys
-    // at every scope so reset-to-defaults strips them for users
-    // upgrading from <=1.4.3.
-    updateSettingAllScopes("modelBridge.enabled", undefined),
-    updateSettingAllScopes("modelBridge.localEndpoint", undefined),
-    // Legacy: bridge.useUnified was removed in v1.4.3 - Epic Handshake
-    // is the single switch for the unified bridge now. Sweep stale
-    // value at every scope so reset-to-defaults still strips it for
-    // users upgrading from <=1.4.2.
-    updateSettingAllScopes("bridge.useUnified", undefined),
-    // Legacy: epicHandshake.bridgeMode was removed in v1.4.4 - the
-    // unified bridge now exposes every enabled target without a
-    // per-mode mask. Sweep stale value at every scope.
-    updateSettingAllScopes("epicHandshake.bridgeMode", undefined),
     resetStatusBarItemVisibility(),
   ]);
 
-  // Remove the entire ~/.wat321/ folder. This catches the active shared
-  // caches and claim files, plus any deprecated artifacts from earlier
-  // versions. One recursive remove covers everything WAT321 has ever
-  // written.
+  // Scoped wipe: only this workspace's client state plus the shared
+  // usage caches. Bin scripts under `~/.wat321/bridge/bin/` and
+  // `~/.wat321/epic-handshake/bin/` are bundled-with-the-.vsix
+  // content, not state - other VS Code windows' `channel.mjs`
+  // processes spawn from those files, so wiping bin globally would
+  // silently kill peer windows' MCP servers. Per-tier per-workspace
+  // EH state (inbox/sent/<wsHash>/, runtime flags) is wiped by EH's
+  // resetCleanup which already ran above.
   try {
-    if (existsSync(WAT321_DIR)) {
-      rmSync(WAT321_DIR, { recursive: true, force: true });
-    }
+    const cliDir = clientStateDir();
+    if (existsSync(cliDir)) rmSync(cliDir, { recursive: true, force: true });
   } catch {
     // best-effort
+  }
+  for (const cacheName of ["claude-usage.cache.json", "codex-usage.cache.json"]) {
+    try {
+      const path = join(WAT321_DIR, cacheName);
+      if (existsSync(path)) rmSync(path, { force: true });
+    } catch {
+      // best-effort
+    }
   }
 
   vscode.window.showInformationMessage(
@@ -251,10 +240,6 @@ export function registerClearSettingsCommand(
   context: vscode.ExtensionContext,
   onReset?: OnResetCallback
 ): void {
-  // Heal stale application-scope keys from .vscode/settings.json
-  // that could block the checkbox change handler.
-  healStaleApplicationScopeKeys();
-
   // Command palette entry
   context.subscriptions.push(
     vscode.commands.registerCommand("wat321.clearAllSettings", () => performClear(onReset))

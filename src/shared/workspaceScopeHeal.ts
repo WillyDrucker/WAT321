@@ -11,59 +11,28 @@ import { writeFileAtomic } from "./fs/atomicWrite";
  * so a value already present in a workspace `.vscode/settings.json`
  * survives silently and can override the user's current preference.
  *
- * Two-pronged on activate:
+ * Two-pronged sweep, run from Reset (not activate):
  *   1. Strip from the workspace config API (for keys where the API
  *      still allows removal, e.g. action-trigger checkboxes).
  *   2. Surgically strip from every open workspace folder's
  *      `.vscode/settings.json` file (the durable fix).
  *
- * Known observed symptom: a user on `"System Notifications"` mode
- * seeing random "Auto"-style behavior because a stale workspace
- * override from an earlier default persists in their workspace
- * `.vscode/settings.json` even after the default changed upstream.
+ * Symptom this addresses: a user on `"System Notifications"` mode
+ * seeing random behavior because a stale workspace override from a
+ * previous default persists in their workspace `.vscode/settings.json`.
  */
 
 /** Application-scoped `wat321.*` keys. Must stay in sync with the
  * `"scope": "application"` entries in package.json. */
 const APPLICATION_SCOPE_KEYS = [
   `wat321.${SETTING.clearAllData}`,
-  // Legacy: sessionTokens.compact was a separate boolean in v1.4.0 -
-  // v1.4.2 and got folded into the displayMode enum as "Full + Compact"
-  // in v1.4.3. Keep the key in the heal sweep so a user upgrading from
-  // <=1.4.2 with a stale workspace-scope override gets it stripped
-  // automatically; the migration in extension.ts maps a true value onto
-  // displayMode="Full + Compact" before the sweep removes the source.
-  `wat321.sessionTokens.compact`,
   `wat321.${SETTING.notificationsMode}`,
   `wat321.${SETTING.notificationsClaude}`,
   `wat321.${SETTING.notificationsCodex}`,
   `wat321.${SETTING.epicHandshakeEnabled}`,
   `wat321.${SETTING.epicHandshakeSuppressCodexNotifications}`,
-  // Legacy: epicHandshake.bridgeMode was removed in v1.4.4 - the
-  // unified bridge exposes every enabled target without a per-mode
-  // mask now. Keep the key in the heal sweep so a user upgrading
-  // from <=1.4.3 with a stale workspace-scope override gets it
-  // stripped automatically.
-  `wat321.epicHandshake.bridgeMode`,
-  // Legacy: epicHandshake.defaultWaitMode was removed in v1.4.1 -
-  // adaptive is the fixed activate-time default now. Keep the key in
-  // the heal sweep so a user upgrading from <=1.4.0 with a stale
-  // workspace-scope override gets it stripped automatically.
-  `wat321.epicHandshake.defaultWaitMode`,
   `wat321.${SETTING.enableOpenCode}`,
   `wat321.${SETTING.localEndpoint}`,
-  // Legacy: modelBridge.enabled and modelBridge.localEndpoint were
-  // renamed in v1.4.4 to enableOpenCode and localEndpoint. Migration
-  // happens on activate; sweep the source keys here so the workspace
-  // copy doesn't shadow the new ones.
-  `wat321.modelBridge.enabled`,
-  `wat321.modelBridge.localEndpoint`,
-  // Legacy: bridge.useUnified was removed in v1.4.3 - Epic Handshake's
-  // own enabled flag is the single switch for the unified bridge MCP
-  // server now. Keep the key in the heal sweep so a user upgrading
-  // from <=1.4.2 with a stale workspace-scope override gets it
-  // stripped automatically.
-  `wat321.bridge.useUnified`,
 ] as const;
 
 /** Value-pattern fragments matched per JSONC value shape. Ordered
