@@ -80,8 +80,19 @@ const HEARTBEAT_STALENESS_MS = 120_000;
  *
  * Workspace filtering matters when multiple VS Code windows run the
  * bridge concurrently - without it the status bar in window A
- * would render whatever turn is freshest in window B. */
-export function readNewestHeartbeat(wsHash: string | null): TurnHeartbeat | null {
+ * would render whatever turn is freshest in window B.
+ *
+ * `preferredEnvelopeId`: when an active latch already owns a turn,
+ * pass its envelope id so the reader returns that turn's heartbeat
+ * even when a parallel backend (e.g. opencode/local fire-and-forget)
+ * has just written a fresher-mtime heartbeat for a different envelope.
+ * Without this, parallel dispatches make the single-latch coordinator
+ * flip between envelopes and the Codex ceremony visibly replays as
+ * the latch oscillates. */
+export function readNewestHeartbeat(
+  wsHash: string | null,
+  preferredEnvelopeId?: string
+): TurnHeartbeat | null {
   if (!wsHash) return null;
   try {
     if (!existsSync(EPIC_HANDSHAKE_DIR)) return null;
@@ -90,6 +101,7 @@ export function readNewestHeartbeat(wsHash: string | null): TurnHeartbeat | null
     );
     if (files.length === 0) return null;
     let newest: { parsed: TurnHeartbeat; mtime: number } | null = null;
+    let preferred: { parsed: TurnHeartbeat; mtime: number } | null = null;
     for (const f of files) {
       const p = join(EPIC_HANDSHAKE_DIR, f);
       let mtime = 0;
@@ -162,8 +174,11 @@ export function readNewestHeartbeat(wsHash: string | null): TurnHeartbeat | null
       if (!newest || mtime > newest.mtime) {
         newest = { parsed: normalized, mtime };
       }
+      if (preferredEnvelopeId && heartbeatId === preferredEnvelopeId) {
+        preferred = { parsed: normalized, mtime };
+      }
     }
-    return newest?.parsed ?? null;
+    return (preferred ?? newest)?.parsed ?? null;
   } catch {
     return null;
   }
