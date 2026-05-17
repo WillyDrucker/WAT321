@@ -59,13 +59,10 @@ export type DispatchAction = (
   ctx: ActionContext
 ) => Promise<void>;
 
-/** Pass-through wrapper for QuickPick opens. Originally carried a
- * lifecycle-hook plumbing layer that suppressed the bridge widget
- * tooltip while a menu was open and during the action toast that
- * followed. The bridge widget no longer renders a tooltip at all, so
- * the hooks are dead code. The wrapper stays in place across all
- * menu call sites so a future lifecycle need (telemetry, locking,
- * etc.) can be retrofitted without touching every QuickPick caller. */
+/** Pass-through wrapper for QuickPick opens. Retained as the single
+ * seam every menu call site funnels through; the body is a no-op
+ * today and is a candidate for inlining if a future audit confirms
+ * no seam is needed. */
 export async function withMenuLifecycle<T>(fn: () => Thenable<T>): Promise<T> {
   return fn();
 }

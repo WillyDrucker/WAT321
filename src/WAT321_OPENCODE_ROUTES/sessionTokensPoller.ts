@@ -290,8 +290,13 @@ export class BridgeSessionTokensPoller {
     } catch {
       return;
     }
+    // Cache even when contextUsed is 0. Brand-new sessions (no prior
+    // assistant turn) and mid-stream dispatches (assistant output still
+    // 0) are legitimate zero-states; bailing here stranded the widget
+    // in the liveTokens-only fallback for the entire first dispatch.
+    // Caching with the resolved contextWindow lets the widget render
+    // projected tokens + percent from the first heartbeat.
     const contextUsed = computeContextUsed(messages);
-    if (contextUsed === 0) return;
 
     const { contextWindow, modelDisplayName } = await this.resolveLocalProps(target);
     const autoCompactTokens =

@@ -8,7 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { bridgeStateDir } from "./paths.mjs";
 
 /**
@@ -25,17 +25,17 @@ import { bridgeStateDir } from "./paths.mjs";
  * MCP runtime process:
  *   - Survives MCP server restart. The Node process Claude Code
  *     spawned for the MCP transport is independent from the VS Code
- *     extension host; in the previous detached-Promise design, an
- *     MCP-side process exit aborted in-flight FF calls. The extension
- *     host lifecycle is what the user actually controls.
+ *     extension host. An MCP-side process exit would abort any
+ *     in-flight FF work running inside it; running the dispatch from
+ *     the extension host scopes the lifecycle to VS Code itself.
  *   - Graceful shutdown. The extension-side dispatcher implements the
  *     engine's `BackendDispatcher.shutdown()` contract; on VS Code
  *     deactivate, in-flight dispatches are cancelled and "cancelled
  *     by shutdown" inbound envelopes land so the user sees a clear
  *     outcome on next launch.
- *   - Symmetry with Codex. The Codex dispatcher already runs in the
- *     extension host (it manages the `codex app-server` subprocess);
- *     opencode/local now follows the same shape.
+ *   - Symmetry with Codex. The Codex dispatcher runs in the extension
+ *     host (it manages the `codex app-server` subprocess); opencode
+ *     and local follow the same shape.
  *
  * Sync dispatch continues to run inline in the MCP runtime via
  * `opencode/dispatch.mjs:handleAsk` - there is no benefit to envelope
@@ -292,7 +292,3 @@ export function listNonCodexInboxResource(target) {
   };
 }
 
-// dirname is still imported for clarity but not used in this trimmed
-// FF path; the runtime no longer needs to reach into the inbox
-// directory tree directly. Suppress the lint warning by referencing it.
-void dirname;

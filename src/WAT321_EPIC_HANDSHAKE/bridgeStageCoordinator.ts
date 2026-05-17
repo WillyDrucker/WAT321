@@ -460,7 +460,12 @@ export class BridgeStageCoordinator
 
     const wsHash = workspaceHash(workspacePath);
     const returning = existsSync(returningFlagPath(wsHash));
-    const rawHeartbeat = readNewestHeartbeat(wsHash);
+    // Pass the active latch's envelope so the reader returns that turn's
+    // heartbeat even when a parallel backend has written a fresher-mtime
+    // file for a different envelope. Without this, the single-latch
+    // coordinator flips between envelopes during concurrent dispatches
+    // and the Codex ceremony visibly replays as the latch oscillates.
+    const rawHeartbeat = readNewestHeartbeat(wsHash, this.latchState?.envelopeId);
     const busy = isBridgeBusy(workspacePath);
     // Wait-mode resolution prefers the active turn's resolved mode
     // (captured in the latch state at start, sourced from the

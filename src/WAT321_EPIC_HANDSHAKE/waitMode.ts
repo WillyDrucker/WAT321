@@ -22,8 +22,8 @@ import { adaptiveFlagPath, EPIC_HANDSHAKE_DIR, fireAndForgetFlagPath } from "./c
  * Per-workspace partition: both flags carry the workspace-hash suffix
  * so toggling the mode in one VS Code window does not flip the mode
  * in a sibling window on the same machine. Matches the partitioning
- * pattern of `inFlightFlagPath` / `processingFlagPath` / etc. Account-
- * global wait-mode flags from the pre-partition era are retired via
+ * pattern of `inFlightFlagPath` / `processingFlagPath` / etc.
+ * Account-global root-level flag files are retired via
  * `LEGACY_FLAG_PATHS` on activate.
  *
  * Mode resolution precedence at the MCP boundary: per-call `args`

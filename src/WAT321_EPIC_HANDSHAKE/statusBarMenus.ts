@@ -52,8 +52,8 @@ import { workspaceHash } from "../shared/workspaceHash";
 /** Read the unified bridge's alias map for the current S# suffix on
  * the parent menu's MANAGE OPENCODE/LOCAL rows. Only the alias keys
  * are consumed here, so the value shape is left as `unknown` -
- * tolerates both legacy string entries and the new `{sessionId,
- * instanceId}` form without coupling this menu to either schema. */
+ * tolerates both the bare-string and `{sessionId, instanceId}` shapes
+ * the alias map carries without coupling this menu to either schema. */
 const BRIDGE_ALIASES_PATH = join(bridgeStateDir(), "session-aliases.json");
 function readBridgeAliases(): {
   opencode: Record<string, unknown>;
@@ -263,7 +263,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // active-alias state.
   const openCodeEnabled = vscode.workspace
     .getConfiguration("wat321")
-    .get<boolean>(SETTING.enableOpenCode, true);
+    .get<boolean>(SETTING.enableOpenCode, false);
   const localEndpoint = vscode.workspace
     .getConfiguration("wat321")
     .get<string>(SETTING.localEndpoint, "")

@@ -86,7 +86,7 @@ export async function readConfigFromSettings(
   managedOpenCodeUrl = ""
 ): Promise<OpenCodeRoutesConfig> {
   const cfg = vscode.workspace.getConfiguration("wat321");
-  const enabled = cfg.get<boolean>(SETTING.enableOpenCode, true);
+  const enabled = cfg.get<boolean>(SETTING.enableOpenCode, false);
   const localEndpoint = cfg
     .get<string>(SETTING.localEndpoint, "")
     .trim()

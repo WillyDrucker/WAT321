@@ -6,6 +6,7 @@ import {
   AUTH_ERROR_CODES,
   CACHE_FRESHNESS_OK_MS,
   CLAIM_TTL_MS,
+  COLD_START_ABSORPTION_THRESHOLD,
   ERROR_ABSORPTION_THRESHOLD,
   NETWORK_ERROR_ABSORPTION_THRESHOLD,
   NETWORK_ERROR_RETRY_MS,
@@ -371,7 +372,6 @@ export abstract class UsageServiceBase<TResponse> {
       // Falls through to the full park if the cold-start persists
       // past COLD_START_ABSORPTION_THRESHOLD polls.
       const nowForAbsorb = Date.now();
-      const COLD_START_ABSORPTION_THRESHOLD = 3;
       if (
         this.state.status === "ok" &&
         this.kickstart.isIdleAt(nowForAbsorb) &&

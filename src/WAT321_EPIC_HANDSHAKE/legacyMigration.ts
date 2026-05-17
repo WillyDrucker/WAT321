@@ -169,11 +169,11 @@ export function clearStaleRuntimeFiles(): void {
       // otherwise eat the first unrelated Codex toast in this session.
       removeIfExists(suppressCodexToastFlagPath(hash));
     }
-    // Inherit-first-window migration for the two account-global
-    // sentinels that were intentionally persistent pre-1.5.5:
-    // `paused.flag` and `adaptive.flag`. Fire-and-forget was already
-    // session-scoped so nothing to inherit. Run before the legacy
-    // sweep so the global file is still readable.
+    // Inherit-first-window migration for `paused.flag` and
+    // `adaptive.flag`: account-global sentinels were persistent, so
+    // copy their body into the active window's per-workspace path
+    // before the legacy sweep removes the global file. Fire-and-forget
+    // was session-scoped so nothing to inherit.
     if (hash) {
       migrateLegacyFlag(
         join(EPIC_HANDSHAKE_DIR, "paused.flag"),

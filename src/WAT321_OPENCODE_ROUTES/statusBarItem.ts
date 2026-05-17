@@ -236,9 +236,8 @@ export function createOpenCodeRoutesStatusBarItem(
 
   // Tooltip-only widget. All session/instance management lives on
   // the Epic Handshake dropdown (Manage OpenCode Sessions / Manage
-  // Local LLM Sessions). The legacy click-menu stays registered as a
-  // command-palette entry only ('WAT321: OpenCode Routes - Menu
-  // (legacy)') for the rare user who wants the old shape; the widget
+  // Local LLM Sessions). A command-palette-only entry surfaces the
+  // same picker for users who prefer the palette flow; the widget
   // itself never sets `item.command`.
   const legacyMenuCommand = vscode.commands.registerCommand(
     "wat321.modelBridge.legacyMenu",
@@ -369,7 +368,12 @@ export function createOpenCodeRoutesStatusBarItem(
       ? sessionTokensPoller.snapshot(activeBridgeTarget)
       : null;
     let sessionTokensSuffix = "";
-    if (sessionTokens) {
+    // Per-session context-used is the primary surface, but a brand-new
+    // session with zero turns reads as `0 0%` which is technically
+    // correct yet less useful than the per-instance lifetime counter
+    // at idle. Show per-session only once it has real tokens; otherwise
+    // fall to lifetime so the bar always carries some signal.
+    if (sessionTokens && sessionTokens.contextUsed > 0) {
       const pctSuffix =
         sessionTokens.contextWindow !== null && sessionTokens.contextWindow > 0
           ? ` ${formatPct(
@@ -383,9 +387,8 @@ export function createOpenCodeRoutesStatusBarItem(
     } else {
       // Fallback: cumulative lifetime tokens from the per-instance
       // usage tracker. Less precise than per-session context-used,
-      // but shows something instead of a bare alias when the poller
-      // has no data yet (cold launch before the first /session
-      // /message poll lands, or no active alias at all).
+      // but shows something instead of a bare alias before the first
+      // assistant turn lands on this session.
       const activeUsage = usage?.instances[active.id];
       const activeTotalTokens =
         typeof activeUsage?.input === "number" && typeof activeUsage?.output === "number"
@@ -455,6 +458,13 @@ export function createOpenCodeRoutesStatusBarItem(
         const projectedSuffix = (() => {
           if (sessionTokens) {
             const projectedUsed = sessionTokens.contextUsed + liveTokens;
+            // Brand-new session on its very first heartbeat may have
+            // both `contextUsed` and `liveTokens` at zero before the
+            // SSE tap delivers its first token sample. Falling through
+            // to the live / elapsed branch keeps the widget showing
+            // motion (`Xt` once liveTokens > 0, `Xs` until then)
+            // instead of stalling on `0 0%` for a few seconds.
+            if (projectedUsed <= 0) return sessionTokensSuffix;
             const pctSuffix =
               sessionTokens.contextWindow !== null && sessionTokens.contextWindow > 0
                 ? ` ${formatPct(

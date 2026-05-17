@@ -53,7 +53,7 @@ to enable settings programmatically; that requires user consent.
 
 You passed an `action` field that is not "consume". The tool is
 single-purpose - it drains the inbox. Omit `action` entirely, or pass
-`action: "consume"` for back-compat with the pre-v1.5.5 schema.
+`action: "consume"` for back-compat.
 
 Recovery: reissue without the action field.
 

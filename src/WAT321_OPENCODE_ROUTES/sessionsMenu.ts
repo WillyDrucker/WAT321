@@ -6,14 +6,12 @@ import { makeBackItem, makeSeparator } from "./menuCommon";
 
 /**
  * "Manage Sessions" submenu for the OpenCode Routes widget. Lists
- * every legacy-harness rollout directory under
+ * harness rollout directories under
  * `clients/<wsId>/model-bridge/sessions/`, summarizing turns +
  * compacts + last-turn timestamp per thread, with row-level erase
- * or bulk "Erase all".
- *
- * The unified MCP server no longer writes here - this surface only
- * cleans up rollouts left by earlier installs and any still-resident
- * legacy harness traffic.
+ * or bulk "Erase all". The unified MCP server writes through other
+ * paths; this surface exists to clean up rollouts that still land
+ * on the harness path.
  */
 
 interface ThreadSummary {

@@ -250,16 +250,13 @@ export async function withOpenCodeHeartbeat(meta, runDispatch) {
 
   // Engine heartbeat lets the bridge stage coordinator animate the
   // 5-stage glyph walker for SYNC (and adaptive-falls-through-to-sync)
-  // non-Codex dispatches. Previously only the FF path wrote engine
-  // heartbeats (extension-side OpenCodeDispatcher); sync dispatches
-  // here only wrote the OpenCode widget heartbeat, leaving the bridge
-  // widget blank. wsHash falls back to `workspaceId()` (which is
-  // already a hash of workspacePath; the extension installer injects
-  // it as `WAT321_WORKSPACE_ID`). Target defaults to "opencode" when
-  // meta.target isn't set so a legacy caller still emits a usable
-  // heartbeat - readers filter on workspaceHash first, so the wrong
-  // target value here just means the post-dispatch resource tooltip
-  // attributes the turn to the wrong backend, not a missed animation.
+  // non-Codex dispatches. wsHash falls back to `workspaceId()` (already
+  // a hash of workspacePath; the extension installer injects it as
+  // `WAT321_WORKSPACE_ID`). Target defaults to "opencode" when meta.target
+  // isn't set so a caller that omits the field still emits a usable
+  // heartbeat - readers filter on workspaceHash first, so a wrong target
+  // value here just means the post-dispatch resource tooltip attributes
+  // the turn to the wrong backend, not a missed animation.
   const wsHash =
     typeof meta?.workspaceHash === "string" && meta.workspaceHash.length > 0
       ? meta.workspaceHash
