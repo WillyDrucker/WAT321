@@ -337,7 +337,7 @@ class EpicHandshakeTier {
     const cfg = vscode.workspace.getConfiguration("wat321");
     const claudeOn = cfg.get<boolean>(SETTING.enableClaude, true) === true;
     const codexOn = cfg.get<boolean>(SETTING.enableCodex, true) === true;
-    const openCodeOn = cfg.get<boolean>(SETTING.enableOpenCode, true) === true;
+    const openCodeOn = cfg.get<boolean>(SETTING.enableOpenCode, false) === true;
     return claudeOn && (codexOn || openCodeOn);
   }
 
@@ -432,10 +432,10 @@ class EpicHandshakeTier {
 
         progress.report({ message: "registering bridge channel..." });
         try {
-          // installUnifiedBridge sweeps every legacy `wat321*` MCP
-          // entry (`LEGACY_MCP_NAMES`) before adding the fresh
-          // registration, so a stale registration from a pre-1.5.0
-          // install path is reconciled in the same step.
+          // installUnifiedBridge sweeps stale entries from
+          // `~/.claude.json`'s projects tree and runs `claude mcp
+          // remove` before the fresh `claude mcp add` (which would
+          // otherwise error on duplicate-name).
           await vscode.commands.executeCommand("wat321.bridge.installUnified");
         } catch (err) {
           await this.unflipAndWarn(
