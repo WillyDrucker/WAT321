@@ -101,6 +101,18 @@ export const NETWORK_ERROR_ABSORPTION_THRESHOLD = 2;
  * 35-40s total spin range before the offline skin renders. */
 export const NETWORK_ERROR_RETRY_MS = 30_000;
 
+/** How many consecutive idle-tagged 429s we absorb while showing the
+ * prior ok numbers before flipping to the parked "Idle" skin. At the
+ * 122s poll cadence, 30 absorbs covers ~1 hour of idle, matching the
+ * Claude CLI's own idle-recovery threshold (the "147k tokens, want to
+ * compact?" banner that surfaces around the same window). The widget
+ * keeps showing last-known-good numbers throughout - which is exactly
+ * what the user wants while reading a long response or stepping away
+ * briefly - and only flips to Idle if the cold-start persists beyond
+ * a reasonable idle period. A successful poll on user re-activation
+ * (kickstart) resets the counter and refreshes numbers. */
+export const COLD_START_ABSORPTION_THRESHOLD = 30;
+
 /**
  * Exponential discovery backoff for detecting when a provider CLI becomes
  * installed after the extension is already running. Fast early to catch
