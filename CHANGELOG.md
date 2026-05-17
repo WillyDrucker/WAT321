@@ -7,13 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.5.7] - unreleased
 
-### Added
-
 ### Changed
+
+- **OpenCode Routes is now opt-in.** Fresh installs no longer auto-enable OpenCode widgets or the bundled `opencode serve` harness. If you want Big Pickle, Nemotron Super, Local LLM dispatch, or the session-token widget for those routes, enable OpenCode in WAT321 settings. Existing aliases, sessions, your Zen API key, and your local endpoint setting are all preserved - flipping the toggle back on lights everything up exactly as you left it. The reason: the free OpenCode routes log prompts and outputs by default per their docs, and that should be an explicit choice rather than a silent default.
 
 ### Fixed
 
-### Removed
+- **Claude's thinking indicator stops cleanly after a manual `/compact`.** Earlier it would keep spinning indefinitely after `/compact` finished, and even survive a VS Code relaunch because the prior session's transcript still read as "mid-turn." The fix recognizes both the slash-form invocation Claude Code now writes and the `Compacted` completion marker, so the widget settles back to idle as soon as the compact summary lands. Auto-compact behavior is unchanged.
+- **Bridge session tokens show up immediately on the first Big Pickle or Local LLM ask.** The widget used to display a bare token-only placeholder during the first Adaptive dispatch in a session and only switched to real numbers after the reply came back. Now the per-session context window is cached as soon as the session is created, so you see live tokens and percent remaining throughout the very first wait - the same behavior subsequent asks already had.
+- **Codex disconnect/reconnect ceremony no longer flickers during parallel dispatches.** Sending one prompt to Big Pickle and another to Codex at roughly the same time used to make Codex's connection ceremony cycle multiple extra times because the bridge kept rediscovering the freshest backend's heartbeat instead of sticking with the Codex turn. The bridge now pins to the in-flight turn's own heartbeat, so Codex's animation cycles cleanly through its turn regardless of what the other backends are doing.
+- **Usage widgets stay visible during normal idle gaps instead of flipping to offline after a few minutes.** Anthropic's stats endpoint sometimes returns cold-poll 429s when you've been quietly reading a long response. WAT321 used to absorb only a few of those before the widget switched to the idle skin, which made the bar feel like it was dropping out every 5-15 minutes. The absorption window now covers about an hour of idle - matching the Claude CLI's own idle threshold - so the bar keeps showing your last known numbers until you're actually away. As soon as you're active again, the next successful poll refreshes everything.
 
 ## [1.5.6] - 2026-05-15
 
