@@ -26,19 +26,26 @@
 const INTERRUPT_MARKER = "[Request interrupted";
 
 /** Markers Claude Code writes to the transcript as the terminal entry
- * of an auto-compact operation. The compact summary arrives as a
+ * of a compact operation - both auto-compact (context-window exhaustion)
+ * and manual (user types `/compact`). The compact summary arrives as a
  * `type: "user"` entry (structurally a new prompt) but meaning-wise
  * is the end state of the prior turn, not a pending question. Without
  * this recognition the session-token widget's thinking indicator stays
- * on after every auto-compact because the classifier returns `user`
- * and keeps waiting for an assistant response that never comes (the
- * real next assistant response only fires on the user's NEXT prompt).
- * Matched as substrings to tolerate wording drift across Claude Code
- * releases. */
+ * on after every compact because the classifier returns `user` and
+ * keeps waiting for an assistant response that never comes (the real
+ * next assistant response only fires on the user's NEXT prompt).
+ *
+ * Auto-compact lands as the "This session is being continued..." or
+ * "conversation was compacted" user entry. Manual `/compact` lands as
+ * `<command-name>/compact</command-name>` (with leading slash) followed
+ * by `<local-command-stdout>Compacted </local-command-stdout>`. Matched
+ * as substrings to tolerate wording drift across Claude Code releases. */
 const COMPACT_MARKERS = [
   "This session is being continued from a previous conversation",
   "conversation was compacted",
   "<command-name>compact</command-name>",
+  "<command-name>/compact</command-name>",
+  "<local-command-stdout>Compacted",
 ] as const;
 
 /** True if a decoded text block contains any of our auto-compact
