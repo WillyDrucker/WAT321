@@ -12,7 +12,7 @@ import {
  * dir simultaneously so a reply landing on any tier surfaces to the
  * status bar within ~50ms.
  *
- * Pattern mirrors the old per-tier coordinator:
+ * Pattern:
  *   - One FSWatcher per inbound dir (Codex EH mailbox + each non-Codex
  *     per-client dir).
  *   - 5s polling tick as a missed-event backstop.

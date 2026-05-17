@@ -117,13 +117,11 @@ export function activate(context: vscode.ExtensionContext) {
     await epicHandshake.resetCleanup();
     if (openCodeRoutes) await openCodeRoutes.resetCleanup();
     // Sweep the unified bridge's MCP entry + pre-allowed tool list
-    // (mcp__wat321__wat321_ask, etc.) from ~/.claude/settings.json. EH's
-    // resetCleanup removes the legacy `wat321` entry, but if the user
-    // ever ran the unified install command the entry got rewritten to
-    // point at ~/.wat321/bridge/bin/channel.mjs and the unified tool
-    // names were added to the allowlist. Reset is "factory clean" - both
-    // surfaces have to go. Idempotent - succeeds even if neither was
-    // ever installed.
+    // (mcp__wat321__wat321_ask, etc.) from ~/.claude/settings.json so
+    // a fresh re-enable starts from a clean Claude config. EH's
+    // resetCleanup handles the registration removal at the CLI layer;
+    // this second pass covers the pre-allowed tool surface that lives
+    // in the user-scope settings file. Idempotent.
     try {
       const { uninstallUnifiedBridge } = await import("./WAT321_MCP_SERVER/installer");
       await uninstallUnifiedBridge();
