@@ -90,4 +90,12 @@ export class KickstartGate {
       postWakeStrikesRemaining: this.postWakeStrikesRemaining,
     };
   }
+
+  /** Most recent activity timestamp the probe knows about, or null
+   * when no probe is set or the probe itself returns null. Lets the
+   * usage service compute `idleForMs` for transition-log records
+   * without taking a second reference to the probe. */
+  getCurrentActivityMs(): number | null {
+    return this.getActivityMs?.() ?? null;
+  }
 }

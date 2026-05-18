@@ -5,6 +5,12 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8] - 2026-05-17
+
+### Added
+
+- **`WAT321: Show Provider Health` now shows recent state transitions for the usage widgets.** A new "recent transitions" block per provider lists the last 25 polling events from the past few hours - successful fetches, absorbed cold-poll 429s, parks, wakes - each timestamped with how long since you last sent a Claude prompt at that moment, the current poll cadence, and how stale the cross-window cache was. If you're investigating "the widget went idle randomly," the health output now tells you exactly which path got it there. The history persists across VS Code restarts via a per-workspace JSONL ring at `~/.wat321/clients/<wsId>/<provider>-usage-transitions.jsonl`.
+
 ## [1.5.7] - 2026-05-16
 
 ### Changed
