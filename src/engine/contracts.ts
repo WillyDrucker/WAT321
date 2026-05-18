@@ -143,6 +143,16 @@ export interface SessionTokenService<TState> extends Subscribable<TState> {
     source: "live" | "lastKnown" | null;
     pid: number | null;
   };
+  /** Compact-state-machine diagnostics. Only Claude implements - the
+   * `/compact` operation is Claude-specific. Codex returns null.
+   * Health command renders `state`, current `estimatedDurationMs`,
+   * and the rolling history when present. */
+  getCompactDiagnostics?(): {
+    state: "idle" | "in-flight";
+    startedAt: number | null;
+    estimatedDurationMs: number;
+    recentDurationsMs: readonly number[];
+  };
   /** Clear all cached session state and drop to the idle state.
    * Called by Reset WAT321 so the widget goes blank immediately
    * instead of re-discovering old transcripts on the next poll. */

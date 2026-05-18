@@ -10,6 +10,124 @@ import type {
  * is append-only JSON-lines with one entry per turn/event.
  */
 
+/** Structured signal Claude Code writes at the end of every compact.
+ * Empirically verified against transcripts from CLI v2.1.126-v2.1.143.
+ * Entry shape:
+ *
+ *   {
+ *     "type": "system",
+ *     "subtype": "compact_boundary",
+ *     "content": "Conversation compacted",
+ *     "timestamp": "2026-05-11T15:28:55.310Z",
+ *     "compactMetadata": {
+ *       "trigger": "manual" | "auto",
+ *       "preTokens": <int>,
+ *       "durationMs": <int>,
+ *       "postTokens": <int>,
+ *       "preservedSegment": { ... },
+ *       "preCompactDiscoveredTools": [ ... ]
+ *     }
+ *   }
+ *
+ * This is the canonical end-of-compact signal - far more reliable than
+ * the historical string-marker classifier path. Drives the compact
+ * state machine's clean-exit transition. */
+export interface CompactBoundary {
+  /** ms since epoch parsed from the entry's `timestamp` field. */
+  at: number;
+  trigger: string;
+  preTokens: number;
+  durationMs: number;
+  postTokens: number;
+}
+
+/** Walk the tail backwards and parse compact_boundary system entries.
+ * Returns the most recent `limit` entries, oldest first. Malformed
+ * entries are skipped silently. */
+export function parseRecentCompactBoundaries(
+  tail: string,
+  limit: number
+): CompactBoundary[] {
+  const lines = tail.trimEnd().split("\n");
+  const out: CompactBoundary[] = [];
+  for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
+    const line = lines[i];
+    if (!line) continue;
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.type !== "system" || entry.subtype !== "compact_boundary") {
+      continue;
+    }
+    const tsRaw = entry.timestamp;
+    const at = typeof tsRaw === "string" ? Date.parse(tsRaw) : NaN;
+    if (Number.isNaN(at)) continue;
+    const meta = entry.compactMetadata as Record<string, unknown> | undefined;
+    if (!meta) continue;
+    const trigger = typeof meta.trigger === "string" ? meta.trigger : "auto";
+    const preTokens = typeof meta.preTokens === "number" ? meta.preTokens : 0;
+    const durationMs = typeof meta.durationMs === "number" ? meta.durationMs : 0;
+    const postTokens = typeof meta.postTokens === "number" ? meta.postTokens : 0;
+    if (durationMs <= 0) continue;
+    out.unshift({ at, trigger, preTokens, durationMs, postTokens });
+  }
+  return out;
+}
+
+/** Walk the tail backwards looking for the most recent `<command-name>
+ * /compact</command-name>` user entry. Returns the entry's parsed
+ * timestamp in ms, or null if no manual-compact start marker is in
+ * the tail.
+ *
+ * Auto-compacts are NOT detected here - by the time the auto-compact
+ * summary user entry lands, the compact has already completed and
+ * there's no progress bar to show. Manual `/compact` is the only path
+ * that produces a detectable start marker AHEAD of completion, which
+ * is what drives the in-flight progress bar. */
+export function parseLastManualCompactStart(tail: string): number | null {
+  const lines = tail.trimEnd().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.type !== "user") continue;
+    const msg = entry.message as Record<string, unknown> | undefined;
+    const content = msg?.content;
+    let text = "";
+    if (typeof content === "string") text = content;
+    else if (Array.isArray(content)) {
+      for (const p of content) {
+        if (typeof p !== "object" || p === null) continue;
+        const part = p as Record<string, unknown>;
+        if (part.type === "text" && typeof part.text === "string") {
+          text += part.text;
+        }
+      }
+    }
+    // Match both `<command-name>compact</command-name>` (legacy form)
+    // and `<command-name>/compact</command-name>` (current CLI form).
+    // The stdout-completion marker is deliberately NOT a start signal -
+    // it lands AFTER the compact runs.
+    if (
+      text.includes("<command-name>/compact</command-name>") ||
+      text.includes("<command-name>compact</command-name>")
+    ) {
+      const tsRaw = entry.timestamp;
+      const ts = typeof tsRaw === "string" ? Date.parse(tsRaw) : NaN;
+      return Number.isNaN(ts) ? null : ts;
+    }
+  }
+  return null;
+}
+
 /** Re-export the shared display types so callers in this tool can
  * continue to import them from the parsers module without knowing
  * about the shared-ui module. The interfaces themselves live in shared

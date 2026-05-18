@@ -26,10 +26,20 @@ const SQUARE_BLUE = "\uD83D\uDFE6";
 const SQUARE_GREEN = "\uD83D\uDFE9";
 /** Large yellow square emoji. U+1F7E8 LARGE YELLOW SQUARE. */
 const SQUARE_YELLOW = "\uD83D\uDFE8";
+/** Large orange square emoji. U+1F7E7 LARGE ORANGE SQUARE. Used by
+ * the Claude compact-progress bar. Not a heatmap band - compact is a
+ * distinct widget state, not a usage severity. Exported via
+ * `SQUARE_ORANGE_COMPACT` so the session-token widget can build its
+ * own bar without depending on the heatmap rendering paths. */
+const SQUARE_ORANGE = "\uD83D\uDFE7";
+export const SQUARE_ORANGE_COMPACT = SQUARE_ORANGE;
 /** Large red square emoji. U+1F7E5 LARGE RED SQUARE. */
 const SQUARE_RED = "\uD83D\uDFE5";
 /** Large black square emoji. U+2B1B BLACK LARGE SQUARE. */
 const SQUARE_BLACK = "\u2B1B";
+/** Exported black square for callers building bars outside the
+ * heatmap rendering paths (e.g. the compact-progress bar). */
+export const SQUARE_BLACK_EMPTY = SQUARE_BLACK;
 
 export type HeatmapBand = "green" | "yellow" | "red";
 

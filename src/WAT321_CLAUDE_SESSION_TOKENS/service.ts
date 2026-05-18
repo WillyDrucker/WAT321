@@ -18,6 +18,7 @@ import {
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
 import { classifyLastEntry } from "../shared/transcriptClassifier";
+import { CompactStateMachine } from "./compactStateMachine";
 import { parseFirstUserMessage, parseLastUsage, parseTurnInfo } from "./parsers";
 import {
   findActiveSession,
@@ -44,6 +45,18 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
    * keep first-prompt cache-creation step functions from spiking the
    * counter to 999. */
   private readonly tpsTracker = new TpsTracker();
+  /** Compact-progress state machine. Owns the in-flight detection +
+   * rolling-duration estimate. Synced once per poll from the same tail
+   * the rest of the service reads, plus the classifier output for the
+   * activity-recovery exit path. */
+  private readonly compactStateMachine = new CompactStateMachine();
+
+  /** Diagnostic snapshot for the health command. Forwards the state
+   * machine's internal view (current state, started-at, estimate, and
+   * rolling history) without exposing the machine instance itself. */
+  getCompactDiagnostics(): ReturnType<CompactStateMachine["getDiagnostics"]> {
+    return this.compactStateMachine.getDiagnostics();
+  }
 
   /** Watches ~/.claude/sessions/ for new/removed CLI process files.
    * Triggers an immediate poll so new sessions are detected instantly
@@ -83,6 +96,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.cachedSessionTitlePath = "";
     this.cachedAutoCompactPct = null;
     this.cachedAutoCompactTime = 0;
+    this.compactStateMachine.reset();
     this.sessionsWatcher.close();
     this.settingsWatcher.close();
     super.reset();
@@ -256,6 +270,13 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       usage.outputTokens;
 
     const tokensPerSecond = this.tpsTracker.add(sessionId, mtime, contextUsed);
+    const turnState = classifyLastEntry(tail);
+    const compactState = this.compactStateMachine.sync({
+      tail,
+      sessionId,
+      now,
+      classifierKind: turnState,
+    });
 
     this.emitOk({
       sessionId,
@@ -269,10 +290,11 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
         readAutoCompactEffectiveTriggerTokens(contextWindowSize),
       source,
       lastActiveAt: mtime,
-      turnState: classifyLastEntry(tail),
+      turnState,
       pid,
       turnInfo: parseTurnInfo(tail),
       tokensPerSecond,
+      compactState,
     });
   }
 

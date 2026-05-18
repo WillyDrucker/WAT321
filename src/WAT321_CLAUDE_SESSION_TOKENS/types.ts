@@ -1,5 +1,6 @@
 import type { StatusBarWidget as GenericStatusBarWidget } from "../engine/serviceTypes";
 import type { LastEntryKind } from "../shared/transcriptClassifier";
+import type { CompactSnapshot } from "./compactStateMachine";
 import type { ClaudeTurnInfo } from "./parsers";
 
 /** Active session entry from ~/.claude/sessions/<pid>.json */
@@ -55,6 +56,13 @@ export interface ResolvedSession {
    * to null after ~30s of no further growth so a long idle does not
    * keep showing a stale "TPS" reading. */
   tokensPerSecond: number | null;
+  /** Compact state machine snapshot. When `state: "in-flight"` the
+   * widget renders an orange progress bar in place of the normal
+   * token display. When `state: "idle"` the widget falls through to
+   * the standard render path. Always present so the widget never has
+   * to null-check - the snapshot itself encodes the idle/in-flight
+   * distinction via its `state` field. */
+  compactState: CompactSnapshot;
 }
 
 export type WidgetState =
