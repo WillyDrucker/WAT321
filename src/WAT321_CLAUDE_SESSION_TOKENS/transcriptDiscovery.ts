@@ -30,10 +30,21 @@ export interface LastKnownTranscript {
 
 /**
  * Pick the active Claude session for the given workspace path. Matches
- * on `cwd` (workspace or ancestor), then breaks ties by transcript
- * mtime so a resumed session beats its stale sibling. As a final
- * tiebreaker, `entrypoint: "claude-vscode"` wins over terminal-launched
- * sessions when transcript mtimes are equal.
+ * on `cwd` bidirectionally: the workspace can sit inside the session's
+ * cwd (claude launched at a project root, VS Code opened deeper) OR
+ * the session's cwd can sit inside the workspace (claude launched from
+ * a subdirectory, VS Code opened at the project root). Ties break by
+ * transcript mtime so a resumed session beats its stale sibling, with
+ * `entrypoint: "claude-vscode"` winning over terminal-launched sessions
+ * as the final tiebreaker when mtimes are equal.
+ *
+ * Bidirectional match closes a recurring widget-misses-the-live-session
+ * gap: when a user launches `claude` from `c:\Dev\WAT321\subdir` but
+ * has VS Code open at `c:\Dev\WAT321`, the unidirectional check
+ * `workspace ⊆ session.cwd` fails (workspace is the ancestor, not the
+ * descendant), live PID is never found, and the widget drops to mtime-
+ * only fallback. The reverse check `session.cwd ⊆ workspace` recovers
+ * the PID in that case.
  */
 export function findActiveSession(
   sessionsDir: string,
@@ -63,7 +74,9 @@ export function findActiveSession(
       const match =
         wsNorm === ""
           ? true
-          : entryCwd === wsNorm || wsNorm.startsWith(entryCwd + "/");
+          : entryCwd === wsNorm ||
+            wsNorm.startsWith(`${entryCwd}/`) ||
+            entryCwd.startsWith(`${wsNorm}/`);
       if (!match) continue;
 
       const projectKey = getProjectKey(entry.cwd);
@@ -111,16 +124,23 @@ export function findActiveSession(
  *      common case: user opens VS Code in a folder where they have
  *      run Claude Code before, and we want their most recent
  *      transcript for THIS workspace.
- *   2. If that returns nothing (empty workspace path, no project
- *      dir for this folder yet, or an empty project dir), fall
- *      back to scanning every project dir under ~/.claude/projects
- *      and return the globally-newest .jsonl. This mirrors how
- *      Codex handles an empty or unrecognized workspace - it
- *      refuses to go blank when SOME session data is available.
- *      Without this fallback, opening VS Code at a fresh folder or
- *      with no workspace at all leaves the widget stuck at
- *      "No active Claude session" even though the user has a
- *      perfectly good most-recent session sitting on disk.
+ *   2. If that returns nothing AND the workspace path is empty
+ *      (folderless VS Code window), fall back to scanning every
+ *      project dir under ~/.claude/projects and return the globally-
+ *      newest .jsonl. This mirrors how Codex handles a folderless
+ *      window - it refuses to go blank when SOME session data is
+ *      available.
+ *
+ *      The global fallback is GATED on `workspacePath === ""` because
+ *      firing it when a workspace folder IS open is what produced
+ *      cross-workspace contamination. Pre-fix: if Stage 1 missed (the
+ *      workspace's project dir was named differently due to encoding
+ *      drift, was empty, or didn't exist yet), Stage 2 returned the
+ *      globally-newest transcript across ALL workspaces - so an
+ *      actively-typing session in workspace A bled its mtime updates
+ *      and turn-state onto workspace B's widget. Post-fix: a workspace
+ *      with no transcripts yet stays in `waiting`/`no-session` instead
+ *      of borrowing another workspace's activity.
  */
 export function findLastKnownTranscript(
   workspacePath: string
@@ -134,6 +154,11 @@ export function findLastKnownTranscript(
   );
   if (workspaceBest) return workspaceBest;
 
+  // Only fall through to the global scan when there's genuinely no
+  // workspace folder to disambiguate against. With a folder open,
+  // returning some-other-workspace's transcript is cross-pollination,
+  // not a helpful fallback.
+  if (workspacePath !== "") return null;
   return findNewestJsonlAcrossAllProjects(projectsDir);
 }
 
