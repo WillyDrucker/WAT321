@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { WAT321_DIR } from "../../engine/settingsKeys";
 import { UsageServiceBase } from "../polling/usageServiceBase";
+import { clientStateDir } from "../wat321Paths";
 import type { CodexUsageResponse } from "./types";
 
 const AUTH_DIR = join(homedir(), ".codex");
@@ -23,6 +24,8 @@ export class CodexUsageSharedService extends UsageServiceBase<CodexUsageResponse
       cacheFile: join(WAT321_DIR, "codex-usage.cache.json"),
       claimFile: join(WAT321_DIR, "codex-usage.claim"),
       endpointUrl: "https://chatgpt.com/backend-api/wham/usage",
+      providerKey: "codex",
+      transitionLogPath: join(clientStateDir(), "codex-usage-transitions.jsonl"),
     });
   }
 

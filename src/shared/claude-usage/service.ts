@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { WAT321_DIR } from "../../engine/settingsKeys";
 import { UsageServiceBase } from "../polling/usageServiceBase";
+import { clientStateDir } from "../wat321Paths";
 import type { UsageResponse } from "./types";
 
 const AUTH_DIR = join(homedir(), ".claude");
@@ -16,6 +17,8 @@ export class ClaudeUsageSharedService extends UsageServiceBase<UsageResponse> {
       cacheFile: join(WAT321_DIR, "claude-usage.cache.json"),
       claimFile: join(WAT321_DIR, "claude-usage.claim"),
       endpointUrl: "https://api.anthropic.com/api/oauth/usage",
+      providerKey: "claude",
+      transitionLogPath: join(clientStateDir(), "claude-usage-transitions.jsonl"),
     });
   }
 

@@ -29,6 +29,11 @@ import {
 } from "./stateMachine";
 import { KickstartGate } from "./kickstartGate";
 import { computeStartupDelay } from "./startupDelay";
+import {
+  logTransition,
+  type TransitionReason,
+  type TransitionStatus,
+} from "./transitionLog";
 
 const NO_CACHE_RETRY_MS = 10_000;
 
@@ -37,6 +42,14 @@ export interface UsageServiceConfig {
   cacheFile: string;
   claimFile: string;
   endpointUrl: string;
+  /** Provider tag stamped onto every transition log record. Lets the
+   * health command attribute entries when both Claude and Codex are
+   * active in the same workspace. */
+  providerKey: "claude" | "codex";
+  /** Path to the per-workspace JSONL log of state transitions. Each
+   * subclass passes a path inside `clientStateDir()` so the log stays
+   * scoped to the current VS Code window's view of the state machine. */
+  transitionLogPath: string;
 }
 
 /**
@@ -74,6 +87,11 @@ export abstract class UsageServiceBase<TResponse> {
    * if the cold-start persists. Counter resets on any successful
    * fetch. */
   private consecutiveColdStartAbsorbs = 0;
+  /** Most recently chosen poll cadence in ms. Mirrors whatever
+   * `setPollInterval()` last set. Stamped onto transition log records
+   * so a reader can tell at a glance whether the service is on the
+   * normal 122s cadence or stretched to a rate-limit backoff. */
+  private currentPollIntervalMs = POLL_INTERVAL_MS;
 
   private readonly kickstart = new KickstartGate();
   private readonly coordinator: Coordinator<ServiceState<TResponse>>;
@@ -161,6 +179,7 @@ export abstract class UsageServiceBase<TResponse> {
       postWakeStrikesRemaining: kick.postWakeStrikesRemaining,
       rateLimitedAt: rateLimitedState?.rateLimitedAt ?? null,
       retryAfterMs: rateLimitedState?.retryAfterMs ?? null,
+      consecutiveColdStartAbsorbs: this.consecutiveColdStartAbsorbs,
     };
   }
 
@@ -197,14 +216,14 @@ export abstract class UsageServiceBase<TResponse> {
     this.consecutiveRateLimits = 0;
     this.kickstart.onWake();
     this.countdown.stop();
-    this.setState({ status: "loading" });
+    this.setState({ status: "loading" }, "wake-from-park");
     this.setPollInterval(POLL_INTERVAL_MS);
   }
 
   private startDiscovery(): void {
     this.discoveryPoller?.dispose();
     this.discoveryPoller = new DiscoveryPoller(this.config.authDir, () => {
-      this.setState({ status: "loading" });
+      this.setState({ status: "loading" }, "discovery-recovered");
       this.startPolling();
     });
     this.discoveryPoller.start();
@@ -222,16 +241,115 @@ export abstract class UsageServiceBase<TResponse> {
     this.pendingTimers.add(handle);
   }
 
-  private setState(state: ServiceState<TResponse>): void {
+  private setState(
+    state: ServiceState<TResponse>,
+    reason: TransitionReason | null = null
+  ): void {
     if (this.disposed) return;
     if (statesEqual(this.state, state)) return;
+    const prev = this.state;
     this.state = state;
     for (const listener of this.listeners) listener(state);
+    if (reason !== null && prev.status !== state.status) {
+      this.writeTransition(
+        prev.status as TransitionStatus,
+        state.status as TransitionStatus,
+        reason,
+        state
+      );
+    }
+  }
+
+  private writeTransition(
+    from: TransitionStatus,
+    to: TransitionStatus,
+    reason: TransitionReason,
+    nextState: ServiceState<TResponse>
+  ): void {
+    const kick = this.kickstart.getDiagnostics();
+    const isRateLimited = nextState.status === "rate-limited";
+    logTransition(this.config.transitionLogPath, {
+      at: Date.now(),
+      provider: this.config.providerKey,
+      from,
+      to,
+      reason,
+      isColdStart: isRateLimited ? nextState.isColdStart : undefined,
+      consecutiveColdStartAbsorbs: this.consecutiveColdStartAbsorbs,
+      consecutiveFailedKickstarts: kick.consecutiveFailedKickstarts,
+      retryAfterMs: isRateLimited ? nextState.retryAfterMs : undefined,
+      serverMessage: isRateLimited ? nextState.serverMessage : undefined,
+      idleForMs: this.computeIdleForMs(),
+      pollIntervalMs: this.currentPollIntervalMs,
+    });
+  }
+
+  /** Wall-clock ms since the last transcript-write activity, or null
+   * when no session is resolved yet. Source for the `idleForMs` field
+   * stamped on every transition record. */
+  private computeIdleForMs(): number | null {
+    const activityMs = this.kickstart.getCurrentActivityMs();
+    if (activityMs === null) return null;
+    return Math.max(0, Date.now() - activityMs);
+  }
+
+  /** Cache-adoption setState that stamps `cacheAgeMs` onto the
+   * transition record. Helps distinguish "this window adopted a fresh
+   * cross-window cache another window just wrote" from "this window
+   * read its own near-expiring cache and skipped the API call." */
+  private setStateWithCacheAge(
+    state: ServiceState<TResponse>,
+    reason: TransitionReason,
+    cacheAgeMs: number
+  ): void {
+    if (this.disposed) return;
+    if (statesEqual(this.state, state)) return;
+    const prev = this.state;
+    this.state = state;
+    for (const listener of this.listeners) listener(state);
+    if (prev.status === state.status) return;
+    const kick = this.kickstart.getDiagnostics();
+    const isRateLimited = state.status === "rate-limited";
+    logTransition(this.config.transitionLogPath, {
+      at: Date.now(),
+      provider: this.config.providerKey,
+      from: prev.status as TransitionStatus,
+      to: state.status as TransitionStatus,
+      reason,
+      isColdStart: isRateLimited ? state.isColdStart : undefined,
+      consecutiveColdStartAbsorbs: this.consecutiveColdStartAbsorbs,
+      consecutiveFailedKickstarts: kick.consecutiveFailedKickstarts,
+      retryAfterMs: isRateLimited ? state.retryAfterMs : undefined,
+      serverMessage: isRateLimited ? state.serverMessage : undefined,
+      idleForMs: this.computeIdleForMs(),
+      pollIntervalMs: this.currentPollIntervalMs,
+      cacheAgeMs,
+    });
+  }
+
+  /** Log a transition-shaped event whose `from` and `to` are the same
+   * status (the state machine did not move). Used for fetch-attempted
+   * heartbeats and kickstart-skipped notes that capture polling
+   * activity even when state stays put. */
+  private logEvent(reason: TransitionReason, status: TransitionStatus): void {
+    const kick = this.kickstart.getDiagnostics();
+    logTransition(this.config.transitionLogPath, {
+      at: Date.now(),
+      provider: this.config.providerKey,
+      from: status,
+      to: status,
+      reason,
+      consecutiveColdStartAbsorbs: this.consecutiveColdStartAbsorbs,
+      consecutiveFailedKickstarts: kick.consecutiveFailedKickstarts,
+      idleForMs: this.computeIdleForMs(),
+      pollIntervalMs: this.currentPollIntervalMs,
+    });
   }
 
   private setPollInterval(ms: number): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => this.refresh(), ms);
+    this.currentPollIntervalMs = ms;
   }
 
   private async refresh(): Promise<void> {
@@ -244,7 +362,7 @@ export abstract class UsageServiceBase<TResponse> {
         this.timer = null;
       }
       this.countdown.stop();
-      this.setState({ status: "not-connected" });
+      this.setState({ status: "not-connected" }, "auth-dir-vanished");
       this.startDiscovery();
       return;
     }
@@ -255,7 +373,8 @@ export abstract class UsageServiceBase<TResponse> {
 
     const cache = this.coordinator.readCache();
     if (cache && this.coordinator.isFresh(cache)) {
-      this.setState(cache.state);
+      const cacheAgeMs = Date.now() - cache.timestamp;
+      this.setStateWithCacheAge(cache.state, "cache-adopted", cacheAgeMs);
       if (cache.state.status === "ok") this.consecutiveErrors = 0;
       if (cache.state.status === "rate-limited") {
         this.countdown.start();
@@ -267,7 +386,8 @@ export abstract class UsageServiceBase<TResponse> {
 
     if (!this.coordinator.tryClaim()) {
       if (cache) {
-        this.setState(cache.state);
+        const cacheAgeMs = Date.now() - cache.timestamp;
+        this.setStateWithCacheAge(cache.state, "cache-adopted", cacheAgeMs);
       } else {
         const handle = setTimeout(() => {
           this.pendingTimers.delete(handle);
@@ -282,21 +402,30 @@ export abstract class UsageServiceBase<TResponse> {
     const auth = this.getAuth();
     if (!auth) {
       const newState: ServiceState<TResponse> = { status: "no-auth" };
-      if (this.state.status !== "no-auth") this.setState(newState);
+      if (this.state.status !== "no-auth") this.setState(newState, "auth-missing");
       this.coordinator.writeCache(newState);
       this.coordinator.releaseClaim();
       return;
     }
 
     this.inFlight = true;
+    // Log every fetch attempt so the transition log shows poll cadence
+    // even when nothing else changes. A long gap between fetch-attempted
+    // records means the service is parked on a long backoff (or
+    // disposed) - useful evidence when diagnosing "widget hasn't
+    // refreshed in 20 minutes."
+    this.logEvent("fetch-attempted", this.state.status as TransitionStatus);
     try {
       const usage = await this.doFetch(auth);
 
       if (!this.validateResponse(usage)) {
-        this.setState({
-          status: "error",
-          message: "Unexpected API response format",
-        });
+        this.setState(
+          {
+            status: "error",
+            message: "Unexpected API response format",
+          },
+          "fetch-other-error"
+        );
         return;
       }
 
@@ -305,7 +434,7 @@ export abstract class UsageServiceBase<TResponse> {
         data: usage,
         fetchedAt: Date.now(),
       };
-      this.setState(newState);
+      this.setState(newState, "fetch-ok");
       this.coordinator.writeCache(newState);
       this.countdown.stop();
 
@@ -359,7 +488,7 @@ export abstract class UsageServiceBase<TResponse> {
       if (this.kickstart.consumeStrike()) {
         // Strikes remain - keep retrying at normal cadence.
         this.setPollInterval(POLL_INTERVAL_MS);
-        this.setState({ status: "loading" });
+        this.setState({ status: "loading" }, "fetch-429-strike-retry");
         return;
       }
 
@@ -382,6 +511,24 @@ export abstract class UsageServiceBase<TResponse> {
         // picks up quickly. Do not touch state - widget continues to
         // render the prior ok numbers from `this.state`.
         this.setPollInterval(POLL_INTERVAL_MS);
+        // Record the absorbed 429 in the transition log even though
+        // status didn't change. The absorb counter + idleForMs are the
+        // load-bearing signals for "widget went idle randomly" debugging
+        // - the user can see how many cold-poll 429s have stacked AND
+        // whether the activity probe agreed they were idle at each one.
+        logTransition(this.config.transitionLogPath, {
+          at: nowForAbsorb,
+          provider: this.config.providerKey,
+          from: "ok",
+          to: "ok",
+          reason: "fetch-429-absorbed",
+          consecutiveColdStartAbsorbs: this.consecutiveColdStartAbsorbs,
+          consecutiveFailedKickstarts:
+            this.kickstart.getDiagnostics().consecutiveFailedKickstarts,
+          serverMessage: extractServerMessage(error),
+          idleForMs: this.computeIdleForMs(),
+          pollIntervalMs: this.currentPollIntervalMs,
+        });
         return;
       }
 
@@ -408,7 +555,7 @@ export abstract class UsageServiceBase<TResponse> {
         serverMessage: extractServerMessage(error),
         isColdStart: this.kickstart.isIdleAt(now),
       };
-      this.setState(newState);
+      this.setState(newState, "fetch-429-parked");
       this.coordinator.writeCache(newState);
       this.countdown.start();
       return;
@@ -436,17 +583,21 @@ export abstract class UsageServiceBase<TResponse> {
     }
 
     let newState: ServiceState<TResponse>;
+    let reason: TransitionReason;
     if (statusCode && AUTH_ERROR_CODES.has(statusCode)) {
       newState = {
         status: "token-expired",
         message: `Authentication failed (${statusCode})`,
       };
+      reason = "fetch-auth-error";
     } else if (isNetworkError(message)) {
       newState = { status: "offline", message };
+      reason = "fetch-network-error";
     } else {
       newState = { status: "error", message };
+      reason = "fetch-other-error";
     }
-    this.setState(newState);
+    this.setState(newState, reason);
     if (isCacheableState(newState)) this.coordinator.writeCache(newState);
   }
 }

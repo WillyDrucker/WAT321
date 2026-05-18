@@ -108,6 +108,11 @@ export interface UsageServiceDiagnostics {
   /** Server-supplied retry-after in ms for the current park, or
    * null. */
   retryAfterMs: number | null;
+  /** Count of consecutive cold-start 429s absorbed while showing prior
+   * ok numbers. Resets on successful fetch. Useful for distinguishing
+   * a widget that's been in absorption mode for a while from one that
+   * just hit its first transient 429. */
+  consecutiveColdStartAbsorbs: number;
 }
 
 /** Extended contract for usage services that support the

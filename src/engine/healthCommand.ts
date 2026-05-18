@@ -1,7 +1,10 @@
+import { join } from "node:path";
 import * as vscode from "vscode";
 import type { ProviderKey } from "./contracts";
 import type { EngineContext } from "./engineContext";
+import { readRecentTransitions } from "../shared/polling/transitionLog";
 import { getNotificationDiagnostics } from "./toastNotifier";
+import { clientStateDir } from "../shared/wat321Paths";
 import { getAppUserModelID } from "./windowsToastProcess";
 
 /** Appended callbacks for tool-owned health sections (Epic Handshake
@@ -92,6 +95,9 @@ function renderProvider(ctx: EngineContext, key: ProviderKey, lines: string[]): 
   if (diag.consecutiveFailedKickstarts > 0 || diag.postWakeStrikesRemaining > 0) {
     lines.push(`  kickstart: failed=${diag.consecutiveFailedKickstarts} strikesRemaining=${diag.postWakeStrikesRemaining}`);
   }
+  if (diag.consecutiveColdStartAbsorbs > 0) {
+    lines.push(`  absorbs:  ${diag.consecutiveColdStartAbsorbs} cold-poll 429s absorbed in a row (resets on next ok)`);
+  }
 
   if (diag.rateLimitedAt !== null && diag.retryAfterMs !== null) {
     const parkedFor = Date.now() - diag.rateLimitedAt;
@@ -102,6 +108,47 @@ function renderProvider(ctx: EngineContext, key: ProviderKey, lines: string[]): 
   const transcriptPath = group.tokenService.getActiveTranscriptPath();
   if (transcriptPath) {
     lines.push(`  tail:    ${transcriptPath}`);
+  }
+
+  renderTransitionLog(key, lines);
+}
+
+function renderTransitionLog(key: ProviderKey, lines: string[]): void {
+  const path = join(clientStateDir(), `${key}-usage-transitions.jsonl`);
+  const recent = readRecentTransitions(path, 25);
+  if (recent.length === 0) return;
+  lines.push(`  recent transitions (last ${recent.length}, oldest first):`);
+  for (const r of recent) {
+    const at = new Date(r.at).toLocaleTimeString();
+    const tag = r.from === r.to ? r.reason : `${r.from} -> ${r.to} (${r.reason})`;
+    const detail: string[] = [];
+    if (typeof r.idleForMs === "number") {
+      detail.push(`idle=${formatDuration(r.idleForMs)}`);
+    } else if (r.idleForMs === null) {
+      detail.push("idle=no-probe");
+    }
+    if (r.isColdStart === true) detail.push("cold-start");
+    if (typeof r.consecutiveColdStartAbsorbs === "number" && r.consecutiveColdStartAbsorbs > 0) {
+      detail.push(`absorbs=${r.consecutiveColdStartAbsorbs}`);
+    }
+    if (
+      typeof r.consecutiveFailedKickstarts === "number" &&
+      r.consecutiveFailedKickstarts > 0
+    ) {
+      detail.push(`failedKicks=${r.consecutiveFailedKickstarts}`);
+    }
+    if (typeof r.pollIntervalMs === "number") {
+      detail.push(`poll=${formatDuration(r.pollIntervalMs)}`);
+    }
+    if (typeof r.cacheAgeMs === "number") {
+      detail.push(`cacheAge=${formatDuration(r.cacheAgeMs)}`);
+    }
+    if (typeof r.retryAfterMs === "number") {
+      detail.push(`retryAfter=${formatDuration(r.retryAfterMs)}`);
+    }
+    if (r.serverMessage) detail.push(`msg="${r.serverMessage}"`);
+    const detailStr = detail.length > 0 ? `  [${detail.join(", ")}]` : "";
+    lines.push(`    ${at}  ${tag}${detailStr}`);
   }
 }
 
