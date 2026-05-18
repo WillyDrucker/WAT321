@@ -43,6 +43,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
       autoCompactEffectiveTokens: session.autoCompactEffectiveTokens,
       lastCompactTimestamp: session.turnInfo?.lastCompactTimestamp ?? null,
       tokensPerSecond: session.tokensPerSecond,
+      compactState: session.compactState,
     };
   },
 };

@@ -120,6 +120,21 @@ export interface SessionTokenRenderData {
    * (idle, just started, transcript not advancing). Surfaced in the
    * tooltip as a "Streaming ~X tps" line. */
   tokensPerSecond?: number | null;
+  /** Claude-only: compact-progress state machine snapshot. When
+   * `state: "in-flight"` the widget replaces the normal token text
+   * with an orange progress bar. Undefined for Codex (no compact
+   * equivalent) and during transitional states where the machine has
+   * not yet emitted. The structural shape is owned by the Claude
+   * tier's `compactStateMachine.ts` and re-exported through the
+   * Claude widget's `getRenderData`. */
+  compactState?: {
+    state: "idle" | "in-flight";
+    startedAt: number | null;
+    estimatedDurationMs: number;
+    elapsedMs: number;
+    percent: number;
+    barsFilled: number;
+  };
 }
 
 export interface SessionTokenWidgetDescriptor<TState extends { status: string }> {

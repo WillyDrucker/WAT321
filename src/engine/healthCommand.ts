@@ -126,6 +126,23 @@ function renderProvider(ctx: EngineContext, key: ProviderKey, lines: string[]): 
     lines.push(`  source:  ${sessionDiag.source}${pidPart}`);
   }
 
+  // Claude-only: compact state machine snapshot. Only fires when the
+  // provider implements the optional contract method.
+  const compactDiag = group.tokenService.getCompactDiagnostics?.();
+  if (compactDiag) {
+    const estimate = formatDuration(compactDiag.estimatedDurationMs);
+    const historyPart =
+      compactDiag.recentDurationsMs.length > 0
+        ? ` (avg of ${compactDiag.recentDurationsMs.length} recent: ${compactDiag.recentDurationsMs.map((d) => formatDuration(d)).join(", ")})`
+        : " (no history yet, using 120s default)";
+    if (compactDiag.state === "in-flight" && compactDiag.startedAt !== null) {
+      const elapsed = formatDuration(Date.now() - compactDiag.startedAt);
+      lines.push(`  compact: in-flight, ${elapsed} elapsed, estimate ${estimate}${historyPart}`);
+    } else {
+      lines.push(`  compact: idle, next estimate ${estimate}${historyPart}`);
+    }
+  }
+
   renderTransitionLog(key, lines);
 }
 

@@ -8,6 +8,13 @@ import { SETTING } from "../../engine/settingsKeys";
 
 export const TICK_MS = 250;
 
+/** Foreground color used for the Claude session-token widget during
+ * a manual `/compact` in-flight render. Same Tailwind Amber-500 hex
+ * already used by the session-token tooltip warning band - reused so
+ * the WAT321 palette stays consistent across compact-progress and
+ * warning surfaces without introducing a new color variant. */
+export const COMPACT_PROGRESS_COLOR = "#f59e0b";
+
 /** Inline TPS suffix for the widget text. Three-digit max (services
  * cap at 999), one decimal below 10 so a slow local LLM at 3.4 tps
  * does not round to 3. Suppressed in minimal mode. Returns an empty

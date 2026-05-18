@@ -17,10 +17,12 @@ import {
   CACHE_MISS_BANNER_ON,
   CACHE_REBUILD_CREATION_MIN,
   CACHE_REBUILD_RATIO_DENOM,
+  COMPACT_PROGRESS_COLOR,
   TICK_MS,
   isPidAlive,
   tpsSuffix,
 } from "./sessionTokenHelpers";
+import { SQUARE_BLACK_EMPTY, SQUARE_ORANGE_COMPACT } from "./heatmap";
 import { TpsThrottle } from "./tpsThrottle";
 import type {
   SessionTokenRenderData,
@@ -362,6 +364,11 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
       const data = this.descriptor.getRenderData(
         this.lastState as TState & { status: "ok" }
       );
+      // Compact-in-flight keeps the ticker alive so the orange bar's
+      // percent advances visually between service polls. The state
+      // machine self-exits on boundary / failsafe / activity recovery,
+      // so this branch can never get stuck active.
+      if (data.compactState?.state === "in-flight") return true;
       const turnInProgress =
         data.turnState === "user" || data.turnState === "assistant-pending";
       // PID + mtime backstop. Without it, a stale `assistant-pending`
@@ -604,6 +611,52 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         const pctOfCeiling = effectiveCeiling > 0
           ? Math.min(100, Math.round((effectiveUsed / effectiveCeiling) * 100))
           : 0;
+
+        // Compact-in-flight branch takes priority over normal token
+        // rendering. Replaces the entire body (token count, percent,
+        // tps suffix, cache banner) with a 5-cell orange progress bar
+        // plus a percent number. Prefix stays the Claude codicon (no
+        // thinking-cycle animation) and the foreground color flips to
+        // the compact-progress amber so the widget reads as a distinct
+        // state, not just "more text." On exit (clean boundary, failsafe,
+        // session change, or activity recovery) the state machine flips
+        // back to idle and the next render falls through to the normal
+        // path below.
+        //
+        // Live re-derivation: the cached values on compactState come
+        // from the last service poll (15s cadence). The ticker re-
+        // renders at 250ms so the bar visibly advances between polls;
+        // we recompute from `startedAt + Date.now()` against the cached
+        // `estimatedDurationMs` so the math stays identical to the
+        // state machine's own calculation.
+        //
+        // Fill math: `Math.round((ratio * 100) / 100 * 5)` matching the
+        // Claude usage rolling bar's per-cell threshold. Cell n lights
+        // up at (2n-1)*10% so the cells fill at 10%, 30%, 50%, 70%, 90%.
+        // The 5th cell at 90%+ matches the "last bar fills late" rhythm
+        // of the usage widget, and the user reads "almost done" from
+        // both the all-filled bar AND the trailing percent (which keeps
+        // ticking 90 -> 99 even after the bar saturates).
+        if (
+          data.compactState?.state === "in-flight" &&
+          data.compactState.startedAt !== null
+        ) {
+          const elapsed = Date.now() - data.compactState.startedAt;
+          const ratio = Math.min(
+            0.99,
+            Math.max(0, elapsed / data.compactState.estimatedDurationMs)
+          );
+          const pct = ratio * 100;
+          const liveBars = Math.min(5, Math.round((pct / 100) * 5));
+          const livePercent = Math.max(1, Math.min(99, Math.floor(pct)));
+          const filled = SQUARE_ORANGE_COMPACT.repeat(liveBars);
+          const empty = SQUARE_BLACK_EMPTY.repeat(5 - liveBars);
+          this.item.text = `${d.idlePrefix} ${filled}${empty} ${livePercent}%`;
+          this.item.color = COMPACT_PROGRESS_COLOR;
+          this.item.tooltip = `${d.provider} compact in progress`;
+          this.item.show();
+          return;
+        }
 
         const mode = getSessionTokenDisplayMode();
         const prefix = this.currentPrefix(data);
