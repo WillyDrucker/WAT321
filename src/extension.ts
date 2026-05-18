@@ -8,6 +8,7 @@ import { registerHealthCommand } from "./engine/healthCommand";
 import { SETTING } from "./engine/settingsKeys";
 import {
   dispose as disposeToastProcess,
+  resetBootstrapCircuit,
   setHostAppName,
 } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
@@ -40,6 +41,23 @@ export function activate(context: vscode.ExtensionContext) {
   // no-op outside Windows paths; safe to call unconditionally.
   if (process.platform === "win32") {
     setHostAppName(vscode.env.appName);
+    // Reset the warm-PS circuit breaker when the window regains focus.
+    // The warm PowerShell process can be reaped or killed (logoff, AV,
+    // task-manager) while the window is in the background, and a few
+    // notification events firing during the unfocused stretch can trip
+    // the five-bootstrap-fail breaker. Without a reset, the user comes
+    // back to a window that silently drops the next five minutes of
+    // toasts. Resetting on focus regain pays a single fresh spawn
+    // attempt at the moment the user is actually there to notice if
+    // notifications are still broken. Underlying problems re-trip the
+    // breaker; this just removes the stale-cooldown failure mode.
+    let lastFocused = vscode.window.state.focused;
+    context.subscriptions.push(
+      vscode.window.onDidChangeWindowState((s) => {
+        if (s.focused && !lastFocused) resetBootstrapCircuit();
+        lastFocused = s.focused;
+      })
+    );
   }
 
   // Set WAT321_WORKSPACE_ID on the extension host's process env so any

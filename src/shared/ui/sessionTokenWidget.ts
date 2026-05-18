@@ -376,14 +376,30 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
       if (turnInProgress) {
         const pidAlive = data.pid !== undefined && isPidAlive(data.pid);
         const mtimeFreshForTurn =
-          Date.now() - data.transcriptMtimeMs < this.descriptor.activeThresholdMs;
+          Date.now() - data.transcriptMtimeMs <
+          this.effectiveActiveThresholdMs(data.pid);
         if (pidAlive || mtimeFreshForTurn) return true;
       }
       const mtimeFresh =
-        Date.now() - data.transcriptMtimeMs < this.descriptor.activeThresholdMs;
+        Date.now() - data.transcriptMtimeMs <
+        this.effectiveActiveThresholdMs(data.pid);
       if (mtimeFresh) return true;
     }
     return false;
+  }
+
+  /** Activity-window length. The descriptor's 3s threshold is tight on
+   * purpose - it's a safety net under live PID, where PID-alive is the
+   * primary continuity signal and mtime only catches CLI crashes. On
+   * lastKnown fallback (pid undefined) there's no PID signal at all,
+   * so mtime is doing both jobs: continuity AND end-of-turn detection.
+   * The 3s window then misreads every silent thinking pause as turn-
+   * complete. Widen to 30s on lastKnown so the indicator rides through
+   * normal between-tool deliberation; classifier transitions still
+   * collapse the widget to idle the instant a real end state lands. */
+  private effectiveActiveThresholdMs(pid: number | undefined): number {
+    if (pid === undefined) return 30_000;
+    return this.descriptor.activeThresholdMs;
   }
 
   private ensureTicker(): void {
@@ -548,10 +564,13 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
 
     // PID liveness keeps the indicator on through silent thinking
     // (no writes for extended Opus reasoning or slow tool calls).
-    // Mtime backstop is the tight safety net when PID is unavailable
-    // or dead - catches CLI crash without any marker ever landing.
+    // Mtime backstop is the safety net when PID is unavailable or dead.
+    // Threshold widens to 30s on lastKnown (pid undefined) where mtime
+    // is the only signal we have - the descriptor's 3s default would
+    // misread normal between-tool deliberation as turn-complete.
     const pidAlive = data.pid !== undefined && isPidAlive(data.pid);
-    const mtimeFresh = now - data.transcriptMtimeMs < d.activeThresholdMs;
+    const mtimeFresh =
+      now - data.transcriptMtimeMs < this.effectiveActiveThresholdMs(data.pid);
     if (!pidAlive && !mtimeFresh) return d.idlePrefix;
 
     const index = Math.floor(now / d.activeStepMs) % d.activeFrames.length;

@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import type { ProviderKey } from "./contracts";
 import type { EngineContext } from "./engineContext";
 import { readRecentTransitions } from "../shared/polling/transitionLog";
+import { isPidAlive } from "../shared/ui/sessionTokenHelpers";
 import { getNotificationDiagnostics } from "./toastNotifier";
 import { clientStateDir } from "../shared/wat321Paths";
 import { getAppUserModelID } from "./windowsToastProcess";
@@ -108,6 +109,21 @@ function renderProvider(ctx: EngineContext, key: ProviderKey, lines: string[]): 
   const transcriptPath = group.tokenService.getActiveTranscriptPath();
   if (transcriptPath) {
     lines.push(`  tail:    ${transcriptPath}`);
+  }
+  const sessionDiag = group.tokenService.getActiveSessionDiagnostics();
+  if (sessionDiag.source !== null) {
+    // `source` is the primary cross-workspace contamination diagnostic.
+    // A `tail:` path that does not belong to your workspace plus
+    // `source: lastKnown` is the signature of the bug fixed in v1.5.9:
+    // getProjectKey encoding mismatch falling to Stage 2 global scan.
+    // After the fix, lastKnown should appear only when (a) no live
+    // session matches the workspace cwd or (b) the live transcript
+    // file has not been created yet.
+    const pidPart =
+      sessionDiag.pid !== null
+        ? ` (pid ${sessionDiag.pid}, ${isPidAlive(sessionDiag.pid) ? "alive" : "dead"})`
+        : "";
+    lines.push(`  source:  ${sessionDiag.source}${pidPart}`);
   }
 
   renderTransitionLog(key, lines);

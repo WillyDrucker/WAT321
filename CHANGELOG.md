@@ -5,6 +5,20 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.9] - 2026-05-18
+
+### Added
+
+- **`WAT321: Show Provider Health` now tells you which session each widget is reading and whether the CLI process is alive.** A new "source" line per provider shows `live (pid 1234, alive)` when WAT321 has matched your widget to a running Claude CLI process, or `lastKnown` when the widget is falling back to the most recent transcript on disk. If your widget ever shows activity that doesn't match what you remember doing in this window, that line plus the `tail` path above it tells you exactly which session you're looking at.
+
+### Fixed
+
+- **Each workspace's Claude session-tokens widget now reads its own transcript, period.** A long-standing encoding mismatch in how WAT321 mapped your workspace folder to Claude Code's project directory could route the widget to scan globally for the most recent transcript, which meant one VS Code window's typing could light up another window's widget. The mapping now matches Claude Code's current filesystem layout, and the global fallback is locked off whenever a workspace folder is open. If you ever saw a widget animate while you weren't doing anything in that window, this was the cause.
+- **The thinking indicator stays on through the whole Claude turn instead of flickering between tool calls.** When WAT321 couldn't match your Claude session to a live CLI process (claude launched from outside the workspace folder, or the session metadata went stale), the indicator was using a tight three-second activity window that misread normal between-tool deliberation as "turn complete." It now uses a thirty-second window in that fallback path, matching how it already behaves when the live process is matched. Compact and interrupt guards are unchanged, so real end states still settle the widget to idle immediately.
+- **System notifications no longer go silent for five minutes after a long stretch with the window unfocused.** The warm PowerShell process WAT321 uses for Windows toasts can get reaped while you're away (Windows scheduler, antivirus, or a logoff), and a few notifications firing during that window were enough to trip a circuit breaker that parked toasts for five minutes. The breaker now resets the moment you focus the window again, so the next notification respawns the pipe cleanly.
+
+### Removed
+
 ## [1.5.8] - 2026-05-17
 
 ### Added

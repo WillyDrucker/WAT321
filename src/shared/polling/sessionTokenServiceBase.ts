@@ -98,6 +98,32 @@ export abstract class SessionTokenServiceBase<TState extends { status: string }>
     return this.cachedTranscriptPath || null;
   }
 
+  /** Resolution-source snapshot for diagnostics. Surfaced in the
+   * health command per-provider block so cross-workspace contamination
+   * (live PID missed, fallen to lastKnown, Stage 2 returning some
+   * other workspace's transcript) is one glance away: a user seeing
+   * `source: lastKnown` plus a `tail:` path that does not belong to
+   * their workspace has the smoking gun. Returns null fields when no
+   * session is resolved or the underlying state shape is unexpected. */
+  getActiveSessionDiagnostics(): {
+    source: "live" | "lastKnown" | null;
+    pid: number | null;
+  } {
+    if (this.state.status !== "ok") return { source: null, pid: null };
+    const session = (this.state as Record<string, unknown>).session;
+    if (typeof session !== "object" || session === null) {
+      return { source: null, pid: null };
+    }
+    const rec = session as Record<string, unknown>;
+    const source = rec.source;
+    const pid = rec.pid;
+    return {
+      source:
+        source === "live" || source === "lastKnown" ? source : null,
+      pid: typeof pid === "number" ? pid : null,
+    };
+  }
+
   /** Trigger an immediate poll + watcher sync. Called by subclass
    * discovery watchers when the sessions directory or config file
    * changes. */
