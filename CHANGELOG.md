@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A live progress bar on the Claude session-tokens widget when you run `/compact`.** As soon as Claude Code accepts the `/compact` command, the widget swaps its normal token readout for a five-cell orange progress bar plus a percent number, so you can see at a glance that compaction is in flight and roughly how far along it is. The bar fills left to right, the last cell only lights up near the end of the run, and the moment compaction finishes the widget snaps back to showing your post-compact token count. Per-session learning: WAT321 reads the actual duration of each completed compact from the transcript and uses a rolling average of the last few runs to estimate the next one - so the bar tunes itself to how long your compacts typically take in this conversation. First compact in a fresh session uses a deliberately generous default so the bar tends to finish a little early rather than appear stuck at 99%. Auto-compact intentionally does not show the bar, because by the time the auto-compact summary lands, the operation has already completed.
+
 ### Changed
 
 ### Fixed
