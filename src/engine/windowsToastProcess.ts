@@ -68,6 +68,21 @@ export function setHostAppName(name: string): void {
   if (typeof name === "string") hostAppName = name;
 }
 
+/** Clear the circuit-breaker cooldown immediately. Called when the
+ * VS Code window regains focus after being unfocused for a while:
+ * a five-minute cooldown the user did not see (warm PS died while
+ * the window was in the background, then a few notification events
+ * tripped the breaker before the user came back) leaves the next
+ * notification silent for up to five minutes after the user is
+ * actively at the keyboard again. Resetting on focus regain lets
+ * the next showToast respawn cleanly. If the underlying problem
+ * persists, the breaker re-trips on the next five failures and the
+ * user is no worse off than before. */
+export function resetBootstrapCircuit(): void {
+  bootstrapFailures = 0;
+  cooldownUntil = 0;
+}
+
 /** Effective AUMID resolved at warm-process bootstrap, or `""` if
  * not yet discovered (process not spawned, discovery in flight, or
  * non-Windows). Surfaced by the health command for diagnostics. */
