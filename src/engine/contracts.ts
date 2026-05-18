@@ -135,6 +135,14 @@ export interface SessionTokenService<TState> extends Subscribable<TState> {
    * been resolved. Used by the notification bridge to read the
    * response preview and by the health command for diagnostics. */
   getActiveTranscriptPath(): string | null;
+  /** Resolution-source diagnostics. Surfaces whether the current
+   * tail came from a live CLI process (with PID) or the lastKnown
+   * fallback. Health command surfaces this so cross-workspace
+   * contamination (wrong tail + lastKnown source) is one glance away. */
+  getActiveSessionDiagnostics(): {
+    source: "live" | "lastKnown" | null;
+    pid: number | null;
+  };
   /** Clear all cached session state and drop to the idle state.
    * Called by Reset WAT321 so the widget goes blank immediately
    * instead of re-discovering old transcripts on the next poll. */
