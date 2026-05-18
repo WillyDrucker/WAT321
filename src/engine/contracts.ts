@@ -148,7 +148,7 @@ export interface SessionTokenService<TState> extends Subscribable<TState> {
    * Health command renders `state`, current `estimatedDurationMs`,
    * and the rolling history when present. */
   getCompactDiagnostics?(): {
-    state: "idle" | "in-flight";
+    state: "idle" | "in-flight" | "flashing-completion";
     startedAt: number | null;
     estimatedDurationMs: number;
     recentDurationsMs: readonly number[];

@@ -5,6 +5,19 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.11] - 2026-05-18
+
+### Added
+
+- **The 5h usage widget keeps showing your last numbers when it goes idle, just dimmed.** Previously, when WAT321 absorbed a cold-poll 429 from Anthropic's stats endpoint (or the equivalent on Codex) after a long idle stretch, the widget swapped to a generic "Usage - Idle" pill that dropped the bars and percent you were just looking at. Now the widget keeps showing the same bars and percent the last successful poll captured, dimmed to a muted gray with "Idle" tacked on the end so you can see at a glance that the reading is paused, not live. Hover the widget and the tooltip leads with "Last updated N minutes ago" so the dimmed state is never mistaken for current data. The cache resets automatically the instant your sign-in identity changes, so a sign-out or token expiry never bleeds a previous account's numbers onto a new session.
+- **A brief orange flash on the Claude session-tokens widget when auto-compact finishes.** v1.5.10 added the live progress bar for manual `/compact`. Auto-compact runs the same way structurally but writes nothing observable until the operation is already done - so a live progress bar isn't possible. Instead, the widget now flashes a saturated orange bar at 99% for about a second and a half the moment auto-compact lands, then snaps back to your normal token display with the new (much lower) post-compact count. Enough acknowledgment that you can spot "the conversation just compacted" without having to figure out why your context just dropped from 720k to 12k. Manual `/compact` running on top of an active flash takes over cleanly; reattaching to a session whose tail already contains a historical auto-compact does NOT trigger the flash for events you weren't watching live.
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [1.5.10] - 2026-05-18
 
 ### Added
