@@ -113,12 +113,12 @@ function renderProvider(ctx: EngineContext, key: ProviderKey, lines: string[]): 
   const sessionDiag = group.tokenService.getActiveSessionDiagnostics();
   if (sessionDiag.source !== null) {
     // `source` is the primary cross-workspace contamination diagnostic.
-    // A `tail:` path that does not belong to your workspace plus
-    // `source: lastKnown` is the signature of the bug fixed in v1.5.9:
-    // getProjectKey encoding mismatch falling to Stage 2 global scan.
-    // After the fix, lastKnown should appear only when (a) no live
-    // session matches the workspace cwd or (b) the live transcript
-    // file has not been created yet.
+    // A `tail:` path that does not belong to the current workspace plus
+    // `source: lastKnown` is the signature of getProjectKey encoding
+    // mismatch falling to Stage 2 global scan. Under normal operation,
+    // `lastKnown` should appear only when (a) no live session matches
+    // the workspace cwd or (b) the live transcript file has not been
+    // created yet.
     const pidPart =
       sessionDiag.pid !== null
         ? ` (pid ${sessionDiag.pid}, ${isPidAlive(sessionDiag.pid) ? "alive" : "dead"})`
@@ -138,6 +138,8 @@ function renderProvider(ctx: EngineContext, key: ProviderKey, lines: string[]): 
     if (compactDiag.state === "in-flight" && compactDiag.startedAt !== null) {
       const elapsed = formatDuration(Date.now() - compactDiag.startedAt);
       lines.push(`  compact: in-flight, ${elapsed} elapsed, estimate ${estimate}${historyPart}`);
+    } else if (compactDiag.state === "flashing-completion") {
+      lines.push(`  compact: auto-compact just completed, flashing${historyPart}`);
     } else {
       lines.push(`  compact: idle, next estimate ${estimate}${historyPart}`);
     }

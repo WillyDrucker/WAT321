@@ -128,12 +128,18 @@ export interface SessionTokenRenderData {
    * tier's `compactStateMachine.ts` and re-exported through the
    * Claude widget's `getRenderData`. */
   compactState?: {
-    state: "idle" | "in-flight";
+    state: "idle" | "in-flight" | "flashing-completion";
     startedAt: number | null;
     estimatedDurationMs: number;
     elapsedMs: number;
     percent: number;
     barsFilled: number;
+    /** Wall-clock ms at which a `flashing-completion` window expires.
+     * The widget consults this on every ticker frame so the flash
+     * collapses back to normal token rendering the instant the window
+     * passes, instead of waiting for the next 15s service poll. Null
+     * outside the flash state. */
+    flashUntil: number | null;
   };
 }
 

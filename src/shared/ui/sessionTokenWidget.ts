@@ -365,10 +365,20 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         this.lastState as TState & { status: "ok" }
       );
       // Compact-in-flight keeps the ticker alive so the orange bar's
-      // percent advances visually between service polls. The state
-      // machine self-exits on boundary / failsafe / activity recovery,
-      // so this branch can never get stuck active.
+      // percent advances visually between service polls. Self-exits on
+      // boundary / failsafe / activity recovery.
       if (data.compactState?.state === "in-flight") return true;
+      // Post-completion flash keeps the ticker alive ONLY while the
+      // flashUntil window is open. The instant `Date.now() >= flashUntil`
+      // the ticker can self-suspend - the next render falls through to
+      // the normal path even before the service emits its next state.
+      if (
+        data.compactState?.state === "flashing-completion" &&
+        data.compactState.flashUntil !== null &&
+        Date.now() < data.compactState.flashUntil
+      ) {
+        return true;
+      }
       const turnInProgress =
         data.turnState === "user" || data.turnState === "assistant-pending";
       // PID + mtime backstop. Without it, a stale `assistant-pending`
@@ -654,6 +664,28 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
           this.item.text = `${d.idlePrefix} ${filled}${empty} ${livePercent}%`;
           this.item.color = COMPACT_PROGRESS_COLOR;
           this.item.tooltip = `${d.provider} compact in progress`;
+          this.item.show();
+          return;
+        }
+        // Auto-compact completion flash. trigger:"auto" boundaries land
+        // with no observable in-flight window (the user's triggering
+        // prompt is written AFTER the compact runs), so the user gets
+        // no progress bar during the run. The state machine arms a
+        // ~1.5s flash on the boundary so the user at least sees an
+        // acknowledgment that an auto-compact happened. Bar saturated
+        // at 5/5 + 99%, same visual rhythm as the end of an in-flight
+        // bar. Live `flashUntil` check at render time collapses the
+        // skin back to normal rendering the instant the window passes,
+        // instead of waiting for the next service poll.
+        if (
+          data.compactState?.state === "flashing-completion" &&
+          data.compactState.flashUntil !== null &&
+          Date.now() < data.compactState.flashUntil
+        ) {
+          const filled = SQUARE_ORANGE_COMPACT.repeat(5);
+          this.item.text = `${d.idlePrefix} ${filled} ${data.compactState.percent}%`;
+          this.item.color = COMPACT_PROGRESS_COLOR;
+          this.item.tooltip = `${d.provider} auto-compact complete`;
           this.item.show();
           return;
         }
