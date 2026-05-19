@@ -5,6 +5,19 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.12] - 2026-05-18
+
+### Changed
+
+- **Manual `/compact` and auto-compact now share the same widget treatment.** v1.5.10 shipped what looked like a live progress bar for manual `/compact`, but it turned out Claude Code buffers the `/compact` user entry and writes it to the transcript only after the compact completes - so the bar was never actually observable during a real run. v1.5.12 retires the in-flight code path and unifies both manual and auto-compact around the same post-completion flash that v1.5.11 introduced for auto: a saturated orange bar at 100% for about a second and a half on auto-compact, a slightly longer ~2.5 seconds on manual since you're actively watching after typing the command. The widget settles back to the new lower token count immediately after.
+- **The Codex 5h widget now reads 100% right after the window reset.** Codex reports usage as a fractional percent, so the moment any background traffic flowed in a freshly-reset window the bar was dropping to "99.x% remaining" even though you'd effectively used nothing yet. Now the widget reads 100% through the first whole percent of a fresh window and only drops to 99% once you've actually consumed a full 1% of the period. Honest accounting at the high end - no rounding lies once usage is non-trivial.
+- **The idle skin now reads as unmistakably dimmed.** v1.5.11 introduced the "keep showing your last numbers, just dimmed" treatment for the 5h widget but the chosen gray was close enough to the active foreground that on many VS Code themes the dim was invisible. v1.5.12 takes the dim two steps deeper into the neutral palette so the paused-not-active read is obvious at a glance against both light and dark themes.
+- **The weekly usage bar now stays visible (dimmed) alongside the 5h bar during cold-poll idle.** Previously only the 5h widget kept its last-good bars during cold-poll absorption while the weekly widget hid entirely, which made the row look incomplete. Now both rows keep showing the data you were just looking at, both dimmed in step. Cache identity rules from v1.5.11 still apply - a sign-out or token expiry drops both widgets to the standard error treatment.
+
+### Fixed
+
+### Removed
+
 ## [1.5.11] - 2026-05-18
 
 ### Added

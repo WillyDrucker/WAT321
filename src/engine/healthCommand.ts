@@ -135,13 +135,10 @@ function renderProvider(ctx: EngineContext, key: ProviderKey, lines: string[]): 
       compactDiag.recentDurationsMs.length > 0
         ? ` (avg of ${compactDiag.recentDurationsMs.length} recent: ${compactDiag.recentDurationsMs.map((d) => formatDuration(d)).join(", ")})`
         : " (no history yet, using 120s default)";
-    if (compactDiag.state === "in-flight" && compactDiag.startedAt !== null) {
-      const elapsed = formatDuration(Date.now() - compactDiag.startedAt);
-      lines.push(`  compact: in-flight, ${elapsed} elapsed, estimate ${estimate}${historyPart}`);
-    } else if (compactDiag.state === "flashing-completion") {
-      lines.push(`  compact: auto-compact just completed, flashing${historyPart}`);
+    if (compactDiag.state === "flashing-completion") {
+      lines.push(`  compact: just completed, flashing${historyPart}`);
     } else {
-      lines.push(`  compact: idle, next estimate ${estimate}${historyPart}`);
+      lines.push(`  compact: idle, typical duration ${estimate}${historyPart}`);
     }
   }
 

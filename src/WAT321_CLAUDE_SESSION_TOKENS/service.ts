@@ -275,7 +275,6 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       tail,
       sessionId,
       now,
-      classifierKind: turnState,
     });
 
     this.emitOk({
