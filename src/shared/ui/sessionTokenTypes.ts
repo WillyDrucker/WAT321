@@ -128,10 +128,8 @@ export interface SessionTokenRenderData {
    * tier's `compactStateMachine.ts` and re-exported through the
    * Claude widget's `getRenderData`. */
   compactState?: {
-    state: "idle" | "in-flight" | "flashing-completion";
-    startedAt: number | null;
+    state: "idle" | "flashing-completion";
     estimatedDurationMs: number;
-    elapsedMs: number;
     percent: number;
     barsFilled: number;
     /** Wall-clock ms at which a `flashing-completion` window expires.

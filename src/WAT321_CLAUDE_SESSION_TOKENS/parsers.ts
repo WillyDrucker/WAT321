@@ -77,56 +77,6 @@ export function parseRecentCompactBoundaries(
   return out;
 }
 
-/** Walk the tail backwards looking for the most recent `<command-name>
- * /compact</command-name>` user entry. Returns the entry's parsed
- * timestamp in ms, or null if no manual-compact start marker is in
- * the tail.
- *
- * Auto-compacts are NOT detected here - by the time the auto-compact
- * summary user entry lands, the compact has already completed and
- * there's no progress bar to show. Manual `/compact` is the only path
- * that produces a detectable start marker AHEAD of completion, which
- * is what drives the in-flight progress bar. */
-export function parseLastManualCompactStart(tail: string): number | null {
-  const lines = tail.trimEnd().split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line) continue;
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (entry.type !== "user") continue;
-    const msg = entry.message as Record<string, unknown> | undefined;
-    const content = msg?.content;
-    let text = "";
-    if (typeof content === "string") text = content;
-    else if (Array.isArray(content)) {
-      for (const p of content) {
-        if (typeof p !== "object" || p === null) continue;
-        const part = p as Record<string, unknown>;
-        if (part.type === "text" && typeof part.text === "string") {
-          text += part.text;
-        }
-      }
-    }
-    // Match both `<command-name>compact</command-name>` (legacy form)
-    // and `<command-name>/compact</command-name>` (current CLI form).
-    // The stdout-completion marker is deliberately NOT a start signal -
-    // it lands AFTER the compact runs.
-    if (
-      text.includes("<command-name>/compact</command-name>") ||
-      text.includes("<command-name>compact</command-name>")
-    ) {
-      const tsRaw = entry.timestamp;
-      const ts = typeof tsRaw === "string" ? Date.parse(tsRaw) : NaN;
-      return Number.isNaN(ts) ? null : ts;
-    }
-  }
-  return null;
-}
 
 /** Re-export the shared display types so callers in this tool can
  * continue to import them from the parsers module without knowing
