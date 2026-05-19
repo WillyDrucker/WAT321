@@ -49,8 +49,11 @@ export interface UsageWidgetDescriptor<TData> {
  * the widget reads as "paused, not active" against both dark and
  * light VS Code themes, but still legible. Applies to the entire item
  * text - bar emoji squares ignore item.color because they have their
- * own intrinsic color (only the codicon + number + suffix dim). */
-const IDLE_DIM_COLOR = "#7a7a7a";
+ * own intrinsic color (only the codicon + number + suffix dim).
+ * Value matches Tailwind `neutral-700` (~50% darker in luminance than
+ * the prior `#7a7a7a` mid-gray) so the dimmed state is unmistakable
+ * against the active state. */
+const IDLE_DIM_COLOR = "#404040";
 
 export class UsageWidget<TData> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
@@ -109,19 +112,19 @@ export class UsageWidget<TData> implements vscode.Disposable {
       this.lastOkFetchedAt = null;
     }
 
-    // Cold-start idle skin (5h widgets only). The park was entered while
-    // the user was idle - Anthropic's usage endpoint 429s cold polls on
-    // accounts with no recent OAuth use. That is NOT an incident; it is
-    // a "paused for now" state that recovers on the next activity. Keep
-    // the last-known usage bar + percent visible so the user does not
-    // lose the data they were looking at moments ago. Dim everything to
-    // signal "this is stale, not live" without dropping the data. Other
-    // non-ok states (no-auth, token-expired, offline, error, rate-limited
-    // non-cold-start) keep their dedicated "Standard error" pills via
-    // renderUsageNonOkState - those are real failures where showing
-    // stale data could be misleading.
+    // Cold-start idle skin (both 5h and weekly). The park was entered
+    // while the user was idle - Anthropic's usage endpoint 429s cold
+    // polls on accounts with no recent OAuth use. That is NOT an
+    // incident; it is a "paused for now" state that recovers on the
+    // next activity. Keep the last-known usage bar + percent visible
+    // for the matching row so the user does not lose the data they
+    // were looking at moments ago. Dim everything to signal "this is
+    // stale, not live" without dropping the data. Other non-ok states
+    // (no-auth, token-expired, offline, error, rate-limited non-cold-
+    // start) keep their dedicated treatment via renderUsageNonOkState
+    // / renderWeeklyUsageNonOkState - those are real failures where
+    // showing stale data could be misleading.
     if (
-      d.variant === "5h" &&
       state.status === "rate-limited" &&
       state.isColdStart === true &&
       this.lastOkData !== null
