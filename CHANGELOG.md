@@ -5,6 +5,23 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.13] - 2026-05-20
+
+### Added
+
+- **The Codex session-tokens widget now flashes when a compact finishes, just like Claude.** When Codex compacts a conversation (auto at the threshold or when you run `/compact`), the widget briefly flashes a saturated orange bar at 100% for about two seconds, then settles back to your new lower token count. Same acknowledgment Claude already gives, so a sudden context drop on Codex is never a mystery. Like Claude, there is no live progress bar because the compact only becomes observable once it has already finished, and reattaching to an older session does not replay the flash for a compact you were not watching.
+
+### Changed
+
+- **Idle and connection hiccups no longer wipe your usage bars, on either provider.** Previously a stretch of idle, a brief network drop, or the provider's API throttling a background read would swap the usage widget to a generic "Usage - Idle" pill that dropped the bars and percent you were looking at. Now both the 5h and weekly rows keep showing your last known bars, dimmed to a muted gray with a short suffix after the percent (`5% - Idle`, `5% - Offline`, `5% - Paused`), so you can see at a glance the reading is paused rather than gone. Hover for the full detail, including the reconnect countdown when one applies. Genuine sign-out and credential-refresh states still show their own message and never display a previous account's numbers.
+
+### Fixed
+
+- **Codex's 5h widget now reads 100% right after the window resets.** Codex's usage endpoint reports a floor of 1% even on a freshly reset window, so the bar was dropping to 99% the instant any background traffic flowed even though you had effectively used nothing. The widget now reads a clean 100% through the first whole percent of a fresh window and only steps down once you have actually used a full 1%.
+- **Codex usage bars no longer vanish when ChatGPT throttles an idle poll.** ChatGPT's usage endpoint recently started rate-limiting background reads after a quiet stretch, the same way Anthropic's does. WAT321 now recognizes that as a paused-not-broken state and keeps your dimmed bars on screen, recovering automatically the next time you send a message.
+
+### Removed
+
 ## [1.5.12] - 2026-05-18
 
 ### Changed

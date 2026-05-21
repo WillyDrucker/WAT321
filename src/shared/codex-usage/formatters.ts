@@ -4,14 +4,18 @@ import { makeProgressBar } from "../ui/progressBar";
  * bars. U+1F7E9 LARGE GREEN SQUARE. */
 const FILLED_GREEN = "\uD83D\uDFE9";
 
-/** Codex's stats endpoint reports `used_percent` as a float, so a
- * fresh window with sub-1% activity comes back as 0.x and renders as
- * "99.x% remaining" the moment any traffic flows. Flooring used %
- * before subtracting lets the widget read "100%" cleanly through the
- * first whole percent of a freshly-reset window without rounding lies
- * (used 1.0 still reads 99). */
+/** Codex's stats endpoint floors `used_percent` at 1 - even a freshly
+ * reset 5h window (verified: `reset_after_seconds === limit_window_seconds`
+ * yet `used_percent: 1`) never reports 0. Treating <=1% used as a full
+ * window lets the widget read "100%" when you've effectively used
+ * nothing, matching how the Claude widget reads 0% used on a fresh
+ * window. Above the floor, `Math.floor` keeps the remaining percent a
+ * clean integer (used 2.4 -> 98 remaining). The cost is the first ~1%
+ * of real usage still reads 100%, which is the right call given the
+ * endpoint's own 1% floor. */
 export function getRemainingPct(usedPct: number): number {
   const clamped = Math.max(0, Math.min(100, usedPct));
+  if (clamped <= 1) return 100;
   return Math.max(0, 100 - Math.floor(clamped));
 }
 
