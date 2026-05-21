@@ -45,28 +45,28 @@ export interface UsageWidgetDescriptor<TData> {
   formatText(mode: ReturnType<typeof getDisplayMode>, pct: number, bar5: string, bar10: string): string;
 }
 
-/** Foreground color used by the cold-start idle skin. Dim enough that
- * the widget reads as "paused, not active" against both dark and
- * light VS Code themes, but still legible. Applies to the entire item
- * text - bar emoji squares ignore item.color because they have their
- * own intrinsic color (only the codicon + number + suffix dim).
- * Value matches Tailwind `neutral-700` (~50% darker in luminance than
- * the prior `#7a7a7a` mid-gray) so the dimmed state is unmistakable
+/** Foreground used by the cached-bars-on-error skin. Dim enough that
+ * the widget reads as "paused, not live" against both dark and light
+ * VS Code themes, but still legible. Applies to the entire item text -
+ * bar emoji squares ignore item.color because they have their own
+ * intrinsic color (only the codicon + number + suffix dim). Value
+ * matches Tailwind `neutral-700` (~50% darker in luminance than the
+ * prior `#7a7a7a` mid-gray) so the dimmed state is unmistakable
  * against the active state. */
 const IDLE_DIM_COLOR = "#404040";
 
 export class UsageWidget<TData> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
   private descriptor: UsageWidgetDescriptor<TData>;
-  /** Last `ok` payload observed. Cached so the cold-start idle skin
-   * can keep showing the previous usage bar + percent instead of
-   * blanking to a generic "Idle" pill. Null until the first ok state
-   * lands - on a brand-new install whose first poll lands a cold-start
-   * 429, this stays null and the renderer falls through to the
-   * non-ok renderer's generic "Idle" text. Cleared on identity-changing
+  /** Last `ok` payload observed. Cached so the cached-bars-on-error
+   * skin can keep showing the previous usage bar + percent instead of
+   * blanking to a generic pill on a transient error. Null until the
+   * first ok state lands - on a brand-new install whose first poll
+   * lands a transient error, this stays null and the renderer falls
+   * through to the non-ok renderer's pill. Cleared on identity-changing
    * states (`not-connected`, `no-auth`, `token-expired`) so a user
    * signing out and into a different account never sees the previous
-   * account's bars under the idle skin. */
+   * account's bars under the dimmed skin. */
   private lastOkData: TData | null = null;
   /** Wall-clock ms (Date.now()) when `lastOkData` was captured. Drives
    * the "Last updated X ago" disclosure on the idle tooltip so the
@@ -88,11 +88,10 @@ export class UsageWidget<TData> implements vscode.Disposable {
   update(state: GenericServiceState<TData>): void {
     const d = this.descriptor;
 
-    // Cache the last ok payload + its fetch time so the cold-start idle
-    // path can re-render the same bar + percent the user just saw, only
-    // dimmed and tagged "Idle." Caching happens BEFORE any return so a
-    // transient ok between two rate-limited polls still updates the
-    // cache.
+    // Cache the last ok payload + its fetch time so the cached-bars-on-
+    // error path can re-render the same bar + percent the user just saw,
+    // only dimmed with a status suffix. Caching happens BEFORE any return
+    // so a transient ok between two error polls still updates the cache.
     if (state.status === "ok") {
       this.lastOkData = state.data;
       this.lastOkFetchedAt = state.fetchedAt;
@@ -112,24 +111,23 @@ export class UsageWidget<TData> implements vscode.Disposable {
       this.lastOkFetchedAt = null;
     }
 
-    // Cold-start idle skin (both 5h and weekly). The park was entered
-    // while the user was idle - Anthropic's usage endpoint 429s cold
-    // polls on accounts with no recent OAuth use. That is NOT an
-    // incident; it is a "paused for now" state that recovers on the
-    // next activity. Keep the last-known usage bar + percent visible
-    // for the matching row so the user does not lose the data they
-    // were looking at moments ago. Dim everything to signal "this is
-    // stale, not live" without dropping the data. Other non-ok states
-    // (no-auth, token-expired, offline, error, rate-limited non-cold-
-    // start) keep their dedicated treatment via renderUsageNonOkState
-    // / renderWeeklyUsageNonOkState - those are real failures where
-    // showing stale data could be misleading.
-    if (
-      state.status === "rate-limited" &&
-      state.isColdStart === true &&
-      this.lastOkData !== null
-    ) {
-      this.renderIdleWithLastUsage(this.lastOkData, this.lastOkFetchedAt);
+    // Cached-bars-on-error skin (both 5h and weekly). For transient,
+    // same-identity error states (rate-limited cold + warm, offline,
+    // API error) keep the last-known bars + percent visible, dimmed,
+    // with a short status suffix (`5% - Idle`) instead of dropping to
+    // a generic pill that loses the numbers the user was just looking
+    // at. Only fires when a cached ok payload exists. Identity-changing
+    // states (not-connected, no-auth, token-expired) cleared the cache
+    // above and fall through to their dedicated pill / hide treatment -
+    // showing a prior account's stale bars there would be misleading.
+    const transient = classifyTransientError(state);
+    if (transient && this.lastOkData !== null) {
+      this.renderCachedBarsWithError(
+        this.lastOkData,
+        this.lastOkFetchedAt,
+        transient.label,
+        transient.detail
+      );
       return;
     }
 
@@ -160,14 +158,17 @@ export class UsageWidget<TData> implements vscode.Disposable {
     this.item.show();
   }
 
-  /** Render the "Idle with last usage" skin: same bar + percent layout
-   * as the ok state, dimmed to gray and suffixed with `Idle`. Tooltip
-   * keeps showing the real cached tooltip so hovering during idle still
-   * gives full context, with a leading stale-data disclosure line so
-   * the dimmed widget is never read as live. */
-  private renderIdleWithLastUsage(
+  /** Render the cached-bars-on-error skin: same bar + percent layout as
+   * the ok state, dimmed to gray and suffixed with ` - {label}` (e.g.
+   * `5% - Idle`, `5% - Offline`). Tooltip keeps showing the real cached
+   * tooltip so hovering still gives full context, led by a stale-data
+   * disclosure line (the supplied `detail` plus a "Last updated N ago")
+   * so the dimmed widget is never read as live. */
+  private renderCachedBarsWithError(
     data: TData,
-    fetchedAt: number | null
+    fetchedAt: number | null,
+    label: string,
+    detail: string
   ): void {
     const d = this.descriptor;
     const pct = d.getDisplayPct(data);
@@ -175,26 +176,24 @@ export class UsageWidget<TData> implements vscode.Disposable {
     const bar5 = d.renderBar(pct, 5);
     const bar10 = d.renderBar(pct, 10);
 
-    this.item.text = `${d.formatText(mode, pct, bar5, bar10)} Idle`;
+    this.item.text = `${d.formatText(mode, pct, bar5, bar10)} - ${label}`;
     const baseTooltip = d.buildTooltip(data);
-    const idleTooltip = new vscode.MarkdownString();
-    idleTooltip.isTrusted = baseTooltip.isTrusted;
-    idleTooltip.supportThemeIcons = baseTooltip.supportThemeIcons;
+    const staleTooltip = new vscode.MarkdownString();
+    staleTooltip.isTrusted = baseTooltip.isTrusted;
+    staleTooltip.supportThemeIcons = baseTooltip.supportThemeIcons;
     // `supportHtml` is required for the full/compact mode HTML markup
     // and the minimal-mode `&nbsp;` spacing both Claude and Codex
     // tooltips use. Missing this flag renders the entity references
     // as literal `&nbsp;` text rather than the intended layout.
-    idleTooltip.supportHtml = baseTooltip.supportHtml;
+    staleTooltip.supportHtml = baseTooltip.supportHtml;
     const ageLabel =
       fetchedAt !== null ? formatAge(Date.now() - fetchedAt) : "earlier";
     // Lead the tooltip with a stale-data disclosure so the dimmed widget
-    // is never misread as live. Resumes automatically on the next
-    // activity-driven kickstart - no user action required.
-    idleTooltip.appendMarkdown(
-      `Idle (cold-poll absorbed). Last updated ${ageLabel}.\n\n`
-    );
-    idleTooltip.appendMarkdown(baseTooltip.value);
-    this.item.tooltip = idleTooltip;
+    // is never misread as live. Recovers automatically on the next
+    // activity-driven kickstart / successful poll - no user action.
+    staleTooltip.appendMarkdown(`${detail} Last updated ${ageLabel}.\n\n`);
+    staleTooltip.appendMarkdown(baseTooltip.value);
+    this.item.tooltip = staleTooltip;
     this.item.color = IDLE_DIM_COLOR;
     this.item.backgroundColor = undefined;
     this.item.show();
@@ -202,6 +201,49 @@ export class UsageWidget<TData> implements vscode.Disposable {
 
   dispose(): void {
     this.item.dispose();
+  }
+}
+
+/** Classify a service state as a transient, same-identity error that
+ * should keep the cached bars visible (dimmed + status suffix) rather
+ * than drop to a pill. Returns the status-bar suffix label + a one-line
+ * tooltip detail, or null for states that must NOT show cached bars
+ * (loading has nothing cached yet; not-connected / no-auth / token-
+ * expired are identity-changing and already cleared the cache). The
+ * caller still gates on `lastOkData !== null`. */
+function classifyTransientError<TData>(
+  state: GenericServiceState<TData>
+): { label: string; detail: string } | null {
+  switch (state.status) {
+    case "rate-limited": {
+      if (state.isColdStart === true) {
+        return { label: "Idle", detail: "Idle (cold-poll absorbed)." };
+      }
+      // Warm throttle (a real rate-limit, not idle cold-poll). Keep the
+      // status-bar suffix short but carry the actionable detail the old
+      // pill showed - retry countdown + the upstream server message -
+      // into the tooltip so the cached-bars skin stays as informative.
+      const elapsed = Date.now() - state.rateLimitedAt;
+      const remainingMin = Math.max(
+        0,
+        Math.ceil((state.retryAfterMs - elapsed) / 60_000)
+      );
+      const countdown =
+        remainingMin > 0
+          ? ` Reconnecting in up to ${remainingMin} minute${remainingMin !== 1 ? "s" : ""}.`
+          : " Reconnecting.";
+      const server = state.serverMessage ? ` API: ${state.serverMessage}.` : "";
+      return {
+        label: "Paused",
+        detail: `Temporarily throttled.${countdown}${server}`,
+      };
+    }
+    case "offline":
+      return { label: "Offline", detail: "Network unavailable." };
+    case "error":
+      return { label: "Idle", detail: "Temporarily unavailable, retrying." };
+    default:
+      return null;
   }
 }
 
