@@ -1,5 +1,6 @@
 import type { StatusBarWidget as GenericStatusBarWidget } from "../engine/serviceTypes";
 import type { StageInfo } from "../shared/codex-rollout/types";
+import type { CompactFlashSnapshot } from "../shared/polling/compactFlashMachine";
 import type { LastEntryKind } from "../shared/transcriptClassifier";
 
 /** Entry from ~/.codex/session_index.jsonl */
@@ -35,13 +36,20 @@ export interface CodexResolvedSession {
    * signaling a deliberate context rebuild. Null when no compact event
    * is in the scanned tail window. */
   lastCompactTimestamp: number | null;
-  /** Estimated output tokens-per-second from the most recent rollout
-   * delta. Computed by comparing successive `stageInfo.outputTokens`
-   * snapshots over the wall-clock gap between rollout mtimes. Null
-   * when no recent positive sample is available (idle, no turn yet,
-   * file not advancing). Decays after ~30s of no growth so a pause
-   * does not keep showing a stale reading. */
+  /** Smoothed tokens-per-second from the most recent rollout delta.
+   * `TpsTracker` over cumulative `usage.tokens` (which Codex updates on
+   * every mid-turn `token_count` event) against rollout mtime as the
+   * time axis. Null when no recent positive sample is available (idle,
+   * no turn yet, file not advancing). Decays after ~30s of no growth so
+   * a pause does not keep showing a stale reading. */
   tokensPerSecond: number | null;
+  /** Compact-completion flash snapshot. When `state` is
+   * `"flashing-completion"` the widget replaces the token text with a
+   * saturated orange 100% bar for the flash window. Codex's `compacted`
+   * rollout entry is the post-completion boundary (no live progress is
+   * observable, same as Claude). Driven by the shared
+   * `CompactFlashMachine`. */
+  compactState: CompactFlashSnapshot;
 }
 
 export type CodexTokenWidgetState =

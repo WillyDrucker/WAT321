@@ -310,9 +310,14 @@ export function extractSessionId(rolloutPath: string): string {
  *   - `type: "event_msg"`, `payload.type: "context_compacted"` (signal-only)
  *
  * Either qualifies; we accept the first match and return its timestamp
- * in ms (epoch). The session token widget uses this to fire a yellow
- * LOAD banner on the trailing render, signaling a deliberate context
- * rebuild rather than letting the resume read as silent.
+ * in ms (epoch). Drives two consumers: the yellow LOAD banner on the
+ * trailing render (deliberate context rebuild, not a silent resume) and
+ * the compact-completion flash (`CompactFlashMachine` boundary input).
+ * Matching BOTH markers is deliberate for the flash: `compacted` can
+ * be a very large line (it carries `replacement_history`) and may be
+ * truncated out of the tail window, but the paired `context_compacted`
+ * is tiny, always written immediately after, and walked first here -
+ * so the flash still fires even when `compacted` is unreadable.
  *
  * Marker-only detection here. Codex doesn't surface cache_creation /
  * cache_read tokens the way Claude does, so the qualifying rule is

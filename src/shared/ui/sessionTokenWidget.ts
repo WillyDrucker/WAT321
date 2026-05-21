@@ -627,7 +627,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
         // machine arms a brief flash on boundary detection so the
         // user at least sees an acknowledgment that the compact
         // happened before the widget settles back to the new post-
-        // compact token count. Bar saturated at 5/5 + 99%; live
+        // compact token count. Bar saturated at 5/5 + 100%; live
         // `flashUntil` check collapses the skin the instant the
         // window passes, instead of waiting for the next service poll.
         if (

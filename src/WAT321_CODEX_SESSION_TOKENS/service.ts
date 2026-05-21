@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import type { CodexResolvedSession, CodexTokenWidgetState } from "./types";
 import { parseStageInfo } from "../shared/codex-rollout/phaseParser";
 import { readHead, readTail } from "../shared/fs/fileReaders";
+import { CompactFlashMachine } from "../shared/polling/compactFlashMachine";
 import {
   SESSION_TOKEN_POLL_MS,
   SESSION_TOKEN_RESCAN_MS,
@@ -28,6 +29,12 @@ import { resolveAutoCompactTokens } from "./autoCompactLimit";
  * detection; the shared `SESSION_TOKEN_POLL_MS` cadence is a safety
  * net for session discovery and missed watcher events.
  * `SESSION_TOKEN_RESCAN_MS` gates the more expensive full rescan. */
+
+/** Flash hold for a completed Codex compact. Codex's `compacted` marker
+ * carries no trigger field (no manual/auto distinction) so a single
+ * fixed hold is used - between Claude's auto (1.5s) and manual (2.5s)
+ * since we can't tell which it was. */
+const CODEX_COMPACT_FLASH_MS = 2_000;
 
 export class CodexSessionTokenService extends SessionTokenServiceBase<CodexTokenWidgetState> {
   private cachedRolloutPath: string | null = null;
@@ -68,6 +75,11 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
    * `shared/sessionTokens/tpsTracker.ts` for the windowing, idle-gap
    * reset, and minimum-age guards. */
   private readonly tpsTracker = new TpsTracker();
+  /** Drives the post-compact completion flash. Codex's `compacted`
+   * rollout entry is the only observable signal (post-completion, same
+   * as Claude); the shared machine arms a brief flash on each newly-
+   * observed boundary. */
+  private readonly compactFlash = new CompactFlashMachine();
 
   constructor(workspacePath: string) {
     super(
@@ -77,6 +89,13 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
         : { status: "not-installed" },
       SESSION_TOKEN_POLL_MS
     );
+  }
+
+  /** Compact-flash diagnostics for the health command. Mirrors the
+   * Claude tier's optional contract method so `WAT321: Show Provider
+   * Health` renders Codex compact state too. */
+  getCompactDiagnostics(): ReturnType<CompactFlashMachine["getDiagnostics"]> {
+    return this.compactFlash.getDiagnostics();
   }
 
   reset(): void {
@@ -89,6 +108,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     this.cachedModelSlug = null;
     this.cachedAutoCompactTokens = null;
     this.cachedAutoCompactModel = "";
+    this.compactFlash.reset();
     this.sessionsWatcher.close();
     super.reset();
   }
@@ -221,6 +241,20 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       rolloutMtime,
       usage.tokens
     );
+    // One compact-timestamp read drives both the LOAD banner and the
+    // completion flash. Matching both `compacted` + `context_compacted`
+    // (parseLastCompactTimestamp) keeps the flash firing even when the
+    // large `compacted` line is truncated out of the tail window.
+    const lastCompactAt = parseLastCompactTimestamp(tail);
+    const compactState = this.compactFlash.sync({
+      sessionId,
+      now,
+      observation: {
+        newestBoundaryAt: lastCompactAt,
+        flashDurationMs: CODEX_COMPACT_FLASH_MS,
+        recentDurationsMs: [],
+      },
+    });
 
     this.emitOk({
       sessionId,
@@ -233,8 +267,9 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       lastActiveAt: rolloutMtime,
       turnState: classifyCodexTurn(tail),
       stageInfo,
-      lastCompactTimestamp: parseLastCompactTimestamp(tail),
+      lastCompactTimestamp: lastCompactAt,
       tokensPerSecond,
+      compactState,
     });
   }
 

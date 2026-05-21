@@ -143,10 +143,11 @@ export interface SessionTokenService<TState> extends Subscribable<TState> {
     source: "live" | "lastKnown" | null;
     pid: number | null;
   };
-  /** Compact-state-machine diagnostics. Only Claude implements - the
-   * `/compact` operation is Claude-specific. Codex returns null.
-   * Health command renders `state`, current `estimatedDurationMs`,
-   * and the rolling history when present. */
+  /** Compact-completion flash diagnostics. Both Claude and Codex
+   * implement this (each over the shared `CompactFlashMachine`); the
+   * method stays optional so a future provider without a compact
+   * concept can omit it. Health command renders `state`, current
+   * `estimatedDurationMs`, and the rolling history when present. */
   getCompactDiagnostics?(): {
     state: "idle" | "flashing-completion";
     estimatedDurationMs: number;

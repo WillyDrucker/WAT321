@@ -126,7 +126,7 @@ function renderProvider(ctx: EngineContext, key: ProviderKey, lines: string[]): 
     lines.push(`  source:  ${sessionDiag.source}${pidPart}`);
   }
 
-  // Claude-only: compact state machine snapshot. Only fires when the
+  // Compact-flash snapshot (Claude + Codex). Only fires when the
   // provider implements the optional contract method.
   const compactDiag = group.tokenService.getCompactDiagnostics?.();
   if (compactDiag) {

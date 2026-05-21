@@ -120,13 +120,13 @@ export interface SessionTokenRenderData {
    * (idle, just started, transcript not advancing). Surfaced in the
    * tooltip as a "Streaming ~X tps" line. */
   tokensPerSecond?: number | null;
-  /** Claude-only: compact-progress state machine snapshot. When
-   * `state: "in-flight"` the widget replaces the normal token text
-   * with an orange progress bar. Undefined for Codex (no compact
-   * equivalent) and during transitional states where the machine has
-   * not yet emitted. The structural shape is owned by the Claude
-   * tier's `compactStateMachine.ts` and re-exported through the
-   * Claude widget's `getRenderData`. */
+  /** Compact-completion flash snapshot (Claude + Codex). When
+   * `state: "flashing-completion"` the widget replaces the normal token
+   * text with a saturated orange 100% bar for the flash window. May be
+   * undefined during transitional states where the machine has not yet
+   * emitted. The structural shape is the shared
+   * `CompactFlashSnapshot` from `shared/polling/compactFlashMachine.ts`,
+   * threaded through each provider widget's `getRenderData`. */
   compactState?: {
     state: "idle" | "flashing-completion";
     estimatedDurationMs: number;
