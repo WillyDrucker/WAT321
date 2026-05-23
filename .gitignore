@@ -1,13 +1,104 @@
+# Scratch / temp
+TEMP/
+*.tmp
+*.log
+
+# Onboarding: INSTALL/install.md + setup.md are tracked source - init copies them into
+# a target. Ignore only the runtime artifacts (the fetched engine, plus INSTALL.log via
+# the *.log rule above). graduate removes INSTALL/.
+INSTALL/engine/
+
+# Setup migration archive: keep the empty folder for reference, ignore captured contents.
+AIDOCS/*_SETUP_ARCHIVE/*
+!AIDOCS/*_SETUP_ARCHIVE/.gitkeep
+
+# Environment docs: keep the folder, ignore contents (may hold secrets - local-only).
+AIDOCS/ENV/*
+!AIDOCS/ENV/.gitkeep
+
+# Staging files (transient, written by the engine, cleared on commit). Keep the folder.
+AIDOCS/tools/staging/*
+!AIDOCS/tools/staging/.gitkeep
+
+# Persistent script state (machine-local). Auto-bootstrapped on first run.
+AIDOCS/tools/state.json
+
+# WDDOCS always-local (every mode): deploy runbooks (machine paths / secrets) and the
+# session handoff (live status). The rest of WDDOCS is privacy-gated (tracked when
+# private, in the public block below when public).
+/WDDOCS/RELEASES/*
+!/WDDOCS/RELEASES/.gitkeep
+/WDDOCS/SESSION_HANDOFF*.md
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node
 node_modules/
+npm-debug.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Local MCP server config (machine-local paths / IDs / tokens). Never commit.
+.mcp.json
+.claude/settings.local.json
+
+# Build artifacts
+dist/
 out/
+build/
+
+# Privacy gate (public) - BEGIN. Managed by `engine.mjs privacy`. Do not edit between the markers.
+# Project memory + auto-memory + WDDOCS docs stay local. Flip to a private repo with
+# `node AIDOCS/tools/engine.mjs privacy --set private` (then `git add` what you want tracked).
+AIDOCS/*_MEMORY.md
+AIDOCS/*_MEMORY_EXTENDED.md
+AIDOCS/*_SESSION.md
+AIDOCS/*_SESSION_EXTENDED.md
+AIDOCS/*_BACKLOG.md
+AIDOCS/*_DEV-AUDIT.md
+AIDOCS/*_AUTO-PUSH.md
+# Pruned LIFO overflow: auto-prune writes <doc>_ARCHIVE.md as the recovery net.
+AIDOCS/*_ARCHIVE.md
+AIDOCS/automemory/*
+!AIDOCS/automemory/.gitkeep
+/WDDOCS/ARCHIVE/*
+!/WDDOCS/ARCHIVE/.gitkeep
+/WDDOCS/DESIGN/*
+!/WDDOCS/DESIGN/.gitkeep
+/WDDOCS/IDEAS/*
+!/WDDOCS/IDEAS/.gitkeep
+# Privacy gate - END
+
+# preserved from WAT321 (pre-migration)
+# Build / dependencies
 *.vsix
+# Local-only docs + reference (working state, not committed)
 AIDOCS/
 WDDOCS/
 ARCHIVE/
-.vscode/
-.env
-.env.*
-.mcp.json
+# Editor / generated preview
 README_PREVIEW.html
 TEMP/*
 !TEMP/.gitkeep
+.env.*
+# Machine-local MCP + settings (paths / IDs / tokens)
+# --- 321_STD additions ---
+# AIDOCS/ is fully ignored above - WAT321 keeps its docs AND the 321_STD engine
+# local-only, matching the pre-migration convention (only the /321 router under
+# .claude/ is tracked). If AIDOCS/ is ever un-ignored to commit the engine, also
+# ignore: AIDOCS/tools/staging/*.json (keep SCHEMA.json + *.example.json),
+# AIDOCS/tools/staging/.lock, AIDOCS/tools/state.json, AIDOCS/*_SETUP_ARCHIVE/, AIDOCS/ENV/

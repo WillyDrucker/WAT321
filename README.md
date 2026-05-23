@@ -10,7 +10,7 @@
 
 Claude and Codex usage bars built right into your IDE.
 
-WAT321 ships with **six read-only widgets** - three for Claude, three for Codex - all enabled out of the box. They only read your existing CLI files and poll a safe stats endpoint; they never modify anything.
+WAT321 ships with **six read-only widgets** - three for Claude, three for Codex - all enabled out of the box. They only read your existing CLI files and poll a safe stats endpoint. They never modify anything.
 
 - 4 usage limit progress bars
 - 2 real-time session token status bars
@@ -127,7 +127,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 ## How It Works
 
 - **Claude Usage / Codex Usage** poll each provider's stats endpoint on a safe interval (~2 minutes) with rate-limit protection.
-- **Session Tokens** read local CLI files only - no API calls, no network. Yellow `LOAD` flashes during deliberate cache rebuilds (`/compact` or reload); red `MISS` is reserved for unexpected eviction.
+- **Session Tokens** read local CLI files only - no API calls, no network. Yellow `LOAD` flashes during deliberate cache rebuilds (`/compact` or reload). Red `MISS` is reserved for unexpected eviction.
 - Everything WAT321 writes is a disposable cache inside `~/.wat321/`. Settings changes take effect immediately with no reload.
 - **Epic Handshake** adds a widget between the Claude and Codex session token bars. With it on, Claude understands plain-language asks like *"ask Codex..."*, *"ask Big Pickle..."*, or *"ask the local LLM..."* - the bridge picks the right backend for you, sends the prompt over, and the reply lands right in your Claude conversation. Click the Epic Handshake widget anytime to open the dropdown menu. Manage sessions, models and effort as needed.
 
@@ -171,7 +171,7 @@ A few rough edges that are worth knowing about. None of them need any action on 
 - **Claude Max plan tier label can lag.** Upgrades (for example Max 5x to Max 20x) may take a billing cycle to reflect. Actual limits are still correct.
 - **"Idle" means the usage endpoint throttled a cold poll.** Clears on Claude's next activity - no countdown, no wait. "Offline" with a countdown is a real rate limit and reconnects automatically.
 - **API-only Anthropic accounts stay hidden.** Claude widgets need CLI credentials at `~/.claude/.credentials.json`.
-- **Team and Enterprise Claude plans are untested.** Should work; open an issue if something looks off.
+- **Team and Enterprise Claude plans are untested.** Should work. Open an issue if something looks off.
 
 ## Issues & Feedback
 

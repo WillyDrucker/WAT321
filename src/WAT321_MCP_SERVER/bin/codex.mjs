@@ -73,6 +73,10 @@ const WORKSPACE_PATH = process.env.WAT321_WORKSPACE_PATH || process.cwd();
 const INBOX_CLAUDE = join(INBOX_CLAUDE_ROOT, WORKSPACE_HASH);
 const INBOX_CODEX = join(INBOX_CODEX_ROOT, WORKSPACE_HASH);
 const SENT_CLAUDE = join(SENT_CLAUDE_ROOT, WORKSPACE_HASH);
+// Per-workspace wait sidecar, written at the start of a sync / adaptive
+// wait and cleared in finally. Its fresh presence is the in-flight
+// signal the dispatch guard reads to nudge against overlapping turns.
+const WAIT_STATUS_PATH = join(EH_DIR, `wait-status.${WORKSPACE_HASH}.json`);
 
 /** Per-process fingerprint stamped onto outbound envelopes so the
  * dispatcher can identify which server originated a request. Inbound
@@ -354,6 +358,12 @@ export async function handleAsk(args) {
     };
   }
 
+  // Overlap guard: one Codex turn per workspace at a time. If a wait is
+  // already in flight, nudge the caller to wait rather than starting a
+  // parallel turn (avoids the second-dispatch collision in issue #75).
+  const busy = inFlightNudge();
+  if (busy) return busy;
+
   if (resolved.mode === "sync") return runDispatch(args, prompt, "sync");
   if (resolved.mode === "adaptive") return runDispatch(args, prompt, "adaptive");
 
@@ -496,7 +506,7 @@ async function runSyncWait(args, id, latePreamble) {
       : DEFAULT_TIMEOUT_SEC;
   const timeoutMs = Math.max(MIN_TIMEOUT_MS, timeoutSec * 1000);
 
-  const waitStatusPath = join(EH_DIR, `wait-status.${WORKSPACE_HASH}.json`);
+  const waitStatusPath = WAIT_STATUS_PATH;
   writeWaitStatus(waitStatusPath, id, timeoutSec, "sync");
   try {
     const deadline = Date.now() + timeoutMs;
@@ -516,7 +526,7 @@ async function runSyncWait(args, id, latePreamble) {
       return consumeReplyAndFormat(replyMatch, latePreamble);
     }
 
-    const timeoutMsg = `No reply from Codex within ${Math.round(timeoutMs / 1000)}s. The dispatcher may still be running; the reply will land in the bridge inbox if it completes. Retrieve a late reply with \`wat321_bridge()\`, or retry with a longer \`timeout_sec\` or \`adaptive: true\`.`;
+    const timeoutMsg = `No reply from Codex within ${Math.round(timeoutMs / 1000)}s, but the dispatch is likely still running and its reply will land in the bridge inbox. Check \`wat321_bridge()\` for it - prefer waiting over re-sending, since a second dispatch runs a parallel turn rather than replacing the first.`;
     return {
       content: [
         { type: "text", text: withPreamble(latePreamble, timeoutMsg) },
@@ -542,7 +552,7 @@ async function runAdaptiveWait(args, id, latePreamble) {
   const ceilingMs = Math.min(requestedCeilingMs, ADAPTIVE_HARD_CEILING_MS);
 
   const heartbeatPath = join(EH_DIR, `turn-heartbeat.${id}.json`);
-  const waitStatusPath = join(EH_DIR, `wait-status.${WORKSPACE_HASH}.json`);
+  const waitStatusPath = WAIT_STATUS_PATH;
   writeWaitStatus(waitStatusPath, id, Math.round(ceilingMs / 1000), "adaptive");
 
   try {
@@ -624,6 +634,40 @@ function clearWaitStatus(path) {
   } catch {
     // best-effort
   }
+}
+
+/** Returns a nudge response if a Codex reply wait is already in flight
+ * for this workspace, else null. runSyncWait / runAdaptiveWait write the
+ * wait-status sidecar at the start of a wait and clear it in finally, so
+ * its fresh presence means a dispatch is mid-wait. A second dispatch now
+ * starts a parallel Codex turn (two turns on one thread collide) instead
+ * of replacing or speeding up the first, so nudge the caller to wait and
+ * drain via wat321_bridge(). Bounded to ADAPTIVE_STALE_MS so a sidecar
+ * left behind by a killed MCP process self-expires rather than blocking
+ * new dispatches - no stale-flag false positives. */
+function inFlightNudge() {
+  let startedAt = 0;
+  try {
+    if (!existsSync(WAIT_STATUS_PATH)) return null;
+    const s = JSON.parse(readFileSync(WAIT_STATUS_PATH, "utf8"));
+    startedAt = typeof s?.startedAt === "number" ? s.startedAt : 0;
+  } catch {
+    // best-effort: an unreadable or corrupt sidecar means allow the dispatch
+    return null;
+  }
+  if (Date.now() - startedAt >= ADAPTIVE_STALE_MS) return null;
+  const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `A Codex dispatch is already in flight on this workspace (started ${elapsedSec}s ago). ` +
+          "Codex runs one turn at a time, and a second dispatch starts a parallel turn rather than replacing or speeding up the first. " +
+          "Wait for the in-flight reply and drain it with `wat321_bridge()` instead of sending another. No need to gauge timing - just avoid overlapping dispatches.",
+      },
+    ],
+  };
 }
 
 /** Handle a `wat321_bridge` MCP tool call. Single-purpose: drain the
