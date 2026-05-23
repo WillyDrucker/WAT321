@@ -316,9 +316,18 @@ function buildTools(enabled) {
 // tool inputSchema or resource layout changes in a non-additive way,
 // which lets MCP clients negotiate compatibility independently of
 // extension version stamps.
+//
+// `instructions` is the always-on routing hint. Deferred MCP tools surface
+// by name only, so wat321_ask's description is not in context until Claude
+// searches for it. This server-level string is always present and steers
+// "ask Codex / another model" to the bridge instead of a raw CLI (#80).
 const server = new Server(
   { name: "wat321", version: "1.0" },
-  { capabilities: { tools: {}, resources: {} } }
+  {
+    capabilities: { tools: {}, resources: {} },
+    instructions:
+      "Ask Codex or another model (OpenCode backends, the local LLM) through `wat321_ask`, not its raw CLI. If the tool is not loaded, load it via tool search. See bridge://docs/dispatch.",
+  }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {

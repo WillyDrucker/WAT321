@@ -21,6 +21,15 @@ models, Local LLM) running outside this session, then returns either
 the reply (sync / adaptive) or a dispatch confirmation (fire-and-forget,
 with the reply landing in the bridge inbox).
 
+## Use the bridge, not the raw CLI
+
+Always reach these models through `wat321_ask`, never a raw `codex` or
+`opencode` CLI call. The bridge owns session sync, sandbox (read-only vs
+full) enforcement, and reply delivery to your inbox. A raw CLI call
+bypasses all of that, runs untracked, and its reply never reaches this
+session. If `wat321_ask` is not loaded yet, load it via tool search
+rather than falling back to a CLI.
+
 ## Wait modes
 
 Three modes. The mode applies to all three targets equally - Codex,
