@@ -416,4 +416,28 @@ export function registerUnifiedBridgeCommands(
       }
     )
   );
+
+  // Refresh-only: re-extract the bin scripts + docs to
+  // `~/.wat321/bridge/bin/` without copying node_modules or re-running the
+  // MCP registration. Dispatched on every Epic Handshake activate so an
+  // extension upgrade reaches users who ALREADY have EH enabled. Install
+  // re-extracts only on the explicit enable toggle, so without this an
+  // already-enabled user keeps the prior release's bridge (channel.mjs,
+  // codex.mjs, dispatch docs) until they toggle EH off and on. Mirrors the
+  // stage-clipboard.mjs refresh-on-activate. Best-effort: a failed refresh
+  // leaves whatever is on disk, no worse than before.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "wat321.bridge.refreshUnifiedScripts",
+      () => {
+        try {
+          extractUnifiedScripts(context);
+          logger.info("unified bridge scripts refreshed on activate");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn(`unified bridge script refresh failed: ${msg}`);
+        }
+      }
+    )
+  );
 }

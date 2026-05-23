@@ -519,6 +519,14 @@ class EpicHandshakeTier {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`stage-clipboard.mjs refresh on activate failed: ${msg}`);
     }
+    // Refresh the unified bridge scripts + docs on every activate, same
+    // reasoning as stage-clipboard above. They otherwise re-extract only on
+    // the explicit EH enable toggle, so a user who already has EH enabled
+    // and just upgrades the extension would keep the prior release's
+    // channel.mjs / codex.mjs / docs until a re-toggle. Dispatched as a
+    // command to avoid importing the MCP-server installer across the tier
+    // boundary - the same command-crossing the install / uninstall flow uses.
+    void vscode.commands.executeCommand("wat321.bridge.refreshUnifiedScripts");
     if (this.dispatcher !== null) return;
     this.dispatcher = new CodexDispatcher(ws, this.logger);
     this.dispatcher.start();
