@@ -5,6 +5,13 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.15] - 2026-05-23
+
+### Fixed
+
+- **Asking Claude to hand work to Codex or another model now reliably goes through the bridge.** When you say "ask Codex" (or Big Pickle, or your local LLM), Claude could occasionally reach for a raw command-line call instead of the Epic Handshake bridge, which skips the bridge's session tracking and reply delivery. The bridge now carries an always-on hint so Claude routes those requests through it, even before the bridge's tools are fully loaded into the session.
+- **Bridge updates now take effect on your next launch, with no need to toggle Epic Handshake off and on.** If you already had Epic Handshake enabled, a previous extension update could leave the bridge's core running the prior version until you manually turned the feature off and back on. It now refreshes automatically when you relaunch, so the bridge always matches your installed version.
+
 ## [1.5.14] - 2026-05-23
 
 ### Fixed
