@@ -297,14 +297,14 @@ export class CodexDispatcher {
       // complete" verdicts arrive AFTER Codex's underlying work has
       // landed on disk (the failure is in the reply-marshal step, not
       // the work itself). Tersely refusing here strands Claude with no
-      // path forward; surfacing the on-disk-check hint plus the
-      // retry-by-reissue option keeps the caller productive instead of
-      // bailing on a turn that may have succeeded.
+      // path forward. Surface the on-disk + inbox check hints and gate
+      // re-issue on "nothing landed" so the caller does not start a
+      // parallel turn on top of one that may have succeeded.
       this.writeReply(env, {
         body:
           `Codex bridge turn ended without a reply payload (chain ${env.chainId}). ` +
-          "Codex's underlying work may still have landed on disk - check the workspace for new files / commits / artifacts before treating this as a failure. " +
-          "To retry, re-issue the same prompt; to fully recover bridge state, pick Restart Epic Handshake Bridge from the status bar. " +
+          "Codex's underlying work may still have landed on disk - check the workspace for new files / commits / artifacts, and check `wat321_bridge()` for a late reply, before treating this as a failure. " +
+          "Re-issue only if nothing landed, since re-issuing while the turn may still be running starts a parallel turn. To recover bridge state, pick Restart Epic Handshake Bridge from the status bar. " +
           "Open the WAT321: Epic Handshake output channel for the lower-layer error detail.",
         intent: "blocker",
       });
