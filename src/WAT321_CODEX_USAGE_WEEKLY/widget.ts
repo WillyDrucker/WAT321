@@ -10,9 +10,8 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   id: "wat321.codexWeekly",
   name: "WAT321: Codex Usage (Weekly)",
   slot: WIDGET_SLOT.codexUsageWeekly,
-  variant: "weekly",
-  loadingText: "$(openai) Weekly $(loading~spin)",
-  loadingTooltip: "Fetching Codex usage data...",
+  providerName: "Codex",
+  providerKey: "codex",
   getDisplayPct: (data) => {
     const usedPct = data.rate_limit?.secondary_window?.used_percent ?? 0;
     return getRemainingPct(usedPct);

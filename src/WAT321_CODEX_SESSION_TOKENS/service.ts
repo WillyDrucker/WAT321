@@ -66,6 +66,19 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private cachedModelSlug: string | null = null;
   private cachedAutoCompactTokens: number | null = null;
   private cachedAutoCompactModel = "";
+  /** Wall-clock ms when this service last observed the rollout file
+   * grow in byte size. Seeded with kernel mtime on the first poll of
+   * a new rollout (so a stale file is not falsely treated as live)
+   * and refreshed with `Date.now()` on any later poll where size grew.
+   *
+   * The Codex TUI keeps its rollout file open for the lifetime of the
+   * session and Windows lazily flushes mtime on open handles, so the
+   * kernel `st.mtimeMs` value can lag tens of seconds behind real
+   * writes. The widget's 30s freshness gate then collapses the
+   * activity indicator to idle while Codex is still actively
+   * appending lines. Sampling growth here gives the widget a signal
+   * that does not depend on the kernel's mtime cadence. */
+  private lastObservedGrowthMs: number | null = null;
   /** Smoothed tokens-per-second tracker. Time axis is rollout mtime
    * (not Date.now()) so idle stretches between writes contribute zero
    * seconds to the denominator. Source is cumulative `usage.tokens`
@@ -108,6 +121,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     this.cachedModelSlug = null;
     this.cachedAutoCompactTokens = null;
     this.cachedAutoCompactModel = "";
+    this.lastObservedGrowthMs = null;
     this.compactFlash.reset();
     this.sessionsWatcher.close();
     super.reset();
@@ -165,12 +179,25 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       this.cachedCwd = null;
       this.cachedModelSlug = null;
       this.cachedAutoCompactTokens = null;
+      // New rollout selected. Re-seed the observed-growth watermark on
+      // the next size read so we capture this file's kernel mtime as
+      // the baseline, rather than carrying forward the prior file's
+      // freshness.
+      this.lastObservedGrowthMs = null;
     }
 
     let rolloutMtime: number;
     try {
       const st = statSync(this.cachedRolloutPath);
       if (st.size === this.cachedTranscriptSize && this.hasGoodData) return;
+      // Size grew (or this is the first read of this rollout). Refresh
+      // the observed-growth watermark: seed with kernel mtime on the
+      // first poll of a new rollout so a stale file does not falsely
+      // read as just-active, then sample wall-clock on subsequent
+      // growths so the freshness gate is independent of the kernel's
+      // mtime flush cadence.
+      this.lastObservedGrowthMs =
+        this.lastObservedGrowthMs === null ? st.mtimeMs : Date.now();
       this.cachedTranscriptSize = st.size;
       rolloutMtime = st.mtimeMs;
     } catch {
@@ -265,6 +292,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       contextWindowSize: usage.contextWindowSize,
       autoCompactTokens: this.cachedAutoCompactTokens,
       lastActiveAt: rolloutMtime,
+      lastActivityObservedAt: this.lastObservedGrowthMs ?? rolloutMtime,
       turnState: classifyCodexTurn(tail),
       stageInfo,
       lastCompactTimestamp: lastCompactAt,

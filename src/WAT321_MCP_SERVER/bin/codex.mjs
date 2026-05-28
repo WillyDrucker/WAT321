@@ -293,13 +293,17 @@ const FF_SAFETY_CAP_MS = 60_000;
  * files. Precedence:
  *   1. Per-call `fire_and_forget: true` or `adaptive: true` -> use it.
  *   2. Both true at the same time -> reject (caller bug).
- *   3. Per-call explicit `false` for either flag suppresses the
- *      matching sticky flag (lets a caller override the user's
- *      status-bar toggle for a single dispatch).
- *   4. Neither explicit -> sticky flag files. FF flag wins over
+ *   3. An explicit `fire_and_forget: false` (or `adaptive: false`)
+ *      with no other escalation flag forces plain sync - both sticky
+ *      flag files are suppressed so the caller can override the
+ *      user's status-bar toggle for a single dispatch and actually
+ *      get sync rather than silently running adaptive (#81 finding 1).
+ *   4. Explicit `false` for one flag with `true` for the other still
+ *      honors the explicit `true`.
+ *   5. Neither explicit -> sticky flag files. FF flag wins over
  *      adaptive flag if both somehow exist on disk (more aggressive
  *      opt-out).
- *   5. Default: sync.
+ *   6. Default: sync.
  * Returns `{ mode }` on success or `{ error }` on mutual-exclusion. */
 function resolveMode(args) {
   const ff =
@@ -315,8 +319,15 @@ function resolveMode(args) {
   if (ff === true) return { mode: "ff" };
   if (adp === true) return { mode: "adaptive" };
 
-  const ffFlag = ff !== false && existsSync(FIRE_AND_FORGET_FLAG);
-  const adpFlag = adp !== false && existsSync(ADAPTIVE_FLAG);
+  // Explicit sync opt-out: caller passed `fire_and_forget: false` (or
+  // `adaptive: false`) and did NOT escalate with the other flag. Treat
+  // this as "I want plain sync regardless of any sticky flag the user
+  // has flipped on" and suppress BOTH sticky paths below. Without this
+  // the caller could pass `fire_and_forget:false` and silently run
+  // adaptive because the sticky adaptive flag was on.
+  const explicitSyncOptOut = (ff === false || adp === false);
+  const ffFlag = !explicitSyncOptOut && existsSync(FIRE_AND_FORGET_FLAG);
+  const adpFlag = !explicitSyncOptOut && existsSync(ADAPTIVE_FLAG);
   if (ffFlag) return { mode: "ff" };
   if (adpFlag) return { mode: "adaptive" };
   return { mode: "sync" };
@@ -634,6 +645,103 @@ function clearWaitStatus(path) {
   } catch {
     // best-effort
   }
+}
+
+/** Summary entry per in-flight Codex envelope or heartbeat for THIS
+ * workspace. Drives the wat321_bridge empty-state path so the agent
+ * can report "Codex is still working on it" honestly instead of the
+ * generic "nothing to wait on" when a Codex turn IS mid-flight or
+ * wedged (#81 finding 2).
+ *
+ * Two source surfaces:
+ *   - Queued envelopes in `INBOX_CODEX/*.md`: outbound dispatches the
+ *     extension's CodexDispatcher has not yet claimed. Reported with
+ *     ageSec from file mtime.
+ *   - Turn-heartbeat sidecars `turn-heartbeat.<id>.json` in EH_DIR
+ *     whose `workspaceHash` matches this server's workspace. Reported
+ *     with the latest stage and the staleness gap from now to
+ *     `lastProgressAt`. Stale (> ADAPTIVE_STALE_MS) entries surface
+ *     as "appears stuck"; fresh entries surface as "working".
+ *
+ * Best-effort: unreadable files are skipped. Sorted oldest-first so
+ * the longest-running turn (most likely needing user attention) leads. */
+export function inFlightCodexSummary() {
+  const entries = [];
+  // Queued envelopes (Claude -> Codex, not yet claimed by dispatcher).
+  try {
+    if (existsSync(INBOX_CODEX)) {
+      const files = readdirSync(INBOX_CODEX).filter(
+        (f) => f.endsWith(".md") && !f.endsWith(".claim")
+      );
+      for (const file of files) {
+        const path = join(INBOX_CODEX, file);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = statSync(path).mtimeMs;
+        } catch {
+          continue;
+        }
+        const id = file.replace(/\.md$/, "");
+        const claimed = existsSync(`${path}.claim`);
+        entries.push({
+          kind: claimed ? "claimed" : "queued",
+          id,
+          stage: null,
+          ageSec: Math.max(0, Math.floor((Date.now() - mtimeMs) / 1000)),
+          staleSec: null,
+        });
+      }
+    }
+  } catch {
+    // best-effort
+  }
+  // Active or wedged turn heartbeats (mid-flight or post-dispatch).
+  try {
+    const ehFiles = readdirSync(EH_DIR).filter(
+      (f) => f.startsWith("turn-heartbeat.") && f.endsWith(".json")
+    );
+    for (const file of ehFiles) {
+      const path = join(EH_DIR, file);
+      let beat;
+      try {
+        beat = JSON.parse(readFileSync(path, "utf8"));
+      } catch {
+        continue;
+      }
+      if (beat?.workspaceHash !== WORKSPACE_HASH) continue;
+      const id = typeof beat?.envelopeId === "string" ? beat.envelopeId : null;
+      if (id === null) continue;
+      // De-dupe with the queued-envelope entry if both surfaces show
+      // the same id - heartbeat wins because it carries stage detail.
+      const dupeIdx = entries.findIndex((e) => e.id === id);
+      if (dupeIdx >= 0) entries.splice(dupeIdx, 1);
+      const lastProgressAt =
+        typeof beat?.lastProgressAt === "number" ? beat.lastProgressAt : null;
+      const staleSec =
+        lastProgressAt === null
+          ? null
+          : Math.max(0, Math.floor((Date.now() - lastProgressAt) / 1000));
+      const turnStartedAt =
+        typeof beat?.turnStartedAt === "number" ? beat.turnStartedAt : null;
+      const ageSec =
+        turnStartedAt === null
+          ? 0
+          : Math.max(0, Math.floor((Date.now() - turnStartedAt) / 1000));
+      const isStale =
+        staleSec !== null && staleSec * 1000 > ADAPTIVE_STALE_MS;
+      entries.push({
+        kind: isStale ? "stuck" : "working",
+        id,
+        stage: typeof beat?.stage === "string" ? beat.stage : null,
+        ageSec,
+        staleSec,
+      });
+    }
+  } catch {
+    // best-effort
+  }
+  entries.sort((a, b) => b.ageSec - a.ageSec);
+  return entries;
 }
 
 /** Returns a nudge response if a Codex reply wait is already in flight

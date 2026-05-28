@@ -8,6 +8,7 @@ import { waitModeFlashFlagPath } from "./constants";
 import { listLateReplies } from "./lateReplyInbox";
 import {
   makeCancelItem,
+  makeInFlightLockedItem,
   makePauseResumeItem,
   withMenuLifecycle,
   type Action,
@@ -235,12 +236,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   const waitModeItem: Item | null = paused
     ? null
     : opts.inFlight
-      ? {
-          label: `WAIT MODE: ${waitModeLabel(current)}`,
-          description: "Locked while a bridge turn is running.",
-          iconPath: new vscode.ThemeIcon("wat321-square-bolt"),
-          action: "wait-mode-locked",
-        }
+      ? makeInFlightLockedItem(`WAIT MODE: ${waitModeLabel(current)}`)
       : {
           label: `WAIT MODE: ${waitModeLabel(current)}`,
           description: `Click to switch to ${waitModeLabel(next)}.`,
@@ -385,16 +381,39 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       setPaused(false);
       break;
     case "reset":
+      // Action-time re-check: the submenu renders this row as locked
+      // via `makeInFlightLockedItem` when in-flight, but a turn that
+      // started in the window between QuickPick build and click would
+      // otherwise let rotation fire on the same thread the in-flight
+      // envelope is bound to. Mirrors the `codex-defaults` guard below.
+      if (isBridgeBusy(ctx.ws)) {
+        void vscode.window.showInformationMessage(
+          "Epic Handshake: this action is locked while a bridge turn is in flight. Wait for the turn to finish, or use Cancel / Restart Epic Handshake Bridge if the turn is stuck."
+        );
+        break;
+      }
       await vscode.commands.executeCommand(
         "wat321.epicHandshake.resetCodexSession"
       );
       break;
     case "delete":
+      if (isBridgeBusy(ctx.ws)) {
+        void vscode.window.showInformationMessage(
+          "Epic Handshake: this action is locked while a bridge turn is in flight. Wait for the turn to finish, or use Cancel / Restart Epic Handshake Bridge if the turn is stuck."
+        );
+        break;
+      }
       await vscode.commands.executeCommand(
         "wat321.epicHandshake.deleteCodexSession"
       );
       break;
     case "delete-all":
+      if (isBridgeBusy(ctx.ws)) {
+        void vscode.window.showInformationMessage(
+          "Epic Handshake: this action is locked while a bridge turn is in flight. Wait for the turn to finish, or use Cancel / Restart Epic Handshake Bridge if the turn is stuck."
+        );
+        break;
+      }
       await vscode.commands.executeCommand(
         "wat321.epicHandshake.deleteAllCodexSessions"
       );
@@ -412,6 +431,12 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       await discardAllLateReplies(ctx.lateReplies);
       break;
     case "recover":
+      if (isBridgeBusy(ctx.ws)) {
+        void vscode.window.showInformationMessage(
+          "Epic Handshake: this action is locked while a bridge turn is in flight. Wait for the turn to finish, or use Cancel / Restart Epic Handshake Bridge if the turn is stuck."
+        );
+        break;
+      }
       if (ctx.ws) {
         await showRecoverSessionPicker(
           ctx.ws,
@@ -511,9 +536,14 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       }
       break;
     }
-    case "wait-mode-locked":
+    case "in-flight-locked":
+      // Unified toast for any locked-mid-turn row (wait mode / codex
+      // defaults / reset / delete / delete-all / recover / repair).
+      // The label already says "Disabled - Message In-Flight"; this
+      // toast explains why and reminds the user that cancel / restart
+      // bridge remain available if the turn is truly stuck.
       void vscode.window.showInformationMessage(
-        "Epic Handshake: wait mode is locked while a bridge turn is running. It will unlock automatically when the turn finishes."
+        "Epic Handshake: this action is locked while a bridge turn is in flight. Wait for the turn to finish, or use Cancel / Restart Epic Handshake Bridge if the turn is stuck."
       );
       break;
     case "in-flight-info":
@@ -541,6 +571,12 @@ async function handleAction(action: Action, ctx: ActionContext): Promise<void> {
       }
       break;
     case "repair-sessions":
+      if (isBridgeBusy(ctx.ws)) {
+        void vscode.window.showInformationMessage(
+          "Epic Handshake: this action is locked while a bridge turn is in flight. Wait for the turn to finish, or use Cancel / Restart Epic Handshake Bridge if the turn is stuck."
+        );
+        break;
+      }
       await showRepairSessionsPicker(ctx.ws, ctx.recoverable, ctx.inFlight);
       break;
     case "restart-bridge":

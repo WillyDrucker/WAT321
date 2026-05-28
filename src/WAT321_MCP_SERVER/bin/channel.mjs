@@ -589,13 +589,18 @@ async function dispatchBridgeDrain(args, enabled) {
   }
 
   if (sections.length === 0) {
-    // Surface in-flight non-Codex FF dispatches in the empty-state so
+    // Surface in-flight FF / mid-turn dispatches in the empty-state so
     // the agent can report "still working" honestly instead of hedging
-    // "the reply may or may not be coming". Counting drives the report:
-    // empty + nothing in flight = nothing to wait on; empty + N in flight
-    // = the dispatches are running and the next drain will catch them.
-    const inFlight = bridgeInbox.inFlightNonCodexSummary();
-    if (inFlight.length === 0) {
+    // "the reply may or may not be coming". Two sources combined:
+    //   - Non-Codex (opencode, local): outbound envelopes the extension
+    //     dispatcher has not yet processed.
+    //   - Codex: queued envelopes + active/wedged turn heartbeats
+    //     scoped to THIS workspace (#81 finding 2). Without the Codex
+    //     surface the empty-state reported "nothing to wait on" even
+    //     while a Codex turn was genuinely in flight or wedged.
+    const nonCodexInFlight = bridgeInbox.inFlightNonCodexSummary();
+    const codexInFlight = codex.inFlightCodexSummary();
+    if (nonCodexInFlight.length === 0 && codexInFlight.length === 0) {
       return {
         content: [
           {
@@ -606,18 +611,40 @@ async function dispatchBridgeDrain(args, enabled) {
         ],
       };
     }
-    const lines = inFlight.map((d) => {
+    const nonCodexLines = nonCodexInFlight.map((d) => {
       const aliasPart = d.alias ? ` to ${d.alias}` : "";
       const previewPart = d.promptPreview ? ` "${d.promptPreview}"` : "";
       return `  - ${d.target}${aliasPart} (${d.ageSec}s ago, id=${d.id})${previewPart}`;
     });
+    const codexLines = codexInFlight.map((e) => {
+      const stagePart = e.stage ? `, stage=${e.stage}` : "";
+      const stalePart =
+        e.kind === "stuck" && e.staleSec !== null
+          ? ` - heartbeat stale ${e.staleSec}s, may be wedged`
+          : "";
+      const kindLabel =
+        e.kind === "queued"
+          ? "queued"
+          : e.kind === "claimed"
+            ? "claimed"
+            : e.kind === "stuck"
+              ? "appears stuck"
+              : "working";
+      return `  - codex (${kindLabel}, ${e.ageSec}s old${stagePart}, id=${e.id})${stalePart}`;
+    });
+    const allLines = [...codexLines, ...nonCodexLines];
+    const total = nonCodexInFlight.length + codexInFlight.length;
+    const stuck = codexInFlight.some((e) => e.kind === "stuck");
+    const tail = stuck
+      ? "A Codex heartbeat is stale (may be wedged). Restart Epic Handshake Bridge from the status bar if the next `wat321_bridge()` still reports stuck. Do not re-issue the same prompt; that would queue a duplicate."
+      : "Report this to the user as a wait, not a failure - the extension-side dispatcher is running. Call `wat321_bridge()` again when the user asks for the reply. Do not re-issue the same prompt; that would queue a duplicate dispatch.";
     return {
       content: [
         {
           type: "text",
           text:
-            `No replies have landed yet. ${inFlight.length} fire-and-forget dispatch${inFlight.length === 1 ? " is" : "es are"} still in flight:\n\n${lines.join("\n")}\n\n` +
-            "Report this to the user as a wait, not a failure - the extension-side dispatcher is running. Call `wat321_bridge()` again when the user asks for the reply. Do not re-issue the same prompt; that would queue a duplicate dispatch.",
+            `No replies have landed yet. ${total} dispatch${total === 1 ? " is" : "es are"} still in flight:\n\n${allLines.join("\n")}\n\n` +
+            tail,
         },
       ],
     };

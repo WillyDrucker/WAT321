@@ -31,13 +31,13 @@ export type Action =
   | "cancel"
   | "restart-bridge"
   | "wait-mode-toggle"
-  | "wait-mode-locked"
   | "codex-defaults"
   | "manage-sessions"
   | "manage-opencode-sessions"
   | "manage-local-llm-sessions"
   | "repair-sessions"
   | "in-flight-info"
+  | "in-flight-locked"
   | "back";
 
 export type Item = vscode.QuickPickItem & { action: Action };
@@ -115,5 +115,28 @@ export function makeBackItem(): Item {
     label: "🔵 BACK",
     iconPath: new vscode.ThemeIcon("wat321-square-arrow-left"),
     action: "back",
+  };
+}
+
+/** Wrap an action item as locked-during-turn. Used by every destructive
+ * submenu row (reset / delete / delete-all / recover / repair / codex
+ * defaults / wait mode) when a bridge turn is in flight so the user
+ * sees a consistent disabled marker and gets a clear toast on click
+ * instead of triggering a thread-rotating action mid-stream that would
+ * desync the in-flight envelope from the new state.
+ *
+ * QuickPickItem has no per-row text color, so the visual treatment is:
+ * an explicit ` (Disabled - Message In-Flight)` suffix on the label,
+ * a lock icon, and a description that explains the lock. Click routes
+ * to the `in-flight-locked` action which surfaces the unified toast. */
+export function makeInFlightLockedItem(
+  originalLabel: string,
+  description?: string
+): Item {
+  return {
+    label: `${originalLabel} (Disabled - Message In-Flight)`,
+    description: description ?? "Unlocks automatically when the bridge turn finishes.",
+    iconPath: new vscode.ThemeIcon("lock"),
+    action: "in-flight-locked",
   };
 }

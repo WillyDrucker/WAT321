@@ -5,6 +5,20 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.16] - 2026-05-28
+
+### Fixed
+
+- **Fire-and-forget Codex dispatches no longer wedge the bridge after a long idle.** A fire-and-forget turn that ran past the bridge's 15-minute idle window could leave the workspace stuck so every later prompt was queued but never picked up, and the inbox kept reporting "nothing in flight". The idle timer now resets at the start of every turn and skips its shutdown while a turn is still running, and a fire-and-forget turn that loses its Codex side cleanly releases its locks instead of holding them forever. Asking `wat321_bridge()` while a Codex turn is in flight now reports the dispatch (working or stuck) alongside the non-Codex backends, so an agent can tell "still working" from "wedged" without guessing.
+- **The Codex session-tokens activity icon stays on through a long thinking turn.** Windows lazily refreshes the timestamp on a file that stays open, and Codex keeps its session file open for the whole conversation. The widget's 30-second freshness window was running off that lazy timestamp, so the comment-discussion cycle could drop to idle mid-turn while Codex was still actively writing. The cycle now follows the extension's own observed-growth signal, so it stays on whenever the file is genuinely advancing.
+- **An explicit `fire_and_forget: false` on `wat321_ask` now really means sync.** With sticky Adaptive turned on in the status-bar menu, passing `fire_and_forget: false` from an agent silently fell through to adaptive instead of plain sync. An explicit opt-out now suppresses both sticky flags so a caller can force sync for a single dispatch without flipping the user's status-bar toggle.
+
+### Changed
+
+- **Usage widgets now keep your bars visible through every transient state.** Idle, throttling, network drops, sign-out, and credential refresh all reuse the same bar layout you see normally - your last-known reading dimmed to a muted gray with a short suffix after the percent, instead of swapping out for a different shape. Hover for the full detail, including the reconnect countdown when one applies, and the same provider color scheme everywhere. Sign-out and credential-refresh still clear cleanly so a new account never inherits the previous account's numbers.
+- **The Epic Handshake dropdown now visibly locks every destructive row while a turn is in flight.** Reset, Delete, Delete All, Switch Codex Session, Repair Sessions, Codex Defaults, and Wait Mode all show as `(Disabled - Message In-Flight)` with a lock icon while the bridge is busy, and clicking one surfaces a clear info toast instead of running the action. Cancel, Restart Epic Handshake Bridge, Pause / Resume, and Retrieve Late Replies stay available as escape paths.
+- **The OpenCode Enable setting is marked as WIP in the Settings page**, matching the same flag on the TPS counters, so the in-progress surfaces are easy to spot at a glance.
+
 ## [1.5.15] - 2026-05-23
 
 ### Fixed

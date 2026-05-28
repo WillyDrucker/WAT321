@@ -20,6 +20,21 @@ export interface CodexResolvedSession {
   contextWindowSize: number; // effective model context window from token_count
   autoCompactTokens: number; // effective context window ceiling (matches Codex native hover); actual compact trigger is ~90/95 of this
   lastActiveAt: number; // ms - rollout file mtime (display metadata only)
+  /** Extension-observed growth timestamp (ms). Set to wall-clock
+   * `Date.now()` on every poll where the rollout file's byte size
+   * grew; seeded with the kernel mtime when a new rollout is first
+   * picked up so a stale file does not falsely read as "just active".
+   *
+   * Drives the active-indicator freshness gate in place of the kernel
+   * mtime because the Codex TUI keeps its rollout file open for the
+   * lifetime of the session, and Windows NTFS lazily flushes mtime
+   * on an open handle - the file's size grows on every append, but
+   * `st.mtimeMs` can lag by tens of seconds. With the 30s freshness
+   * window driven directly off mtime, the comment-discussion cycle
+   * collapses to idle mid-turn even while Codex is actively writing.
+   * Sampling growth at the syscall layer makes the freshness gate
+   * independent of the kernel's mtime cadence. */
+  lastActivityObservedAt: number;
   /** Last rollout event classification. Drives the active-state
    * indicator. `user` and `assistant-pending` mean a response is in
    * flight; `assistant-done` and `unknown` are idle. */

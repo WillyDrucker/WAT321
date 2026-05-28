@@ -219,13 +219,32 @@ export class CodexDispatcher {
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => {
-      this.logger.info("codex dispatcher idle timeout - closing app-server");
-      if (this.client) {
-        void this.client.shutdown();
-        this.client = null;
-      }
-    }, IDLE_TIMEOUT_MS);
+    this.idleTimer = setTimeout(() => this.onIdleTimerFire(), IDLE_TIMEOUT_MS);
+  }
+
+  /** Idle-timer callback. Defensive guard against #81: the app-server
+   * child must never be idle-killed during an active turn. The idle
+   * timer is reset at turn start (see processEnvelope) and on every
+   * successful turn end, but a regression that lets the timer arm
+   * during a turn would otherwise SIGKILL the child mid-stream and
+   * wedge any Fire-and-Forget turn (which disables stall/hard-cap
+   * watchdogs). When the timer fires while `this.processing` is
+   * still true, re-schedule THIS check (not a full new idle window)
+   * for 60s out so the next firing re-evaluates against fresh state -
+   * usually the turn has finished and the shutdown can proceed. */
+  private onIdleTimerFire(): void {
+    if (this.processing) {
+      this.logger.warn(
+        "codex dispatcher idle timeout fired while processing; deferring shutdown"
+      );
+      this.idleTimer = setTimeout(() => this.onIdleTimerFire(), 60_000);
+      return;
+    }
+    this.logger.info("codex dispatcher idle timeout - closing app-server");
+    if (this.client) {
+      void this.client.shutdown();
+      this.client = null;
+    }
   }
 
   private async drainInbox(): Promise<void> {
@@ -276,6 +295,14 @@ export class CodexDispatcher {
       moveToSent(path, this.sentCodex);
       return;
     }
+
+    // Reset the idle timer at turn start so the 15-minute idle window
+    // restarts now, not from whenever the LAST successful turn ended.
+    // Without this, a turn that arrives 14:59 into the idle window can
+    // be cut off at the 15:00 mark by the idle shutdown SIGKILL'ing the
+    // app-server child mid-stream (#81 root cause). The guard in
+    // resetIdleTimer's callback is the belt; this is the suspenders.
+    this.resetIdleTimer();
 
     try {
       const reply = await this.dispatchToCodex(env);
