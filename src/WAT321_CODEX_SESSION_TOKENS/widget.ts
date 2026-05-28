@@ -29,7 +29,15 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
       contextWindowSize: session.contextWindowSize,
       ceiling: session.autoCompactTokens,
       baselineTokens: CODEX_BASELINE_TOKENS,
-      transcriptMtimeMs: session.lastActiveAt,
+      // Route freshness through the extension-observed growth timestamp
+      // (not kernel mtime). Windows lazily flushes mtime on open file
+      // handles, and the Codex TUI keeps its rollout open for the
+      // session lifetime, so kernel mtime can lag tens of seconds
+      // behind real writes - long enough to drop the active-indicator
+      // cycle mid-turn while Codex is still streaming. Service samples
+      // size growth on every poll and stamps `lastActivityObservedAt`
+      // with wall-clock at that moment.
+      transcriptMtimeMs: session.lastActivityObservedAt,
       turnState: session.turnState,
       stageInfo: session.stageInfo,
       lastCompactTimestamp: session.lastCompactTimestamp,
