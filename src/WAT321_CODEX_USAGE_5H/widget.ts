@@ -10,14 +10,8 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   id: "wat321.codexSession",
   name: "WAT321: Codex Usage (5h)",
   slot: WIDGET_SLOT.codexUsage5H,
-  variant: "5h",
-  loadingText: "$(openai) 5h $(loading~spin)",
-  nonOkOptions: {
-    providerName: "Codex",
-    providerIcon: "$(openai)",
-    providerKey: "codex",
-    loadingText: "$(openai) 5h $(loading~spin)",
-  },
+  providerName: "Codex",
+  providerKey: "codex",
   getDisplayPct: (data) => {
     const usedPct = data.rate_limit?.primary_window?.used_percent ?? 0;
     return getRemainingPct(usedPct);
