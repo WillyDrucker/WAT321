@@ -503,13 +503,29 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
     // Codex is genuinely working. Periodically re-emit the heartbeat
     // when the child process is alive: a fresh app-server child means
     // SOMETHING is still working server-side, even if no RPC event
-    // has fired recently. If the child died, isAlive flips false and
-    // the heartbeat goes stale on its own - auto-abort still fires
-    // for the genuinely-dead case.
+    // has fired recently. When the child dies, isAlive flips false:
+    // non-FF turns get caught by the monitor's stall + hard-cap
+    // watchdogs, but FF disables both, so detect + reject here so
+    // a dead child cannot hang an FF turn forever (#81).
     const LIVENESS_HEARTBEAT_MS = 60_000;
     const livenessHeartbeat = setInterval(() => {
       if (settled) return;
-      if (!client.isAlive) return;
+      if (!client.isAlive) {
+        if (isFireAndForget) {
+          logger.warn(
+            `[ff-abort] app-server died mid-turn (envelope=${env.id}); rejecting so claim + flags release`
+          );
+          sendInterrupt();
+          settle(() =>
+            reject(
+              new Error(
+                "Codex app-server died mid-turn during fire-and-forget dispatch"
+              )
+            )
+          );
+        }
+        return;
+      }
       writeHeartbeat(lastObservedStage);
     }, LIVENESS_HEARTBEAT_MS);
     livenessHeartbeat.unref?.();
