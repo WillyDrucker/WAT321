@@ -44,6 +44,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
       lastCompactTimestamp: session.turnInfo?.lastCompactTimestamp ?? null,
       tokensPerSecond: session.tokensPerSecond,
       compactState: session.compactState,
+      workspaceSessionInventory: session.workspaceSessionInventory,
     };
   },
 };

@@ -689,6 +689,7 @@ export class SessionTokenWidget<TState extends { status: string }> implements vs
             d.provider === "Claude"
               ? bridgeSnapshot.waitInfo?.mode ?? "sync"
               : "sync",
+          workspaceSessionInventory: data.workspaceSessionInventory,
         });
         this.item.show();
         return;

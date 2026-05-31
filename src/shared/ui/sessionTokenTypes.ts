@@ -139,6 +139,14 @@ export interface SessionTokenRenderData {
      * outside the flash state. */
     flashUntil: number | null;
   };
+  /** Workspace session inventory snapshot. Total = open sessions in
+   * this workspace for the provider; inProgress = subset with an
+   * in-flight turn. Drives the multi-session tooltip disclosure -
+   * surfaced as a tooltip line when total > 1 so the user can see
+   * "this widget is watching one of N sessions" without a separate
+   * pill. Defaults to {total:1, inProgress:0} in the common single-
+   * session case. */
+  workspaceSessionInventory?: { total: number; inProgress: number };
 }
 
 export interface SessionTokenWidgetDescriptor<TState extends { status: string }> {

@@ -5,13 +5,10 @@ import { writeFileAtomic } from "../fs/atomicWrite";
 import { clientStateDir } from "../wat321Paths";
 
 /**
- * Persistent last-known-good store for the usage widgets. File at
+ * Persistent last-known-good store for the usage widgets at
  * `~/.wat321/clients/<wsId>/usage-snapshot.json`. Widgets hydrate on
- * construction, persist on every ok update, and call
- * `clearProviderSnapshot` on identity-changing states (sign-out,
- * token expiry, disconnect) so a restart cannot paint a prior
- * account's bars. Full-wipe is owned by Reset WAT321's
- * `rmSync(clientStateDir())` sweep. Schema is versioned so a future
+ * construction, persist on every ok update, and clear per-provider
+ * on identity-changing states. Schema is versioned so a future
  * shape change can ignore old snapshots instead of crashing.
  */
 
@@ -77,10 +74,14 @@ export function saveSnapshot(
   }
 }
 
-/** Clear a single provider's persisted snapshot. Called by the widget
- * on identity-changing service states (sign-out, token expiry,
+/** Clear a single provider's persisted snapshot. Called by the
+ * widget on identity-changing service states (sign-out,
  * disconnect) so a subsequent VS Code restart cannot hydrate the
- * prior account's bars. Sibling provider's slot stays intact. Atomic
+ * prior account's bars. token-expired is deliberately NOT in that
+ * caller branch - the OAuth access token rotates inside the same
+ * account, so the snapshot survives the refresh window and the
+ * widget keeps showing cached bars under the dim skin until the
+ * token recovers. Sibling provider's slot stays intact. Atomic
  * rewrite of the remaining slots. Best-effort: a failed clear means
  * the next restart shows one stale frame before the live service
  * overwrites it. */

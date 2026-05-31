@@ -57,17 +57,52 @@ const ACTIVITY_SCORE: Record<string, number> = {
  * the window still compete on mtime. */
 const ACTIVITY_FRESHNESS_MS = 5 * 60_000;
 
+/** Hot-recency window. A rollout written within this window
+ * outranks every rollout outside it regardless of activity score,
+ * so a session the user just touched wins against a sibling whose
+ * mid-turn classification is older but technically still inside
+ * the 5-minute activity window. Symmetric with the Claude side.
+ *
+ * Trade-off the constant encodes: a Codex turn that goes silent
+ * for more than this (deep model reasoning with no rollout writes,
+ * external tool dispatch) drops out of "hot" even though the user
+ * is still waiting for it. Picked to be longer than a typical
+ * between-write gap during normal turns and short enough that a
+ * stale background session loses preference quickly once the user
+ * moves on. */
+const HOT_RECENCY_MS = 60_000;
+
+/** How recent a rollout's mtime must be to count toward the
+ * workspace inventory. 30 minutes captures "actually open" without
+ * counting yesterday's leftover rollouts as part of the
+ * "multi-session" surface. Same window is used to gate the
+ * in-progress sub-count. */
+const INVENTORY_WINDOW_MS = 30 * 60_000;
+
+export interface RolloutDiscoveryResult {
+  /** The rollout to track, or null if no workspace match exists. */
+  path: string | null;
+  /** Count of rollouts in this workspace with mtime within the
+   * inventory window. Drives the multi-session tooltip. */
+  total: number;
+  /** Subset of `total` whose tail classifies as a turn in progress
+   * (`assistant-pending` or `user`). */
+  inProgress: number;
+}
+
 /** Find the rollout JSONL the widget should track for the current
- * workspace. Ranks by activity-then-mtime so a concurrently-active
- * native Codex session wins against an idle bridge rollout even when
- * the bridge's last write was newer. Returns `null` if no match
- * exists in the scan window. */
+ * workspace AND tally how many sibling rollouts in the same
+ * workspace are currently open (with how many in-progress). Ranks
+ * the active pick by activity-then-mtime so a concurrently-active
+ * native Codex session wins against an idle bridge rollout even
+ * when the bridge's last write was newer. Inventory is computed in
+ * the same walk so there is no extra cost. */
 export function findLatestRollout(
   codexDir: string,
   workspacePath: string
-): string | null {
+): RolloutDiscoveryResult {
   const sessionsDir = join(codexDir, "sessions");
-  if (!existsSync(sessionsDir)) return null;
+  if (!existsSync(sessionsDir)) return { path: null, total: 0, inProgress: 0 };
 
   const wsNorm = normalizePath(workspacePath);
 
@@ -75,6 +110,9 @@ export function findLatestRollout(
     path: string;
     mtime: number;
     activity: number;
+    inProgress: boolean;
+    fresh: boolean;
+    isHot: boolean;
   }
   const candidates: Candidate[] = [];
   let daysScanned = 0;
@@ -136,10 +174,22 @@ export function findLatestRollout(
             const tail = readTail(fullPath);
             const turnState = tail ? classifyCodexTurn(tail) : "unknown";
             const rawActivity = ACTIVITY_SCORE[turnState] ?? 0;
-            const fresh = Date.now() - mtime <= ACTIVITY_FRESHNESS_MS;
-            const activity = fresh ? rawActivity : 0;
+            const now = Date.now();
+            const activityFresh = now - mtime <= ACTIVITY_FRESHNESS_MS;
+            const activity = activityFresh ? rawActivity : 0;
+            const inventoryFresh = now - mtime <= INVENTORY_WINDOW_MS;
+            const isHot = now - mtime <= HOT_RECENCY_MS;
+            const inProgress =
+              turnState === "assistant-pending" || turnState === "user";
 
-            candidates.push({ path: fullPath, mtime, activity });
+            candidates.push({
+              path: fullPath,
+              mtime,
+              activity,
+              inProgress,
+              fresh: inventoryFresh,
+              isHot,
+            });
           }
         }
       }
@@ -150,23 +200,46 @@ export function findLatestRollout(
   return rankCandidates(candidates);
 }
 
-/** Pick the most deserving candidate: activity desc, then mtime desc.
- * Returns null on empty list. */
+/** Tiered ranking: hot-recency > activity > mtime. A rollout written
+ * within HOT_RECENCY_MS outranks any rollout outside it regardless
+ * of activity score so a session the user just touched wins against
+ * a sibling whose mid-turn classification is older. Inside the same
+ * hot bucket, activity-then-mtime applies as before. Tallies the
+ * inventory (count of fresh rollouts in workspace + those with
+ * in-flight turns) from the same candidate list so the widget
+ * tooltip surfaces multi-session disclosure without a second walk.
+ * Returns `{ path: null, total: 0, inProgress: 0 }` on empty list. */
 function rankCandidates(
-  candidates: { path: string; mtime: number; activity: number }[]
-): string | null {
-  if (candidates.length === 0) return null;
+  candidates: {
+    path: string;
+    mtime: number;
+    activity: number;
+    inProgress: boolean;
+    fresh: boolean;
+    isHot: boolean;
+  }[]
+): RolloutDiscoveryResult {
+  let total = 0;
+  let inProgress = 0;
+  for (const c of candidates) {
+    if (!c.fresh) continue;
+    total++;
+    if (c.inProgress) inProgress++;
+  }
+  if (candidates.length === 0) {
+    return { path: null, total: 0, inProgress: 0 };
+  }
   let best = candidates[0];
   for (let i = 1; i < candidates.length; i++) {
     const c = candidates[i];
-    if (
-      c.activity > best.activity ||
-      (c.activity === best.activity && c.mtime > best.mtime)
-    ) {
-      best = c;
-    }
+    const beats =
+      (c.isHot && !best.isHot) ||
+      (c.isHot === best.isHot &&
+        (c.activity > best.activity ||
+          (c.activity === best.activity && c.mtime > best.mtime)));
+    if (beats) best = c;
   }
-  return best.path;
+  return { path: best.path, total, inProgress };
 }
 
 /** Look up a session's thread name from `~/.codex/session_index.jsonl`

@@ -93,6 +93,14 @@ export interface SessionTokenTooltipInput {
    * Defaults to `"sync"` when omitted so older callers keep the
    * existing "Waiting on Codex: Ns" line. */
   bridgeWaitMode?: "sync" | "adaptive";
+  /** Multi-session disclosure. When the user has more than one
+   * session open in this workspace (e.g. two Claude TUIs in the
+   * same project, two Codex rollouts in the same cwd), the tooltip
+   * adds a line stating "Watching 1 of N sessions (M in progress)"
+   * so the user knows this widget tracks ONE specific session and
+   * understands why notifications may not match the focused window.
+   * Suppressed when total <= 1. */
+  workspaceSessionInventory?: { total: number; inProgress: number };
 }
 
 export function buildSessionTokenTooltip(
@@ -116,6 +124,7 @@ export function buildSessionTokenTooltip(
     bridgeActive = false,
     bridgeWaitTimeoutSec = null,
     bridgeWaitMode = "sync",
+    workspaceSessionInventory,
   } = input;
 
   const effectiveCeiling = Math.max(0, ceiling - baselineTokens);
@@ -174,6 +183,24 @@ export function buildSessionTokenTooltip(
   }
   if (typeof lastActiveAt === "number") {
     md.appendMarkdown(`Last active: ${formatRelativeTime(lastActiveAt)}  \n`);
+  }
+  // Multi-session disclosure. Surfaces only when the workspace has
+  // more than one session open for this provider so the user can see
+  // "this widget tracks one of several" without a separate pill.
+  // The (M in progress) suffix only renders when at least one session
+  // currently has a turn in flight, to avoid cluttering the line with
+  // "0 in progress" in the common idle case.
+  if (
+    workspaceSessionInventory !== undefined &&
+    workspaceSessionInventory.total > 1
+  ) {
+    const inProgressSuffix =
+      workspaceSessionInventory.inProgress > 0
+        ? ` (${workspaceSessionInventory.inProgress} in progress)`
+        : "";
+    md.appendMarkdown(
+      `Watching 1 of ${workspaceSessionInventory.total} ${provider} sessions${inProgressSuffix}  \n`
+    );
   }
   md.appendMarkdown(
     `${FOLDER} ${label} ${formatTokens(contextUsed)} / ${formatTokens(ceiling)}\n\n`

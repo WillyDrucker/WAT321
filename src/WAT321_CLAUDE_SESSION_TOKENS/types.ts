@@ -63,6 +63,16 @@ export interface ResolvedSession {
    * to null-check - the snapshot itself encodes the idle/in-flight
    * distinction via its `state` field. */
   compactState: CompactSnapshot;
+  /** Snapshot of how many Claude sessions in this workspace are
+   * currently open and how many of those have an in-flight turn.
+   * `total` counts live `~/.claude/sessions/*.json` process files
+   * whose cwd matches the workspace (presence of the process file
+   * is Claude's natural "open" signal - it vanishes on CLI exit).
+   * `inProgress` is the subset whose transcript tail classifies as
+   * `user` or `assistant-pending`. Drives the multi-session tooltip
+   * line that surfaces when N > 1. Always present - 1/0 in the
+   * single-session case. */
+  workspaceSessionInventory: { total: number; inProgress: number };
 }
 
 export type WidgetState =
