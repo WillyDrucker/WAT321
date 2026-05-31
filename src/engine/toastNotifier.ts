@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import { logNotifEvent } from "../shared/diag/notifEventLog";
+import { tryClaimNotification } from "../shared/notification/multiWindowDedup";
+import type { ProviderKey } from "./contracts";
 import type { AppEvents, EventHub } from "./eventHub";
 import {
   showInAppNotification,
@@ -100,11 +103,12 @@ export type NotificationOutcome =
   | "suppressed-provider"
   | "suppressed-off"
   | "suppressed-unknown-mode"
-  | "suppressed-epic-handshake";
+  | "suppressed-epic-handshake"
+  | "suppressed-multi-window";
 
 export interface NotificationDiagnostic {
   at: number;
-  provider: string;
+  provider: ProviderKey;
   mode: string;
   outcome: NotificationOutcome;
   focused: boolean;
@@ -121,6 +125,19 @@ function record(entry: NotificationDiagnostic): void {
   if (diagnostics.length > DIAGNOSTIC_RING_SIZE) {
     diagnostics.splice(0, diagnostics.length - DIAGNOSTIC_RING_SIZE);
   }
+  // Mirror to disk so a post-mortem after a VS Code restart still
+  // sees the decision. The in-memory ring above survives only until
+  // the extension reloads, while the JSONL log persists across
+  // reloads and is the load-bearing surface for "the notification
+  // didn't fire two hours ago, what happened" debugging.
+  logNotifEvent({
+    at: entry.at,
+    kind: "notifier-decision",
+    provider: entry.provider,
+    mode: entry.mode,
+    outcome: entry.outcome,
+    focused: entry.focused,
+  });
 }
 
 function getConfig(): vscode.WorkspaceConfiguration {
@@ -205,6 +222,31 @@ function handleResponseComplete(
     record({ ...baseDiag, outcome: "suppressed-cooldown" });
     return;
   }
+
+  // Cross-window dedup. Two VS Code windows on the same workspace
+  // both watch the same transcripts and both bridges fire
+  // responseComplete for the same completion. The dedup tag lets
+  // exactly one window deliver the toast - bucketed completionMs
+  // plus sessionId scope the claim to the right event, and `wx`
+  // create guarantees one winner across windows. The single-window
+  // case still wins the claim and proceeds normally.
+  const dedup = tryClaimNotification(payload.sessionId, payload.completionMs);
+  logNotifEvent({
+    at: now,
+    kind: "dedup-decision",
+    provider: payload.provider,
+    sessionId: payload.sessionId,
+    completionBucket: dedup.bucket,
+    claimed: dedup.claimed,
+  });
+  if (!dedup.claimed) {
+    record({ ...baseDiag, outcome: "suppressed-multi-window" });
+    return;
+  }
+  // Stamp cooldown only after winning the dedup race so a losing
+  // window does not pollute its own per-provider cooldown map with
+  // a delivery it never made. The winning window is the only one
+  // that needs to honor cooldown on the next emission.
   lastNotificationTime.set(payload.provider, now);
 
   const title = truncateSessionTitle(payload.sessionTitle || null);
