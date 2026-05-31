@@ -604,23 +604,28 @@ export abstract class UsageServiceBase<TResponse> {
           ? error.retryAfterMs
           : RATE_LIMIT_BACKOFF_MS;
       const retryAfterMs = Math.min(rawRetryAfterMs, RATE_LIMIT_BACKOFF_MS);
-      if (this.consecutiveRateLimits === 1) {
+      const now = Date.now();
+      const isColdStart = this.kickstart.isIdleAt(now);
+      // Cold-start 429s are Anthropic's usage endpoint declining to
+      // answer polls on idle accounts - they recover as soon as the
+      // user fires any prompt, so the server's retry-after is not a
+      // load-bearing backoff signal in that case. Keep the poll
+      // cadence at POLL_INTERVAL_MS for cold-start parks so recovery
+      // lands within ~122s of activity returning, instead of
+      // stretching the cadence to retryAfterMs (~15min) and waiting
+      // out a window the server only suggested because the account
+      // was quiet. Real (non-cold-start) 429s do stretch - those
+      // come from genuine throttling where retry-after is the
+      // server's actual ask.
+      if (this.consecutiveRateLimits === 1 && !isColdStart) {
         this.setPollInterval(retryAfterMs);
       }
-      const now = Date.now();
-      // Anthropic's usage endpoint 429s cold polls on accounts with
-      // no recent OAuth activity. Tag the park as cold-start when
-      // the user is idle so the renderer shows a friendly "Idle"
-      // skin instead of the alarm-level "Offline" skin. Once the
-      // user activates a session and we re-park with fresh
-      // activity, the new park is not cold and shows the real
-      // Offline view.
       const newState: ServiceState<TResponse> = {
         status: "rate-limited",
         retryAfterMs,
         rateLimitedAt: now,
         serverMessage: extractServerMessage(error),
-        isColdStart: this.kickstart.isIdleAt(now),
+        isColdStart,
       };
       this.setState(newState, "fetch-429-parked");
       this.coordinator.writeCache(newState);

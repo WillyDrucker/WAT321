@@ -66,8 +66,11 @@ export class UsageWidget<TData> implements vscode.Disposable {
    * - on a brand-new install or a freshly-cleared cache, the renderer
    * falls through to the 0% scaffold so the widget is still a bar, never
    * a pill. Cleared on identity-changing states (`not-connected`,
-   * `no-auth`, `token-expired`) so a user signing into a different
-   * account never sees the prior account's bars. */
+   * `no-auth`) so a user signing into a different account never sees
+   * the prior account's bars. token-expired is NOT identity-changing -
+   * the OAuth access token rotates inside the same account, so the
+   * cache survives the refresh window and the bars stay visible under
+   * the dim skin until the token recovers. */
   private lastOkData: TData | null = null;
   /** Wall-clock ms (Date.now()) when `lastOkData` was captured. Drives
    * the "Last updated N ago" disclosure on the non-ok tooltip. Null when
@@ -117,16 +120,19 @@ export class UsageWidget<TData> implements vscode.Disposable {
     }
 
     // Identity-changing states clear BOTH the in-memory cache and the
-    // persisted snapshot so sign-out / token expiry / disconnect
-    // followed by a new account never bleed the previous account's
-    // bars onto the new widget, including across a VS Code restart.
-    // Other non-ok states are transient for the SAME identity and keep
-    // both caches. Per-provider clear so the sibling provider's
-    // snapshot stays intact.
+    // persisted snapshot so sign-out / disconnect followed by a new
+    // account never bleed the previous account's bars onto the new
+    // widget, including across a VS Code restart. token-expired is
+    // deliberately NOT in this branch - it is a transient OAuth
+    // access-token rotation on the SAME identity, and clearing the
+    // cache during the refresh window drops the widget to a zero-bar
+    // "Refreshing" scaffold instead of the cached bars the bars-always
+    // contract promises. Other non-ok states are transient for the
+    // same identity and keep both caches. Per-provider clear so the
+    // sibling provider's snapshot stays intact.
     if (
       state.status === "not-connected" ||
-      state.status === "no-auth" ||
-      state.status === "token-expired"
+      state.status === "no-auth"
     ) {
       this.lastOkData = null;
       this.lastOkFetchedAt = null;

@@ -1,0 +1,112 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { clientStateDir } from "../wat321Paths";
+
+/**
+ * Append-only JSONL log of notification-path decisions at
+ * `<clientStateDir>/notification-events.jsonl`. Bounded rolling
+ * head-truncate at 1MB. Raw `writeFileSync` with `{ flag: "a" }` is
+ * intentional - the atomic-write helper would clobber the prior log
+ * on every append.
+ */
+
+const EVENT_LOG_FILENAME = "notification-events.jsonl";
+const EVENT_LOG_MAX_BYTES = 1_000_000;
+
+export type NotifEventKind =
+  | "session-switch"
+  | "bridge-decision"
+  | "dedup-decision"
+  | "notifier-decision";
+
+/** Specific gate or fire path inside `sessionResponseBridge`. Shared
+ * with the bridge so the literal union has a single home; the
+ * `fire-*` prefix is load-bearing for the bridge's
+ * `reason.startsWith("fire-")` check. */
+export type BridgeDecisionReason =
+  | "fire-context-increase"
+  | "fire-done-transition"
+  | "fire-path-switch-completion"
+  | "suppress-first-read"
+  | "suppress-mtime-stale"
+  | "suppress-no-trigger";
+
+interface BaseEvent {
+  at: number;
+  kind: NotifEventKind;
+}
+
+export interface SessionSwitchEvent extends BaseEvent {
+  kind: "session-switch";
+  provider: "claude" | "codex";
+  fromPath: string | null;
+  toPath: string | null;
+  /** Where the new path came from. Diagnostic label only - the
+   * service does not branch on this, but it lets the log reader
+   * distinguish a live-process pick from a lastKnown fallback from a
+   * Codex rollout scan without re-deriving from the path shape. */
+  source: "live" | "lastKnown" | "rollout-scan";
+}
+
+export interface BridgeDecisionEvent extends BaseEvent {
+  kind: "bridge-decision";
+  provider: "claude" | "codex";
+  path: string | null;
+  decision: "fire" | "suppress";
+  reason: BridgeDecisionReason;
+  contextChanged: boolean;
+  isIncrease: boolean;
+  classifierDone: boolean;
+  mtimeFresh: boolean;
+  isPathSwitch: boolean;
+  isNewPath: boolean;
+}
+
+export interface DedupDecisionEvent extends BaseEvent {
+  kind: "dedup-decision";
+  provider: "claude" | "codex";
+  sessionId: string;
+  completionBucket: number;
+  claimed: boolean;
+}
+
+export interface NotifierDecisionEvent extends BaseEvent {
+  kind: "notifier-decision";
+  provider: "claude" | "codex";
+  mode: string;
+  outcome: string;
+  focused: boolean;
+}
+
+export type NotifEvent =
+  | SessionSwitchEvent
+  | BridgeDecisionEvent
+  | DedupDecisionEvent
+  | NotifierDecisionEvent;
+
+function eventLogPath(): string {
+  return join(clientStateDir(), EVENT_LOG_FILENAME);
+}
+
+/** Append a single event to the JSONL log. Best-effort: a failed
+ * write is silently ignored so a disk problem never disrupts the
+ * notification path itself. */
+export function logNotifEvent(event: NotifEvent): void {
+  try {
+    const path = eventLogPath();
+    if (!existsSync(dirname(path))) {
+      mkdirSync(dirname(path), { recursive: true });
+    }
+    writeFileSync(path, `${JSON.stringify(event)}\n`, { flag: "a" });
+    try {
+      const stat = readFileSync(path, "utf8");
+      if (stat.length > EVENT_LOG_MAX_BYTES) {
+        writeFileSync(path, stat.slice(-EVENT_LOG_MAX_BYTES));
+      }
+    } catch {
+      // best-effort
+    }
+  } catch {
+    // best-effort
+  }
+}
