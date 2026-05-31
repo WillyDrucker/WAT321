@@ -7,6 +7,7 @@ import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { atomicCopy } from "../shared/fs/atomicCopy";
 import { resolveClaudeCli } from "../shared/providers/claude/cliResolver";
 import {
+  healLegacyAllowlistEntries,
   preAllowMcpTools,
   unAllowMcpTools,
 } from "../shared/providers/claude/mcpAllowlist";
@@ -349,6 +350,12 @@ export async function installUnifiedBridge(
       : `claude mcp add ${UNIFIED_MCP_NAME} succeeded (user scope, folderless wsId=${wsId})`
   );
   preAllowMcpTools(UNIFIED_ALLOWED_TOOLS, logger);
+  // Heal stale allowlist entries from retired bridge tools. The
+  // additive preAllow path does not touch entries that no longer
+  // ship, so without this sweep an upgrade from a release that
+  // seeded a now-retired tool leaves the entry stranded. Idempotent.
+  // No-op when nothing matches.
+  healLegacyAllowlistEntries(logger);
   return { ok: true, scriptPath };
 }
 
