@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { CodexSessionIndex } from "./types";
+import { readTail } from "../shared/fs/fileReaders";
 import { normalizePath } from "../shared/fs/pathUtils";
-import { parseCwd } from "./parsers";
+import { classifyCodexTurn, parseCwd } from "./parsers";
 
 /**
  * Walks Codex's date-sharded rollout tree and picks the active
@@ -12,24 +13,55 @@ import { parseCwd } from "./parsers";
  * Codex keeps rollouts under `~/.codex/sessions/YYYY/MM/DD/`. The
  * filename encodes the session CREATION timestamp, but users
  * regularly return to older sessions - those files then get mtime
- * updates without a filename change. Ranking by filename alone
- * misses the case where the active session has an older name but
- * was most recently written to. We rank by file mtime instead to
- * reflect actual recent use.
+ * updates without a filename change. The walk is bounded to a
+ * recent window so a machine with years of rollouts does not pay
+ * the stat cost on every cycle.
  *
- * The walk is bounded to a recent window so a machine with years
- * of rollouts does not pay the stat cost on every cycle. Within
- * the window we skip `parseCwd` (first-line read) for files older
- * than the current best candidate by mtime.
+ * Ranking is activity-first, not mtime-first: in a workspace where
+ * the EH bridge writes rollouts on most prompts, the bridge wins
+ * pure mtime competition against a freshly-typed-into native Codex
+ * VS Code session, leaving the user's actual session invisible to
+ * the widget. We instead read each candidate's tail, classify its
+ * last turn (`assistant-pending` > `user` > `assistant-done` >
+ * `unknown`), and break ties by file mtime. This way:
+ *   - Bridge mid-dispatch wins when nothing else is active.
+ *   - A native session the user is prompting wins over an idle bridge
+ *     even when the bridge's last rollout write was more recent.
+ *   - When two sessions are concurrently active, the most-recent
+ *     write breaks the tie.
  */
 
 /** How many calendar day-directories back we walk. 30 days covers
  * any realistic active-session age; older rollouts are ignored. */
 const MAX_DAYS_TO_SCAN = 30;
 
-/** Find the rollout JSONL most recently written to whose
- * `session_meta.cwd` matches the current workspace. Returns `null`
- * if no match exists in the scan window. */
+/** Per-candidate activity weight from the tail classifier. Larger
+ * means "this session is more deserving of widget focus right now".
+ * Sequence rationale: an in-flight assistant turn is the strongest
+ * signal (something is actively happening), a pending user prompt is
+ * the next strongest (user just typed and is waiting), and a done /
+ * unknown tail is idle. */
+const ACTIVITY_SCORE: Record<string, number> = {
+  "assistant-pending": 3,
+  user: 2,
+  "assistant-done": 1,
+  unknown: 0,
+};
+
+/** Freshness gate for the activity-first ranking. A rollout whose
+ * tail still classifies as `assistant-pending` but whose mtime is
+ * older than this window is treated as stale (activity score forced
+ * to 0) so an orphaned mid-write rollout from days ago can't outrank
+ * a freshly-active session. 5 minutes covers the longest reasonable
+ * in-flight Codex turn while excluding stale tails. Candidates outside
+ * the window still compete on mtime. */
+const ACTIVITY_FRESHNESS_MS = 5 * 60_000;
+
+/** Find the rollout JSONL the widget should track for the current
+ * workspace. Ranks by activity-then-mtime so a concurrently-active
+ * native Codex session wins against an idle bridge rollout even when
+ * the bridge's last write was newer. Returns `null` if no match
+ * exists in the scan window. */
 export function findLatestRollout(
   codexDir: string,
   workspacePath: string
@@ -39,8 +71,12 @@ export function findLatestRollout(
 
   const wsNorm = normalizePath(workspacePath);
 
-  let bestPath: string | null = null;
-  let bestMtime = 0;
+  interface Candidate {
+    path: string;
+    mtime: number;
+    activity: number;
+  }
+  const candidates: Candidate[] = [];
   let daysScanned = 0;
 
   try {
@@ -56,7 +92,9 @@ export function findLatestRollout(
 
         const days = readdirSync(monthDir).sort().reverse();
         for (const day of days) {
-          if (daysScanned >= MAX_DAYS_TO_SCAN) return bestPath;
+          if (daysScanned >= MAX_DAYS_TO_SCAN) {
+            return rankCandidates(candidates);
+          }
           daysScanned++;
 
           const dayDir = join(monthDir, day);
@@ -78,10 +116,6 @@ export function findLatestRollout(
             } catch {
               continue;
             }
-            // Skip the cwd read (opens the file) when this rollout
-            // cannot beat the current best mtime. Most files in
-            // older day-dirs are immediately rejected this way.
-            if (mtime <= bestMtime) continue;
 
             const cwd = parseCwd(fullPath);
             if (!cwd) continue;
@@ -92,8 +126,20 @@ export function findLatestRollout(
               wsNorm.startsWith(`${cwdNorm}/`);
             if (!matches) continue;
 
-            bestPath = fullPath;
-            bestMtime = mtime;
+            // Read the tail to classify activity. Bounded to the tail
+            // window so this stays cheap even on multi-MB rollouts.
+            // Freshness-gated: a non-zero activity score only counts
+            // when the rollout was written within ACTIVITY_FRESHNESS_MS.
+            // Outside that window the tail's classification is treated
+            // as stale (often an orphaned mid-write from days ago) and
+            // the candidate competes on mtime alone.
+            const tail = readTail(fullPath);
+            const turnState = tail ? classifyCodexTurn(tail) : "unknown";
+            const rawActivity = ACTIVITY_SCORE[turnState] ?? 0;
+            const fresh = Date.now() - mtime <= ACTIVITY_FRESHNESS_MS;
+            const activity = fresh ? rawActivity : 0;
+
+            candidates.push({ path: fullPath, mtime, activity });
           }
         }
       }
@@ -101,7 +147,26 @@ export function findLatestRollout(
   } catch {
     // ignore
   }
-  return bestPath;
+  return rankCandidates(candidates);
+}
+
+/** Pick the most deserving candidate: activity desc, then mtime desc.
+ * Returns null on empty list. */
+function rankCandidates(
+  candidates: { path: string; mtime: number; activity: number }[]
+): string | null {
+  if (candidates.length === 0) return null;
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (
+      c.activity > best.activity ||
+      (c.activity === best.activity && c.mtime > best.mtime)
+    ) {
+      best = c;
+    }
+  }
+  return best.path;
 }
 
 /** Look up a session's thread name from `~/.codex/session_index.jsonl`

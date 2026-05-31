@@ -12,6 +12,8 @@ import {
   NETWORK_ERROR_RETRY_MS,
   POLL_INTERVAL_MS,
   RATE_LIMIT_BACKOFF_MS,
+  RECOVERY_CEILING_MS,
+  RECOVERY_TICK_MS,
 } from "./constants";
 import { CountdownTicker } from "./countdownTicker";
 import { DiscoveryPoller } from "./discovery";
@@ -70,6 +72,7 @@ export abstract class UsageServiceBase<TResponse> {
   private state: ServiceState<TResponse>;
   private listeners = new Set<StateListener<ServiceState<TResponse>>>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private recoveryTimer: ReturnType<typeof setInterval> | null = null;
   private pendingTimers = new Set<ReturnType<typeof setTimeout>>();
   private discoveryPoller: DiscoveryPoller | null = null;
   private abortController: AbortController | null = null;
@@ -77,6 +80,13 @@ export abstract class UsageServiceBase<TResponse> {
   private disposed = false;
   private consecutiveRateLimits = 0;
   private consecutiveErrors = 0;
+  /** Wall-clock ms of the last actual HTTPS fetch attempt. Updates
+   * only in `doFetch`, NOT on cache adoptions. Drives the recovery
+   * watchdog so a long stretch of cache-only adoption or an extended
+   * rate-limit park never leaves the service silent past the
+   * `RECOVERY_CEILING_MS` ceiling. Seeded to `Date.now()` at
+   * construction so the watchdog does not fire immediately on startup. */
+  private lastFetchAttemptMs = Date.now();
   /** Transient 429s tagged cold-start that we have absorbed while an
    * ok state is on display. Anthropic's usage endpoint cold-polls 429
    * on brief idle gaps (most visibly at the 5h billing-window rollover),
@@ -201,6 +211,10 @@ export abstract class UsageServiceBase<TResponse> {
       clearInterval(this.timer);
       this.timer = null;
     }
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
     for (const handle of this.pendingTimers) clearTimeout(handle);
     this.pendingTimers.clear();
     this.discoveryPoller?.dispose();
@@ -239,6 +253,48 @@ export abstract class UsageServiceBase<TResponse> {
       this.timer = setInterval(() => this.refresh(), POLL_INTERVAL_MS);
     }, delay);
     this.pendingTimers.add(handle);
+    // Start the recovery watchdog alongside the main poll loop so the
+    // discovery-recovered path (auth dir appeared after startup) also
+    // gets the 15-min ceiling. Idempotent - clears any prior timer.
+    this.startRecoveryWatchdog();
+  }
+
+  /** Recovery watchdog. Independent of the main poll loop. Ticks at
+   * `RECOVERY_TICK_MS` (60s) and checks the gap since the last real
+   * HTTPS attempt. When the gap exceeds `RECOVERY_CEILING_MS` (15 min)
+   * and the service is in a non-ok / non-not-connected state, forces
+   * a fetch that bypasses cache adoption so a stuck `token-expired`
+   * or a long `rate-limited` park always gets at least one real
+   * attempt per quarter-hour. Replaces "user must prompt to recover"
+   * with "the service heals itself on its own clock." */
+  private startRecoveryWatchdog(): void {
+    if (this.recoveryTimer) clearInterval(this.recoveryTimer);
+    this.recoveryTimer = setInterval(() => this.recoveryTick(), RECOVERY_TICK_MS);
+  }
+
+  private recoveryTick(): void {
+    if (this.disposed) return;
+    if (this.inFlight) return;
+    // ok = nothing to recover from. not-connected = no auth dir yet,
+    // discovery poller owns recovery. no-auth = auth dir present but
+    // empty / unreadable credentials. refresh would short-circuit at
+    // getAuth() without an HTTPS attempt, so the watchdog would log
+    // recovery-ceiling-hit every minute without making progress. The
+    // poll loop already revisits getAuth() every POLL_INTERVAL_MS, so
+    // the watchdog adds nothing here.
+    if (this.state.status === "ok") return;
+    if (this.state.status === "not-connected") return;
+    if (this.state.status === "no-auth") return;
+    const sinceLastFetch = Date.now() - this.lastFetchAttemptMs;
+    if (sinceLastFetch < RECOVERY_CEILING_MS) return;
+    this.logEvent("recovery-ceiling-hit", this.state.status as TransitionStatus);
+    // Force = bypass cache adoption. The cache might be holding the
+    // exact same stuck state (e.g. token-expired written by an earlier
+    // tick, refreshed by this window's adoption every 30s), so adopting
+    // it would just re-enter the same loop. A forced refresh either
+    // resolves the state (auth refreshed in the background) or stamps
+    // a fresh failure with current evidence.
+    void this.refresh(true);
   }
 
   private setState(
@@ -352,7 +408,7 @@ export abstract class UsageServiceBase<TResponse> {
     this.currentPollIntervalMs = ms;
   }
 
-  private async refresh(): Promise<void> {
+  private async refresh(force: boolean = false): Promise<void> {
     if (this.disposed) return;
     if (this.inFlight) return;
 
@@ -371,23 +427,29 @@ export abstract class UsageServiceBase<TResponse> {
       this.wake();
     }
 
-    const cache = this.coordinator.readCache();
-    if (cache && this.coordinator.isFresh(cache)) {
-      const cacheAgeMs = Date.now() - cache.timestamp;
-      this.setStateWithCacheAge(cache.state, "cache-adopted", cacheAgeMs);
-      if (cache.state.status === "ok") this.consecutiveErrors = 0;
-      if (cache.state.status === "rate-limited") {
-        this.countdown.start();
-      } else {
-        this.countdown.stop();
+    // Force = recovery-watchdog path. Skip cache adoption so the same
+    // stuck state can't be re-adopted. Falls straight through to
+    // claim + doFetch. Normal poll-loop callers pass force=false.
+    if (!force) {
+      const cache = this.coordinator.readCache();
+      if (cache && this.coordinator.isFresh(cache)) {
+        const cacheAgeMs = Date.now() - cache.timestamp;
+        this.setStateWithCacheAge(cache.state, "cache-adopted", cacheAgeMs);
+        if (cache.state.status === "ok") this.consecutiveErrors = 0;
+        if (cache.state.status === "rate-limited") {
+          this.countdown.start();
+        } else {
+          this.countdown.stop();
+        }
+        return;
       }
-      return;
     }
 
     if (!this.coordinator.tryClaim()) {
-      if (cache) {
-        const cacheAgeMs = Date.now() - cache.timestamp;
-        this.setStateWithCacheAge(cache.state, "cache-adopted", cacheAgeMs);
+      const fallbackCache = this.coordinator.readCache();
+      if (fallbackCache) {
+        const cacheAgeMs = Date.now() - fallbackCache.timestamp;
+        this.setStateWithCacheAge(fallbackCache.state, "cache-adopted", cacheAgeMs);
       } else {
         const handle = setTimeout(() => {
           this.pendingTimers.delete(handle);
@@ -409,6 +471,11 @@ export abstract class UsageServiceBase<TResponse> {
     }
 
     this.inFlight = true;
+    // Stamp lastFetchAttemptMs at the actual point of attempt so the
+    // recovery watchdog measures against real HTTPS activity, not
+    // against poll-loop ticks that exited early (cache adoption,
+    // claim contention, auth-dir vanish).
+    this.lastFetchAttemptMs = Date.now();
     // Log every fetch attempt so the transition log shows poll cadence
     // even when nothing else changes. A long gap between fetch-attempted
     // records means the service is parked on a long backoff (or

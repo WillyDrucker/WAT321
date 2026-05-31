@@ -46,7 +46,8 @@ export type TransitionReason =
   | "auth-missing"
   | "auth-dir-vanished"
   | "discovery-recovered"
-  | "cache-adopted";
+  | "cache-adopted"
+  | "recovery-ceiling-hit";
 
 export interface TransitionRecord {
   at: number;

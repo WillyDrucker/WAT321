@@ -27,6 +27,28 @@ export const SESSION_TOKEN_RESCAN_MS = 51_000;
  * don't hammer) by capping at our own conservative fallback. */
 export const RATE_LIMIT_BACKOFF_MS = 901_000;
 
+/** Hard recovery ceiling. Independent of the main poll loop, a
+ * watchdog timer enforces this as the maximum time between actual
+ * HTTPS fetch attempts for any non-ok, non-not-connected state. Covers
+ * three classes of "widget stays stuck without user intervention":
+ *
+ *   - `token-expired` that never re-tries because the cache adoption
+ *     path keeps refreshing the same stale state from disk
+ *   - `rate-limited` that honored a server `Retry-After` capped at
+ *     RATE_LIMIT_BACKOFF_MS but where a sibling-window cache adoption
+ *     keeps resetting the local park clock
+ *   - any state where the main poll timer drifts or stalls
+ *
+ * 15 minutes is the user-visible "definitely should have tried by now"
+ * bar. Watchdog tick cadence stays at 60s so it never adds more than
+ * ~1 min of skew on top of the ceiling. */
+export const RECOVERY_CEILING_MS = 15 * 60_000;
+
+/** How often the recovery watchdog ticks to check the ceiling. Cheap
+ * (one `Date.now()` comparison and at most one cache invalidation +
+ * refresh call per tick) so a tight cadence is fine. */
+export const RECOVERY_TICK_MS = 60_000;
+
 /** Minimum time the usage service must have been parked in
  * `rate-limited` before an activity-driven kickstart is allowed,
  * for a FRESH park (no prior failed kickstart rounds against the

@@ -3,23 +3,27 @@ import type { ProviderKey } from "../../engine/contracts";
 import { getDisplayMode } from "../../engine/displayMode";
 import type { ServiceState as GenericServiceState } from "../../engine/serviceTypes";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
+import { refreshIfStale } from "../incidentStatusPoller";
 import {
-  getCachedStatus,
-  getProviderOwner,
-  refreshIfStale,
-} from "../incidentStatusPoller";
+  clearProviderSnapshot,
+  loadSnapshot,
+  saveSnapshot,
+} from "../usage/snapshotStore";
+import { IDLE_DIM_COLOR } from "./idleColor";
+import { classifyUsageNonOk } from "./usageNonOkClassifier";
 
 /**
  * Config-driven usage widget. Bars are always visible. The ok branch
  * renders fresh data with the provider's text color; every non-ok branch
  * reuses the same bar layout (last-known cached data when available, else
- * a 0% scaffold) under the dim idle color, with a short ` - {Label}`
- * suffix on the status-bar text and a tooltip that leads with the cached
- * ok content (reset times etc.) and closes with the error message. There
- * is no separate text-pill / hide / spinner-only path - every state is a
- * bar state, so a brand-new install, a signed-out account, a network
- * outage, and a transient API error all read the same shape with just the
- * suffix + tooltip changing.
+ * a 0% scaffold) under the dim idle color. The one-word state label
+ * ("Loading", "Refreshing", "Idle", "Offline", ...) lives on a separate
+ * conditional error-status widget (`UsageErrorWidget`) sitting between
+ * this 5h widget and the matching weekly widget - this widget itself
+ * stays bars-only so the user always sees usage shape, never text where
+ * a bar should be. The non-ok tooltip still leads with the cached ok
+ * content (reset times etc.) and closes with the error detail so hover
+ * disclosure remains identical.
  */
 
 export interface UsageWidgetDescriptor<TData> {
@@ -47,17 +51,11 @@ export interface UsageWidgetDescriptor<TData> {
   /** Resolve the text color for the ok state. Non-ok states ignore this
    * and use the idle dim color directly. */
   getTextColor(mode: ReturnType<typeof getDisplayMode>, pct: number): string | undefined;
-  /** Format the status-bar text for a given display mode. Used for both
-   * ok and non-ok states - the widget appends ` - {Label}` for non-ok. */
+  /** Format the status-bar text for a given display mode. Used for
+   * both ok and non-ok states. The bar widget never adds a state-
+   * label suffix - the sibling `UsageErrorWidget` owns that disclosure. */
   formatText(mode: ReturnType<typeof getDisplayMode>, pct: number, bar5: string, bar10: string): string;
 }
-
-/** Idle / non-ok foreground. Dim enough that the widget reads as
- * "paused, not live" against both dark and light VS Code themes but
- * still legible. Bar emoji squares ignore item.color (they carry their
- * own intrinsic color), so only the codicon + number + suffix dim.
- * Value matches Tailwind `neutral-700`. */
-const IDLE_DIM_COLOR = "#404040";
 
 export class UsageWidget<TData> implements vscode.Disposable {
   private item: vscode.StatusBarItem;
@@ -84,26 +82,47 @@ export class UsageWidget<TData> implements vscode.Disposable {
       getWidgetPriority(descriptor.slot)
     );
     this.item.name = descriptor.name;
-    // Paint a 0% scaffold the moment the widget exists so the first frame
-    // is a bar instead of a spinner or empty text - the bars-always
-    // contract holds even before the first service tick lands.
-    this.renderNonOk("Loading", `Fetching ${descriptor.providerName} usage data.`);
+    // Hydrate the last-known-good payload from disk so a VS Code
+    // restart, extension reload, or long error stretch never wipes
+    // the bars the user was last seeing. Both 5h and weekly widgets
+    // for the same provider share one snapshot slot (the upstream
+    // payload carries both windows), so each widget reads the same
+    // file and extracts its own field via descriptor.getDisplayPct.
+    // Cleared by the identity-change branch below (per-provider) and
+    // by Reset WAT321's per-client state-dir wipe (full sweep).
+    const persisted = loadSnapshot<TData>(descriptor.providerKey);
+    if (persisted !== null) {
+      this.lastOkData = persisted.data;
+      this.lastOkFetchedAt = persisted.fetchedAt;
+    }
+    // Paint a 0% scaffold (or the persisted bars if we just hydrated)
+    // the moment the widget exists so the first frame is a bar instead
+    // of a spinner or empty text - the bars-always contract holds even
+    // before the first service tick lands.
+    this.renderNonOk(`Fetching ${descriptor.providerName} usage data.`);
   }
 
   update(state: GenericServiceState<TData>): void {
     // Cache the ok payload + fetch time so a later non-ok render shows
     // the same bar + percent dimmed instead of dropping to 0%. Caching
     // happens before the renders so a transient ok between two errors
-    // still refreshes the cache.
+    // still refreshes the cache. Persist the payload to disk too so a
+    // VS Code restart or extension reload keeps the bars across
+    // sessions. Cleared per-provider on identity-changing states below
+    // and fully by Reset WAT321.
     if (state.status === "ok") {
       this.lastOkData = state.data;
       this.lastOkFetchedAt = state.fetchedAt;
+      saveSnapshot(this.descriptor.providerKey, state.data, state.fetchedAt);
     }
 
-    // Identity-changing states clear the cache so sign-out / token
-    // expiry / disconnect followed by a new account does not bleed the
-    // previous account's bars onto the new widget. Other non-ok states
-    // are transient for the SAME identity and keep the cache.
+    // Identity-changing states clear BOTH the in-memory cache and the
+    // persisted snapshot so sign-out / token expiry / disconnect
+    // followed by a new account never bleed the previous account's
+    // bars onto the new widget, including across a VS Code restart.
+    // Other non-ok states are transient for the SAME identity and keep
+    // both caches. Per-provider clear so the sibling provider's
+    // snapshot stays intact.
     if (
       state.status === "not-connected" ||
       state.status === "no-auth" ||
@@ -111,6 +130,7 @@ export class UsageWidget<TData> implements vscode.Disposable {
     ) {
       this.lastOkData = null;
       this.lastOkFetchedAt = null;
+      clearProviderSnapshot(this.descriptor.providerKey);
     }
 
     if (state.status === "ok") {
@@ -118,8 +138,21 @@ export class UsageWidget<TData> implements vscode.Disposable {
       return;
     }
 
-    const { label, detail } = this.classifyNonOk(state);
-    this.renderNonOk(label, detail);
+    // Kick a lazy refresh of the provider's public status page when we
+    // hit the rate-limited path. TTL-gated, fires at most once per 5
+    // min per window. Lives here (not in the classifier) so the
+    // sibling error widget's update never double-fires the same kick
+    // for the same state tick.
+    if (state.status === "rate-limited") {
+      refreshIfStale(this.descriptor.providerKey);
+    }
+
+    const { detail } = classifyUsageNonOk(
+      state,
+      this.descriptor.providerName,
+      this.descriptor.providerKey
+    );
+    this.renderNonOk(detail);
   }
 
   private renderOk(data: TData): void {
@@ -136,11 +169,13 @@ export class UsageWidget<TData> implements vscode.Disposable {
   }
 
   /** Render any non-ok state through the same bar layout as ok - cached
-   * data when available, a 0% scaffold otherwise - with the dim color, a
-   * short ` - {label}` suffix, and a tooltip that leads with the cached
-   * ok content (reset times etc.) and closes with the error detail. No
-   * `hide()`, no spinner-only pill. */
-  private renderNonOk(label: string, detail: string): void {
+   * data when available, a 0% scaffold otherwise - with the dim color
+   * and a tooltip that leads with the cached ok content (reset times
+   * etc.) and closes with the error detail. The one-word state label
+   * lives on the sibling `UsageErrorWidget`, so the bar widget itself
+   * carries no suffix - the user always reads usage shape here, never
+   * text where a bar should be. No `hide()`, no spinner-only pill. */
+  private renderNonOk(detail: string): void {
     const d = this.descriptor;
     const data = this.lastOkData;
     const pct = data !== null ? d.getDisplayPct(data) : 0;
@@ -151,7 +186,7 @@ export class UsageWidget<TData> implements vscode.Disposable {
     // No click affordance on non-ok - the auto-kickstart on the service
     // handles recovery, no user action is required or possible.
     this.item.command = undefined;
-    this.item.text = `${d.formatText(mode, pct, bar5, bar10)} - ${label}`;
+    this.item.text = d.formatText(mode, pct, bar5, bar10);
     this.item.tooltip = this.buildNonOkTooltip(data, detail);
     this.item.color = IDLE_DIM_COLOR;
     this.item.backgroundColor = undefined;
@@ -189,81 +224,6 @@ export class UsageWidget<TData> implements vscode.Disposable {
       tip.appendMarkdown(detail);
     }
     return tip;
-  }
-
-  /** Inline non-ok classifier. Returns the suffix label that lands in the
-   * status-bar text and the tooltip detail (server message, rate-limit
-   * countdown, status-page indicator). Loading and identity-changing
-   * states carry a constant message; rate-limited and offline / error
-   * carry server-supplied detail when available. */
-  private classifyNonOk(
-    state: Exclude<GenericServiceState<TData>, { status: "ok" }>
-  ): { label: string; detail: string } {
-    const d = this.descriptor;
-    switch (state.status) {
-      case "loading":
-        return {
-          label: "Loading",
-          detail: `Fetching ${d.providerName} usage data.`,
-        };
-      case "not-connected":
-        return {
-          label: "Not Connected",
-          detail: `${d.providerName} is not connected yet. Bars appear automatically once usage data lands.`,
-        };
-      case "no-auth":
-        return {
-          label: "Signed Out",
-          detail: `${d.providerName} is signed out. Will reconnect automatically when credentials return.`,
-        };
-      case "token-expired":
-        return {
-          label: "Refreshing",
-          detail: `${d.providerName} is refreshing credentials. Will reconnect automatically on next activity.`,
-        };
-      case "rate-limited": {
-        if (state.isColdStart === true) {
-          const server = state.serverMessage ? ` API: ${state.serverMessage}.` : "";
-          return {
-            label: "Idle",
-            detail: `Idle (cold-poll absorbed).${server} Usage data becomes available after ${d.providerName}'s next activity.`,
-          };
-        }
-        const elapsed = Date.now() - state.rateLimitedAt;
-        const remainingMin = Math.max(
-          0,
-          Math.ceil((state.retryAfterMs - elapsed) / 60_000)
-        );
-        const countdown =
-          remainingMin > 0
-            ? ` Reconnecting in up to ${remainingMin} minute${remainingMin !== 1 ? "s" : ""}.`
-            : " Reconnecting.";
-        const server = state.serverMessage ? ` API: ${state.serverMessage}.` : "";
-        // Kick a lazy refresh of the provider's public status page. TTL-
-        // gated, fires at most once per 5 min per window; the cached
-        // entry is surfaced when an incident is actually live.
-        refreshIfStale(d.providerKey);
-        const status = getCachedStatus(d.providerKey);
-        const incident =
-          status && status.indicator !== "none"
-            ? ` ${getProviderOwner(d.providerKey)} status: ${status.description}.`
-            : "";
-        return {
-          label: "Paused",
-          detail: `Temporarily throttled by ${d.providerName} (their side, not yours).${countdown}${server}${incident}`,
-        };
-      }
-      case "offline":
-        return {
-          label: "Offline",
-          detail: "Network unavailable. Will reconnect automatically.",
-        };
-      case "error":
-        return {
-          label: "Idle",
-          detail: `${d.providerName} usage temporarily unavailable. Will retry automatically.`,
-        };
-    }
   }
 
   dispose(): void {

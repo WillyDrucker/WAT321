@@ -36,6 +36,29 @@ interface ClaudeSettings {
 
 const CLAUDE_SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
 
+/** Retired MCP tool names that may remain in `permissions.allow`.
+ * The active install path (`preAllowMcpTools(UNIFIED_ALLOWED_TOOLS)`)
+ * is additive-only with idempotent skip, and the uninstall path
+ * sweeps only the current tools. Neither touches names that no longer
+ * ship, so the heal pass below removes any entry in this list to keep
+ * user settings clean. Append future retirements here as one
+ * canonical list. */
+const LEGACY_RETIRED_TOOLS = [
+  "mcp__wat321__wat321_inbox",
+  "mcp__wat321__wat321_list",
+] as const;
+
+/** Heal stale allowlist entries from retired bridge tools. Called
+ * from two places so every active EH install gets the sweep without
+ * a re-install: alongside `preAllowMcpTools` in `installUnifiedBridge`
+ * (covers the install path), and from `EpicHandshakeTier.activate`
+ * when EH is already enabled at activate-time (covers users who
+ * upgraded without flipping EH off then on). Idempotent: no-op when
+ * nothing matches. */
+export function healLegacyAllowlistEntries(logger: MinimalLogger): void {
+  unAllowMcpTools(LEGACY_RETIRED_TOOLS, logger);
+}
+
 /** Append `toolNames` to `permissions.allow`. Idempotent - already-
  * present entries are skipped. No-op when the file exists but is
  * unparseable; the user falls back to the standard prompt. */

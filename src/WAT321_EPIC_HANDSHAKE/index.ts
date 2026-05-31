@@ -33,6 +33,7 @@ import {
   clearClipboardStaging,
   sweepStaleClipboardStages,
 } from "./stageClipboardImage";
+import { healLegacyAllowlistEntries } from "../shared/providers/claude/mcpAllowlist";
 import { wipeWorkspaceEpicHandshakeState } from "./resetWipe";
 import { registerSessionPickerCommands } from "./openCodeSessionsPicker";
 import {
@@ -173,6 +174,17 @@ class EpicHandshakeTier {
         // bridge that cannot succeed.
         void this.unflipForMissingProvider();
       } else {
+        // Activate-time sweep of retired bridge tools. The install
+        // path runs this too, but a user whose EH was already on at
+        // upgrade never re-runs the installer - so without an
+        // activate-time pass their `~/.claude.json` keeps any orphaned
+        // legacy allowlist entries. Idempotent. No-op when the entries
+        // are absent. Best-effort. Never blocks startEnabled.
+        try {
+          healLegacyAllowlistEntries(this.logger);
+        } catch {
+          // best-effort - activation continues regardless
+        }
         void this.startEnabled();
       }
     } else {

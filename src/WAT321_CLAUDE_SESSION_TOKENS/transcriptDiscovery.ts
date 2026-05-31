@@ -2,7 +2,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { SessionEntry } from "./types";
+import { readTail } from "../shared/fs/fileReaders";
 import { getProjectKey, normalizePath } from "../shared/fs/pathUtils";
+import { classifyLastEntry } from "../shared/transcriptClassifier";
 import { parseCwd } from "./parsers";
 
 /**
@@ -33,19 +35,44 @@ export interface LastKnownTranscript {
  * on `cwd` bidirectionally: the workspace can sit inside the session's
  * cwd (claude launched at a project root, VS Code opened deeper) OR
  * the session's cwd can sit inside the workspace (claude launched from
- * a subdirectory, VS Code opened at the project root). Ties break by
- * transcript mtime so a resumed session beats its stale sibling, with
- * `entrypoint: "claude-vscode"` winning over terminal-launched sessions
- * as the final tiebreaker when mtimes are equal.
+ * a subdirectory, VS Code opened at the project root).
  *
- * Bidirectional match closes a recurring widget-misses-the-live-session
- * gap: when a user launches `claude` from `c:\Dev\WAT321\subdir` but
- * has VS Code open at `c:\Dev\WAT321`, the unidirectional check
- * `workspace ⊆ session.cwd` fails (workspace is the ancestor, not the
- * descendant), live PID is never found, and the widget drops to mtime-
- * only fallback. The reverse check `session.cwd ⊆ workspace` recovers
- * the PID in that case.
+ * Ranking is activity-first, not mtime-first. With multiple Claude
+ * sessions open in the same workspace (the user is running A and B
+ * concurrently), a pure mtime pick locks onto whichever was written
+ * to most recently and ends its cycle when that session finishes -
+ * even though the other session is still mid-turn. Reading each
+ * candidate's tail and classifying the last entry lets us prefer
+ * `assistant-pending` (in-flight tool use) over `user` (waiting on
+ * model) over `assistant-done` (idle), with mtime as the tiebreaker
+ * and `entrypoint: "claude-vscode"` as the final fallback when
+ * activity AND mtime are equal.
+ *
+ * Bidirectional cwd match closes a recurring widget-misses-the-live-
+ * session gap: when a user launches `claude` from `c:\Dev\WAT321\subdir`
+ * but has VS Code open at `c:\Dev\WAT321`, the unidirectional check
+ * "workspace is inside session.cwd" fails and the live PID is never
+ * found. The reverse check "session.cwd is inside workspace" recovers
+ * the PID.
  */
+const ACTIVITY_SCORE: Record<string, number> = {
+  "assistant-pending": 3,
+  user: 2,
+  "assistant-done": 1,
+  "compact-end": 0,
+  interrupted: 0,
+  unknown: 0,
+};
+
+/** Freshness gate for the activity-first ranking. A transcript whose
+ * tail still classifies as `assistant-pending` but whose mtime is
+ * older than this window is treated as stale (activity score forced
+ * to 0) so an orphaned mid-turn transcript from days ago can't outrank
+ * a freshly-active session. 5 minutes covers the longest reasonable
+ * in-flight Claude turn while excluding stale tails. Candidates outside
+ * the window still compete on mtime. */
+const ACTIVITY_FRESHNESS_MS = 5 * 60_000;
+
 export function findActiveSession(
   sessionsDir: string,
   workspacePath: string
@@ -62,8 +89,12 @@ export function findActiveSession(
   const wsNorm = normalizePath(workspacePath);
   const home = homedir();
 
-  let best: SessionEntry | null = null;
-  let bestMtime = 0;
+  interface Candidate {
+    entry: SessionEntry;
+    mtime: number;
+    activity: number;
+  }
+  const candidates: Candidate[] = [];
 
   for (const file of files) {
     try {
@@ -94,23 +125,39 @@ export function findActiveSession(
         // startedAt fallback
       }
 
-      const beatsBest = !best || mtime > bestMtime;
-      const tieBreak =
-        best !== null &&
-        mtime === bestMtime &&
-        entry.entrypoint === "claude-vscode" &&
-        best.entrypoint !== "claude-vscode";
+      // Classify the candidate's last entry so a concurrently-mid-turn
+      // session beats an idle sibling regardless of mtime ordering.
+      // Bounded tail read. Freshness-gated: a non-zero activity score
+      // only counts when the transcript was written within
+      // ACTIVITY_FRESHNESS_MS. Outside that window an orphaned
+      // assistant-pending tail (the session crashed mid-turn days ago)
+      // is treated as stale and the candidate competes on mtime alone.
+      const tail = readTail(transcriptPath);
+      const turnState = tail ? classifyLastEntry(tail) : "unknown";
+      const rawActivity = ACTIVITY_SCORE[turnState] ?? 0;
+      const fresh = Date.now() - mtime <= ACTIVITY_FRESHNESS_MS;
+      const activity = fresh ? rawActivity : 0;
 
-      if (beatsBest || tieBreak) {
-        best = entry;
-        bestMtime = mtime;
-      }
+      candidates.push({ entry, mtime, activity });
     } catch {
       continue;
     }
   }
 
-  return best;
+  if (candidates.length === 0) return null;
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i++) {
+    const c = candidates[i];
+    const beats =
+      c.activity > best.activity ||
+      (c.activity === best.activity && c.mtime > best.mtime) ||
+      (c.activity === best.activity &&
+        c.mtime === best.mtime &&
+        c.entry.entrypoint === "claude-vscode" &&
+        best.entry.entrypoint !== "claude-vscode");
+    if (beats) best = c;
+  }
+  return best.entry;
 }
 
 /**
