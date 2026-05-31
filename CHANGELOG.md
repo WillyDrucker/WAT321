@@ -5,15 +5,24 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.18] - unreleased
+## [1.5.18] - 2026-05-31
 
 ### Added
 
+- **The session-tokens widget tooltip now tells you when you have more than one Claude or Codex session open in the same workspace.** A line reading "Watching 1 of N Claude sessions (M in progress)" surfaces only when the count exceeds one, so single-session workspaces stay clean. Makes it instantly obvious that the widget is locked onto one specific session - useful when a notification fires for what looks like the wrong session or when you switch between concurrent CLI windows in the same project.
+- **A disk-backed event log captures every notification-path decision under `~/.wat321/clients/<workspace>/notification-events.jsonl`.** Each session switch, bridge fire / suppress, cross-window dedup outcome, and toast delivery result is appended as a single JSONL line with the data that drove the decision. Bounded rolling log (1MB head-truncate). Survives extension reloads so a "the notification did not fire two hours ago" post-mortem can reconstruct the chain without needing a repro under a debugger.
+
 ### Changed
+
+- **Usage widgets stuck on a transient cold-start rate-limit now recover within the normal 122-second poll cycle instead of waiting out the server's suggested 15-minute window.** A cold-start 429 is Anthropic's usage endpoint declining to answer polls on quiet accounts - it clears the instant any prompt fires, so the server's retry-after is a polite suggestion, not a real backoff. The poll cadence stays at 122 seconds for cold-start parks now, so the bars recover within seconds of activity returning. Real (non-cold-start) throttling still honors the server's window where the retry-after is load-bearing.
+- **You get one notification per Claude or Codex response when more than one VS Code window is open on the same workspace.** Before this change, every window watching the same project would fire its own toast for the same completion. Now the windows coordinate so only one delivers, and the duplicates are silently suppressed. Single-window workflows are unchanged.
+- **The session-tokens widget switches faster to a session you just touched when more than one Claude or Codex session is open in the same workspace.** Activity-first ranking alone could leave the widget locked onto a sibling whose mid-turn classification was older than the session you just returned to, since both were inside the five-minute freshness window. A new hot-recency tier sits above the activity score so a transcript written to within the last minute wins outright, then activity-then-mtime applies as before. The result is the widget tracking the user's actual focus instead of trailing it by a turn.
 
 ### Fixed
 
-### Removed
+- **The Claude usage bars no longer drop to zero with a stuck `Refreshing` label during an OAuth token refresh.** A transient `token-expired` state was being treated as identity-changing alongside sign-out and disconnect, clearing both the in-memory cache and the persisted snapshot the moment a 401 landed. The next renders had nothing to fall back to, so the bars went to a 0% scaffold under the dim skin until the token recovered. The refresh window now keeps the cached bars visible under the dim skin, matching every other transient state. Sign-out and disconnect still clear cleanly because they actually change identity.
+- **A Claude response that completes during a session switch now fires its notification instead of being swallowed by the path-switch reset.** Reopening VS Code and prompting a session that was not the most-recent-on-disk could let the turn finish before the widget caught up to the new path - the first emission on the new path then satisfied the first-read guard and returned without firing. The bridge now tracks paths it has already seen this process and treats a never-seen path with a fresh, done tail as a legitimate "completion landed during the switch" event. Flipping back to a previously-seen path still goes through the normal flow and cannot re-fire its old completion.
+- **Codex thread rotations now write to the bridge errors log on disk.** The three rotation sites in the dispatcher logged at warn level, which the v1.5.17 disk tee deliberately skipped (only error level was teed). Rotations now log at error level so post-mortem review of `~/.wat321/clients/<workspace>/bridge/errors.log` captures the consecutive-failure threshold rotation, the failed `thread/resume` rotation, and the run-turn outer rotation - all three with the original failure message intact.
 
 ## [1.5.17] - 2026-05-31
 
