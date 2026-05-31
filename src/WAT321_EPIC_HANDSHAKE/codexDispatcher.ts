@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { releaseClaim, tryAcquireClaim } from "../shared/claimFile";
 import { resolveCodexCli } from "../shared/providers/codex/cliResolver";
@@ -14,6 +14,7 @@ import { newEnvelopeId, readEnvelope, writeEnvelopeAtomic, type Envelope } from 
 import { classifyFailure } from "./failureClassifier";
 import { moveToSent, purgeSent } from "./mailbox";
 import { isKnownCodexModel, readCodexConfigModel } from "../shared/providers/codex/models";
+import { tryRolloutRecovery } from "./rolloutRecovery";
 import {
   clearBridgeErrorState,
   findRolloutPath,
@@ -472,6 +473,29 @@ export class CodexDispatcher {
     }
 
     const threadReady = Date.now();
+
+    // Seed for reply-recovery in the outer catch below. Captured here
+    // once threadId is known so the catch can tell a fresh reply
+    // (committed during THIS turn) from stale text already in the
+    // rollout when the turn started. seedAssistantText reads the
+    // last-assistant text via the same rollout-recovery path the catch
+    // will use. seedRolloutSize is the byte watermark so a turn that
+    // produced byte-identical text to the prior turn still reads as
+    // fresh. Both default to "" / 0 on any read failure.
+    const seedRolloutPath =
+      threadId !== null ? findRolloutPath(threadId) : null;
+    const seedAssistantText = seedRolloutPath
+      ? (tryRolloutRecovery(seedRolloutPath) ?? "")
+      : "";
+    const seedRolloutSize = ((): number => {
+      if (!seedRolloutPath) return 0;
+      try {
+        return statSync(seedRolloutPath).size;
+      } catch {
+        return 0;
+      }
+    })();
+
     try {
       writeInFlightFlag(this.workspacePath);
       let result: string;
@@ -530,6 +554,42 @@ export class CodexDispatcher {
       // the flags and propagate so the reply path writes "cancelled
       // by user" back to Claude cleanly.
       if (msg !== "cancelled by user") {
+        // Reply-marshal failures can fire AFTER Codex committed the
+        // reply to the rollout. Before declaring failure, try one more
+        // rollout-recovery pass with the seed comparison - the late
+        // commit often lands in the window between runTurn rejecting
+        // and us reaching this catch. Freshness gated against the
+        // captured seed so a stale prior turn's text never gets
+        // delivered as ours: either the assistant text differs from
+        // the seed OR the rollout grew past the seed size (covers the
+        // rare byte-identical-reply case).
+        if (threadId !== null) {
+          const recoveryRollout = findRolloutPath(threadId);
+          const recovered = tryRolloutRecovery(recoveryRollout);
+          const grew =
+            recoveryRollout !== null &&
+            ((): boolean => {
+              try {
+                return statSync(recoveryRollout).size > seedRolloutSize;
+              } catch {
+                return false;
+              }
+            })();
+          if (
+            recovered !== null &&
+            (recovered !== seedAssistantText || grew)
+          ) {
+            this.logger.info(
+              `[recover] dispatch catch absorbed throw (chain ${env.chainId}); rollout has fresh reply len=${recovered.length}, delivering instead of blocker`
+            );
+            noteSuccess(record);
+            writeSuppressCodexToast(this.workspacePath);
+            clearProcessingFlag(this.workspacePath);
+            clearInFlightFlag(this.workspacePath);
+            writeReturningFlag(this.workspacePath);
+            return recovered;
+          }
+        }
         noteFailure(record, msg);
       } else {
         // Cancel is best-effort: turn/interrupt may not have delivered
