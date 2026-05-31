@@ -5,15 +5,20 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.17] - unreleased
-
-### Added
-
-### Changed
+## [1.5.17] - 2026-05-31
 
 ### Fixed
 
-### Removed
+- **The session-tokens widget now follows the session you are actually working in when more than one Claude or Codex session is open in the same workspace.** Picking the active session by file write-time alone could lock onto whichever session was last written, even when the other one was the one you were actively prompting. The picker now reads the tail of each candidate, scores it by current activity (a mid-turn assistant beats a waiting prompt beats an idle finished turn), and only honors the score for sessions written in the last five minutes. An orphaned mid-turn file left over from days ago no longer outranks a fresh idle session, and concurrent sessions stay disambiguated as you switch between them.
+- **Usage widgets that get stuck on a transient error now auto-heal within fifteen minutes without you having to prompt or click anything.** A recovery watchdog runs alongside the main poll loop and forces a fresh fetch whenever the gap since the last real attempt exceeds the ceiling, bypassing the cache adoption that could otherwise let a stuck `Refreshing` or `Paused` state ride out a long stretch. Covers the cases where a cached error state keeps refreshing itself, an extended rate-limit park honors a long server backoff, or the poll timer drifts.
+- **A Codex turn that completes but loses its reply in the bridge marshal step now delivers the reply from the rollout file instead of failing.** The dispatcher captures a watermark on the rollout at turn start and, in the outer error path, re-reads the rollout to compare against that seed. When the assistant text differs or the file grew past the seed size, the recovered text is delivered as success instead of the generic blocker message. Closes the silent-severance class where on-disk work landed but the reply never reached your inbox.
+- **Orphaned MCP bridge tool entries from older releases are now cleaned out of your Claude settings on every Epic Handshake activate, not just on a fresh install.** A user who already had Epic Handshake on at upgrade never re-triggered the installer, so legacy entries from retired bridge tools stayed in `~/.claude/settings.json` forever. The cleanup is now part of both the install path and the activate path. Idempotent, no-op when nothing matches.
+
+### Changed
+
+- **Your last-known usage bars now survive a VS Code restart or extension reload, not just an idle stretch in the same session.** The widget persists each provider's most recent reading to a small file under `~/.wat321/clients/<workspace>/usage-snapshot.json` and rehydrates it on construction, so the first frame of a new VS Code window is your real bars instead of a blank scaffold. Sign-out, token expiry, or disconnect still clear the persisted snapshot for that provider so a different account never inherits the prior one's display, and Reset WAT321 wipes the whole thing as part of the existing per-client sweep.
+- **The transient state label (Loading, Refreshing, Idle, Paused, Offline) now lives on a small dedicated widget that sits between the 5h and weekly bars, only visible when something needs your attention.** The bars themselves are now always bars - no more suffix text grafted onto the bar widget. The label widget appears for any non-ok service state and disappears the moment the service returns to ok, with the full tooltip detail (reconnect countdown, server message, status-page incident) on hover.
+- **WAT321 now reads `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` as a pair when both are set, matching current Claude Code behavior.** Earlier releases of Claude Code accepted the percentage override on its own, but recent versions ignore it without a paired window declaration. The widget now computes the effective trigger as `(pct / 100) * window` minus the observed 9-to-15-thousand-token drift between the nominal target and the actual fire point. The legacy single-key paths are still honored for older Claude Code releases.
 
 ## [1.5.16] - 2026-05-28
 
