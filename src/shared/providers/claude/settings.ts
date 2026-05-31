@@ -5,29 +5,22 @@ import { join } from "node:path";
 /**
  * Read-only accessor for `~/.claude/settings.json` used by the Claude
  * session token widget to display the current auto-compact threshold.
+ * Never writes. All CLAUDE_* env keys are user-owned, this module only
+ * reads them.
  *
- * Invariant: never writes. All CLAUDE_* env keys are user-owned; WAT321
- * only reads them.
+ * Three env keys participate in the threshold computation:
+ *   - `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` - percentage 1-100, only
+ *     effective when paired with WINDOW below.
+ *   - `CLAUDE_CODE_AUTO_COMPACT_WINDOW` - the denominator the
+ *     percentage applies to. Effective trigger lands around
+ *     `(pct / 100) * window` minus `OVERRIDE_EFFECTIVE_RESERVE`.
+ *   - `CLAUDE_CODE_MAX_CONTEXT_TOKENS` - context window override,
+ *     preferred over the model-derived window for 1M sessions where
+ *     the model tag may be absent.
  *
- * Three env keys are relevant and tracked here:
- *   - `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` - percentage (1-100). Most
- *     common user knob. Interpreted by Claude Code as "fire compaction
- *     when usage crosses this % of the effective context window".
- *   - `CLAUDE_CODE_AUTO_COMPACT_WINDOW` - absolute trigger token count.
- *     Rare, but if set it overrides the percentage path entirely.
- *   - `CLAUDE_CODE_MAX_CONTEXT_TOKENS` - declares the context window
- *     size. When Claude Code is on a 1M-variant model but this env
- *     key is unset, the percentage above gets applied to the wrong
- *     denominator (200k) and the widget overreports. We prefer this
- *     over the model-derived `contextWindowSize` when set.
- *
- * Effective-reserve caveat: empirically the percentage override in
- * recent Claude Code releases stacks with an internal reserve rather
- * than replacing it. Setting OVERRIDE=73 on a 1M window triggers
- * compaction around ~715k, not the nominal 730k. `OVERRIDE_EFFECTIVE_RESERVE`
- * captures that drift so the widget displays the real trigger point
- * instead of the nominal target. If future Claude Code releases change
- * this behavior, this is the one knob to update.
+ * `OVERRIDE_EFFECTIVE_RESERVE` documents the empirical drift between
+ * the nominal override target and Claude Code's actual compaction
+ * trigger. Update that constant if Claude Code's behavior shifts.
  */
 
 export const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
@@ -85,8 +78,12 @@ export function readAutoCompactOverrideRaw(): string | null {
 }
 
 /** Raw `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` as an integer token count,
- * or null. When set this is an absolute trigger threshold and should
- * win over the percentage path. */
+ * or null. When paired with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` this
+ * declares the denominator the percentage applies to (the pair
+ * branch wins in `readAutoCompactEffectiveTriggerTokens`). Without
+ * the percentage pair, older Claude Code releases treated this as
+ * an absolute trigger threshold. Current releases may ignore it
+ * alone. The reader stays a thin env accessor either way. */
 export function readAutoCompactWindow(): number | null {
   const raw = readSettingsEnv("CLAUDE_CODE_AUTO_COMPACT_WINDOW");
   if (raw === null) return null;
@@ -118,9 +115,22 @@ export function readAutoCompactPct(contextWindowSize: number): number {
 }
 
 /** Real auto-compact fire point in absolute tokens, accounting for
- * the empirical drift between the nominal override target and the
- * actual trigger. Priority: WINDOW env wins outright -> OVERRIDE env
- * percent minus OVERRIDE_EFFECTIVE_RESERVE -> default formula.
+ * the empirical drift between the nominal target and the actual
+ * trigger. Resolution order:
+ *   1. WINDOW + PCT pair (current Claude Code behavior). WINDOW
+ *      declares the denominator, PCT is the percentage applied to
+ *      it. Effective trigger = `(pct / 100) * window` minus the
+ *      empirical drift reserve.
+ *   2. WINDOW alone (legacy interpretation). Older Claude Code
+ *      releases treated this as an absolute trigger. Current releases
+ *      appear to ignore PCT without WINDOW and may also ignore WINDOW
+ *      alone. Kept here so users on older Claude Code that still
+ *      honor it see the right number.
+ *   3. PCT alone applied to MAX_CONTEXT (legacy interpretation).
+ *      Currently defunct in recent Claude Code releases, but kept for
+ *      backward compatibility with older releases where it still
+ *      worked.
+ *   4. Built-in default formula on the effective context window.
  *
  * Widget consumers use this as the unified denominator for bars, the
  * displayed percentage, the "N/M" numerator's right-hand side, and
@@ -133,12 +143,21 @@ export function readAutoCompactEffectiveTriggerTokens(
   contextWindowSize: number
 ): number {
   const absWindow = readAutoCompactWindow();
+  const overrideRaw = readAutoCompactOverrideRaw();
+
+  if (absWindow !== null && overrideRaw !== null) {
+    const pct = parseInt(overrideRaw, 10);
+    if (pct >= 1 && pct <= 100) {
+      const nominal = Math.round((pct / 100) * absWindow);
+      return Math.max(1, nominal - OVERRIDE_EFFECTIVE_RESERVE);
+    }
+  }
+
   if (absWindow !== null) return absWindow;
 
   const maxCtx = readMaxContextTokens();
   const effectiveWindow = maxCtx ?? contextWindowSize;
 
-  const overrideRaw = readAutoCompactOverrideRaw();
   if (overrideRaw !== null) {
     const pct = parseInt(overrideRaw, 10);
     if (pct >= 1 && pct <= 100) {
