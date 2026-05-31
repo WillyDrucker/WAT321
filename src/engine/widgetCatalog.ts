@@ -19,13 +19,15 @@ const DEFAULT_BASE_PRIORITY = 1001;
  * left-to-right status bar position (slot 0 = leftmost). */
 const WIDGETS = [
   { id: "wat321.session",               name: "Claude Usage (5hr)",           provider: "claude", slot: 0 },
-  { id: "wat321.weekly",                name: "Claude Usage (Weekly)",        provider: "claude", slot: 1 },
-  { id: "wat321.codexSession",          name: "Codex Usage (5 hour)",         provider: "codex",  slot: 2 },
-  { id: "wat321.codexWeekly",           name: "Codex Usage (Weekly)",         provider: "codex",  slot: 3 },
-  { id: "wat321.sessionTokens",         name: "Claude Session Tokens",        provider: "claude", slot: 4 },
-  { id: "wat321.epicHandshake",         name: "Epic Handshake",               provider: "engine", slot: 5 },
-  { id: "wat321.codexSessionTokens",    name: "Codex Session Tokens",         provider: "codex",  slot: 6 },
-  { id: "wat321.modelBridge",           name: "OpenCode Routes",                 provider: "engine", slot: 7 },
+  { id: "wat321.claudeUsageStatus",     name: "Claude Usage Status",          provider: "claude", slot: 1 },
+  { id: "wat321.weekly",                name: "Claude Usage (Weekly)",        provider: "claude", slot: 2 },
+  { id: "wat321.codexSession",          name: "Codex Usage (5 hour)",         provider: "codex",  slot: 3 },
+  { id: "wat321.codexUsageStatus",      name: "Codex Usage Status",           provider: "codex",  slot: 4 },
+  { id: "wat321.codexWeekly",           name: "Codex Usage (Weekly)",         provider: "codex",  slot: 5 },
+  { id: "wat321.sessionTokens",         name: "Claude Session Tokens",        provider: "claude", slot: 6 },
+  { id: "wat321.epicHandshake",         name: "Epic Handshake",               provider: "engine", slot: 7 },
+  { id: "wat321.codexSessionTokens",    name: "Codex Session Tokens",         provider: "codex",  slot: 8 },
+  { id: "wat321.modelBridge",           name: "OpenCode Routes",                 provider: "engine", slot: 9 },
 ] as const satisfies readonly WidgetDescriptor[];
 
 /** Every widget ID registered in the catalog. Used by Reset WAT321
@@ -54,13 +56,15 @@ export function getWidgetPriority(slot: number): number {
  * cannot drift silently. */
 export const WIDGET_SLOT = {
   claudeUsage5H: 0,
-  claudeUsageWeekly: 1,
-  codexUsage5H: 2,
-  codexUsageWeekly: 3,
-  claudeSessionTokens: 4,
-  epicHandshake: 5,
-  codexSessionTokens: 6,
-  openCodeRoutes: 7,
+  claudeUsageStatus: 1,
+  claudeUsageWeekly: 2,
+  codexUsage5H: 3,
+  codexUsageStatus: 4,
+  codexUsageWeekly: 5,
+  claudeSessionTokens: 6,
+  epicHandshake: 7,
+  codexSessionTokens: 8,
+  openCodeRoutes: 9,
 } as const;
 
 /** Derived reverse map: slot number -> widget ID. Built from

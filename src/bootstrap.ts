@@ -15,11 +15,13 @@ import { parseLastAssistantText as parseCodexAssistantText } from "./shared/code
 import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
 import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
+import { ClaudeUsageErrorWidget } from "./WAT321_CLAUDE_USAGE_ERROR/widget";
 import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
 import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/widget";
 import { isCodexTurnComplete } from "./WAT321_CODEX_SESSION_TOKENS/parsers";
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { CodexSessionTokensWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
+import { CodexUsageErrorWidget } from "./WAT321_CODEX_USAGE_ERROR/widget";
 import { CodexUsage5hrWidget } from "./WAT321_CODEX_USAGE_5H/widget";
 import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/widget";
 
@@ -113,6 +115,7 @@ function buildClaudeGroup(
 
   const disposables: vscode.Disposable[] = [
     ...activateWidget(usageService, new ClaudeUsage5hrWidget()),
+    ...activateWidget(usageService, new ClaudeUsageErrorWidget()),
     ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
     ...activateWidget(tokenService, new ClaudeSessionTokensWidget(bridgeStage)),
     watchProviderAvailability("claude", usageService, ctx),
@@ -147,6 +150,7 @@ function buildCodexGroup(
 
   const disposables: vscode.Disposable[] = [
     ...activateWidget(usageService, new CodexUsage5hrWidget()),
+    ...activateWidget(usageService, new CodexUsageErrorWidget()),
     ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
     ...activateWidget(tokenService, new CodexSessionTokensWidget(bridgeStage)),
     watchProviderAvailability("codex", usageService, ctx),
