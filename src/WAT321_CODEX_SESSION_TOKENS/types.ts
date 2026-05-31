@@ -65,6 +65,18 @@ export interface CodexResolvedSession {
    * observable, same as Claude). Driven by the shared
    * `CompactFlashMachine`. */
   compactState: CompactFlashSnapshot;
+  /** Snapshot of how many Codex sessions in this workspace are
+   * currently open and how many of those have an in-flight turn.
+   * `total` counts rollouts whose cwd matches the workspace and
+   * whose mtime is within the inventory window (Codex rollouts
+   * persist on disk after the CLI exits, so a freshness gate is
+   * what defines "open" - distinct from Claude's process-file
+   * signal). `inProgress` is the subset whose tail classifies as
+   * `assistant-pending` or `user`. Drives the multi-session tooltip
+   * line that surfaces when N > 1. Always present - 1/0 in the
+   * single-session case. Computed alongside the active-rollout
+   * pick so no extra walk is required. */
+  workspaceSessionInventory: { total: number; inProgress: number };
 }
 
 export type CodexTokenWidgetState =

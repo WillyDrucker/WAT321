@@ -401,7 +401,7 @@ export class CodexDispatcher {
       record.threadId !== null &&
       (record.consecutiveFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES
     ) {
-      this.logger.warn(
+      this.logger.error(
         `thread ${record.threadId} hit ${MAX_CONSECUTIVE_FAILURES} consecutive failures; rotating`
       );
       record = rotateThreadRecord(record, this.workspacePath);
@@ -455,7 +455,7 @@ export class CodexDispatcher {
         const cls = classifyFailure(err);
         const msg = err instanceof Error ? err.message : String(err);
         if (cls === "rotate") {
-          this.logger.warn(`resume failed (${msg}); thread unrecoverable, rotating`);
+          this.logger.error(`resume failed (${msg}); thread unrecoverable, rotating`);
           record = rotateThreadRecord(record, this.workspacePath);
           const spawned = await spawnFreshThread({
             client,
@@ -514,7 +514,7 @@ export class CodexDispatcher {
         const cls = classifyFailure(err);
         if (cls !== "rotate") throw err;
         const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
+        this.logger.error(
           `runTurn rotate (${msg}); rotating + spawning fresh thread for retry`
         );
         record = rotateThreadRecord(record, this.workspacePath);

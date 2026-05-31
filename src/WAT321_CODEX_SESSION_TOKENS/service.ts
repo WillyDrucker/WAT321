@@ -23,6 +23,7 @@ import {
   parseModelSlug,
 } from "./parsers";
 import { findLatestRollout, getSessionTitle } from "./rolloutDiscovery";
+import { logNotifEvent } from "../shared/diag/notifEventLog";
 import { resolveAutoCompactTokens } from "./autoCompactLimit";
 
 /** fs.watch in the base class handles instant transcript-change
@@ -66,6 +67,13 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private cachedModelSlug: string | null = null;
   private cachedAutoCompactTokens: number | null = null;
   private cachedAutoCompactModel = "";
+  /** Latest workspace inventory snapshot. Refreshed inside the same
+   * scan that picks the active rollout, surfaced in the emitted
+   * state for the multi-session tooltip line. */
+  private cachedInventory: { total: number; inProgress: number } = {
+    total: 0,
+    inProgress: 0,
+  };
   /** Wall-clock ms when this service last observed the rollout file
    * grow in byte size. Seeded with kernel mtime on the first poll of
    * a new rollout (so a stale file is not falsely treated as live)
@@ -161,8 +169,9 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       now - this.lastRolloutScan >= SESSION_TOKEN_RESCAN_MS ||
       !this.cachedRolloutPath
     ) {
-      const found = findLatestRollout(codexDir, this.workspacePath);
-      if (found) this.cachedRolloutPath = found;
+      const result = findLatestRollout(codexDir, this.workspacePath);
+      if (result.path) this.cachedRolloutPath = result.path;
+      this.cachedInventory = { total: result.total, inProgress: result.inProgress };
       this.lastRolloutScan = now;
     }
 
@@ -173,6 +182,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     }
 
     if (this.cachedRolloutPath !== this.cachedTranscriptPath) {
+      const prevPath = this.cachedTranscriptPath;
       this.cachedTranscriptSize = 0;
       this.cachedTranscriptPath = this.cachedRolloutPath;
       this.cachedSessionTitle = null;
@@ -184,6 +194,18 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       // the baseline, rather than carrying forward the prior file's
       // freshness.
       this.lastObservedGrowthMs = null;
+      // Log rollout-switches so a missing-notification post-mortem
+      // can see exactly when the widget moved between rollouts.
+      // The next stat read carries the new rollout's mtime through
+      // the normal state flow.
+      logNotifEvent({
+        at: Date.now(),
+        kind: "session-switch",
+        provider: "codex",
+        fromPath: prevPath,
+        toPath: this.cachedRolloutPath,
+        source: "rollout-scan",
+      });
     }
 
     let rolloutMtime: number;
@@ -298,6 +320,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       lastCompactTimestamp: lastCompactAt,
       tokensPerSecond,
       compactState,
+      workspaceSessionInventory: this.cachedInventory,
     });
   }
 

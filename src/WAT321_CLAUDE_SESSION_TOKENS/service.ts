@@ -18,12 +18,16 @@ import {
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
 import { classifyLastEntry } from "../shared/transcriptClassifier";
+import { logNotifEvent } from "../shared/diag/notifEventLog";
 import { CompactStateMachine } from "./compactStateMachine";
 import { parseFirstUserMessage, parseLastUsage, parseTurnInfo } from "./parsers";
 import {
-  findActiveSession,
   findLastKnownTranscript,
+  rankActiveSession,
+  tallyWorkspaceSessions,
+  walkWorkspaceSessions,
   type LastKnownTranscript,
+  type SessionCandidate,
 } from "./transcriptDiscovery";
 
 /** fs.watch in the base class handles instant transcript-change
@@ -118,7 +122,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
 
   private resolveTranscript(
     home: string,
-    sessionsDir: string,
+    candidates: readonly SessionCandidate[],
     now: number
   ): {
     transcriptPath: string;
@@ -127,7 +131,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     source: "live" | "lastKnown";
     pid?: number;
   } | null {
-    const live = findActiveSession(sessionsDir, this.workspacePath);
+    const live = rankActiveSession(candidates);
     if (live) {
       const projectKey = getProjectKey(live.cwd);
       const transcriptPath = join(
@@ -186,7 +190,13 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.settingsWatcher.sync(SETTINGS_PATH);
 
     const now = Date.now();
-    const resolved = this.resolveTranscript(home, sessionsDir, now);
+    // Walk the workspace's Claude sessions once per poll. Both the
+    // active-session pick (ranked by activity + freshness) and the
+    // multi-session inventory (tally for the tooltip) read from this
+    // result, so the walk + per-session tail read does not happen
+    // twice.
+    const candidates = walkWorkspaceSessions(sessionsDir, this.workspacePath);
+    const resolved = this.resolveTranscript(home, candidates, now);
     if (!resolved) {
       if (this.hasGoodData) return;
       this.setState({ status: "no-session" });
@@ -202,9 +212,22 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     }
 
     if (transcriptPath !== this.cachedTranscriptPath) {
+      const prevPath = this.cachedTranscriptPath;
       this.cachedTranscriptSize = 0;
       this.cachedTranscriptPath = transcriptPath;
       this.cachedSessionTitle = null;
+      // Log session-switches so a missing-notification post-mortem
+      // can see exactly when the widget moved between transcripts.
+      // The next emission's stat read carries the new path's mtime
+      // through the normal state flow.
+      logNotifEvent({
+        at: Date.now(),
+        kind: "session-switch",
+        provider: "claude",
+        fromPath: prevPath,
+        toPath: transcriptPath,
+        source,
+      });
     }
 
     let size: number;
@@ -277,6 +300,11 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       now,
     });
 
+    // Workspace session inventory for the multi-session tooltip line.
+    // Reads the same candidate list that drove the active-session
+    // pick above - no second walk, no second round of tail reads.
+    const workspaceSessionInventory = tallyWorkspaceSessions(candidates);
+
     this.emitOk({
       sessionId,
       label: basename(cwdForLabel),
@@ -294,6 +322,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       turnInfo: parseTurnInfo(tail),
       tokensPerSecond,
       compactState,
+      workspaceSessionInventory,
     });
   }
 
