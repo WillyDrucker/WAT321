@@ -1,13 +1,30 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import * as vscode from "vscode";
-import { readAliases, writeAliases, type SessionTarget } from "../shared/bridge/sessionAliases";
+import {
+  readAliases,
+  writeAliases,
+  type SessionTarget,
+} from "../shared/bridge/sessionAliases";
 import {
   makeBackItem,
   makeCancelItem,
   makePauseResumeItem,
   withMenuLifecycle,
 } from "./menuCommon";
+import {
+  ALIAS_PATH,
+  buildCurrentRow,
+  buildDeleteAllRow,
+  buildDeleteRow,
+  buildModelRow,
+  buildResetRow,
+  fetchSessions,
+  formatSessionDisplayName,
+  pickInstanceForTarget,
+  readOpenCodeRoutesConfigSnapshot,
+  showSwitchSessionPicker,
+  TARGET_CONFIGS,
+  type PickerRow,
+} from "./openCodeSessionsPickerData";
 import { isPaused, setPaused } from "./statusBarState";
 
 /**
@@ -16,10 +33,9 @@ import { isPaused, setPaused } from "./statusBarState";
  *
  * Both targets share opencode serve's session machinery; the only
  * differences are the alias-map namespace and the instance kind
- * filter. A single parameterized picker handles both, keeping them in
- * lockstep on row order and behavior. Codex's picker stays separate
- * because Codex sessions live in Codex's own rollout files, not in
- * opencode.db.
+ * filter. A single parameterized picker handles both. Codex's
+ * picker stays separate because Codex sessions live in Codex's own
+ * rollout files, not in opencode.db.
  *
  * Row set (Codex-style single-active-session model):
  *   - BACK
@@ -32,149 +48,16 @@ import { isPaused, setPaused } from "./statusBarState";
  *
  * Active-alias state lives in `aliases.activeAliases[target]` in
  * `~/.wat321/bridge/session-aliases.json`. The bridge consumer
- * (bin/opencode.mjs) resolves a missing `session` arg to that active
- * value, so the menu's CURRENT row is the user-facing source of truth
- * and dispatch follows automatically.
+ * (bin/opencode.mjs) resolves a missing `session` arg to that
+ * active value, so the menu's CURRENT row is the user-facing source
+ * of truth and dispatch follows automatically.
+ *
+ * Row builders + data sources live in `openCodeSessionsPickerData.ts`.
  */
 
-import { bridgeStateDir, openCodeRoutesStateDir } from "../shared/wat321Paths";
-
-const ALIAS_PATH = join(bridgeStateDir(), "session-aliases.json");
-const BRIDGE_CONFIG_PATH = join(bridgeStateDir(), "config.json");
-const OPENCODE_ROUTES_CONFIG_PATH = join(openCodeRoutesStateDir(), "config.json");
-
-/** Read the bridge config's projectName for display labels. The
- * bridge tier writes this on activate + workspace-folder change.
- * Fallback "Workspace" matches what the bridge tier uses when no
- * folder is open. */
-function readProjectName(): string {
-  try {
-    if (!existsSync(BRIDGE_CONFIG_PATH)) return "Workspace";
-    const raw = readFileSync(BRIDGE_CONFIG_PATH, "utf8");
-    const cfg = JSON.parse(raw) as { projectName?: unknown };
-    if (typeof cfg.projectName === "string" && cfg.projectName.trim().length > 0) {
-      return cfg.projectName.trim();
-    }
-    return "Workspace";
-  } catch {
-    return "Workspace";
-  }
-}
-
-/** Standardized session display label. Mirrors the format used in the
- * unified bridge handlers so the picker, the bridge response text,
- * and any future surfaces all read the same way. */
-function formatSessionDisplayName(target: SessionTarget, alias: string): string {
-  const targetLabel = target === "local" ? "Local" : "OpenCode";
-  return `${readProjectName()} Epic Handshake Claude-to-${targetLabel} ${alias}`;
-}
-
-interface OpenCodeSessionMeta {
-  id: string;
-  slug?: string;
-  title?: string;
-  model?: { id?: string; providerID?: string };
-  time?: { created?: number; updated?: number };
-}
-
-interface OpenCodeRoutesInstance {
-  id: string;
-  alias: string;
-  kind: "local" | "remote";
-  model: string;
-  harnessProviderID: "llama.cpp" | "zen";
-}
-
-interface OpenCodeRoutesConfigSnapshot {
-  openCodeServerUrl?: string;
-  activeInstanceId?: string;
-  instances?: OpenCodeRoutesInstance[];
-}
-
-function readOpenCodeRoutesConfigSnapshot(): OpenCodeRoutesConfigSnapshot | null {
-  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return null;
-  try {
-    return JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8")) as OpenCodeRoutesConfigSnapshot;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchSessions(serveUrl: string): Promise<OpenCodeSessionMeta[]> {
-  try {
-    const res = await fetch(`${serveUrl}/session`);
-    if (!res.ok) return [];
-    const data = (await res.json()) as OpenCodeSessionMeta[];
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
-}
-
-function formatRelative(ms: number | undefined): string {
-  if (typeof ms !== "number") return "";
-  const ageMs = Date.now() - ms;
-  if (ageMs < 60_000) return "just now";
-  if (ageMs < 3_600_000) return `${Math.round(ageMs / 60_000)}m ago`;
-  if (ageMs < 86_400_000) return `${Math.round(ageMs / 3_600_000)}h ago`;
-  return `${Math.round(ageMs / 86_400_000)}d ago`;
-}
-
-interface PickerRow extends vscode.QuickPickItem {
-  rowKind:
-    | "back"
-    | "model"
-    | "current"
-    | "reset"
-    | "delete"
-    | "delete-all"
-    | "pause"
-    | "resume"
-    | "cancel";
-  alias?: string;
-  instanceId?: string;
-}
-
-interface TargetConfig {
-  title: string;
-  instanceKind: "local" | "remote";
-  fallbackInstanceId: string;
-  emptyHint: string;
-}
-
-const TARGET_CONFIGS: Record<SessionTarget, TargetConfig> = {
-  opencode: {
-    title: "Manage OpenCode",
-    instanceKind: "remote",
-    fallbackInstanceId: "big-pickle",
-    emptyHint: "No OpenCode sessions yet. The next prompt creates one.",
-  },
-  local: {
-    title: "Manage Local LLM",
-    instanceKind: "local",
-    fallbackInstanceId: "local-llm",
-    emptyHint:
-      "No Local LLM sessions yet. The next prompt creates one (requires Local Endpoint set in WAT321 settings).",
-  },
-};
-
-function pickInstanceForTarget(
-  opencodeCfg: OpenCodeRoutesConfigSnapshot | null,
+async function showSessionsPicker(
   target: SessionTarget
-): OpenCodeRoutesInstance | null {
-  if (!opencodeCfg) return null;
-  const cfg = TARGET_CONFIGS[target];
-  const instances = opencodeCfg.instances ?? [];
-  const candidates = instances.filter((i) => i.kind === cfg.instanceKind);
-  if (candidates.length === 0) return null;
-  const active = candidates.find((i) => i.id === opencodeCfg.activeInstanceId);
-  if (active) return active;
-  const fallback = candidates.find((i) => i.id === cfg.fallbackInstanceId);
-  if (fallback) return fallback;
-  return candidates[0];
-}
-
-async function showSessionsPicker(target: SessionTarget): Promise<"back" | undefined> {
+): Promise<"back" | undefined> {
   const cfg = TARGET_CONFIGS[target];
   const aliases = readAliases(ALIAS_PATH);
   const opencodeCfg = readOpenCodeRoutesConfigSnapshot();
@@ -182,26 +65,28 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
 
   const sessionMetas = serveUrl ? await fetchSessions(serveUrl) : [];
   const metaById = new Map(sessionMetas.map((s) => [s.id, s]));
-  const instancesById = new Map((opencodeCfg?.instances ?? []).map((i) => [i.id, i]));
+  const instancesById = new Map(
+    (opencodeCfg?.instances ?? []).map((i) => [i.id, i])
+  );
 
   const targetAliases = aliases[target];
   const activeAlias = aliases.activeAliases[target];
   const bucketSize = Object.keys(targetAliases).length;
+  const toolDisplay = target === "local" ? "Local" : "OpenCode";
+  const toolUpper = target === "local" ? "LOCAL LLM" : "OPENCODE";
+  const ctx = { target, toolDisplay, toolUpper, activeAlias, bucketSize } as const;
 
-  // Model label shown on the MODEL row. For opencode we render the
-  // catalog instance alias ("Big Pickle"). For local the catalog's
-  // `model` field is intentionally blank (llama.cpp ignores model id
-  // and answers with whatever is loaded), so the truthful name lives
-  // on the active session's metadata, populated when opencode serve
-  // creates a session against the local endpoint. Resolution order:
-  //   1. active session's `model.id` from /session metadata
-  //   2. catalog instance alias ("Local LLM" by default)
-  //   3. "Local LLM (detected on first prompt)" first-run hint
+  // Model label. For opencode the catalog instance alias ("Big
+  // Pickle") wins. For local the catalog's `model` field is blank
+  // (llama.cpp ignores model id and answers with whatever is loaded)
+  // so the truthful name lives on the active session's metadata
+  // populated when opencode serve creates a session against the local
+  // endpoint. Resolution order: detected local model > catalog alias
+  // > first-run hint.
   const activeInstance = pickInstanceForTarget(opencodeCfg, target);
-  const activeAliasForLabel = aliases.activeAliases[target];
   const activeSessionMeta =
-    activeAliasForLabel !== null
-      ? metaById.get(targetAliases[activeAliasForLabel]?.sessionId ?? "")
+    activeAlias !== null
+      ? metaById.get(targetAliases[activeAlias]?.sessionId ?? "")
       : undefined;
   const detectedLocalModel =
     target === "local" ? activeSessionMeta?.model?.id ?? null : null;
@@ -211,92 +96,17 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
         activeInstance?.alias ||
         "Local LLM (detected on first prompt)"
       : activeInstance?.alias ?? "(none)";
-  // For target=local the row doubles as the entry point into the
-  // local-side settings (endpoint URL, related knobs) - llama.cpp's
-  // model is server-controlled, so the row's payload is "settings,"
-  // not a model picker. For target=opencode the row stays a one-click
-  // catalog instance switch since OpenCode's model is bound at session
-  // create.
-  const modelRowLabel =
-    target === "local"
-      ? `LOCAL LLM MODEL SETTINGS: ${modelLabelText}`
-      : `OPENCODE MODEL: ${modelLabelText}`;
-  const modelRow: PickerRow = {
-    rowKind: "model",
-    label: modelRowLabel,
-    description:
-      target === "local"
-        ? "Click to open Local Endpoint settings."
-        : "Click to change model.",
-    iconPath: new vscode.ThemeIcon(
-      target === "local" ? "settings-gear" : "symbol-method"
-    ),
-  };
-
-  // SESSION row. Mirrors Codex's row exactly: shows the active alias'
-  // display name, or the "Created on next prompt to ..." hint when
-  // nothing is active. Click opens the switch sub-picker (when multiple
-  // aliases exist) or shows a hint toast when only the active one
-  // exists. Active row in the sub-picker carries a green check.
-  const toolDisplay = target === "local" ? "Local" : "OpenCode";
-  const toolUpper = target === "local" ? "LOCAL LLM" : "OPENCODE";
-  const currentLabel =
-    activeAlias !== null
-      ? `Epic Handshake Claude-to-${toolDisplay} ${activeAlias}`
-      : `Created on next prompt to ${toolDisplay}`;
-  const currentRow: PickerRow = {
-    rowKind: "current",
-    label: `${toolUpper} SESSION: ${currentLabel}`,
-    iconPath: new vscode.ThemeIcon("history"),
-  };
-
-  const resetRow: PickerRow = {
-    rowKind: "reset",
-    label: `RESET ${toolUpper} SESSION`,
-    description: "Fresh session on next prompt.",
-    detail: `Keeps past ${toolDisplay} sessions in the alias bucket.`,
-    iconPath: new vscode.ThemeIcon("refresh"),
-  };
-
-  // Always rendered for layout consistency with the Codex menu. When
-  // no active alias exists the click handler short-circuits with an
-  // info toast rather than hiding the row, so the menu shape stays
-  // stable as the user moves between empty and active states.
-  const deleteRow: PickerRow = {
-    rowKind: "delete",
-    label:
-      activeAlias !== null
-        ? `DELETE ${toolUpper} SESSION (${activeAlias})`
-        : `DELETE ${toolUpper} SESSION`,
-    description: "Remove the active session.",
-    detail:
-      activeAlias !== null
-        ? `Deletes the currently active "Epic Handshake" session. Fresh session on next prompt.`
-        : undefined,
-    iconPath: new vscode.ThemeIcon("trash"),
-  };
-
-  const deleteAllRow: PickerRow = {
-    rowKind: "delete-all",
-    label: `DELETE ALL ${toolUpper} SESSIONS (${bucketSize})`,
-    description:
-      bucketSize === 0
-        ? "Nothing to clear right now."
-        : "Removes every bridge session for this workspace.",
-    detail: bucketSize === 0 ? undefined : "Fresh session on next prompt.",
-    iconPath: new vscode.ThemeIcon("trash"),
-  };
 
   const paused = isPaused();
   const pauseItem = makePauseResumeItem(paused, false);
 
   const items: PickerRow[] = [
     { ...makeBackItem(), rowKind: "back" },
-    modelRow,
-    currentRow,
-    resetRow,
-    deleteRow,
-    deleteAllRow,
+    buildModelRow(ctx, modelLabelText),
+    buildCurrentRow(ctx),
+    buildResetRow(ctx),
+    buildDeleteRow(ctx),
+    buildDeleteAllRow(ctx),
     {
       ...pauseItem,
       rowKind: pauseItem.action === "resume" ? "resume" : "pause",
@@ -324,9 +134,9 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
 
   if (pick.rowKind === "model") {
     if (target === "local") {
-      // Open VS Code's settings UI filtered to the local LLM keys so
-      // the user can edit `wat321.localEndpoint` (and any future
-      // local-side knobs) without leaving the bridge menu flow.
+      // Open VS Code's settings UI filtered to local LLM keys so the
+      // user can edit `wat321.localEndpoint` without leaving the
+      // bridge menu flow.
       await vscode.commands.executeCommand(
         "workbench.action.openSettings",
         "@id:wat321.localEndpoint"
@@ -347,65 +157,22 @@ async function showSessionsPicker(target: SessionTarget): Promise<"back" | undef
       );
       return showSessionsPicker(target);
     }
-    interface SwitchRow extends vscode.QuickPickItem {
-      rowType: "session" | "back" | "pause" | "resume" | "cancel";
-      alias?: string;
+    const outcome = await showSwitchSessionPicker({
+      target,
+      toolDisplay,
+      activeAlias,
+      targetAliases,
+      metaById,
+      instancesById,
+    });
+    if (outcome.kind === "switched" && outcome.alias !== activeAlias) {
+      aliases.activeAliases[target] = outcome.alias;
+      writeAliases(ALIAS_PATH, aliases);
+      void vscode.window.showInformationMessage(
+        `Active ${toolDisplay} session: ${formatSessionDisplayName(target, outcome.alias)}.`
+      );
     }
-    const aliasRows: SwitchRow[] = Object.entries(targetAliases).map(
-      ([alias, entry]) => {
-        const meta = metaById.get(entry.sessionId);
-        const boundInstance = entry.instanceId
-          ? instancesById.get(entry.instanceId)
-          : null;
-        const modelHint =
-          boundInstance?.alias ?? meta?.model?.id ?? "(no model)";
-        const ageLabel = formatRelative(meta?.time?.updated);
-        const display = formatSessionDisplayName(target, alias);
-        const isActive = alias === activeAlias;
-        return {
-          rowType: "session",
-          label: `${isActive ? "✔️ " : ""}${display}`,
-          description: `${modelHint}${ageLabel ? `  -  ${ageLabel}` : ""}`,
-          alias,
-        };
-      }
-    );
-    const subPause = makePauseResumeItem(paused, false);
-    const switchItems: SwitchRow[] = [
-      { ...makeBackItem(), rowType: "back" },
-      ...aliasRows,
-      {
-        ...subPause,
-        rowType: subPause.action === "resume" ? "resume" : "pause",
-      },
-      { ...makeCancelItem(false), rowType: "cancel" },
-    ];
-    const switchPick = await vscode.window.showQuickPick<SwitchRow>(
-      switchItems,
-      {
-        title: `Switch ${toolDisplay} session`,
-        placeHolder: "Pick a session to mark active",
-      }
-    );
-    if (!switchPick || switchPick.rowType === "cancel") return;
-    if (switchPick.rowType === "back") return showSessionsPicker(target);
-    if (switchPick.rowType === "pause") {
-      setPaused(true);
-      return;
-    }
-    if (switchPick.rowType === "resume") {
-      setPaused(false);
-      return showSessionsPicker(target);
-    }
-    if (switchPick.rowType === "session" && switchPick.alias !== undefined) {
-      if (switchPick.alias !== activeAlias) {
-        aliases.activeAliases[target] = switchPick.alias;
-        writeAliases(ALIAS_PATH, aliases);
-        void vscode.window.showInformationMessage(
-          `Active ${toolDisplay} session: ${formatSessionDisplayName(target, switchPick.alias)}.`
-        );
-      }
-    }
+    if (outcome.kind === "close") return;
     return showSessionsPicker(target);
   }
 

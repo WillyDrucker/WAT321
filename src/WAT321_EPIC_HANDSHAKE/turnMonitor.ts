@@ -2,7 +2,14 @@ import { statSync } from "node:fs";
 import { readTail } from "../shared/fs/fileReaders";
 import { parseStageInfo } from "../shared/codex-rollout/phaseParser";
 import type { BridgeStage, StageInfo } from "../shared/codex-rollout/types";
-import type { EpicHandshakeLogger } from "./types";
+import {
+  resolveTurnMonitorOptions,
+  type MonitorSnapshot,
+  type ResolvedTurnMonitorOptions,
+  type RpcProgressKind,
+  type TurnMonitorOptions,
+} from "./turnMonitorOptions";
+import { stallWindowFor } from "./turnMonitorStallWindow";
 
 /**
  * Adaptive turn watchdog for the Epic Handshake dispatcher. Replaces
@@ -22,10 +29,11 @@ import type { EpicHandshakeLogger } from "./types";
  *   - Phase 0 -> 1: `phase0WindowMs` from start until `task_started`
  *     or `turn/started` observed. Timeout = hard fail
  *     ("Codex never activated").
- *   - Phase 1 onward: `stallWindowMs` since any progress signal.
+ *   - Phase 1 onward: tool-aware window since any progress signal -
+ *     see `turnMonitorStallWindow.ts` for the per-tool table.
  *     Timeout = soft fail ("Codex stalled during <tool>").
- *   - `hardCapMs`: absolute ceiling regardless of progress. Timeout
- *     = hard fail ("Codex exceeded max turn duration").
+ *   - `hardCapMs`: absolute wall-clock ceiling. Timeout = hard fail
+ *     ("Codex exceeded max turn duration").
  *
  * Callers drive completion from outside. The monitor reports stall
  * or cap via `onStall` / `onHardCap`, and the caller sends
@@ -35,106 +43,10 @@ import type { EpicHandshakeLogger } from "./types";
  * invoked.
  */
 
-export interface TurnMonitorOptions {
-  /** Resolver for the bridge thread's rollout .jsonl path. Called on
-   * every poll tick until it returns a non-null path, then on every
-   * subsequent tick to keep the path fresh (Codex may rotate files
-   * mid-turn for compaction). The dispatcher passes a thunk that wraps
-   * `findRolloutPath(threadId)` so the monitor can keep retrying while
-   * Codex is still creating the file - prior eager-resolution-at-start
-   * left the monitor permanently in RPC-only mode if the file did not
-   * exist at dispatch time, which stranded the status-bar glyph at
-   * stage 2/5 because nothing else advances `working` / `writing`.
-   *
-   * Pass a thunk that always returns null to disable rollout polling
-   * (RPC-only mode). */
-  resolveRolloutPath: () => string | null;
-  /** Fires on every observed progress signal - stage transition,
-   * RPC notification, OR rollout mtime bump. Used by the dispatcher
-   * to refresh the heartbeat file so channel.mjs's adaptive polling
-   * window keeps extending while Codex is demonstrably working.
-   * Without this, a long `working` phase would emit plenty of
-   * `function_call` + `token_count` events that reset the monitor's
-   * stall clock but never refresh the heartbeat, so channel.mjs
-   * would bail at `initialDeadline + stallWindow`. */
-  onProgress: (stage: BridgeStage, info: StageInfo) => void;
-  /** Fires whenever the monitor advances to a later stage. UI uses
-   * this to log the transition. onProgress also fires on every
-   * transition so callers don't need to subscribe to both if they
-   * only care about "did anything happen" semantics. */
-  onStageChange?: (stage: BridgeStage, info: StageInfo) => void;
-  /** Fires when the stall window expires with no progress signal. */
-  onStall: (reason: string) => void;
-  /** Fires when `hardCapMs` elapses regardless of progress. */
-  onHardCap: () => void;
-  /** Logger for phase transitions + timing. Prefixes each line with
-   * `[monitor]` so it is filterable in the output channel. */
-  logger: EpicHandshakeLogger;
-  /** Milliseconds to wait for the first `task_started` / `turn/started`
-   * before declaring the turn dead. Default 20_000. */
-  phase0WindowMs?: number;
-  /** Default milliseconds since the most recent progress signal before
-   * the turn is declared stalled. Default 60_000. Per-activity windows
-   * override this when an `activeTool` is present (see
-   * `stallWindowForTool`) - 60s is too tight for a `shell_command` that
-   * runs `npm test` or similar, because Codex emits function_call at
-   * dispatch time then goes silent until function_call_output lands.
-   * Raising the default here instead would also loosen idle-phase
-   * stall detection, which we want to keep tight. */
-  stallWindowMs?: number;
-  /** Absolute wall-clock ceiling. Default 300_000 (5 min). */
-  hardCapMs?: number;
-  /** How often to stat + tail the rollout file. Default 5_000. */
-  pollIntervalMs?: number;
-  /** Minimum stall window applied on top of the per-tool values in
-   * `stallWindowForCurrentActivity`. When set, every tool window gets
-   * max()'d with this floor - useful for modes that should tolerate
-   * longer silent gaps (e.g. Adaptive). Default 0 (no floor). */
-  stallFloorMs?: number;
-  /** Disable stall detection, hard-cap, and phase-0 "never activated"
-   * checks entirely. For Fire-and-Forget, where the user explicitly
-   * opted out of waiting - letting Codex run as long as it needs is
-   * the whole point of the mode. The reply lands when it lands, and
-   * if Codex truly hangs the user can cancel from the widget or reset
-   * the session. Default false. */
-  disableAllTimeouts?: boolean;
-}
-
-/** Kind of RPC progress event observed. Drives the stall-reset path
- * without coupling the monitor to the JSON-RPC client type. */
-export type RpcProgressKind =
-  | "turn-started"
-  | "item-started"
-  | "delta"
-  | "item-completed";
-
-interface MonitorSnapshot {
-  stage: BridgeStage;
-  info: StageInfo;
-  elapsedMs: number;
-}
+export type { TurnMonitorOptions, RpcProgressKind, MonitorSnapshot };
 
 export class TurnMonitor {
-  private readonly options: Required<
-    Omit<
-      TurnMonitorOptions,
-      | "resolveRolloutPath"
-      | "onProgress"
-      | "onStageChange"
-      | "onStall"
-      | "onHardCap"
-      | "logger"
-    >
-  > &
-    Pick<
-      TurnMonitorOptions,
-      | "resolveRolloutPath"
-      | "onProgress"
-      | "onStageChange"
-      | "onStall"
-      | "onHardCap"
-      | "logger"
-    >;
+  private readonly options: ResolvedTurnMonitorOptions;
   private resolvedRolloutPath: string | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private hardCapTimer: ReturnType<typeof setTimeout> | null = null;
@@ -149,20 +61,7 @@ export class TurnMonitor {
   private turnStartAt = 0;
 
   constructor(options: TurnMonitorOptions) {
-    this.options = {
-      resolveRolloutPath: options.resolveRolloutPath,
-      onProgress: options.onProgress,
-      onStageChange: options.onStageChange,
-      onStall: options.onStall,
-      onHardCap: options.onHardCap,
-      logger: options.logger,
-      phase0WindowMs: options.phase0WindowMs ?? 20_000,
-      stallWindowMs: options.stallWindowMs ?? 60_000,
-      hardCapMs: options.hardCapMs ?? 300_000,
-      pollIntervalMs: options.pollIntervalMs ?? 5_000,
-      stallFloorMs: options.stallFloorMs ?? 0,
-      disableAllTimeouts: options.disableAllTimeouts ?? false,
-    };
+    this.options = resolveTurnMonitorOptions(options);
   }
 
   /** Begin watching. Sets the hard cap timer, the phase-0 timer (for
@@ -275,8 +174,6 @@ export class TurnMonitor {
       this.stallTimer = null;
     }
   }
-
-  // --- Internals ---
 
   /** Read the rollout tail, run the phase parser, detect stage
    * advances and mtime freshness. Any fresh activity resets the
@@ -395,7 +292,11 @@ export class TurnMonitor {
     // Phase 0 has its own (tighter) timer; do not double-arm the
     // stall timer until we have crossed into phase 1+.
     if (this.currentStage === "dispatched") return;
-    const window = this.stallWindowForCurrentActivity();
+    const window = stallWindowFor(
+      this.lastInfo,
+      this.options.stallWindowMs,
+      this.options.stallFloorMs
+    );
     this.stallTimer = setTimeout(() => {
       this.stallTimer = null;
       if (this.stopped) return;
@@ -407,47 +308,6 @@ export class TurnMonitor {
       this.options.logger.warn(`[monitor] ${reason}`);
       this.options.onStall(reason);
     }, window);
-  }
-
-  /** Pick the stall window based on the active tool. `shell_command`
-   * can run several minutes with no rollout writes (Codex emits the
-   * function_call entry at dispatch, then nothing until
-   * function_call_output lands). Long-running reasoning is similar.
-   * Quick tools (update_plan, read_file) stay on tighter windows so
-   * a true stall still gets caught. Falls back to the configured
-   * default when no active tool is set (pure-reasoning phase or
-   * between tool calls). */
-  private stallWindowForCurrentActivity(): number {
-    const raw = this.rawStallWindowForCurrentActivity();
-    // Apply the configured floor so Fire-and-Forget turns can ride out
-    // long chained tool calls without tripping a false stall. Default
-    // floor is 0, which is a no-op for Standard/Adaptive.
-    return Math.max(raw, this.options.stallFloorMs);
-  }
-
-  private rawStallWindowForCurrentActivity(): number {
-    const tool = this.lastInfo?.activeTool?.name;
-    if (!tool) {
-      // Reasoning-only phases can run long (model thinking without
-      // tool calls); reasoning is signalled by reasoningTokens > 0
-      // on the last parsed info snapshot.
-      if (this.lastInfo && this.lastInfo.reasoningTokens > 0) {
-        return 180_000;
-      }
-      return this.options.stallWindowMs;
-    }
-    switch (tool) {
-      case "shell_command":
-        return 180_000;
-      case "web_search":
-      case "web_search_call":
-        return 120_000;
-      case "update_plan":
-      case "read_file":
-        return 60_000;
-      default:
-        return Math.max(this.options.stallWindowMs, 90_000);
-    }
   }
 
   private emptyInfo(): StageInfo {

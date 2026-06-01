@@ -1,43 +1,26 @@
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { releaseClaim, tryAcquireClaim } from "../shared/claimFile";
 import { resolveCodexCli } from "../shared/providers/codex/cliResolver";
 import { PathWatcher } from "../shared/polling/pathWatcher";
+import { workspaceHash } from "../shared/workspaceHash";
 import { AppServerClient } from "./appServerClient";
+import { dispatchTurn } from "./codexTurnDispatch";
 import {
   inboxClaudeDir,
   inboxCodexDir,
   sentClaudeDir,
   sentCodexDir,
 } from "./constants";
-import { newEnvelopeId, readEnvelope, writeEnvelopeAtomic, type Envelope } from "./envelope";
-import { classifyFailure } from "./failureClassifier";
+import {
+  newEnvelopeId,
+  readEnvelope,
+  writeEnvelopeAtomic,
+  type Envelope,
+} from "./envelope";
 import { moveToSent, purgeSent } from "./mailbox";
-import { isKnownCodexModel, readCodexConfigModel } from "../shared/providers/codex/models";
-import { tryRolloutRecovery } from "./rolloutRecovery";
-import {
-  clearBridgeErrorState,
-  findRolloutPath,
-  readRolloutModelSlug,
-  loadBridgeThreadRecord,
-} from "./threadPersistence";
-import {
-  noteFailure,
-  noteSuccess,
-  rotateThreadRecord,
-  spawnFreshThread,
-} from "./threadLifecycle";
-import {
-  clearInFlightFlag,
-  clearProcessingFlag,
-  writeInFlightFlag,
-  writeReturningFlag,
-  writeSuppressCodexToast,
-} from "./turnFlags";
-import { runTurnOnce } from "./turnRunner";
+import { writeSuppressCodexToast } from "./turnFlags";
 import type { EpicHandshakeLogger } from "./types";
-import { currentWaitMode } from "./waitMode";
-import { workspaceHash } from "../shared/workspaceHash";
 
 /**
  * Watches `inbox/codex/<wshash>/` for envelopes from Claude, dispatches
@@ -45,55 +28,21 @@ import { workspaceHash } from "../shared/workspaceHash";
  * writes the reply back to `inbox/claude/<wshash>/` so the channel MCP
  * server can push it into the originating Claude session.
  *
- * Lifecycle:
- *   - On first envelope: spawn AppServerClient, initialize, create or
- *     resume the workspace's bridge thread, dispatch turn, aggregate
- *     reply, write reply envelope.
- *   - Thread id persists in bridge-thread.<wshash>.json across
- *     subprocess restarts. Non-ephemeral threads survive the subprocess
- *     idle-kill, so we can drop the client after N minutes idle and
- *     resume cleanly on the next envelope.
- *
- * This file is the orchestration shell. The heavy lifting lives in:
- *   - `mailbox.ts`         - sent/inbox file housekeeping
- *   - `threadLifecycle.ts` - spawn/rotate/note success/failure
- *   - `turnRunner.ts`      - the runTurnOnce subscription + monitor loop
+ * This file owns the orchestration shell: inbox watching, per-envelope
+ * claim arbitration, app-server lifecycle (spawn / initialize / idle
+ * shutdown / force-restart), and reply envelope writing. The per-turn
+ * thread / dispatch / recover flow lives in `codexTurnDispatch.ts`;
+ * the actual turn run loop lives in `turnRunner.ts`.
  */
 
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
-/** Consecutive recoverable-shape failures before we give up on the
- * thread and rotate to a fresh one. Keeps a user's S1 alive through
- * transient network blips but bails out of genuinely stuck threads. */
-const MAX_CONSECUTIVE_FAILURES = 3;
 /** Per-envelope claim TTL. Two VS Code windows on the same workspace
  * each watch the same `inbox/codex/<wsHash>/` directory; without a
- * claim, both would dispatch the same envelope to Codex and write
- * duplicate replies. The claim file lives next to the envelope at
- * `<id>.md.claim` and is released on completion. TTL exceeds the
- * monitor's hard cap so a healthy long-running turn never reclaims;
- * a crashed dispatcher's claim ages out and the surviving window
- * picks up the orphan on its next inbox scan. */
+ * claim, both would dispatch the same envelope and write duplicate
+ * replies. TTL exceeds the monitor's hard cap so a healthy long-
+ * running turn never reclaims; a crashed dispatcher's claim ages out
+ * and the surviving window picks up the orphan on its next scan. */
 const ENVELOPE_CLAIM_TTL_MS = 30 * 60 * 1000;
-
-/** Recognize a bridge-thread `lastError` string that came from an
- * upstream "model does not exist" / "model not available" response.
- * Used by auto-recovery: if past failures on this thread were all
- * model-unknown errors AND the model is now in the cache, we can
- * safely clear the failure counter and resume. Matches substrings
- * so minor wording changes across Codex / OpenAI versions still
- * classify correctly. */
-function looksLikeModelError(lastError: string | null | undefined): boolean {
-  if (!lastError) return false;
-  const lower = lastError.toLowerCase();
-  return (
-    lower.includes("does not exist") ||
-    lower.includes("does not recognize") ||
-    lower.includes("model not available") ||
-    lower.includes("model not found") ||
-    lower.includes("do not have access to") ||
-    lower.includes("is not in your installed codex")
-  );
-}
 
 export class CodexDispatcher {
   private watcher: PathWatcher | null = null;
@@ -102,12 +51,10 @@ export class CodexDispatcher {
   private purgeTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private processing = false;
-  /** Workspace identity for inbox/sent partitioning. Computed once
-   * so both the watcher and the per-envelope reply writer point at
-   * the same `<wshash>` subfolder. Multiple dispatchers across
-   * separate VS Code instances each watch their own subfolder, so
-   * envelopes meant for one workspace can never be picked up by
-   * another's dispatcher. */
+  /** Workspace identity for inbox/sent partitioning. Multiple
+   * dispatchers across separate VS Code instances each watch their
+   * own `<wshash>` subfolder, so envelopes meant for one workspace
+   * can never be picked up by another's dispatcher. */
   private readonly wsHash: string;
   private readonly inboxCodex: string;
   private readonly inboxClaude: string;
@@ -126,7 +73,12 @@ export class CodexDispatcher {
   }
 
   start(): void {
-    for (const dir of [this.inboxCodex, this.inboxClaude, this.sentCodex, this.sentClaude]) {
+    for (const dir of [
+      this.inboxCodex,
+      this.inboxClaude,
+      this.sentCodex,
+      this.sentClaude,
+    ]) {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     }
     this.logger.info(
@@ -141,8 +93,8 @@ export class CodexDispatcher {
     this.watcher.sync(this.inboxCodex);
     void this.drainInbox();
     // Sent-folder purge: delivered envelopes older than 5 minutes.
-    // No downstream consumer - conversation lives in Claude's own
-    // transcript, not here. Keeps disk footprint bounded.
+    // No downstream consumer (conversation lives in Claude's
+    // transcript). Keeps disk footprint bounded.
     this.runPurge();
     this.purgeTimer = setInterval(() => this.runPurge(), 5 * 60 * 1000);
     this.purgeTimer.unref?.();
@@ -159,16 +111,12 @@ export class CodexDispatcher {
   }
 
   /** Eagerly spawn the codex app-server child process and complete
-   * the JSON-RPC `initialize` handshake without dispatching any turn.
-   * Idempotent - no-ops when a client is already alive. Called at
+   * `initialize` without dispatching any turn. Idempotent. Called at
    * tier activate (deferred 2s) and after `forceRestart()` so the
-   * first user-visible dispatch pays only `thread/start` + `turn/start`
-   * latency (~1-3s) instead of the full ~20s spawn + Node init +
-   * config load + handshake cold-start chain.
-   *
-   * Failures are logged and swallowed - if Codex CLI is missing or
-   * auth-broken, the user's first real dispatch surfaces the problem
-   * the normal way. Pre-warm never blocks activation. */
+   * first user-visible dispatch pays only `thread/start` + `turn/
+   * start` latency (~1-3s) instead of the full ~20s cold-start
+   * chain. Failures are logged and swallowed - the first real
+   * dispatch surfaces the problem the normal way. */
   async prewarm(): Promise<void> {
     if (this.client !== null) return;
     try {
@@ -181,12 +129,10 @@ export class CodexDispatcher {
     }
   }
 
-  /** Force-kill the current app-server child process (SIGKILL) and
-   * drop the cached client. Next dispatch spawns a fresh app-server
-   * with whatever config.toml currently holds. Used by the "Restart
-   * Codex Bridge" main-menu action when the user needs the bridge's
-   * Codex process gone now (stale cached config, stuck state, etc.).
-   * Idempotent; no-ops when no client is connected. */
+  /** Force-kill the current app-server child and drop the cached
+   * client. Next dispatch spawns fresh. Used by "Restart Codex
+   * Bridge" when the user needs the Codex process gone now (stale
+   * cached config, stuck state). Idempotent. */
   forceRestart(): void {
     if (this.client === null) return;
     this.client.forceKill();
@@ -223,16 +169,13 @@ export class CodexDispatcher {
     this.idleTimer = setTimeout(() => this.onIdleTimerFire(), IDLE_TIMEOUT_MS);
   }
 
-  /** Idle-timer callback. Defensive guard against #81: the app-server
-   * child must never be idle-killed during an active turn. The idle
-   * timer is reset at turn start (see processEnvelope) and on every
-   * successful turn end, but a regression that lets the timer arm
-   * during a turn would otherwise SIGKILL the child mid-stream and
-   * wedge any Fire-and-Forget turn (which disables stall/hard-cap
-   * watchdogs). When the timer fires while `this.processing` is
-   * still true, re-schedule THIS check (not a full new idle window)
-   * for 60s out so the next firing re-evaluates against fresh state -
-   * usually the turn has finished and the shutdown can proceed. */
+  /** Idle-timer callback. The app-server child must never be idle-
+   * killed during an active turn (#81). Reset is called at turn
+   * start and on every successful turn end; this guard handles the
+   * regression case where the timer arms during a turn. When the
+   * timer fires with `this.processing` still true, re-schedule THIS
+   * check (not a full new idle window) for 60s so the next firing
+   * re-evaluates against fresh state. */
   private onIdleTimerFire(): void {
     if (this.processing) {
       this.logger.warn(
@@ -264,10 +207,9 @@ export class CodexDispatcher {
         const envelopePath = join(this.inboxCodex, f);
         const claimPath = `${envelopePath}.claim`;
         // Cross-window arbitration: same-workspace siblings race on
-        // the same inbox dir. Claim the envelope before reading; the
-        // loser skips and lets the winner deliver. Stale claims (TTL)
-        // get reclaimed so a crashed dispatcher cannot deadlock the
-        // envelope forever.
+        // the same inbox dir. Claim before reading; loser skips. TTL
+        // reclaims stale claims so a crashed dispatcher cannot
+        // deadlock the envelope forever.
         if (!tryAcquireClaim(claimPath, ENVELOPE_CLAIM_TTL_MS)) continue;
         try {
           await this.processEnvelope(envelopePath);
@@ -288,46 +230,45 @@ export class CodexDispatcher {
       return;
     }
     if (env.target !== "codex") {
-      // Wrong-target envelope landed in inbox/codex (misrouted by an
-      // older client, or a hand-edited drop). Quarantine to sent so
-      // the next drain does not re-encounter and re-claim the same
-      // file forever.
       this.logger.warn(`envelope ${env.id} target=${env.target}; quarantining`);
       moveToSent(path, this.sentCodex);
       return;
     }
 
-    // Reset the idle timer at turn start so the 15-minute idle window
-    // restarts now, not from whenever the LAST successful turn ended.
-    // Without this, a turn that arrives 14:59 into the idle window can
-    // be cut off at the 15:00 mark by the idle shutdown SIGKILL'ing the
-    // app-server child mid-stream (#81 root cause). The guard in
-    // resetIdleTimer's callback is the belt; this is the suspenders.
+    // Reset the idle timer at turn start so the 15-min window starts
+    // now, not from whenever the LAST turn ended. Without this, a
+    // turn arriving 14:59 into the window can be cut off by the idle
+    // shutdown SIGKILL'ing the child mid-stream (#81).
     this.resetIdleTimer();
 
     try {
-      const reply = await this.dispatchToCodex(env);
+      const reply = await dispatchTurn(
+        {
+          workspacePath: this.workspacePath,
+          wsHash: this.wsHash,
+          logger: this.logger,
+          ensureClient: () => this.ensureClient(),
+          forceRestart: () => this.forceRestart(),
+        },
+        env
+      );
       this.writeReply(env, { body: reply, intent: "assessment" });
-      // Belt-and-suspenders sentinel write. The runTurnOnce path also
-      // writes this on `turn/completed` and rollout-recovery success;
-      // the read side is consume-on-read so a double-write is harmless.
+      // Belt-and-suspenders sentinel write. dispatchTurn also writes
+      // this on its success and recovery paths; the read side is
+      // consume-on-read so a double-write is harmless.
       writeSuppressCodexToast(this.workspacePath);
       moveToSent(path, this.sentCodex);
       this.resetIdleTimer();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Full error text goes to the EH output channel for diagnostics;
-      // the user-facing reply that lands back in Claude's inbox stays
-      // brief and never echoes raw lower-layer messages.
       this.logger.error(`dispatch failed for ${env.id}: ${msg}`);
-      // Body wording invites the caller to investigate before declaring
-      // failure. Pattern from issues #73 / #75 / #69: many "couldn't
-      // complete" verdicts arrive AFTER Codex's underlying work has
-      // landed on disk (the failure is in the reply-marshal step, not
-      // the work itself). Tersely refusing here strands Claude with no
-      // path forward. Surface the on-disk + inbox check hints and gate
-      // re-issue on "nothing landed" so the caller does not start a
-      // parallel turn on top of one that may have succeeded.
+      // Body wording invites the caller to investigate before
+      // declaring failure (#73 / #75 / #69). Many "couldn't complete"
+      // verdicts arrive AFTER Codex's underlying work has landed on
+      // disk (the failure is in the reply-marshal step, not the work
+      // itself). Tersely refusing here strands Claude with no path
+      // forward; we surface the on-disk + inbox check hints and gate
+      // re-issue on "nothing landed".
       this.writeReply(env, {
         body:
           `Codex bridge turn ended without a reply payload (chain ${env.chainId}). ` +
@@ -360,260 +301,18 @@ export class CodexDispatcher {
     };
     const out = join(this.inboxClaude, `${reply.id}.md`);
     writeEnvelopeAtomic(out, reply);
-    this.logger.info(`reply written ${reply.id} chain=${reply.chainId} iter=${reply.iteration}`);
-  }
-
-  private async dispatchToCodex(env: Envelope): Promise<string> {
-    const dispatchStart = Date.now();
-    const client = await this.ensureClient();
-    const clientReady = Date.now();
-    let record = loadBridgeThreadRecord(this.workspacePath);
-
-    // Auto-recovery: if the stored model slug is NOW recognized
-    // (Codex CLI upgrade added support for it, or the cache refreshed)
-    // and the last failure was a model-unknown error, clear the
-    // failure state and preserve the threadId. Lets a session that
-    // was bricked by upstream absence-of-model recover silently on
-    // the next prompt without the user clicking "Clear error state".
-    // Runs BEFORE the threshold rotation check so a session at or
-    // past the threshold can still be rescued.
-    if (
-      record.threadId !== null &&
-      (record.consecutiveFailures ?? 0) > 0 &&
-      looksLikeModelError(record.lastError)
-    ) {
-      const rolloutPath = findRolloutPath(record.threadId);
-      const storedSlug = rolloutPath ? readRolloutModelSlug(rolloutPath) : null;
-      if (storedSlug !== null && isKnownCodexModel(storedSlug)) {
-        this.logger.info(
-          `[auto-recover] session S${record.sessionCounter} stored model "${storedSlug}" is now recognized; clearing ${record.consecutiveFailures} prior failure(s) and resuming`
-        );
-        record = clearBridgeErrorState(this.workspacePath);
-      }
-    }
-
-    // Threshold-based rotation: if we've seen N consecutive recoverable
-    // failures on the same thread, rotate. Protects against a thread
-    // stuck in a bad state we can't detect cleanly. Runs after the
-    // auto-recovery check above so model-unknown failures that the
-    // upstream cache now covers don't trigger a pointless rotation.
-    if (
-      record.threadId !== null &&
-      (record.consecutiveFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES
-    ) {
-      this.logger.error(
-        `thread ${record.threadId} hit ${MAX_CONSECUTIVE_FAILURES} consecutive failures; rotating`
-      );
-      record = rotateThreadRecord(record, this.workspacePath);
-    }
-
-    let threadId = record.threadId;
-    if (threadId === null) {
-      // Pre-spawn config validation. `thread/start` accepts any
-      // model slug silently; Codex only validates when the first
-      // `turn/start` actually calls the upstream API. Without this
-      // check, a config.toml with a bogus model births a zombie
-      // thread (rollout file on disk with a bad session_meta.model)
-      // that fails every subsequent turn with a cryptic API error.
-      // Catch it here before any side effect lands.
-      const configDefault = readCodexConfigModel();
-      if (configDefault !== null && !isKnownCodexModel(configDefault)) {
-        const msg = `Codex's default model "${configDefault}" isn't in the installed Codex's known set. The bridge can't start a session on a slug Codex doesn't recognize. Update Codex's config to a valid slug, or clear the model line so Codex picks its own default.`;
-        this.logger.warn(`[preflight] ${msg}`);
-        noteFailure(record, msg);
-        throw new Error(msg);
-      }
-      const spawned = await spawnFreshThread({
-        client,
-        record,
-        workspacePath: this.workspacePath,
-        logger: this.logger,
-      });
-      threadId = spawned.threadId;
-      record = spawned.record;
-    } else {
-      // Pre-flight model validation. Every `thread/resume` ships the
-      // rollout's stored `session_meta.model` to the API; if that slug
-      // is no longer in the user's `~/.codex/models_cache.json` the
-      // next turn 404s with a cryptic "model X does not exist" error
-      // that surfaces inside Codex's own stream. Catching it here
-      // keeps the failure actionable - the user sees a clear reply
-      // and a pointer at the Repair menu instead of an API stack.
-      // Validation is lossy in the "cache unreadable" case (returns
-      // true), so a missing cache never gates a legit dispatch.
-      const rolloutPath = findRolloutPath(threadId);
-      const storedSlug = rolloutPath ? readRolloutModelSlug(rolloutPath) : null;
-      if (storedSlug !== null && !isKnownCodexModel(storedSlug)) {
-        const msg = `Codex session S${record.sessionCounter} stores a model slug "${storedSlug}" that the installed Codex doesn't recognize. The Repair Sessions option in the bridge menu can rewrite the slug; Reset Codex Session rolls to a fresh thread.`;
-        this.logger.warn(`[preflight] ${msg}`);
-        noteFailure(record, msg);
-        throw new Error(msg);
-      }
-      try {
-        await client.sendRequest("thread/resume", { threadId });
-      } catch (err) {
-        const cls = classifyFailure(err);
-        const msg = err instanceof Error ? err.message : String(err);
-        if (cls === "rotate") {
-          this.logger.error(`resume failed (${msg}); thread unrecoverable, rotating`);
-          record = rotateThreadRecord(record, this.workspacePath);
-          const spawned = await spawnFreshThread({
-            client,
-            record,
-            workspacePath: this.workspacePath,
-            logger: this.logger,
-          });
-          threadId = spawned.threadId;
-          record = spawned.record;
-        } else {
-          noteFailure(record, msg);
-          throw err;
-        }
-      }
-    }
-
-    const threadReady = Date.now();
-
-    // Seed for reply-recovery in the outer catch below. Captured here
-    // once threadId is known so the catch can tell a fresh reply
-    // (committed during THIS turn) from stale text already in the
-    // rollout when the turn started. seedAssistantText reads the
-    // last-assistant text via the same rollout-recovery path the catch
-    // will use. seedRolloutSize is the byte watermark so a turn that
-    // produced byte-identical text to the prior turn still reads as
-    // fresh. Both default to "" / 0 on any read failure.
-    const seedRolloutPath =
-      threadId !== null ? findRolloutPath(threadId) : null;
-    const seedAssistantText = seedRolloutPath
-      ? (tryRolloutRecovery(seedRolloutPath) ?? "")
-      : "";
-    const seedRolloutSize = ((): number => {
-      if (!seedRolloutPath) return 0;
-      try {
-        return statSync(seedRolloutPath).size;
-      } catch {
-        return 0;
-      }
-    })();
-
-    try {
-      writeInFlightFlag(this.workspacePath);
-      let result: string;
-      try {
-        result = await this.runTurn(client, threadId, env);
-      } catch (err) {
-        // Late rotation: thread/resume can succeed (Codex's app-server
-        // has the thread cached in memory), but turn/start then fails
-        // with "no rollout found for thread id ..." when the rollout
-        // file on disk is gone - typically because the user deleted
-        // sessions manually or from a sibling Codex VS Code instance.
-        // Treat this exactly like a resume-time rotate: rotate, spawn
-        // fresh, retry runTurn ONCE. Without this the user sees a raw
-        // "Codex bridge error" reply for every prompt until they
-        // manually pick Reset from the menu.
-        const cls = classifyFailure(err);
-        if (cls !== "rotate") throw err;
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.error(
-          `runTurn rotate (${msg}); rotating + spawning fresh thread for retry`
-        );
-        record = rotateThreadRecord(record, this.workspacePath);
-        const spawned = await spawnFreshThread({
-          client,
-          record,
-          workspacePath: this.workspacePath,
-          logger: this.logger,
-        });
-        threadId = spawned.threadId;
-        record = spawned.record;
-        result = await this.runTurn(client, threadId, env);
-      }
-      const turnEnd = Date.now();
-      noteSuccess(record);
-      // Breakdown: client_setup is spawn + initialize (warm = ~0ms);
-      // thread_setup is thread/start or thread/resume; turn is the
-      // actual Codex work from turn/start to turn/completed. Helps
-      // tell "Codex is slow" from "we are slow" in post-mortems.
-      this.logger.info(
-        `[timing] turn ok client_setup=${clientReady - dispatchStart}ms thread_setup=${threadReady - clientReady}ms turn=${turnEnd - threadReady}ms total=${turnEnd - dispatchStart}ms`
-      );
-      // Transition: in-flight -> returning. The reply starts flowing
-      // back to Claude via the MCP tool result. Hold the returning
-      // flag 5000ms so the status bar renders a clear minimum of the
-      // arrow-circle-left animation before the delivered flash kicks in.
-      clearProcessingFlag(this.workspacePath);
-      clearInFlightFlag(this.workspacePath);
-      writeReturningFlag(this.workspacePath);
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // User cancellations are intentional stops, not failures. Don't
-      // bump the consecutive-failure counter (which would eventually
-      // trigger thread rotation on repeated cancels) and don't stash
-      // lastError (which would light up the error icon). Still clear
-      // the flags and propagate so the reply path writes "cancelled
-      // by user" back to Claude cleanly.
-      if (msg !== "cancelled by user") {
-        // Reply-marshal failures can fire AFTER Codex committed the
-        // reply to the rollout. Before declaring failure, try one more
-        // rollout-recovery pass with the seed comparison - the late
-        // commit often lands in the window between runTurn rejecting
-        // and us reaching this catch. Freshness gated against the
-        // captured seed so a stale prior turn's text never gets
-        // delivered as ours: either the assistant text differs from
-        // the seed OR the rollout grew past the seed size (covers the
-        // rare byte-identical-reply case).
-        if (threadId !== null) {
-          const recoveryRollout = findRolloutPath(threadId);
-          const recovered = tryRolloutRecovery(recoveryRollout);
-          const grew =
-            recoveryRollout !== null &&
-            ((): boolean => {
-              try {
-                return statSync(recoveryRollout).size > seedRolloutSize;
-              } catch {
-                return false;
-              }
-            })();
-          if (
-            recovered !== null &&
-            (recovered !== seedAssistantText || grew)
-          ) {
-            this.logger.info(
-              `[recover] dispatch catch absorbed throw (chain ${env.chainId}); rollout has fresh reply len=${recovered.length}, delivering instead of blocker`
-            );
-            noteSuccess(record);
-            writeSuppressCodexToast(this.workspacePath);
-            clearProcessingFlag(this.workspacePath);
-            clearInFlightFlag(this.workspacePath);
-            writeReturningFlag(this.workspacePath);
-            return recovered;
-          }
-        }
-        noteFailure(record, msg);
-      } else {
-        // Cancel is best-effort: turn/interrupt may not have delivered
-        // if the codex child was wedged in inference or stuck on a
-        // tool call. Force-restart the app-server so the NEXT dispatch
-        // starts on a fresh process instead of inheriting a half-
-        // killed connection. Cheap (SIGKILL of one node child),
-        // idempotent if the child already exited cleanly.
-        this.forceRestart();
-      }
-      clearProcessingFlag(this.workspacePath);
-      clearInFlightFlag(this.workspacePath);
-      throw err;
-    }
+    this.logger.info(
+      `reply written ${reply.id} chain=${reply.chainId} iter=${reply.iteration}`
+    );
   }
 
   private async ensureClient(): Promise<AppServerClient> {
     if (this.client) return this.client;
     const spawnStart = Date.now();
-    // Resolve the codex binary path with PATH-then-extension-bundled
-    // fallback. Lets users who only installed the OpenAI Codex VS Code
-    // extension (no global codex CLI on PATH) still drive the bridge.
-    // resolveCodexCli probes once per process and caches the result,
-    // so repeated dispatches don't re-probe.
+    // Resolve the codex binary with PATH-then-extension-bundled
+    // fallback. Lets users who only installed the OpenAI Codex VS
+    // Code extension (no global codex CLI) still drive the bridge.
+    // Cached after first probe.
     const resolved = await resolveCodexCli();
     const client = new AppServerClient({
       logger: this.logger,
@@ -626,10 +325,6 @@ export class CodexDispatcher {
       );
     }
     client.spawn();
-    // Bracket each stage so cold-start latency breaks down into spawn
-    // time, initialize handshake time, and post-initialize ack time.
-    // Warm starts skip this function entirely; only the first turn
-    // after a ~15 min idle pays these costs.
     const initStart = Date.now();
     await client.sendRequest("initialize", {
       clientInfo: {
@@ -650,51 +345,5 @@ export class CodexDispatcher {
       `[timing] app-server cold-start spawn_to_init=${initStart - spawnStart}ms initialize=${initEnd - initStart}ms total=${Date.now() - spawnStart}ms`
     );
     return client;
-  }
-
-  /** Dispatch a turn. If it fails with a compactable error (context
-   * window exceeded), run `thread/compact/start` to summarize the
-   * thread in place and retry the same turn once. Same threadId,
-   * same S<N> name, same user-visible session - compaction is a
-   * repair, not a reset. */
-  private async runTurn(
-    client: AppServerClient,
-    threadId: string,
-    env: Envelope
-  ): Promise<string> {
-    // Wait mode resolution: prefer the envelope's `wait_mode` field,
-    // which the MCP caller (`codex.mjs:resolveMode`) locked in at
-    // dispatch time. This is the only place per-call args (the FF /
-    // adaptive params on `wat321_ask`) can reach the dispatcher; the
-    // sticky flag fallback is for back-compat with envelopes written
-    // by older MCP servers that did not emit the field. Wait mode is
-    // locked during in-flight turns (menu guard) so the snapshot
-    // holds for the full turn even if the user flips the toggle.
-    const waitMode = env.waitMode ?? currentWaitMode(this.workspacePath);
-    const opts = {
-      client,
-      threadId,
-      env,
-      workspacePath: this.workspacePath,
-      wsHash: this.wsHash,
-      logger: this.logger,
-      waitMode,
-    };
-    try {
-      return await runTurnOnce(opts);
-    } catch (err) {
-      if (classifyFailure(err) !== "compact") throw err;
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.info(`turn hit context limit (${msg}); running thread/compact/start`);
-      try {
-        await client.sendRequest("thread/compact/start", { threadId });
-      } catch (cerr) {
-        const cmsg = cerr instanceof Error ? cerr.message : String(cerr);
-        this.logger.error(`compact failed: ${cmsg}`);
-        throw err;  // original error is more informative
-      }
-      this.logger.info(`compact complete; retrying turn on same thread`);
-      return await runTurnOnce(opts);
-    }
   }
 }
