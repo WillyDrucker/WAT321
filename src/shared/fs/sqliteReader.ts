@@ -31,11 +31,11 @@ export interface SqliteReader {
 
 let cachedSqliteModule: typeof import("node:sqlite") | null | undefined;
 
-/** Load `node:sqlite` once. Cached on first call so the per-poll
- * overhead is a memoized fetch rather than a repeated require. The
- * cache holds `null` when the runtime does not expose the module; we
- * still try once per process so an upgrade between polls is picked up
- * on the next cold path (rare, but cheap). */
+/** Load `node:sqlite` once and cache for the extension host's lifetime.
+ * Both success (module reference) and failure (`null` when the runtime
+ * does not expose the module) are cached so the per-poll overhead is a
+ * map lookup. A VS Code version upgrade only takes effect after the
+ * extension host reloads, which is when this cache resets too. */
 function loadSqlite(): typeof import("node:sqlite") | null {
   if (cachedSqliteModule !== undefined) return cachedSqliteModule;
   let mod: typeof import("node:sqlite") | null;
