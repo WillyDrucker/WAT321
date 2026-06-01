@@ -88,6 +88,16 @@ export interface RolloutDiscoveryResult {
   /** Subset of `total` whose tail classifies as a turn in progress
    * (`assistant-pending` or `user`). */
   inProgress: number;
+  /** Every workspace-matching candidate from this walk. Empty when
+   * no workspace match exists. */
+  candidates: RolloutCandidate[];
+}
+
+export interface RolloutCandidate {
+  path: string;
+  mtime: number;
+  turnState: "user" | "assistant-pending" | "assistant-done" | "unknown";
+  cwd: string;
 }
 
 /** Find the rollout JSONL the widget should track for the current
@@ -102,7 +112,9 @@ export function findLatestRollout(
   workspacePath: string
 ): RolloutDiscoveryResult {
   const sessionsDir = join(codexDir, "sessions");
-  if (!existsSync(sessionsDir)) return { path: null, total: 0, inProgress: 0 };
+  if (!existsSync(sessionsDir)) {
+    return { path: null, total: 0, inProgress: 0, candidates: [] };
+  }
 
   const wsNorm = normalizePath(workspacePath);
 
@@ -113,6 +125,8 @@ export function findLatestRollout(
     inProgress: boolean;
     fresh: boolean;
     isHot: boolean;
+    turnState: "user" | "assistant-pending" | "assistant-done" | "unknown";
+    cwd: string;
   }
   const candidates: Candidate[] = [];
   let daysScanned = 0;
@@ -172,8 +186,16 @@ export function findLatestRollout(
             // as stale (often an orphaned mid-write from days ago) and
             // the candidate competes on mtime alone.
             const tail = readTail(fullPath);
-            const turnState = tail ? classifyCodexTurn(tail) : "unknown";
-            const rawActivity = ACTIVITY_SCORE[turnState] ?? 0;
+            const rawTurnState = tail ? classifyCodexTurn(tail) : "unknown";
+            // Narrow LastEntryKind to the three states the candidate
+            // carries; compact-end / interrupted collapse to unknown.
+            const turnState: RolloutCandidate["turnState"] =
+              rawTurnState === "user" ||
+              rawTurnState === "assistant-pending" ||
+              rawTurnState === "assistant-done"
+                ? rawTurnState
+                : "unknown";
+            const rawActivity = ACTIVITY_SCORE[rawTurnState] ?? 0;
             const now = Date.now();
             const activityFresh = now - mtime <= ACTIVITY_FRESHNESS_MS;
             const activity = activityFresh ? rawActivity : 0;
@@ -189,6 +211,8 @@ export function findLatestRollout(
               inProgress,
               fresh: inventoryFresh,
               isHot,
+              turnState,
+              cwd,
             });
           }
         }
@@ -217,6 +241,8 @@ function rankCandidates(
     inProgress: boolean;
     fresh: boolean;
     isHot: boolean;
+    turnState: "user" | "assistant-pending" | "assistant-done" | "unknown";
+    cwd: string;
   }[]
 ): RolloutDiscoveryResult {
   let total = 0;
@@ -226,8 +252,14 @@ function rankCandidates(
     total++;
     if (c.inProgress) inProgress++;
   }
+  const exposedCandidates: RolloutCandidate[] = candidates.map((c) => ({
+    path: c.path,
+    mtime: c.mtime,
+    turnState: c.turnState,
+    cwd: c.cwd,
+  }));
   if (candidates.length === 0) {
-    return { path: null, total: 0, inProgress: 0 };
+    return { path: null, total: 0, inProgress: 0, candidates: exposedCandidates };
   }
   let best = candidates[0];
   for (let i = 1; i < candidates.length; i++) {
@@ -239,7 +271,7 @@ function rankCandidates(
           (c.activity === best.activity && c.mtime > best.mtime)));
     if (beats) best = c;
   }
-  return { path: best.path, total, inProgress };
+  return { path: best.path, total, inProgress, candidates: exposedCandidates };
 }
 
 /** Look up a session's thread name from `~/.codex/session_index.jsonl`
