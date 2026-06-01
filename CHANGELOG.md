@@ -5,7 +5,15 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.20] - unreleased
+## [1.5.20] - 2026-06-01
+
+### Fixed
+
+- **The Codex usage and Codex session-tokens widgets reappear in the status bar.** A v1.5.19 regression made these widgets register with VS Code (they still showed up under the status-bar right-click menu) but never paint their text, leaving a workspace with Claude on its own and the dual-provider layout collapsed to single-provider Full mode. Cause was a missing `this` binding in the new non-active completion drain inside the notification bridge: the drain was destructured into a local variable and called without its receiver, so the first emission of a real Codex session synchronously crashed Codex activation. Extension activation now also shields each provider's startup in its own try block, so a future regression in one provider can never strand the sibling's widgets the same way.
+
+### Changed
+
+- **A long Codex turn that exceeds the bridge's stall or hard-cap timer no longer loses its reply.** Previously, an adaptive-mode dispatch that ran past the bridge's two-minute stall window or 30-minute hard cap would interrupt Codex, poll the rollout file for 30 seconds, and then reject with "Codex exceeded max turn duration" if the reply had not landed yet. A reply that arrived a moment later was discarded. The bridge now opens a 30-minute background late-delivery watch when the initial recovery exhausts, so a slow flush, mid-turn compact, or genuinely-long task still lands in your `wat321_bridge()` inbox via the normal completion path. The MCP tool's caller-side timeout is unchanged: the AI making the dispatch still returns at its `timeout_sec` ceiling without waiting longer.
 
 ## [1.5.19] - 2026-06-01
 
