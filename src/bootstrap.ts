@@ -109,10 +109,7 @@ function buildClaudeGroup(
   bridgeStage: BridgeStageReader
 ): ProviderGroup {
   const usageService = new ClaudeUsageSharedService();
-  const tokenService = new ClaudeSessionTokenService(
-    getWorkspacePath(),
-    ctx.extensionStorageDir
-  );
+  const tokenService = new ClaudeSessionTokenService(getWorkspacePath());
 
   usageService.setActivityProbe(() => tokenService.getLastActivityMs());
 

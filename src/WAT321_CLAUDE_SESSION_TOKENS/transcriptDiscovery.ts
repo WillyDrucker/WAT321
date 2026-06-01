@@ -138,47 +138,24 @@ export function walkWorkspaceSessions(
 
 /** Pick the most-deserving workspace candidate. Tiered ranking:
  *
- *   1. Selected session memento. When `selectedSessionId` matches a
- *      candidate's session id, that candidate wins outright. This is
- *      the user's actual click in the Claude Code sidebar switcher,
- *      read from VS Code's per-workspace `state.vscdb`. It outranks
- *      every disk signal because no disk signal can disambiguate two
- *      concurrently-active sessions (both pass freshness, both
- *      classify pending, both stay inside the hot window) - their
- *      mtimes alternate with every tool-call write and the widget
- *      flips. The memento sticks while disk activity churns.
- *   2. Hot recency. A candidate written within HOT_RECENCY_MS
+ *   1. Hot recency. A candidate written within HOT_RECENCY_MS
  *      outranks every candidate outside that window. The strongest
  *      "user is here right now" signal the file system gives us, so
  *      a sibling whose mid-turn classification is older than the
  *      hot window cannot steal focus from a session the user just
  *      touched.
- *   3. Activity score. Inside the same hot bucket, prefer
+ *   2. Activity score. Inside the same hot bucket, prefer
  *      `assistant-pending` over `user` over `assistant-done`.
  *      Activity score is gated by ACTIVITY_FRESHNESS_MS so an
  *      orphaned mid-turn tail from days ago cannot outrank a fresh
  *      idle session.
- *   4. mtime. Most-recent-write wins.
- *   5. Entrypoint tiebreaker. `claude-vscode` beats other
- *      entrypoints when all of the above are equal.
- *
- * `selectedSessionId` falls through cleanly when null, when the
- * memento file is unavailable (older VS Code Electron without
- * `node:sqlite`, brand-new workspace with no Claude session yet
- * selected), or when the memento points at a session not in the
- * walker output. */
+ *   3. mtime. Most-recent-write wins.
+ *   4. Entrypoint tiebreaker. `claude-vscode` beats other
+ *      entrypoints when all of the above are equal. */
 export function rankActiveSession(
-  candidates: readonly SessionCandidate[],
-  selectedSessionId: string | null = null
+  candidates: readonly SessionCandidate[]
 ): SessionEntry | null {
   if (candidates.length === 0) return null;
-
-  if (selectedSessionId) {
-    const direct = candidates.find(
-      (c) => c.entry.sessionId === selectedSessionId
-    );
-    if (direct) return direct.entry;
-  }
 
   interface RankedCandidate {
     entry: SessionEntry;

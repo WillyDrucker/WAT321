@@ -14,23 +14,13 @@ import { validateCatalog } from "./widgetCatalog";
 export interface EngineContext {
   providers: ProviderRegistry;
   events: EventHub;
-  /** Absolute path to the extension's per-workspace storage dir
-   * (`<workspaceStorage>/<wsHash>/<publisher>.<name>/`). Used by the
-   * Claude session-tokens tier to derive `state.vscdb` for the
-   * selected-session memento read, sidestepping the question of how
-   * VS Code computes `<wsHash>`. `null` when no workspace folder is
-   * open (`context.storageUri` is undefined). */
-  extensionStorageDir: string | null;
 }
 
 /** Create the engine context and run startup validation. */
-export function createEngineContext(
-  extensionStorageDir: string | null
-): EngineContext {
+export function createEngineContext(): EngineContext {
   validateCatalog();
   return {
     providers: new ProviderRegistry(),
     events: new EventHub(),
-    extensionStorageDir,
   };
 }

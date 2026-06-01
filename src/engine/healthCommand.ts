@@ -38,7 +38,7 @@ export function registerHealthSection(fn: HealthSectionFn): vscode.Disposable {
  *   - Windows host AUMID diagnostics
  *   - Recent provider transitions (ring buffer)
  *   - Recent notification deliveries (ring buffer)
- *   - `node:sqlite` probe (renderRuntimeProbes)
+ *   - Node / Electron / V8 versions (renderRuntimeProbes)
  *
  * All data is read-only from existing service accessors. Nothing
  * here can alter behavior. This is the canonical instrumentation
@@ -188,26 +188,11 @@ function renderTransitionLog(key: ProviderKey, lines: string[]): void {
 }
 
 function renderRuntimeProbes(lines: string[]): void {
-  // [WAT-DEBUG] node:sqlite probe. Diagnoses whether the host VS Code
-  // build ships the SQLite native module (Claude Code's selected-
-  // session memento tier depends on it). Forks lacking node:sqlite
-  // fall through to disk-only tiers; this probe makes that visible
-  // without making the user diff their build's Electron version.
   lines.push("Runtime probes");
   lines.push("-".repeat(30));
   lines.push(`  node:    ${process.versions.node}`);
   lines.push(`  electron: ${process.versions.electron ?? "(not electron)"}`);
   lines.push(`  v8:      ${process.versions.v8}`);
-  let sqliteResult: string;
-  try {
-    const sqlite = require("node:sqlite");
-    const shape = Object.keys(sqlite).slice(0, 6).join(", ");
-    sqliteResult = `available (exports: ${shape || "(empty)"})`;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    sqliteResult = `unavailable: ${msg.slice(0, 120)}`;
-  }
-  lines.push(`  node:sqlite: ${sqliteResult}`);
 }
 
 function renderTransitions(lines: string[]): void {

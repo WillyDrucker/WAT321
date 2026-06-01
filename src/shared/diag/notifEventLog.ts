@@ -12,20 +12,19 @@ import { clientStateDir } from "../wat321Paths";
  * Every `logNotifEvent` callsite is part of the `[WAT-DEBUG]` surface
  * for missing-notification post-mortems. Surfaces feeding this log
  * today: session-switch (per provider), bridge-decision (fire / gate),
- * dedup-decision, notifier-decision (toast outcome), rank-decision
- * (memento vs disk-tiers). `grep -rn "logNotifEvent\\|\\[WAT-DEBUG\\]" src/`
- * pulls the full instrumentation set for review or wholesale removal.
+ * dedup-decision, notifier-decision (toast outcome). `grep -rn
+ * "logNotifEvent\\|\\[WAT-DEBUG\\]" src/` pulls the full
+ * instrumentation set for review or wholesale removal.
  */
 
 const EVENT_LOG_FILENAME = "notification-events.jsonl";
 const EVENT_LOG_MAX_BYTES = 1_000_000;
 
-export type NotifEventKind =
+type NotifEventKind =
   | "session-switch"
   | "bridge-decision"
   | "dedup-decision"
-  | "notifier-decision"
-  | "rank-decision";
+  | "notifier-decision";
 
 /** Specific gate or fire path inside `sessionResponseBridge`. Shared
  * with the bridge so the literal union has a single home; the
@@ -45,7 +44,7 @@ interface BaseEvent {
   kind: NotifEventKind;
 }
 
-export interface SessionSwitchEvent extends BaseEvent {
+interface SessionSwitchEvent extends BaseEvent {
   kind: "session-switch";
   provider: "claude" | "codex";
   fromPath: string | null;
@@ -65,7 +64,7 @@ export interface SessionSwitchEvent extends BaseEvent {
   source: "live" | "lastKnown" | "rollout-scan";
 }
 
-export interface BridgeDecisionEvent extends BaseEvent {
+interface BridgeDecisionEvent extends BaseEvent {
   kind: "bridge-decision";
   provider: "claude" | "codex";
   path: string | null;
@@ -82,7 +81,7 @@ export interface BridgeDecisionEvent extends BaseEvent {
   isNewPath: boolean;
 }
 
-export interface DedupDecisionEvent extends BaseEvent {
+interface DedupDecisionEvent extends BaseEvent {
   kind: "dedup-decision";
   provider: "claude" | "codex";
   sessionId: string;
@@ -90,7 +89,7 @@ export interface DedupDecisionEvent extends BaseEvent {
   claimed: boolean;
 }
 
-export interface NotifierDecisionEvent extends BaseEvent {
+interface NotifierDecisionEvent extends BaseEvent {
   kind: "notifier-decision";
   provider: "claude" | "codex";
   /** Per-session UUID at the time of delivery. Empty string when
@@ -103,39 +102,11 @@ export interface NotifierDecisionEvent extends BaseEvent {
   focused: boolean;
 }
 
-export interface RankDecisionEvent extends BaseEvent {
-  kind: "rank-decision";
-  provider: "claude" | "codex";
-  /** Winning session id selected by the ranker / overlay. */
-  sessionId: string;
-  /** Total candidate count the ranker considered. Useful to read in
-   * conjunction with the multi-session tooltip line - when this is
-   * 1, the ranker had no choice; > 1, the source field below
-   * explains why this candidate won. */
-  candidateCount: number;
-  /** Which input directed the pick:
-   *   - "memento" - Claude's per-workspace Memento (read from
-   *     state.vscdb) matched a candidate and short-circuited the
-   *     ranker above hot-recency / activity / mtime. The signal of
-   *     record for "user clicked this session in the sidebar".
-   *   - "extension-overlay" - Codex's SQLite scanner overrode the
-   *     rollout-derived turnState because the VS Code extension
-   *     panel had a fresher write than the rollout file. The
-   *     authoritative signal for "user is prompting via the
-   *     extension, not the CLI bridge".
-   *   - "disk-tiers" - none of the user-intent signals engaged; the
-   *     pick came from the disk-only tiers (hot recency, activity
-   *     score, mtime, entrypoint tiebreaker). Expected default for
-   *     workspaces with a single active session. */
-  source: "memento" | "extension-overlay" | "disk-tiers";
-}
-
-export type NotifEvent =
+type NotifEvent =
   | SessionSwitchEvent
   | BridgeDecisionEvent
   | DedupDecisionEvent
-  | NotifierDecisionEvent
-  | RankDecisionEvent;
+  | NotifierDecisionEvent;
 
 function eventLogPath(): string {
   return join(clientStateDir(), EVENT_LOG_FILENAME);

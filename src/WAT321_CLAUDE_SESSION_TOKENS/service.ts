@@ -24,11 +24,6 @@ import { CompactStateMachine } from "./compactStateMachine";
 import { parseFirstUserMessage, parseLastUsage } from "./parsers";
 import { parseTurnInfo } from "./turnInfoParser";
 import {
-  readSelectedSession,
-  resetSelectedSessionCache,
-  resolveStateVscdbPath,
-} from "./selectedSessionDetector";
-import {
   findLastKnownTranscript,
   rankActiveSession,
   tallyWorkspaceSessions,
@@ -85,19 +80,6 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.triggerPoll();
   });
 
-  /** Absolute path to VS Code's per-workspace `state.vscdb`, resolved
-   * once at construction from the extension's own storage URI parent.
-   * `null` when no workspace folder is open at activate time. Reads
-   * are cached + stat-gated inside `selectedSessionDetector`, so this
-   * value is consulted on every poll cheaply. */
-  private readonly stateVscdbPath: string | null;
-
-  /** Debounce key for the rank-decision event log. Empty string until
-   * the first emission. Updated only when (sessionId, source) changes,
-   * so a stable rank does not flood the log every poll. Cleared in
-   * reset() so a workspace switch re-emits the new rank. */
-  private lastRankDecisionKey = "";
-
   /** Per-session turn-state tracker for non-active completion
    * detection. Updated each poll from the candidate walk. */
   private readonly sessionTurnStates = new Map<
@@ -106,7 +88,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
   >();
   private pendingNonActiveCompletions: NonActiveCompletion[] = [];
 
-  constructor(workspacePath: string, extensionStorageDir: string | null) {
+  constructor(workspacePath: string) {
     super(
       workspacePath,
       existsSync(join(homedir(), ".claude"))
@@ -114,9 +96,6 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
         : { status: "not-installed" },
       SESSION_TOKEN_POLL_MS
     );
-    this.stateVscdbPath = extensionStorageDir
-      ? resolveStateVscdbPath(extensionStorageDir)
-      : null;
   }
 
   rebroadcast(): void {
@@ -134,8 +113,6 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.compactStateMachine.reset();
     this.sessionsWatcher.close();
     this.settingsWatcher.close();
-    resetSelectedSessionCache();
-    this.lastRankDecisionKey = "";
     this.sessionTurnStates.clear();
     this.pendingNonActiveCompletions = [];
     super.reset();
@@ -166,8 +143,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
   private resolveTranscript(
     home: string,
     candidates: readonly SessionCandidate[],
-    now: number,
-    selectedSessionId: string | null
+    now: number
   ): {
     transcriptPath: string;
     sessionId: string;
@@ -175,7 +151,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     source: "live" | "lastKnown";
     pid?: number;
   } | null {
-    const live = rankActiveSession(candidates, selectedSessionId);
+    const live = rankActiveSession(candidates);
     if (live) {
       const projectKey = getProjectKey(live.cwd);
       const transcriptPath = join(
@@ -240,22 +216,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     // result, so the walk + per-session tail read does not happen
     // twice.
     const candidates = walkWorkspaceSessions(sessionsDir, this.workspacePath);
-    // Read the Claude Code extension's persisted selected-session
-    // memento from VS Code's per-workspace state.vscdb. Stat-gated +
-    // cached inside the detector so back-to-back polls without a
-    // user click hit memory, not SQLite. Falls through to null on
-    // every failure mode (no workspace folder, no node:sqlite, no
-    // memento yet, SQLite locked) so the ranker's lower tiers still
-    // apply.
-    const selectedSessionId = this.stateVscdbPath
-      ? readSelectedSession(this.stateVscdbPath)?.sessionId ?? null
-      : null;
-    const resolved = this.resolveTranscript(
-      home,
-      candidates,
-      now,
-      selectedSessionId
-    );
+    const resolved = this.resolveTranscript(home, candidates, now);
     if (!resolved) {
       if (this.hasGoodData) return;
       this.setState({ status: "no-session" });
@@ -263,27 +224,6 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     }
 
     const { transcriptPath, sessionId, cwdForLabel, source, pid } = resolved;
-
-    // Log the rank-decision so a "widget switched to the wrong
-    // session" post-mortem can see whether the memento tier engaged
-    // or the disk-only tiers picked. Debounced on (sessionId, source)
-    // so a stable rank does not flood the log every poll.
-    const rankSource =
-      selectedSessionId !== null && sessionId === selectedSessionId
-        ? "memento"
-        : "disk-tiers";
-    const rankKey = `${sessionId}:${rankSource}`;
-    if (rankKey !== this.lastRankDecisionKey) {
-      logNotifEvent({
-        at: now,
-        kind: "rank-decision",
-        provider: "claude",
-        sessionId,
-        candidateCount: candidates.length,
-        source: rankSource,
-      });
-      this.lastRankDecisionKey = rankKey;
-    }
 
     if (!existsSync(transcriptPath)) {
       if (this.hasGoodData) return;
