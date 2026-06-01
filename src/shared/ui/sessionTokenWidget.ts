@@ -16,6 +16,7 @@ import {
 } from "./sessionTokenHelpers";
 import {
   effectiveActiveThresholdMs,
+  isTurnFresh,
   pickPrefix,
 } from "./sessionTokenPrefix";
 import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
@@ -144,10 +145,7 @@ export class SessionTokenWidget<TState extends { status: string }>
       // update() so this is a self-healing suspension.
       if (turnInProgress) {
         const pidAlive = data.pid !== undefined && isPidAlive(data.pid);
-        const mtimeFreshForTurn =
-          now - data.transcriptMtimeMs <
-          effectiveActiveThresholdMs(data.pid, this.descriptor.activeThresholdMs);
-        if (pidAlive || mtimeFreshForTurn) return true;
+        if (pidAlive || isTurnFresh(data, this.descriptor, now)) return true;
       }
       const mtimeFresh =
         now - data.transcriptMtimeMs <
