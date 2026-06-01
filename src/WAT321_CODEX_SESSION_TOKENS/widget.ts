@@ -18,6 +18,13 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
   activeFrames: ["$(comment)", "$(comment-discussion-quote)"],
   activeStepMs: 1000,
   activeThresholdMs: 30_000,  // Codex has no PID signal; mtime-only with generous window
+  // Native Codex turns reason silently for tens of seconds with no
+  // rollout write (96s observed after task_started). The classifier
+  // collapses the indicator instantly on a real end-state, so an
+  // in-flight turn rides this wider window instead of dropping to idle
+  // mid-reasoning. The EH bridge path is unaffected (it animates off
+  // its own heartbeat, not rollout freshness).
+  silentTurnCeilingMs: 180_000,
   getRenderData: (state) => {
     const { session } = state;
     return {
