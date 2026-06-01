@@ -42,10 +42,25 @@ export const ROLLOUT_RECOVERY_WINDOW_MS = 30_000;
  * stretching the user's wait. */
 export const ROLLOUT_RECOVERY_FAST_WINDOW_MS = 5_000;
 
+/** Background late-delivery window. After the initial stall- or
+ * hard-cap recovery exhausts, the dispatcher keeps polling the rollout
+ * in the background so a long task, mid-turn compact, or slow flush
+ * still lands the reply in the inbox via the normal completion path.
+ * The MCP tool's caller-side timeout has already returned to the AI
+ * by the time this engages - no AI wait is extended; only the
+ * extension-side watcher persists. 30 min covers the realistic upper
+ * bound of a single Codex turn before declaring it truly stuck. */
+export const LATE_DELIVERY_WINDOW_MS = 30 * 60_000;
+
 /** Poll cadence inside the recovery window. 1s balances reactivity
  * (recovery resolves within a second of Codex finishing its flush)
  * against I/O cost (one stat + tail read per poll, cheap). */
 export const ROLLOUT_RECOVERY_POLL_MS = 1_000;
+
+/** Poll cadence for the longer late-delivery window. 5s keeps disk
+ * traffic light during the half-hour ceiling while still catching the
+ * reply within one cadence of Codex finishing its write. */
+export const LATE_DELIVERY_POLL_MS = 5_000;
 
 /** Single-shot rollout-recovery attempt. Returns the final assistant
  * text when the current-turn slice has both `stage=complete` and a

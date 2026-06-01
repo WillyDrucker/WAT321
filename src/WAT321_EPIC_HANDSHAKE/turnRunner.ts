@@ -1,5 +1,7 @@
 import type { AppServerClient } from "./appServerClient";
 import {
+  LATE_DELIVERY_POLL_MS,
+  LATE_DELIVERY_WINDOW_MS,
   recoverOrRejectViaRolloutPolling,
   ROLLOUT_RECOVERY_FAST_WINDOW_MS,
   ROLLOUT_RECOVERY_POLL_MS,
@@ -144,6 +146,39 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       });
     };
 
+    /** After the initial 30s rollout-recovery exhausts on a stall or
+     * hard-cap, fall through to a longer background watch instead of
+     * rejecting. Codex frequently lands a real reply after a perceived
+     * stall (long task, mid-turn compact, slow flush); the MCP tool's
+     * caller-side timeout has already returned to the AI so no caller
+     * wait is extended - this just lets the eventual reply land in the
+     * inbox via the normal completion path. Only after the long window
+     * exhausts do we declare a genuinely stuck turn and reject. */
+    const startLateDeliveryWatch = (rejectReason: string): void => {
+      if (settled) return;
+      logger.info(
+        `[monitor] initial recovery exhausted; opening ${LATE_DELIVERY_WINDOW_MS / 60_000}-min late-delivery watch`
+      );
+      recoverOrRejectViaRolloutPolling({
+        deadlineMs: LATE_DELIVERY_WINDOW_MS,
+        pollMs: LATE_DELIVERY_POLL_MS,
+        getRolloutPath: resolveRolloutPath,
+        isSettled: () => settled,
+        isFreshText: freshness.isFreshText,
+        requireTurnObserved: () => ourTurnObserved,
+        onRecovered: (text) => {
+          logger.info(
+            `[monitor] late delivery recovered (len=${text.length})`
+          );
+          writeSuppressCodexToast(workspacePath);
+          settle(() => resolve(text));
+        },
+        onTimeout: () => {
+          settle(() => reject(new Error(rejectReason)));
+        },
+      });
+    };
+
     const isFireAndForget = waitMode === "fire-and-forget";
     const isAdaptive = waitMode === "adaptive";
 
@@ -181,7 +216,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
             settle(() => resolve(text));
           },
           onTimeout: () => {
-            settle(() => reject(new Error(reason)));
+            startLateDeliveryWatch(reason);
           },
         });
       },
@@ -202,7 +237,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
             settle(() => resolve(text));
           },
           onTimeout: () => {
-            settle(() => reject(new Error("Codex exceeded max turn duration")));
+            startLateDeliveryWatch("Codex exceeded max turn duration");
           },
         });
       },
