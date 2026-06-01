@@ -226,9 +226,11 @@ export function bridgeSessionResponse(
 }
 
 function drainNonActiveCompletions(cfg: SessionResponseBridgeConfig): void {
-  const drain = cfg.tokenService.consumeNonActiveCompletions;
-  if (!drain) return;
-  const completions = drain();
+  // Call through the object so `this` binds correctly. Destructuring
+  // `consumeNonActiveCompletions` into a variable loses `this`, which
+  // makes `this.pendingNonActiveCompletions` undefined inside the method
+  // and crashes provider activation before `setProviderActive` fires.
+  const completions = cfg.tokenService.consumeNonActiveCompletions?.() ?? [];
   if (completions.length === 0) return;
   for (const completion of completions) {
     const tail = cfg.readTail(completion.transcriptPath);
