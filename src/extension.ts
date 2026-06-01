@@ -111,13 +111,15 @@ export function activate(context: vscode.ExtensionContext) {
   lastNotificationMode = config.get<string>(SETTING.notificationsMode, "System Notifications");
 
   // --- Initial activation based on current settings ---
+  // Wrapped per-provider so a throw inside one provider's activation
+  // (service constructor, first sync poll, bridge listener) cannot
+  // abort the entire extension activation and strand sibling widgets
+  // registered-but-invisible.
   if (config.get<boolean>(SETTING.enableClaude, true)) {
-    ctx.providers.activate("claude");
-    ctx.events.emit("provider.activated", { provider: "claude" });
+    activateProviderSafely(ctx, "claude");
   }
   if (config.get<boolean>(SETTING.enableCodex, true)) {
-    ctx.providers.activate("codex");
-    ctx.events.emit("provider.activated", { provider: "codex" });
+    activateProviderSafely(ctx, "codex");
   }
   // --- Dynamic enable/disable on settings change ---
   context.subscriptions.push(
@@ -218,6 +220,24 @@ function handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
     } else {
       lastNotificationMode = mode;
     }
+  }
+}
+
+/** Activate a provider with a try/catch shield. A throw inside the
+ * provider's activation factory (service constructor, first sync poll,
+ * bridge listener) is surfaced to the user but does not abort the rest
+ * of the extension's activate(). Without this shield, sibling widgets
+ * register-but-stay-invisible and the user's settings watcher never
+ * registers either. */
+function activateProviderSafely(ctx: EngineContext, key: ProviderKey): void {
+  try {
+    ctx.providers.activate(key);
+    ctx.events.emit("provider.activated", { provider: key });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showWarningMessage(
+      `WAT321 ${key} activation failed; other widgets continue working. (${msg})`
+    );
   }
 }
 
