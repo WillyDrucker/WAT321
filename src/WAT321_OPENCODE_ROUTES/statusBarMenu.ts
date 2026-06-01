@@ -1,16 +1,17 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as vscode from "vscode";
-import {
-  type OpenCodeRouteInstance,
-  readConfigFromSettings,
-} from "./config";
+import { readConfigFromSettings, type OpenCodeRouteInstance } from "./config";
 import { USAGE_PATH } from "./constants";
-import { isPaused, setPaused, writeCancelFlag } from "./runtimeFlags";
-import { makeBackItem, makeCancelItem, makePauseResumeItem, makeSeparator } from "./menuCommon";
-import { showOpenCodeRoutesSessions } from "./sessionsMenu";
-import { zenKeyMenu } from "./zenKeyMenu";
+import { makeCancelItem, makePauseResumeItem, makeSeparator } from "./menuCommon";
 import type { OpenCodeRoutesLogger } from "./outputChannel";
-import { promptAndStoreZenApiKey } from "./secrets";
+import { isPaused, setPaused, writeCancelFlag } from "./runtimeFlags";
+import { showOpenCodeRoutesSessions } from "./sessionsMenu";
+import {
+  pickActiveInstance,
+  resetSessionTotals,
+  testConnection,
+} from "./statusBarMenuActions";
+import { zenKeyMenu } from "./zenKeyMenu";
 
 /**
  * Click-menu surface for the OpenCode Routes widget. Layout follows the
@@ -31,8 +32,10 @@ import { promptAndStoreZenApiKey } from "./secrets";
  * `~/.wat321/clients/<wsId>/model-bridge/` directory that `channel.mjs`
  * observes per call.
  *
- * Sessions submenu lives in `sessionsMenu.ts`; the Zen API key
- * picker lives in `zenKeyMenu.ts`.
+ * Action handlers (pickActiveInstance, testConnection,
+ * resetSessionTotals) live in `statusBarMenuActions.ts` symmetric with
+ * EH's actions file. Sessions submenu lives in `sessionsMenu.ts`; the
+ * Zen API key picker lives in `zenKeyMenu.ts`.
  */
 
 /** llama-server's `/props` endpoint reports the server's actual
@@ -72,7 +75,7 @@ async function probeLocalNCtx(endpoint: string): Promise<number | null> {
       if (typeof n === "number" && n > 0) nCtx = n;
     }
   } catch {
-    // probe failure is non-fatal - row falls back to "(unknown)"
+    // probe failure falls back to "(unknown)"
   }
   nCtxCache.set(endpoint, { at: Date.now(), nCtx });
   return nCtx;
@@ -92,7 +95,6 @@ interface UsageSummary {
   totalCalls: number;
   totalInput: number;
   totalOutput: number;
-  perInstance: Array<{ id: string; input: number; output: number; calls: number }>;
 }
 
 function readUsageSummary(): UsageSummary | null {
@@ -102,175 +104,18 @@ function readUsageSummary(): UsageSummary | null {
     const data = JSON.parse(raw) as {
       instances?: Record<string, { input?: number; output?: number; calls?: number }>;
     };
-    const instances = data.instances ?? {};
-    const perInstance = Object.entries(instances).map(([id, u]) => ({
-      id,
-      input: u.input ?? 0,
-      output: u.output ?? 0,
-      calls: u.calls ?? 0,
-    }));
+    const instances = Object.values(data.instances ?? {});
     return {
-      totalCalls: perInstance.reduce((a, b) => a + b.calls, 0),
-      totalInput: perInstance.reduce((a, b) => a + b.input, 0),
-      totalOutput: perInstance.reduce((a, b) => a + b.output, 0),
-      perInstance,
+      totalCalls: instances.reduce((a, b) => a + (b.calls ?? 0), 0),
+      totalInput: instances.reduce((a, b) => a + (b.input ?? 0), 0),
+      totalOutput: instances.reduce((a, b) => a + (b.output ?? 0), 0),
     };
   } catch {
     return null;
   }
 }
 
-async function resetSessionTotals(): Promise<void> {
-  if (!existsSync(USAGE_PATH)) {
-    void vscode.window.showInformationMessage("OpenCode: session totals are already empty.");
-    return;
-  }
-  const confirm = await vscode.window.showWarningMessage(
-    "Reset OpenCode session totals? This zeroes the per-instance token + call counters surfaced in the widget tooltip.",
-    "Reset",
-    "Cancel"
-  );
-  if (confirm !== "Reset") return;
-  try {
-    unlinkSync(USAGE_PATH);
-    void vscode.window.showInformationMessage("OpenCode: session totals reset.");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`OpenCode: reset failed - ${msg}`);
-  }
-}
-
-export async function pickActiveInstance(
-  context: vscode.ExtensionContext,
-  kindFilter?: "remote" | "local"
-): Promise<void> {
-  const config = await readConfigFromSettings(context);
-
-  // Optional kind filter for cross-tier dispatch from the EH session
-  // pickers. The OpenCode session manager's MODEL row passes "remote"
-  // so Local LLM doesn't appear (Local LLM has its own session-
-  // management submenu and its own active-instance picker entry).
-  // The standalone palette command passes nothing, showing all kinds.
-  const visibleInstances = kindFilter
-    ? config.instances.filter((i) => i.kind === kindFilter)
-    : config.instances;
-
-  const paused = isPaused();
-  const pauseItem = makePauseResumeItem(paused);
-  const cancelItem = makeCancelItem();
-  const items: vscode.QuickPickItem[] = [
-    makeBackItem(),
-    makeSeparator(),
-    ...visibleInstances.map((inst) => {
-      const check = inst.id === config.activeInstanceId ? "✔️ " : "";
-      const status =
-        inst.kind === "remote" && inst.apiKeyMissing
-          ? "needs Zen API key"
-          : `${inst.kind} - ${retentionLabel(inst)}`;
-      return {
-        label: `${check}${inst.alias}`,
-        description: status,
-        detail: `${inst.endpoint}${inst.model ? `  ·  model=${inst.model}` : ""}`,
-      };
-    }),
-    pauseItem,
-    cancelItem,
-  ];
-
-  const pick = await vscode.window.showQuickPick(items, {
-    title: "Active OpenCode instance",
-    placeHolder: "Pick which instance handles tool calls by default",
-  });
-  if (!pick || pick.label === "🔵 BACK") return;
-  if (pick.label === pauseItem.label) {
-    setPaused(pauseItem.action !== "resume");
-    return;
-  }
-  if (pick.label === cancelItem.label) {
-    writeCancelFlag();
-    return;
-  }
-  const stripped = pick.label.replace(/^✔️ /, "");
-  const found = config.instances.find((i) => i.alias === stripped);
-  if (!found) return;
-
-  const { updatePreference } = await import("./preferences");
-  updatePreference("activeInstanceId", found.id);
-
-  if (found.kind === "remote" && found.apiKeyMissing) {
-    const stored = await promptAndStoreZenApiKey(context);
-    if (!stored) {
-      void vscode.window.showWarningMessage(
-        `OpenCode: '${found.alias}' is set as active but still needs an API key. Use 'OpenCode Zen API Key' from the menu when ready.`
-      );
-      return;
-    }
-    return;
-  }
-
-  void vscode.window.showInformationMessage(
-    `OpenCode: active instance set to ${found.alias}.`
-  );
-}
-
-async function testConnection(
-  context: vscode.ExtensionContext,
-  logger: OpenCodeRoutesLogger
-): Promise<void> {
-  const config = await readConfigFromSettings(context);
-  const active = config.instances.find((i) => i.id === config.activeInstanceId);
-  if (!active) {
-    void vscode.window.showWarningMessage(
-      "OpenCode: no active instance to test. Pick one via Active Instance."
-    );
-    return;
-  }
-  if (active.kind === "remote" && active.apiKeyMissing) {
-    void vscode.window.showWarningMessage(
-      `OpenCode: '${active.alias}' needs an API key. Use 'Set Zen API Key'.`
-    );
-    return;
-  }
-
-  const url = `${active.endpoint.replace(/\/+$/, "")}/v1/models`;
-  const headers: Record<string, string> = {};
-  if (active.kind === "remote" && active.apiKey) {
-    headers.Authorization = `Bearer ${active.apiKey}`;
-  }
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 5000);
-  const start = Date.now();
-  try {
-    const res = await fetch(url, { signal: ac.signal, headers });
-    clearTimeout(timer);
-    const elapsed = Date.now() - start;
-    if (!res.ok) {
-      logger.warn(`Test connection: ${url} -> HTTP ${res.status} in ${elapsed}ms`);
-      void vscode.window.showWarningMessage(
-        `OpenCode: '${active.alias}' returned HTTP ${res.status} (${elapsed}ms).`
-      );
-      return;
-    }
-    let modelName = "(unknown)";
-    try {
-      const json = (await res.json()) as { data?: Array<{ id?: string }> };
-      if (json?.data?.[0]?.id) modelName = json.data[0].id;
-    } catch {
-      // body parse optional
-    }
-    logger.info(`Test connection: ${url} -> 200 in ${elapsed}ms, model=${modelName}`);
-    void vscode.window.showInformationMessage(
-      `OpenCode: '${active.alias}' reachable, ${modelName} (${elapsed}ms).`
-    );
-  } catch (err) {
-    clearTimeout(timer);
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error(`Test connection: ${url} -> ${msg}`);
-    void vscode.window.showErrorMessage(`OpenCode Routes: ${active.alias} - ${msg}`);
-  }
-}
-
-export { showOpenCodeRoutesSessions };
+export { pickActiveInstance, showOpenCodeRoutesSessions };
 
 export async function showOpenCodeRoutesMenu(
   context: vscode.ExtensionContext,
