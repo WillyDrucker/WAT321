@@ -1,5 +1,8 @@
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../../engine/settingsKeys";
+import { openCodeRoutesStateDir } from "../wat321Paths";
 
 /**
  * Small helpers and constants the SessionTokenWidget composes from.
@@ -7,6 +10,30 @@ import { SETTING } from "../../engine/settingsKeys";
  */
 
 export const TICK_MS = 250;
+
+/** OpenCode dispatch heartbeat. The MCP server's dispatch path writes
+ * this file at `~/.wat321/clients/<wsId>/model-bridge/heartbeat.json`
+ * for the duration of every Claude-to-OpenCode / Claude-to-Local-LLM call
+ * with a 5s keepalive cadence; the file is unlinked on completion.
+ * The 15s staleness budget covers one missed keepalive plus normal
+ * filesystem latency without ever lingering past a real dispatch. */
+const OPENCODE_HEARTBEAT_PATH = join(openCodeRoutesStateDir(), "heartbeat.json");
+const OPENCODE_HEARTBEAT_STALE_MS = 15_000;
+
+/** Is the OpenCode / Local-LLM dispatch heartbeat currently fresh?
+ * Used by both the Claude session-token widget (to render a
+ * waiting-on-OpenCode blink) and the Codex widget (to suppress its
+ * bridge-ceremony animation when the active dispatch targets a
+ * different backend). */
+export function isOpenCodeDispatchActive(): boolean {
+  try {
+    if (!existsSync(OPENCODE_HEARTBEAT_PATH)) return false;
+    const stat = statSync(OPENCODE_HEARTBEAT_PATH);
+    return Date.now() - stat.mtimeMs < OPENCODE_HEARTBEAT_STALE_MS;
+  } catch {
+    return false;
+  }
+}
 
 /** Foreground color used for the Claude session-token widget during
  * a manual `/compact` in-flight render. Same Tailwind Amber-500 hex

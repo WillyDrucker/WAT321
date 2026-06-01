@@ -26,7 +26,6 @@ const CLAMP = "\u{1F5DC}\u{FE0F}";
  * ellipsis-truncating; line two ends at the same per-line cap. */
 const MAX_TITLE_LINE_LEN = 38;
 
-
 export interface SessionTokenTooltipInput {
   provider: "Claude" | "Codex";
   sessionTitle: string;
@@ -81,10 +80,10 @@ export interface SessionTokenTooltipInput {
   bridgeActive?: boolean;
   /** Claude-only: total wait budget (seconds) for the in-flight Codex
    * dispatch. When set, a "Waiting on Codex: Ns" line renders below
-   * the progress bar so the user can see how long Claude will hold for
-   * before timing out. Static value - VS Code rebuilds the tooltip on
-   * each widget render cycle so the read refreshes naturally without
-   * needing a live countdown. Null when no bridge dispatch is blocking. */
+   * the progress bar so the user can see how long Claude will hold
+   * before timing out. Null when no bridge dispatch is blocking.
+   * Static value - the tooltip rebuilds on each widget render cycle
+   * so the read refreshes naturally without a live countdown. */
   bridgeWaitTimeoutSec?: number | null;
   /** Claude-only: which wait mode is driving the in-flight dispatch.
    * `"adaptive"` renders a different wait line ("Adaptive wait on
@@ -210,14 +209,12 @@ export function buildSessionTokenTooltip(
   // Claude-only: while a Claude-to-Codex bridge dispatch is blocking,
   // surface the wait shape so the user knows whether Claude is on a
   // fixed budget (sync) or extending while Codex makes progress
-  // (adaptive). Static value - VS Code rebuilds the tooltip on each
-  // widget render cycle so the line refreshes on re-hover without
-  // needing a live countdown. Adaptive intentionally omits a numeric
-  // budget because its useful "expected to finish by" answer is "as
-  // long as the dispatcher keeps refreshing its heartbeat sidecar".
-  // Adaptive does have a 30-minute hard ceiling enforced by the MCP
-  // server and dispatcher, but surfacing that as a countdown reads
-  // as the wrong signal - users expect adaptive to "just work".
+  // (adaptive). Adaptive intentionally omits a numeric budget - its
+  // useful "expected to finish" answer is "as long as the dispatcher
+  // keeps refreshing its heartbeat sidecar". Adaptive does carry a
+  // 30-minute hard ceiling in the MCP server and dispatcher, but
+  // surfacing it as a countdown reads as the wrong signal: users
+  // expect adaptive to "just work".
   if (provider === "Claude" && typeof bridgeWaitTimeoutSec === "number") {
     if (bridgeWaitMode === "adaptive") {
       md.appendMarkdown(
@@ -239,7 +236,7 @@ export function buildSessionTokenTooltip(
     provider === "Codex" &&
     stageInfo &&
     bridgeActive &&
-    turnStateIsActive(turnState)
+    isTurnActive(turnState)
   ) {
     const display = renderStageDisplay(stageInfo);
     const lines: string[] = [];
@@ -293,10 +290,9 @@ export function buildSessionTokenTooltip(
 /** Wrap a long session title across up to two lines, breaking on a
  * word boundary inside the first line's character budget. Titles
  * that fit on one line are returned unchanged; titles that exceed
- * two lines are ellipsis-truncated. Exported so the OpenCode Routes widget can
- * reuse the same wrap logic for OpenCode / Local LLM session titles.
- * Used to give long session names
- * a fair shot at full readability before falling back to truncation. */
+ * two lines are ellipsis-truncated. Exported so the OpenCode Routes
+ * widget can reuse the same wrap logic for OpenCode / Local LLM
+ * session titles. */
 export function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
   if (!sessionTitle) return "";
   if (sessionTitle.length <= MAX_TITLE_LINE_LEN) return sessionTitle;
@@ -318,7 +314,7 @@ export function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
  * on the model) and `assistant-pending` (model actively working)
  * qualify; `assistant-done`, `compact-end`, `interrupted`, and
  * `unknown` all read as idle. */
-function turnStateIsActive(turnState: LastEntryKind | undefined): boolean {
+function isTurnActive(turnState: LastEntryKind | undefined): boolean {
   return turnState === "user" || turnState === "assistant-pending";
 }
 
