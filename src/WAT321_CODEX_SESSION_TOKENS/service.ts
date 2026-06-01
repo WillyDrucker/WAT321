@@ -28,10 +28,6 @@ import {
   type RolloutCandidate,
 } from "./rolloutDiscovery";
 import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
-import {
-  readLatestExtensionActivity,
-  resetExtensionActivityCache,
-} from "./codexExtensionScanner";
 import { logNotifEvent } from "../shared/diag/notifEventLog";
 import { resolveAutoCompactTokens } from "./autoCompactLimit";
 
@@ -106,10 +102,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
    * observed boundary. */
   private readonly compactFlash = new CompactFlashMachine();
 
-  /** Debounce key for the rank-decision event log. Same role as the
-   * Claude tier's matching field. */
-  private lastRankDecisionKey = "";
-
   /** Per-rollout turn-state tracker, refreshed each rescan. */
   private readonly rolloutTurnStates = new Map<
     string,
@@ -147,8 +139,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     this.lastObservedGrowthMs = null;
     this.compactFlash.reset();
     this.sessionsWatcher.close();
-    resetExtensionActivityCache();
-    this.lastRankDecisionKey = "";
     this.rolloutTurnStates.clear();
     this.pendingNonActiveCompletions = [];
     super.reset();
@@ -238,11 +228,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       });
     }
 
-    // Read extension activity ahead of the size-unchanged early-return
-    // so a fresh extension-panel turn can drive a state emit when the
-    // rollout file is idle.
-    const extActivity = readLatestExtensionActivity(codexDir, this.workspacePath);
-
     let rolloutMtime: number;
     let rolloutGrew = false;
     try {
@@ -261,10 +246,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       return;
     }
 
-    const currentWatermark = this.lastObservedGrowthMs ?? rolloutMtime;
-    const extIsFresher =
-      extActivity !== null && extActivity.activeAt > currentWatermark;
-    if (!rolloutGrew && !extIsFresher && this.hasGoodData) return;
+    if (!rolloutGrew && this.hasGoodData) return;
 
     const tail = readTail(this.cachedRolloutPath);
     if (!tail) {
@@ -345,41 +327,8 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       },
     });
 
-    // Activity-overlay from the Codex VS Code extension's structured-
-    // log SQLite. The extension does not write to rollout files, so
-    // without this overlay the widget shows an idle indicator while
-    // the user is actively prompting through the extension panel.
-    // Rollout-derived bars/labels/tokens stay authoritative; this
-    // overlay only adopts the extension's turnState and freshness
-    // timestamp when its activity is more recent than any observed
-    // rollout growth. CLI bridge dispatches still drive the indicator
-    // through the rollout side.
-    let turnState = classifyCodexTurn(tail);
-    let lastActivityObservedAt = this.lastObservedGrowthMs ?? rolloutMtime;
-    let overlayEngaged = false;
-    if (extActivity && extActivity.activeAt > lastActivityObservedAt) {
-      turnState = extActivity.turnState;
-      lastActivityObservedAt = extActivity.activeAt;
-      overlayEngaged = true;
-    }
-
-    // Log the rank-decision so a "widget shows wrong activity" post-
-    // mortem can see whether the SQLite overlay engaged or the
-    // rollout-based path won. Debounced on (sessionId, source) so a
-    // stable rank does not flood the log every poll.
-    const rankSource = overlayEngaged ? "extension-overlay" : "disk-tiers";
-    const rankKey = `${sessionId}:${rankSource}`;
-    if (rankKey !== this.lastRankDecisionKey) {
-      logNotifEvent({
-        at: now,
-        kind: "rank-decision",
-        provider: "codex",
-        sessionId,
-        candidateCount: this.cachedInventory.total,
-        source: rankSource,
-      });
-      this.lastRankDecisionKey = rankKey;
-    }
+    const turnState = classifyCodexTurn(tail);
+    const lastActivityObservedAt = this.lastObservedGrowthMs ?? rolloutMtime;
 
     this.emitOk({
       sessionId,
