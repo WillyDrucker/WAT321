@@ -5,7 +5,11 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.21] - unreleased
+## [1.5.21] - 2026-06-01
+
+### Removed
+
+- **The Claude and Codex session-tokens widgets no longer require Node 22.5+ at runtime.** v1.5.19 added two precision tiers that read SQLite databases via the experimental `node:sqlite` module: a Claude "Memento" tier that stabilized the active-session pick when more than one session was concurrently open in a workspace, and a Codex extension-overlay that detected activity from the Codex VS Code extension's chat panel. Both required VS Code 1.103 or newer (the first VS Code release with a Node 22 runtime), which silently degraded older VS Code, Cursor, Windsurf, and locked-enterprise installs. Both tiers have been removed; ranking falls back to the v1.5.18 disk-tier baseline (hot recency, activity score, mtime, entrypoint). The removed source lives in `WDDOCS/ARCHIVE/v1.5.21-sqlite-dropout/` for a future reimport behind a universal-compatibility library.
 
 ## [1.5.20] - 2026-06-01
 
