@@ -19,8 +19,15 @@ import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBa
 import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
 import { classifyLastEntry } from "../shared/transcriptClassifier";
 import { logNotifEvent } from "../shared/diag/notifEventLog";
+import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
 import { CompactStateMachine } from "./compactStateMachine";
-import { parseFirstUserMessage, parseLastUsage, parseTurnInfo } from "./parsers";
+import { parseFirstUserMessage, parseLastUsage } from "./parsers";
+import { parseTurnInfo } from "./turnInfoParser";
+import {
+  readSelectedSession,
+  resetSelectedSessionCache,
+  resolveStateVscdbPath,
+} from "./selectedSessionDetector";
 import {
   findLastKnownTranscript,
   rankActiveSession,
@@ -78,7 +85,28 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.triggerPoll();
   });
 
-  constructor(workspacePath: string) {
+  /** Absolute path to VS Code's per-workspace `state.vscdb`, resolved
+   * once at construction from the extension's own storage URI parent.
+   * `null` when no workspace folder is open at activate time. Reads
+   * are cached + stat-gated inside `selectedSessionDetector`, so this
+   * value is consulted on every poll cheaply. */
+  private readonly stateVscdbPath: string | null;
+
+  /** Debounce key for the rank-decision event log. Empty string until
+   * the first emission. Updated only when (sessionId, source) changes,
+   * so a stable rank does not flood the log every poll. Cleared in
+   * reset() so a workspace switch re-emits the new rank. */
+  private lastRankDecisionKey = "";
+
+  /** Per-session turn-state tracker for non-active completion
+   * detection. Updated each poll from the candidate walk. */
+  private readonly sessionTurnStates = new Map<
+    string,
+    { turnState: string; mtime: number; reportedAsDone: boolean }
+  >();
+  private pendingNonActiveCompletions: NonActiveCompletion[] = [];
+
+  constructor(workspacePath: string, extensionStorageDir: string | null) {
     super(
       workspacePath,
       existsSync(join(homedir(), ".claude"))
@@ -86,6 +114,9 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
         : { status: "not-installed" },
       SESSION_TOKEN_POLL_MS
     );
+    this.stateVscdbPath = extensionStorageDir
+      ? resolveStateVscdbPath(extensionStorageDir)
+      : null;
   }
 
   rebroadcast(): void {
@@ -103,6 +134,10 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.compactStateMachine.reset();
     this.sessionsWatcher.close();
     this.settingsWatcher.close();
+    resetSelectedSessionCache();
+    this.lastRankDecisionKey = "";
+    this.sessionTurnStates.clear();
+    this.pendingNonActiveCompletions = [];
     super.reset();
   }
 
@@ -116,6 +151,14 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     return { status: "no-session" };
   }
 
+  /** Drain non-active completions since the last call. */
+  consumeNonActiveCompletions(): NonActiveCompletion[] {
+    if (this.pendingNonActiveCompletions.length === 0) return [];
+    const out = this.pendingNonActiveCompletions;
+    this.pendingNonActiveCompletions = [];
+    return out;
+  }
+
   private emitOk(session: ResolvedSession): void {
     this.setOkStateIfChanged(session, (s) => ({ status: "ok" as const, session: s }));
   }
@@ -123,7 +166,8 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
   private resolveTranscript(
     home: string,
     candidates: readonly SessionCandidate[],
-    now: number
+    now: number,
+    selectedSessionId: string | null
   ): {
     transcriptPath: string;
     sessionId: string;
@@ -131,7 +175,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     source: "live" | "lastKnown";
     pid?: number;
   } | null {
-    const live = rankActiveSession(candidates);
+    const live = rankActiveSession(candidates, selectedSessionId);
     if (live) {
       const projectKey = getProjectKey(live.cwd);
       const transcriptPath = join(
@@ -196,7 +240,22 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     // result, so the walk + per-session tail read does not happen
     // twice.
     const candidates = walkWorkspaceSessions(sessionsDir, this.workspacePath);
-    const resolved = this.resolveTranscript(home, candidates, now);
+    // Read the Claude Code extension's persisted selected-session
+    // memento from VS Code's per-workspace state.vscdb. Stat-gated +
+    // cached inside the detector so back-to-back polls without a
+    // user click hit memory, not SQLite. Falls through to null on
+    // every failure mode (no workspace folder, no node:sqlite, no
+    // memento yet, SQLite locked) so the ranker's lower tiers still
+    // apply.
+    const selectedSessionId = this.stateVscdbPath
+      ? readSelectedSession(this.stateVscdbPath)?.sessionId ?? null
+      : null;
+    const resolved = this.resolveTranscript(
+      home,
+      candidates,
+      now,
+      selectedSessionId
+    );
     if (!resolved) {
       if (this.hasGoodData) return;
       this.setState({ status: "no-session" });
@@ -204,6 +263,27 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     }
 
     const { transcriptPath, sessionId, cwdForLabel, source, pid } = resolved;
+
+    // Log the rank-decision so a "widget switched to the wrong
+    // session" post-mortem can see whether the memento tier engaged
+    // or the disk-only tiers picked. Debounced on (sessionId, source)
+    // so a stable rank does not flood the log every poll.
+    const rankSource =
+      selectedSessionId !== null && sessionId === selectedSessionId
+        ? "memento"
+        : "disk-tiers";
+    const rankKey = `${sessionId}:${rankSource}`;
+    if (rankKey !== this.lastRankDecisionKey) {
+      logNotifEvent({
+        at: now,
+        kind: "rank-decision",
+        provider: "claude",
+        sessionId,
+        candidateCount: candidates.length,
+        source: rankSource,
+      });
+      this.lastRankDecisionKey = rankKey;
+    }
 
     if (!existsSync(transcriptPath)) {
       if (this.hasGoodData) return;
@@ -226,6 +306,8 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
         provider: "claude",
         fromPath: prevPath,
         toPath: transcriptPath,
+        fromSessionId: prevPath ? basename(prevPath, ".jsonl") : null,
+        toSessionId: sessionId,
         source,
       });
     }
@@ -305,6 +387,8 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     // pick above - no second walk, no second round of tail reads.
     const workspaceSessionInventory = tallyWorkspaceSessions(candidates);
 
+    this.detectNonActiveCompletions(candidates, sessionId, now);
+
     this.emitOk({
       sessionId,
       label: basename(cwdForLabel),
@@ -326,4 +410,64 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     });
   }
 
+  /** Queue done-transitions on non-active sessions with fresh mtime.
+   * First-read for an unknown session is recorded but never queued;
+   * a stable done-state does not re-fire (per-session reportedAsDone
+   * gate). */
+  private detectNonActiveCompletions(
+    candidates: readonly SessionCandidate[],
+    activeSessionId: string,
+    now: number
+  ): void {
+    const FRESH_WINDOW_MS = 30_000;
+    const seen = new Set<string>();
+    for (const candidate of candidates) {
+      const sid = candidate.entry.sessionId;
+      seen.add(sid);
+      const prev = this.sessionTurnStates.get(sid);
+      const isDone = candidate.turnState === "assistant-done";
+      const isFresh = now - candidate.mtime <= FRESH_WINDOW_MS;
+
+      if (sid === activeSessionId) {
+        // Active session handled by the main bridge path; track state
+        // so a future ranking flip inherits a real baseline.
+        this.sessionTurnStates.set(sid, {
+          turnState: candidate.turnState,
+          mtime: candidate.mtime,
+          reportedAsDone: isDone,
+        });
+        continue;
+      }
+
+      if (prev === undefined) {
+        // First read: record without queuing.
+        this.sessionTurnStates.set(sid, {
+          turnState: candidate.turnState,
+          mtime: candidate.mtime,
+          reportedAsDone: isDone,
+        });
+        continue;
+      }
+
+      const wasDone = prev.reportedAsDone;
+      const transitionedToDone = isDone && !wasDone;
+      if (transitionedToDone && isFresh) {
+        this.pendingNonActiveCompletions.push({
+          sessionId: sid,
+          transcriptPath: candidate.transcriptPath,
+          label: basename(candidate.entry.cwd) || candidate.entry.cwd,
+          sessionTitle: parseFirstUserMessage(candidate.transcriptPath),
+          completedAtMs: now,
+        });
+      }
+      this.sessionTurnStates.set(sid, {
+        turnState: candidate.turnState,
+        mtime: candidate.mtime,
+        reportedAsDone: isDone || (wasDone && candidate.mtime === prev.mtime),
+      });
+    }
+    for (const sid of this.sessionTurnStates.keys()) {
+      if (!seen.has(sid)) this.sessionTurnStates.delete(sid);
+    }
+  }
 }

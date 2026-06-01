@@ -6,88 +6,27 @@ import type {
 } from "../shared/ui/sessionTokenWidget";
 
 /**
- * Parsers for Claude Code's `.jsonl` transcript files. The transcript
- * is append-only JSON-lines with one entry per turn/event.
+ * Small extractors for Claude Code's `.jsonl` transcripts. Each
+ * function walks the tail / head looking for a specific field
+ * (last usage, last assistant text, cwd, first user message) and
+ * returns it - no aggregation, no classification.
+ *
+ * Bigger concerns live in sibling files:
+ *   - `turnInfoParser.ts` - per-turn aggregation (parseTurnInfo,
+ *     parseRecentCompactBoundaries)
+ *   - `cacheEventParser.ts` - LOAD/MISS classification
+ *     (parseMostRecentCacheEvent)
+ *
+ * The shared display types (`ClaudeTurnInfo`, `CacheEvent`,
+ * `CacheEventKind`) are re-exported here so callers in this tool
+ * can import them from `./parsers` without knowing about the
+ * shared-ui module.
  */
 
-/** Structured signal Claude Code writes at the end of every compact.
- * Empirically verified against transcripts from CLI v2.1.126-v2.1.143.
- * Entry shape:
- *
- *   {
- *     "type": "system",
- *     "subtype": "compact_boundary",
- *     "content": "Conversation compacted",
- *     "timestamp": "2026-05-11T15:28:55.310Z",
- *     "compactMetadata": {
- *       "trigger": "manual" | "auto",
- *       "preTokens": <int>,
- *       "durationMs": <int>,
- *       "postTokens": <int>,
- *       "preservedSegment": { ... },
- *       "preCompactDiscoveredTools": [ ... ]
- *     }
- *   }
- *
- * This is the canonical end-of-compact signal - far more reliable than
- * the historical string-marker classifier path. Drives the compact
- * state machine's clean-exit transition. */
-export interface CompactBoundary {
-  /** ms since epoch parsed from the entry's `timestamp` field. */
-  at: number;
-  trigger: string;
-  preTokens: number;
-  durationMs: number;
-  postTokens: number;
-}
-
-/** Walk the tail backwards and parse compact_boundary system entries.
- * Returns the most recent `limit` entries, oldest first. Malformed
- * entries are skipped silently. */
-export function parseRecentCompactBoundaries(
-  tail: string,
-  limit: number
-): CompactBoundary[] {
-  const lines = tail.trimEnd().split("\n");
-  const out: CompactBoundary[] = [];
-  for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
-    const line = lines[i];
-    if (!line) continue;
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (entry.type !== "system" || entry.subtype !== "compact_boundary") {
-      continue;
-    }
-    const tsRaw = entry.timestamp;
-    const at = typeof tsRaw === "string" ? Date.parse(tsRaw) : NaN;
-    if (Number.isNaN(at)) continue;
-    const meta = entry.compactMetadata as Record<string, unknown> | undefined;
-    if (!meta) continue;
-    const trigger = typeof meta.trigger === "string" ? meta.trigger : "auto";
-    const preTokens = typeof meta.preTokens === "number" ? meta.preTokens : 0;
-    const durationMs = typeof meta.durationMs === "number" ? meta.durationMs : 0;
-    const postTokens = typeof meta.postTokens === "number" ? meta.postTokens : 0;
-    if (durationMs <= 0) continue;
-    out.unshift({ at, trigger, preTokens, durationMs, postTokens });
-  }
-  return out;
-}
-
-
-/** Re-export the shared display types so callers in this tool can
- * continue to import them from the parsers module without knowing
- * about the shared-ui module. The interfaces themselves live in shared
- * to keep the generic session-token widget independent of tool
- * folders. */
 export type { CacheEvent, CacheEventKind, ClaudeTurnInfo };
 
 /** Extract text from a Claude message content field. Handles both
- * `content: "string"` and `content: [{type: "text", text: "..."}]`
- * forms used in Claude transcripts. */
+ * `content: "string"` and `content: [{type: "text", text: "..."}]`. */
 function extractTextContent(content: unknown): string | null {
   if (typeof content === "string" && content.length > 0) return content;
   if (Array.isArray(content)) {
@@ -113,13 +52,11 @@ export interface LastUsage {
   modelId: string;
 }
 
-/**
- * Walk backwards through the tail of a transcript to find the most
- * recent `type: "assistant"` entry that carries `message.usage`. Post-
+/** Walk backwards through the tail to find the most recent
+ * `type: "assistant"` entry that carries `message.usage`. Post-
  * compact or long-tool-result turns can push the last usage-bearing
  * entry well beyond the first 100 lines of a 256KB tail, so this
- * scans every line in the tail window.
- */
+ * scans every line in the window. */
 export function parseLastUsage(tail: string): LastUsage | null {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -157,11 +94,9 @@ export function parseLastUsage(tail: string): LastUsage | null {
   return null;
 }
 
-/**
- * Extract the text content from the most recent assistant turn in
+/** Extract the text content from the most recent assistant turn in
  * the tail. Used for toast notification previews. Returns "" if no
- * assistant message with text content is found.
- */
+ * assistant message with text content is found. */
 export function parseLastAssistantText(tail: string): string {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -185,327 +120,25 @@ export function parseLastAssistantText(tail: string): string {
   return "";
 }
 
-/** Cache TTL gap threshold. A user prompt that lands more than this
- * many ms after the prior assistant turn lost its prompt cache. */
-const CACHE_TTL_GAP_MS = 5 * 60 * 1000;
-/** Tool-result content size threshold flagged as "large payload". */
-const LARGE_TOOL_RESULT_BYTES = 50_000;
-/** Cache-rebuild detection mirrors `maybeLatchCacheBanner` thresholds.
- * Do not adjust these without a fresh false-fire audit - they suppress
- * spurious fires on normal incremental cache writes. Loosening either
- * value re-introduces the LOAD-against-incremental-write bug. */
-const REBUILD_CC_FLOOR = 5_000;
-const REBUILD_RATIO_DENOM = 2;
-
-/**
- * Walk back through up to `lookback` assistant turns to detect and
- * classify the most recent cache event. Pure transcript-derived. Reads
- * only the same `tail` string the rest of the parser already operates
- * on; makes no file reads, no HTTP calls, no process spawns. Output
- * powers a tooltip-only readout - no banner flashing, no alarms.
- *
- * Detection:
- *   - cc >= 5000 AND cc >= cr * 2 -> rebuild detected. Classify by:
- *     - preceding user has isCompactSummary -> LOAD-compact
- *     - gap from prior assistant ts to current user ts > 5 min -> MISS-TTL
- *     - preceding user has tool_result content >= 50 KB -> MISS-large-payload
- *     - else -> MISS-unknown
- *   - No rebuild in lookback window -> HIT-clean.
- *
- * Note: this is read-only diagnosis. The cache LOAD/MISS banner
- * thresholds in `sessionTokenWidget.ts:maybeLatchCacheBanner` are
- * unaffected. This function only adds tooltip visibility for events
- * that would otherwise be silent.
- */
-export function parseMostRecentCacheEvent(
-  tail: string,
-  lookback = 10
-): CacheEvent {
-  interface TurnRecord {
-    assistantTs: number;
-    cc: number;
-    cr: number;
-    userTs: number | null;
-    isPostCompact: boolean;
-    toolResultBytes: number;
-  }
-
-  const lines = tail.trimEnd().split("\n");
-  const turns: TurnRecord[] = [];
-  let pending: TurnRecord | null = null;
-
-  for (let i = lines.length - 1; i >= 0 && turns.length < lookback; i--) {
-    const line = lines[i];
-    if (!line) continue;
-
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
-    if (entry.type === "assistant") {
-      // A new assistant entry without a paired user means the prior
-      // pending record has no preceding user info (e.g. tool-result
-      // assistant-only sequence). Push it as-is and start fresh.
-      if (pending !== null) {
-        turns.push(pending);
-        pending = null;
-        if (turns.length >= lookback) break;
-      }
-      const msg = entry.message as Record<string, unknown> | undefined;
-      const usage = msg?.usage as Record<string, unknown> | undefined;
-      if (!usage) continue;
-      const tsRaw = entry.timestamp;
-      const ts = typeof tsRaw === "string" ? Date.parse(tsRaw) : NaN;
-      if (Number.isNaN(ts)) continue;
-      pending = {
-        assistantTs: ts,
-        cc:
-          typeof usage.cache_creation_input_tokens === "number"
-            ? usage.cache_creation_input_tokens
-            : 0,
-        cr:
-          typeof usage.cache_read_input_tokens === "number"
-            ? usage.cache_read_input_tokens
-            : 0,
-        userTs: null,
-        isPostCompact: false,
-        toolResultBytes: 0,
-      };
-    } else if (entry.type === "user" && pending !== null) {
-      const tsRaw = entry.timestamp;
-      const ts = typeof tsRaw === "string" ? Date.parse(tsRaw) : NaN;
-      pending.userTs = Number.isNaN(ts) ? null : ts;
-      pending.isPostCompact = entry.isCompactSummary === true;
-      const msg = entry.message as Record<string, unknown> | undefined;
-      const content = msg?.content;
-      if (Array.isArray(content)) {
-        let bytes = 0;
-        for (const part of content) {
-          if (typeof part !== "object" || part === null) continue;
-          const p = part as Record<string, unknown>;
-          if (p.type !== "tool_result") continue;
-          const c = p.content;
-          if (typeof c === "string") bytes += c.length;
-          else if (c !== undefined) bytes += JSON.stringify(c).length;
-        }
-        pending.toolResultBytes = bytes;
-      }
-      turns.push(pending);
-      pending = null;
-    }
-  }
-
-  if (pending !== null && turns.length < lookback) turns.push(pending);
-
-  // turns[0] is the most recent assistant turn.
-  for (let i = 0; i < turns.length; i++) {
-    const t = turns[i];
-    if (t.cc < REBUILD_CC_FLOOR) continue;
-    const ago = describeTurnsAgo(i);
-
-    // Compact-driven rebuilds qualify on the creation floor alone -
-    // mirrors the banner's `meetsCompact` exception. Compact bundles
-    // a fresh summary alongside surviving system prompt + tools, so
-    // creation is meaningful but reads can be non-trivial; the strict
-    // ratio gate would miss most compact LOADs and let the tooltip
-    // disagree with the banner. Check this before the ratio gate.
-    if (t.isPostCompact) {
-      return {
-        kind: "LOAD-compact",
-        description: `LOAD - post-compact rebuild (${ago})`,
-        ts: t.assistantTs,
-      };
-    }
-
-    if (t.cc < t.cr * REBUILD_RATIO_DENOM) continue;
-    const prior = turns[i + 1];
-    if (prior !== undefined && t.userTs !== null) {
-      const gapMs = t.userTs - prior.assistantTs;
-      if (gapMs > CACHE_TTL_GAP_MS) {
-        const gapMin = Math.round(gapMs / 60_000);
-        return {
-          kind: "MISS-TTL",
-          description: `MISS - TTL expiration (~${gapMin} min gap, ${ago})`,
-          ts: t.assistantTs,
-        };
-      }
-    }
-    if (t.toolResultBytes >= LARGE_TOOL_RESULT_BYTES) {
-      const kb = Math.round(t.toolResultBytes / 1024);
-      return {
-        kind: "MISS-large-payload",
-        description: `MISS - large tool payload (~${kb} KB tool result, ${ago})`,
-        ts: t.assistantTs,
-      };
-    }
-    // Ruled out: TTL gap (turn-to-turn was within 5 min), large tool
-    // payload (preceding tool_result was below 50 KB), and post-compact
-    // rebuild. Most likely remaining causes for a prefix-rebuild that
-    // we can't pin from the transcript:
-    //   - Tool schema change: a tool was added/removed since the
-    //     prior turn (Claude Code's tool list shifts between sessions
-    //     or after MCP server reinstall, which invalidates the cache).
-    //   - System-prompt mutation: <system-reminder> content varies
-    //     across turns.
-    //   - Claude Code internal cache reset: not observable here.
-    // Surfacing the ruled-out bucket helps the user know we checked
-    // the obvious causes and they're not the answer.
-    return {
-      kind: "MISS-unknown",
-      description: `MISS - prefix rebuilt (${ago}); ruled out TTL/large-payload/compact. Likely tool schema or system-prompt change.`,
-      ts: t.assistantTs,
-    };
-  }
-
-  if (turns.length === 0) {
-    return { kind: "HIT-clean", description: "no recent activity", ts: null };
-  }
-  return {
-    kind: "HIT-clean",
-    description: "Clean",
-    ts: null,
-  };
-}
-
-function describeTurnsAgo(n: number): string {
-  if (n === 0) return "this turn";
-  if (n === 1) return "1 turn ago";
-  return `${n} turns ago`;
-}
-
-/** Compose a `ClaudeTurnInfo` snapshot from a transcript tail. Walks
- * backwards once, aggregates tool_use names, detects thinking blocks,
- * and captures the last assistant turn's usage. Cheap enough to call
- * on every poll - a single tail pass. */
-export function parseTurnInfo(tail: string): ClaudeTurnInfo {
-  const lines = tail.trimEnd().split("\n");
-
-  let activeToolName: string | null = null;
-  let activeToolLocked = false;
-  let toolCallCount = 0;
-  let hasThinkingRecent = false;
-  let outputTokens = 0;
-  let totalInputTokens = 0;
-  let cachedInputTokens = 0;
-  let cacheCreationTokens = 0;
-  let lastCompactTimestamp: number | null = null;
-  let usageLocked = false;
-  let thinkingScanBudget = 20;
-
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line) continue;
-
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
-    if (entry.type === "user") {
-      // User message closes the current turn - stop counting tool
-      // calls at this boundary. If the closing user entry is itself
-      // a compact summary, capture its timestamp so the widget can
-      // classify the trailing assistant turn's cache rebuild as a
-      // compact-driven LOAD rather than an involuntary MISS.
-      if (
-        entry.isCompactSummary === true &&
-        typeof entry.timestamp === "string"
-      ) {
-        const ts = Date.parse(entry.timestamp);
-        if (!Number.isNaN(ts)) lastCompactTimestamp = ts;
-      }
-      break;
-    }
-
-    if (entry.type !== "assistant") continue;
-    const msg = entry.message as Record<string, unknown> | undefined;
-    if (!msg) continue;
-
-    // First assistant entry encountered (walking backwards = newest)
-    // supplies the usage snapshot and the active tool name if any.
-    if (!usageLocked) {
-      const usage = msg.usage as Record<string, unknown> | undefined;
-      if (usage) {
-        outputTokens =
-          typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
-        const input =
-          typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
-        cacheCreationTokens =
-          typeof usage.cache_creation_input_tokens === "number"
-            ? usage.cache_creation_input_tokens
-            : 0;
-        cachedInputTokens =
-          typeof usage.cache_read_input_tokens === "number"
-            ? usage.cache_read_input_tokens
-            : 0;
-        totalInputTokens = input + cacheCreationTokens + cachedInputTokens;
-        usageLocked = true;
-      }
-    }
-
-    const content = msg.content;
-    if (Array.isArray(content)) {
-      for (const part of content) {
-        if (typeof part !== "object" || part === null) continue;
-        const p = part as Record<string, unknown>;
-        if (p.type === "tool_use") {
-          toolCallCount++;
-          if (!activeToolLocked && typeof p.name === "string") {
-            activeToolName = p.name;
-            activeToolLocked = true;
-          }
-        } else if (p.type === "thinking") {
-          hasThinkingRecent = true;
-        }
-      }
-    }
-
-    if (--thinkingScanBudget <= 0 && usageLocked && activeToolLocked) {
-      // Have enough signal; bail out rather than walk the rest of the
-      // tail. thinkingScanBudget also caps how far back we look for
-      // thinking blocks so very old blocks do not keep the indicator on.
-      break;
-    }
-  }
-
-  return {
-    activeToolName,
-    toolCallCount,
-    hasThinkingRecent,
-    outputTokens,
-    totalInputTokens,
-    cachedInputTokens,
-    cacheCreationTokens,
-    lastCompactTimestamp,
-    mostRecentCacheEvent: parseMostRecentCacheEvent(tail),
-  };
-}
-
-/**
- * Read the originating cwd out of a transcript's first few lines.
+/** Read the originating cwd out of a transcript's first few lines.
  * Claude transcripts include a `cwd` field on every entry, so the
- * very first parseable line is enough. Returns "" when the file
- * cannot be read or no `cwd` field is found.
+ * first parseable line is enough. Returns null when the file cannot
+ * be read or no `cwd` is found. Symmetric with Codex's `parseCwd`
+ * (see `WAT321_CODEX_SESSION_TOKENS/parsers.ts`) so callers using both
+ * providers handle the miss case the same way.
  *
  * Used by the cross-project "last known" fallback so the widget can
- * label a transcript from another project with that project's
- * actual basename, instead of misleadingly labeling it with the
- * current workspace's basename.
- */
-export function parseCwd(path: string): string {
-  // Read a larger head than the default 8KB. Claude Code transcripts
-  // often start with a few small control events (permission-mode,
-  // model-switch, etc.) that do not carry `cwd`, and the first user
-  // turn that does carry `cwd` can land past the 8KB mark on files
-  // with long early messages. 32KB is enough to always reach the
-  // first user turn without being expensive.
+ * label a transcript from another project with that project's basename,
+ * instead of misleadingly labeling it with the current workspace's. */
+export function parseCwd(path: string): string | null {
+  // Read a larger head than the default 8KB. Transcripts often
+  // start with a few small control events (permission-mode, model-
+  // switch) that don't carry `cwd`, and the first user turn that
+  // does can land past the 8KB mark on files with long early
+  // messages. 32KB is enough to always reach it without being
+  // expensive.
   const head = readHead(path, 32_768);
-  if (!head) return "";
+  if (!head) return null;
 
   const lines = head.trimEnd().split("\n");
   for (let i = 0; i < lines.length && i < 40; i++) {
@@ -522,15 +155,14 @@ export function parseCwd(path: string): string {
     const cwd = entry.cwd;
     if (typeof cwd === "string" && cwd.length > 0) return cwd;
   }
-  return "";
+  return null;
 }
 
-/**
- * Read the first user turn out of a transcript to use as the session
- * title. Only the first ~8KB of the file is read (via `readHead`) and
- * at most 20 JSON lines are scanned. Supports both `content: string`
- * and the content-array form with `{ type: "text", text: ... }` parts.
- */
+/** Read the first user turn out of a transcript to use as the
+ * session title. Only the first ~8KB of the file is read (via
+ * `readHead`) and at most 20 JSON lines are scanned. Supports both
+ * `content: string` and the content-array form with
+ * `{ type: "text", text: ... }` parts. */
 export function parseFirstUserMessage(path: string): string {
   const head = readHead(path);
   if (!head) return "";
