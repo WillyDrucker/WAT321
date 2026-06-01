@@ -5,7 +5,11 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.22] - unreleased
+## [1.5.22] - 2026-06-01
+
+### Fixed
+
+- **The Codex session-tokens "thinking" indicator stays animated while Codex is reasoning, even when it goes quiet.** When you prompt Codex directly in its VS Code extension, the widget's activity cycle used to fall back to its idle icon partway through a turn and sit there until the answer landed. Recent Codex models think silently for long stretches with nothing written to the session file (observed up to a minute and a half), and the indicator was tied to how recently that file last grew, so a quiet reasoning gap read as idle even though Codex was hard at work. The indicator now rides through those silent stretches for the length of a turn and settles only once the turn actually finishes. Work dispatched over the Epic Handshake bridge was never affected and behaves exactly as before. The activity window is now turn-aware, a generous ceiling while a turn is in flight rather than a fixed file-activity timeout.
 
 ## [1.5.21] - 2026-06-01
 
