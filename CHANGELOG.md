@@ -5,6 +5,22 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.19] - 2026-06-01
+
+### Fixed
+
+- **A response completing in a Claude or Codex session you weren't actively watching now reliably fires its notification, even when more than one session is open in the same workspace.** The bridge listens to one ranked active session at a time, but concurrent sibling sessions also need their completions delivered. Sibling completions are now tracked per-session and drained on every poll above the suppress gate, so a busy active session can no longer block a quieter sibling's notification. Covers the case where two Claude windows in the same project both finish within seconds of each other and only one used to chime.
+
+- **Two completions landing within ten seconds on different Claude or Codex sessions both fire their toasts.** The notification cooldown was global per-provider, so a follow-up on a second concurrently-active session collapsed into the first session's cooldown window and went silent. The cooldown is now keyed per (provider, session), so distinct sessions never suppress each other while still collapsing rapid bursts inside one session.
+
+- **The Codex session-tokens widget no longer surfaces activity from another workspace.** The Codex VS Code extension writes its native-panel turns to an account-global SQLite store, and the overlay had no workspace filter, so a sibling workspace open in another VS Code window could feed its turns into the wrong widget. The overlay now matches rows by normalized absolute workspace path and the cache is keyed per (workspace, file). Sibling workspaces sharing a leaf folder name like `api` or `frontend` can no longer false-positive either, because basename-only matching is no longer accepted.
+
+- **Codex extension activity now invalidates the overlay's cache the instant a row lands.** SQLite WAL mode writes fresh rows to a sidecar `<file>-wal` before checkpointing back, and the cache fingerprint was reading the main file's mtime, which stays unchanged until checkpoint. The fingerprint now folds in the WAL file's mtime, so the next poll sees the new state immediately instead of waiting for a checkpoint.
+
+### Changed
+
+- **The Codex extension overlay's freshness window now spans the full rescan cadence.** It was 30 seconds, which meant a Codex completion landing just after a rescan could age out before the next pass picked it up and silently fail to fire. The window is now 120 seconds, covering one full 51-second rescan cycle plus headroom for slow systems. Detection runs on every rescan instead of only on size growth, so the widget also catches completions that don't push the file size past the prior poll.
+
 ## [1.5.18] - 2026-05-31
 
 ### Added

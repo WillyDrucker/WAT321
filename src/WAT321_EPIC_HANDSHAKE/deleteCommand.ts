@@ -1,15 +1,16 @@
-import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import * as vscode from "vscode";
-import { readFirstLine } from "../shared/fs/fileReaders";
 import { EPIC_HANDSHAKE_DIR } from "./constants";
+import { buildDeleteAllDiagnostic } from "./deleteCommandDiagnostic";
+import {
+  clearBridgeThreadRecord,
+  deleteRolloutFilesByThreadId,
+  stripSessionIndexEntries,
+} from "./deleteCommandSteps";
 import {
   bridgeThreadDisplayName,
-  findRolloutPath,
   listRecoverableSessions,
-  nextCollisionFreeCounter,
   type BridgeThreadRecord,
 } from "./threadPersistence";
 import { bridgeThreadNamePattern } from "./threadNaming";
@@ -17,19 +18,22 @@ import type { EpicHandshakeLogger } from "./types";
 import { workspaceHash } from "../shared/workspaceHash";
 
 /**
- * Destructive delete of the current workspace's Codex bridge session.
+ * Destructive delete of the current workspace's Codex bridge session
+ * (single, or every session under this workspace's bridge pattern).
  * Full cleanup path:
  *
- *   1. Delete the rollout .jsonl under `~/.codex/sessions/YYYY/MM/DD/`
- *   2. Strip the matching entry from `~/.codex/session_index.jsonl`
- *      (atomic tmp+rename)
- *   3. Null out our `bridge-thread.<wshash>.json` (threadId=null,
- *      counter bump, failure fields reset)
+ *   1. Delete rollout .jsonl files under `~/.codex/sessions/YYYY/MM/DD/`
+ *   2. Strip matching entries from `~/.codex/session_index.jsonl`
+ *      (bulk path also runs an orphan sweep for rollouts deleted out-
+ *      of-band)
+ *   3. Null our `bridge-thread.<wshash>.json` (threadId=null, counter
+ *      bumped via `nextCollisionFreeCounter`, failure fields reset)
  *
- * This reaches into Codex's own state files - philosophically we
+ * We reach into Codex's own state files here - philosophically we
  * avoid this in shipping code, but the explicit confirmation dialog
- * is the user's informed opt-in. Non-destructive alternative is the
- * soft Reset command.
+ * is the user's informed opt-in. The non-destructive alternative is
+ * the soft Reset command. Step mechanics live in `deleteCommandSteps`;
+ * the empty-result diagnostic lives in `deleteCommandDiagnostic`.
  */
 
 export async function deleteCurrentCodexSession(
@@ -79,201 +83,46 @@ export async function deleteCurrentCodexSession(
   );
   if (confirmation !== "Delete") return;
 
-  const threadId = record.threadId;
-  let removedRollouts = 0;
-  let strippedIndexLines = 0;
-
-  // 1. Delete any rollout files matching the thread id
-  const sessionsRoot = join(homedir(), ".codex", "sessions");
-  try {
-    for (const file of walk(sessionsRoot)) {
-      if (file.includes(threadId)) {
-        unlinkSync(file);
-        removedRollouts++;
-      }
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`rollout delete partial: ${msg}`);
-  }
-
-  // 2. Strip session_index.jsonl entry (atomic tmp+rename)
-  const indexPath = join(homedir(), ".codex", "session_index.jsonl");
-  if (existsSync(indexPath)) {
-    try {
-      const raw = readFileSync(indexPath, "utf8");
-      const lines = raw.split("\n");
-      const kept = lines.filter((line) => {
-        if (!line.trim()) return false;
-        try {
-          const obj = JSON.parse(line) as { id?: string };
-          return obj.id !== threadId;
-        } catch {
-          return true;
-        }
-      });
-      strippedIndexLines = lines.filter((l) => l.trim()).length - kept.length;
-      if (!writeFileAtomic(indexPath, `${kept.join("\n")}\n`)) {
-        logger.warn("session_index strip failed: atomic write rejected");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`session_index strip failed: ${msg}`);
-    }
-  }
-
-  // 3. Null our bridge-thread state. Counter mirrors what
-  // `spawnFreshThread` will actually pick on the next prompt - the
-  // gap-fill (lowest unused integer in this workspace's bridge-pattern
-  // set) instead of the legacy monotonic `+1`. Without this, the menu
-  // label `MANAGE CODEX (S<n>)` and the post-delete toast would show
-  // an inflated next-counter (e.g. S16 after deleting S15) while the
-  // actual spawn lands at S1 because gap-fill is the authoritative
-  // policy. Read session_index AFTER the strip so the just-deleted
-  // entry is excluded.
-  const projectedNext = nextCollisionFreeCounter(
-    workspacePath,
-    record.sessionCounter
+  const threadIds = new Set([record.threadId]);
+  const removedRollouts = deleteRolloutFilesByThreadId(
+    threadIds,
+    logger,
+    "rollout delete partial"
   );
-  const next: BridgeThreadRecord = {
-    ...record,
-    threadId: null,
-    sessionCounter: projectedNext,
-    lastResetAt: new Date().toISOString(),
-    consecutiveFailures: 0,
-    lastError: null,
-    lastSuccessAt: null,
-  };
-  writeFileAtomic(recordPath, JSON.stringify(next, null, 2));
+  const strippedIndexLines = stripSessionIndexEntries(
+    threadIds,
+    null,
+    logger,
+    "session_index strip failed"
+  );
+  const projectedNext = clearBridgeThreadRecord(
+    workspacePath,
+    recordPath,
+    record,
+    logger,
+    "bridge-thread record null failed"
+  );
 
   logger.info(
-    `codex session S${record.sessionCounter} deleted: ${removedRollouts} rollouts, ${strippedIndexLines} index entries. Next: S${next.sessionCounter}`
+    `codex session S${record.sessionCounter} deleted: ${removedRollouts} rollouts, ${strippedIndexLines} index entries. Next: S${projectedNext ?? "?"}`
   );
   void vscode.window.showInformationMessage(
-    `Epic Handshake: S${record.sessionCounter} deleted. Next Claude to Codex prompt spawns S${next.sessionCounter}.`
+    `Epic Handshake: S${record.sessionCounter} deleted. Next Claude to Codex prompt spawns ${projectedNext !== null ? `S${projectedNext}` : "a fresh session"}.`
   );
-}
-
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  let entries: Array<{ name: string; isDirectory: () => boolean }>;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of entries) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walk(p));
-    else out.push(p);
-  }
-  return out;
-}
-
-/** Scan `~/.codex/session_index.jsonl` for bridge-pattern entries and
- * classify each against the current workspace. Used by Delete All to
- * explain a (0) result instead of silently exiting. Returns null when
- * the index has no bridge-pattern entries at all (genuine clean state);
- * otherwise returns the rows (one per scanned entry) plus a short
- * summary suitable for a toast. Detail goes to the Epic Handshake
- * output channel via the caller's logger. */
-function buildDeleteAllDiagnostic(workspacePath: string): {
-  summary: string;
-  rows: string[];
-  basename: string;
-  normalized: string;
-} | null {
-  const indexPath = join(homedir(), ".codex", "session_index.jsonl");
-  if (!existsSync(indexPath)) return null;
-
-  const bridgeRe = /Epic Handshake Claude-to-Codex S(\d+)$/;
-  const wsBasename = basename(workspacePath) || "Workspace";
-  const wsNorm = normalizePath(workspacePath);
-
-  const rows: string[] = [];
-  let matchingCount = 0;
-  try {
-    const raw = readFileSync(indexPath, "utf8");
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
-      let entry: { id?: string; thread_name?: string };
-      try {
-        entry = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      const name = entry.thread_name ?? "";
-      if (!bridgeRe.test(name)) continue;
-      matchingCount++;
-      const id = entry.id;
-      if (typeof id !== "string") {
-        rows.push(`${name}: rejected - no id in index entry`);
-        continue;
-      }
-      if (!name.startsWith(`${wsBasename} `)) {
-        rows.push(`${name}: rejected - basename mismatch (belongs to another workspace)`);
-        continue;
-      }
-      const rolloutPath = findRolloutPath(id);
-      if (rolloutPath === null) {
-        rows.push(`${name} (${id.slice(0, 8)}...): rejected - rollout file missing on disk`);
-        continue;
-      }
-      const rolloutCwd = readRolloutCwdHeader(rolloutPath);
-      if (rolloutCwd === null) {
-        rows.push(`${name} (${id.slice(0, 8)}...): rejected - cwd not readable from rollout`);
-        continue;
-      }
-      if (normalizePath(rolloutCwd) !== wsNorm) {
-        rows.push(`${name} (${id.slice(0, 8)}...): rejected - session_meta.cwd is "${rolloutCwd}" (expected "${workspacePath}")`);
-        continue;
-      }
-      rows.push(`${name} (${id.slice(0, 8)}...): ACCEPTED - would be deleted`);
-    }
-  } catch {
-    return null;
-  }
-
-  if (matchingCount === 0) return null;
-
-  const summary = `no bridge sessions matched this workspace. Scanned ${matchingCount} bridge-pattern session${matchingCount === 1 ? "" : "s"} in the index. Click "View details" for the full breakdown.`;
-
-  return { summary, rows, basename: wsBasename, normalized: wsNorm };
-}
-
-function normalizePath(p: string): string {
-  const s = p.replace(/\\/g, "/").replace(/\/+$/, "");
-  return process.platform === "win32" ? s.toLowerCase() : s;
-}
-
-function readRolloutCwdHeader(rolloutPath: string): string | null {
-  const firstLine = readFirstLine(rolloutPath);
-  if (firstLine === null) return null;
-  try {
-    const entry = JSON.parse(firstLine) as {
-      type?: string;
-      payload?: { cwd?: unknown };
-    };
-    if (entry.type !== "session_meta") return null;
-    const cwd = entry.payload?.cwd;
-    return typeof cwd === "string" ? cwd : null;
-  } catch {
-    return null;
-  }
 }
 
 /**
  * Destructive bulk delete of every Codex session matching this
- * workspace's bridge pattern. Enumerates sessions via
- * `listRecoverableSessions` (scans `~/.codex/session_index.jsonl`
- * for `^<basename> Epic Handshake Claude-to-Codex S\d+$` AND confirms
- * the rollout's `session_meta.cwd` equals the current workspacePath),
+ * workspace's bridge pattern. Enumerates via `listRecoverableSessions`
+ * (scans `~/.codex/session_index.jsonl` for the workspace-prefixed
+ * bridge pattern AND confirms the rollout's `session_meta.cwd` matches),
  * then for each one deletes the rollout file and strips the index
- * entry. Null's the local bridge-thread record at the end so the
- * next prompt spawns a fresh S<N+1>. Single confirmation covers the
- * whole set. The cwd-match gate in the lister is load-bearing:
- * without it a sibling workspace sharing this workspace's basename
- * would get swept by this delete.
+ * entry. The cwd-match gate in the lister is load-bearing: without
+ * it a sibling workspace sharing this workspace's basename would get
+ * swept. The index strip in this path also runs an orphan sweep -
+ * drops entries whose rollout file is gone - so the gap-fill counter
+ * can collapse back to S1 instead of getting blocked by deleted-out-
+ * of-band orphans.
  */
 export async function deleteAllCodexSessions(
   logger: EpicHandshakeLogger
@@ -288,10 +137,6 @@ export async function deleteAllCodexSessions(
 
   const sessions = listRecoverableSessions(workspacePath);
   if (sessions.length === 0) {
-    // Diagnostic path: write the per-entry scan breakdown to the
-    // Epic Handshake output channel and show a short toast pointing
-    // at it. Keeps the on-screen feedback terse while preserving full
-    // detail where a user can page through it.
     const diag = buildDeleteAllDiagnostic(workspacePath);
     if (diag === null) {
       void vscode.window.showInformationMessage(
@@ -299,6 +144,8 @@ export async function deleteAllCodexSessions(
       );
       return;
     }
+    // Per-entry breakdown goes to the output channel; toast stays short
+    // and points the user there.
     logger.info("[delete-all] (0) diagnostic:");
     for (const row of diag.rows) logger.info(`  ${row}`);
     logger.info(
@@ -308,9 +155,7 @@ export async function deleteAllCodexSessions(
       `Epic Handshake: ${diag.summary}`,
       "View details"
     );
-    if (pick === "View details") {
-      logger.show();
-    }
+    if (pick === "View details") logger.show();
     return;
   }
 
@@ -322,116 +167,28 @@ export async function deleteAllCodexSessions(
   if (confirmation !== "Delete All") return;
 
   const threadIds = new Set(sessions.map((s) => s.threadId));
-
-  // 1. Delete every rollout file whose name contains any targeted
-  // thread id. Single walk covers them all in one pass.
-  const sessionsRoot = join(homedir(), ".codex", "sessions");
-  let removedRollouts = 0;
-  try {
-    for (const file of walk(sessionsRoot)) {
-      for (const tid of threadIds) {
-        if (file.includes(tid)) {
-          try {
-            unlinkSync(file);
-            removedRollouts++;
-          } catch {
-            // best-effort per file
-          }
-          break;
-        }
-      }
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`bulk rollout delete partial: ${msg}`);
-  }
-
-  // 2. One-shot session_index strip. Drops:
-  //   (a) every entry whose id is in `threadIds` (intact sessions we
-  //       just walked), and
-  //   (b) any orphan whose `thread_name` matches this workspace's
-  //       bridge pattern but whose rollout file is gone. Orphans
-  //       arise when rollouts get deleted out-of-band (manual rm,
-  //       prior Reset that missed the index strip, etc). Codex never
-  //       cleans its own index on rollout deletion, so without this
-  //       sweep the orphan S# stays in the index and pollutes
-  //       `nextCollisionFreeCounter`'s gap-fill - the user deletes
-  //       everything they can see and the next spawn still picks S2
-  //       because S1/S3/S4/... are orphan-taken. delete-all is the
-  //       right scope for this cleanup: the user explicitly asked
-  //       for "all" of this workspace's bridge state.
-  const pattern = bridgeThreadNamePattern(workspacePath);
-  const indexPath = join(homedir(), ".codex", "session_index.jsonl");
-  let strippedIndexLines = 0;
-  if (existsSync(indexPath)) {
-    try {
-      const raw = readFileSync(indexPath, "utf8");
-      const lines = raw.split("\n");
-      const kept = lines.filter((line) => {
-        if (!line.trim()) return false;
-        try {
-          const obj = JSON.parse(line) as { id?: string; thread_name?: string };
-          if (obj.id !== undefined && threadIds.has(obj.id)) return false;
-          const name = obj.thread_name ?? "";
-          if (pattern.test(name) && obj.id !== undefined) {
-            if (findRolloutPath(obj.id) === null) return false;
-          }
-          return true;
-        } catch {
-          return true;
-        }
-      });
-      strippedIndexLines = lines.filter((l) => l.trim()).length - kept.length;
-      if (!writeFileAtomic(indexPath, `${kept.join("\n")}\n`)) {
-        logger.warn("bulk session_index strip failed: atomic write rejected");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`bulk session_index strip failed: ${msg}`);
-    }
-  }
-
-  // 3. Null our bridge-thread state. Counter mirrors what
-  // `spawnFreshThread` will actually pick on the next prompt: the
-  // gap-fill (lowest unused integer for this workspace's bridge-pattern
-  // set) instead of the legacy `Math.max(record, maxSeen) + 1`. With
-  // every targeted entry stripped from session_index AND the rollout
-  // files removed above, the gap-fill set is empty for this workspace
-  // (modulo any siblings the lister filtered out via cwd-mismatch),
-  // so a true clean state typically yields S1. The menu label
-  // `MANAGE CODEX (S<n>)` and the post-delete toast then read the
-  // same value the spawn will actually use - no more S16 ghost after
-  // a delete-all that collapses to S1.
+  const removedRollouts = deleteRolloutFilesByThreadId(
+    threadIds,
+    logger,
+    "bulk rollout delete partial"
+  );
+  const strippedIndexLines = stripSessionIndexEntries(
+    threadIds,
+    bridgeThreadNamePattern(workspacePath),
+    logger,
+    "bulk session_index strip failed"
+  );
   const recordPath = join(
     EPIC_HANDSHAKE_DIR,
     `bridge-thread.${workspaceHash(workspacePath)}.json`
   );
-  let projectedNext: number | null = null;
-  if (existsSync(recordPath)) {
-    try {
-      const raw = readFileSync(recordPath, "utf8");
-      const record = JSON.parse(raw) as BridgeThreadRecord;
-      projectedNext = nextCollisionFreeCounter(
-        workspacePath,
-        record.sessionCounter
-      );
-      const next: BridgeThreadRecord = {
-        ...record,
-        threadId: null,
-        sessionCounter: projectedNext,
-        lastResetAt: new Date().toISOString(),
-        consecutiveFailures: 0,
-        lastError: null,
-        lastSuccessAt: null,
-      };
-      if (!writeFileAtomic(recordPath, JSON.stringify(next, null, 2))) {
-        logger.warn("bridge-thread record null failed: atomic write rejected");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`bridge-thread record null failed: ${msg}`);
-    }
-  }
+  const projectedNext = clearBridgeThreadRecord(
+    workspacePath,
+    recordPath,
+    null,
+    logger,
+    "bridge-thread record null failed"
+  );
 
   logger.info(
     `bulk codex session delete: ${sessions.length} threads targeted, ${removedRollouts} rollouts removed, ${strippedIndexLines} index entries stripped${projectedNext !== null ? `, next=S${projectedNext}` : ""}`

@@ -3,7 +3,7 @@ import {
   CompactFlashMachine,
   type CompactFlashSnapshot,
 } from "../shared/polling/compactFlashMachine";
-import { parseRecentCompactBoundaries } from "./parsers";
+import { parseRecentCompactBoundaries } from "./turnInfoParser";
 
 /**
  * Claude-tier adapter over the shared `CompactFlashMachine`.

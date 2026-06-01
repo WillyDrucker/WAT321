@@ -84,8 +84,8 @@ function isCodexToastSuppressionEnabled(): boolean {
  * on Windows, Focus Assist / Do Not Disturb, OS-level notification
  * permission disabled, or `notify-send` missing on Linux.
  *
- * Per-provider 10s cooldown keeps a Claude response from suppressing
- * a Codex notification that arrives seconds later.
+ * Per-(provider, sessionId) 10s cooldown so distinct sessions can fire
+ * concurrent toasts; the same session repeating within 10s collapses.
  */
 
 const NOTIFICATION_COOLDOWN_MS = 10_000;
@@ -94,6 +94,10 @@ const MAX_PREVIEW_LENGTH = 200;
 const DIAGNOSTIC_RING_SIZE = 20;
 
 const lastNotificationTime = new Map<string, number>();
+
+function cooldownKey(provider: string, sessionId: string): string {
+  return `${provider}::${sessionId}`;
+}
 
 export type NotificationOutcome =
   | "system"
@@ -112,6 +116,10 @@ export interface NotificationDiagnostic {
   mode: string;
   outcome: NotificationOutcome;
   focused: boolean;
+  /** Per-session UUID of the response being delivered. Empty when
+   * the dispatch context has no session id (defensive - every
+   * current call site populates this from the payload). */
+  sessionId: string;
 }
 
 const diagnostics: NotificationDiagnostic[] = [];
@@ -134,6 +142,7 @@ function record(entry: NotificationDiagnostic): void {
     at: entry.at,
     kind: "notifier-decision",
     provider: entry.provider,
+    sessionId: entry.sessionId,
     mode: entry.mode,
     outcome: entry.outcome,
     focused: entry.focused,
@@ -186,7 +195,13 @@ function handleResponseComplete(
   const focused = vscode.window.state.focused;
   const mode = getMode();
   const now = Date.now();
-  const baseDiag = { at: now, provider: payload.provider, mode, focused };
+  const baseDiag = {
+    at: now,
+    provider: payload.provider,
+    mode,
+    focused,
+    sessionId: payload.sessionId,
+  };
 
   if (mode === "Off") {
     record({ ...baseDiag, outcome: "suppressed-off" });
@@ -217,7 +232,8 @@ function handleResponseComplete(
     return;
   }
 
-  const lastTime = lastNotificationTime.get(payload.provider) ?? 0;
+  const ckey = cooldownKey(payload.provider, payload.sessionId);
+  const lastTime = lastNotificationTime.get(ckey) ?? 0;
   if (now - lastTime < NOTIFICATION_COOLDOWN_MS) {
     record({ ...baseDiag, outcome: "suppressed-cooldown" });
     return;
@@ -244,10 +260,9 @@ function handleResponseComplete(
     return;
   }
   // Stamp cooldown only after winning the dedup race so a losing
-  // window does not pollute its own per-provider cooldown map with
-  // a delivery it never made. The winning window is the only one
-  // that needs to honor cooldown on the next emission.
-  lastNotificationTime.set(payload.provider, now);
+  // window does not pollute its own cooldown map with a delivery it
+  // never made.
+  lastNotificationTime.set(ckey, now);
 
   const title = truncateSessionTitle(payload.sessionTitle || null);
   const preview = truncatePreview(payload.responsePreview || null);

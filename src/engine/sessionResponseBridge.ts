@@ -4,6 +4,7 @@ import type { ProviderKey } from "./contracts";
 import type { EventHub } from "./eventHub";
 import {
   logNotifEvent,
+  sessionIdFromPath,
   type BridgeDecisionReason,
 } from "../shared/diag/notifEventLog";
 
@@ -33,6 +34,17 @@ interface SessionResponseFields {
 
 type MaybeOkState = { status: "ok"; session: SessionResponseFields } | { status: string };
 
+/** A workspace session's done-transition surfaced by the service for
+ * the bridge to fire `session.responseComplete` against - covers
+ * sessions other than the ranker-picked active one. */
+export interface NonActiveCompletion {
+  sessionId: string;
+  transcriptPath: string;
+  label: string;
+  sessionTitle: string;
+  completedAtMs: number;
+}
+
 export interface SessionResponseBridgeConfig {
   provider: ProviderKey;
   displayName: string;
@@ -40,6 +52,9 @@ export interface SessionResponseBridgeConfig {
     subscribe: (listener: (state: MaybeOkState) => void) => void;
     unsubscribe: (listener: (state: MaybeOkState) => void) => void;
     getActiveTranscriptPath: () => string | null;
+    /** Drain non-active session completions since the last call.
+     * Optional - providers without multi-session detection omit it. */
+    consumeNonActiveCompletions?: () => NonActiveCompletion[];
   };
   readTail: (path: string) => string | null;
   parseAssistantText: (tail: string) => string;
@@ -56,26 +71,15 @@ export function bridgeSessionResponse(
   cfg: SessionResponseBridgeConfig
 ): vscode.Disposable {
   let prevContextUsed = -1;
-  // Track which rollout the baseline belongs to. When the service
-  // switches rollouts (e.g. a rollout gets deleted so "newest by
-  // mtime" now points at an older file, or Codex's extension bumps
-  // the mtime on a dormant rollout), the raw contextUsed comparison
-  // would fire a phantom responseComplete for an hours-old turn.
-  // Treat a path switch as a cold start: reset the baseline and
-  // suppress the first emission from the new path, same as the
-  // initial subscription replay. Exception: the path-switch
-  // completion trigger below catches the case where the new path's
-  // tail is already done AND was written within the freshness
-  // window (turn finished during the switch).
+  // Path switch resets the baseline so a contextUsed comparison
+  // across rollouts cannot fire a phantom responseComplete; the
+  // path-switch completion trigger handles the "turn finished during
+  // a session switch" case explicitly.
   let prevTranscriptPath: string | null = null;
-  // Per-process set of transcript paths the bridge has already seen.
-  // Bounds the path-switch completion trigger so it only fires when
-  // the bridge encounters a path for the first time - subsequent
-  // switches back to a previously-seen path go through the normal
-  // baseline-reset flow and cannot re-fire that path's old
-  // completion. Cleared only on extension reload (process exit),
-  // which is the correct cadence: a fresh process has no history
-  // and any newly-encountered done-tail is a missed notification.
+  // Per-process record of transcript paths the bridge has seen.
+  // Bounds the path-switch completion trigger to first-encounter so
+  // flipping back to a previously-seen path cannot re-fire its old
+  // completion. Cleared only on process exit.
   const seenPaths = new Set<string>();
   // Start true so a cached "done" state replay on startup does not
   // register as a fresh not-done -> done transition on the very
@@ -176,6 +180,7 @@ export function bridgeSessionResponse(
       kind: "bridge-decision",
       provider: cfg.provider,
       path,
+      sessionId: sessionIdFromPath(cfg.provider, path),
       decision: willFire ? "fire" : "suppress",
       reason,
       contextChanged,
@@ -185,6 +190,11 @@ export function bridgeSessionResponse(
       isPathSwitch,
       isNewPath,
     });
+
+    // Drain non-active completions every emission, regardless of the
+    // active-session decision. A suppress on the active path must not
+    // strand a queued non-active completion behind the gate.
+    drainNonActiveCompletions(cfg);
 
     if (!willFire) return;
 
@@ -213,4 +223,40 @@ export function bridgeSessionResponse(
 
   cfg.tokenService.subscribe(listener);
   return { dispose: () => cfg.tokenService.unsubscribe(listener) };
+}
+
+function drainNonActiveCompletions(cfg: SessionResponseBridgeConfig): void {
+  const drain = cfg.tokenService.consumeNonActiveCompletions;
+  if (!drain) return;
+  const completions = drain();
+  if (completions.length === 0) return;
+  for (const completion of completions) {
+    const tail = cfg.readTail(completion.transcriptPath);
+    const preview =
+      cfg.shouldParsePreview() && tail ? cfg.parseAssistantText(tail) : "";
+    cfg.events.emit("session.responseComplete", {
+      provider: cfg.provider,
+      displayName: cfg.displayName,
+      label: completion.label,
+      sessionTitle: completion.sessionTitle,
+      responsePreview: preview,
+      sessionId: completion.sessionId,
+      completionMs: completion.completedAtMs,
+    });
+    logNotifEvent({
+      at: completion.completedAtMs,
+      kind: "bridge-decision",
+      provider: cfg.provider,
+      path: completion.transcriptPath,
+      sessionId: completion.sessionId,
+      decision: "fire",
+      reason: "fire-non-active-completion",
+      contextChanged: false,
+      isIncrease: false,
+      classifierDone: true,
+      mtimeFresh: true,
+      isPathSwitch: false,
+      isNewPath: false,
+    });
+  }
 }

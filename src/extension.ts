@@ -69,7 +69,7 @@ export function activate(context: vscode.ExtensionContext) {
   // workspaceId() is deterministic.
   process.env.WAT321_WORKSPACE_ID = workspaceId();
 
-  ctx = createEngineContext();
+  ctx = createEngineContext(context.storageUri?.fsPath ?? null);
 
   // Bridge config writer maintains the per-client
   // `~/.wat321/clients/<wsId>/bridge/config.json` so the unified MCP
