@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { ProviderKey, WidgetDescriptor } from "./contracts";
+import type { WidgetDescriptor } from "./contracts";
 import { SETTING } from "./settingsKeys";
 
 /**
@@ -34,13 +34,6 @@ const WIDGETS = [
  * to restore right-click "Hide" decisions. */
 export function getAllWidgetIds(): readonly string[] {
   return WIDGETS.map((w) => w.id);
-}
-
-/** Widget IDs belonging to a specific provider. */
-export function getWidgetIdsForProvider(
-  provider: ProviderKey | "engine"
-): readonly string[] {
-  return WIDGETS.filter((w) => w.provider === provider).map((w) => w.id);
 }
 
 /** Resolve a widget's slot offset to a concrete VS Code priority. */
