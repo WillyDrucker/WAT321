@@ -5,7 +5,11 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.24] - unreleased
+## [1.5.24] - 2026-06-01
+
+### Changed
+
+- **Internal housekeeping with no change to how the widgets behave.** The code behind the Claude and Codex session-tokens bars was gathered into its own folder, and a few internal helpers that nothing used anymore were removed. This is tidying to keep the codebase easy to work in, and it has no effect on what you see in the status bar or how the extension runs.
 
 ## [1.5.23] - 2026-06-01
 
