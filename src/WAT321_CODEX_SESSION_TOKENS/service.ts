@@ -27,6 +27,11 @@ import {
   getSessionTitle,
   type RolloutCandidate,
 } from "./rolloutDiscovery";
+import {
+  clearPersistedRollout,
+  persistRollout,
+  readPersistedRollout,
+} from "./activeRolloutStore";
 import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
 import { logNotifEvent } from "../shared/diag/notifEventLog";
 import { resolveAutoCompactTokens } from "./autoCompactLimit";
@@ -117,6 +122,13 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
         : { status: "not-installed" },
       SESSION_TOKEN_POLL_MS
     );
+    // Re-adopt the session this workspace last tracked so a long-running
+    // rollout that has aged past the discovery walk's day-window is
+    // picked up again right after a reload, instead of staying invisible
+    // until a fresh session is started. The store re-validates the path
+    // against the workspace, so a stale or foreign pointer is ignored.
+    const seeded = readPersistedRollout(this.workspacePath);
+    if (seeded) this.cachedRolloutPath = seeded;
   }
 
   /** Compact-flash diagnostics for the health command. Mirrors the
@@ -129,6 +141,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   reset(): void {
     this.cachedRolloutPath = null;
     this.lastRolloutScan = 0;
+    clearPersistedRollout();
     this.cachedSessionTitle = null;
     this.cachedSessionTitleId = "";
     this.cachedCwd = null;
@@ -186,7 +199,11 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       now - this.lastRolloutScan >= SESSION_TOKEN_RESCAN_MS ||
       !this.cachedRolloutPath
     ) {
-      const result = findLatestRollout(codexDir, this.workspacePath);
+      const result = findLatestRollout(
+        codexDir,
+        this.workspacePath,
+        this.cachedRolloutPath
+      );
       if (result.path) this.cachedRolloutPath = result.path;
       this.cachedInventory = { total: result.total, inProgress: result.inProgress };
       this.lastRolloutScan = now;
@@ -234,6 +251,9 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
         toSessionId: extractSessionId(this.cachedRolloutPath),
         source: "rollout-scan",
       });
+      // Persist the freshly tracked rollout so a reload can re-adopt it
+      // even after its file ages past the discovery walk's day-window.
+      persistRollout(this.cachedRolloutPath);
     }
 
     let rolloutMtime: number;
