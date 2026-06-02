@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import type { ProviderKey } from "./contracts";
 import type { EngineContext } from "./engineContext";
 import { readRecentTransitions } from "../shared/polling/transitionLog";
-import { isPidAlive } from "../shared/ui/sessionTokenHelpers";
+import { isPidAlive } from "../shared/ui/sessionTokens/sessionTokenHelpers";
 import { getNotificationDiagnostics } from "./toastNotifier";
 import { clientStateDir } from "../shared/wat321Paths";
 import { getAppUserModelID } from "./windowsToastProcess";

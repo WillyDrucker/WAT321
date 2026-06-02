@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import type { BridgeStageReader } from "../../engine/bridgeTypes";
-import { getSessionTokenDisplayMode } from "../../engine/displayMode";
-import { getWidgetPriority } from "../../engine/widgetCatalog";
-import { SQUARE_ORANGE_COMPACT } from "./heatmap";
+import type { BridgeStageReader } from "../../../engine/bridgeTypes";
+import { getSessionTokenDisplayMode } from "../../../engine/displayMode";
+import { getWidgetPriority } from "../../../engine/widgetCatalog";
+import { SQUARE_ORANGE_COMPACT } from "../heatmap";
 import {
   createCacheBannerLatch,
   type CacheBannerLatch,
@@ -21,9 +21,9 @@ import {
 } from "./sessionTokenPrefix";
 import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
 import type { SessionTokenWidgetDescriptor } from "./sessionTokenTypes";
-import { getSessionTokenColor } from "./textColors";
-import { formatPct, formatTokens } from "./tokenFormatters";
-import { TpsThrottle } from "./tpsThrottle";
+import { getSessionTokenColor } from "../textColors";
+import { formatPct, formatTokens } from "../tokenFormatters";
+import { TpsThrottle } from "../tpsThrottle";
 
 export type {
   CacheEvent,

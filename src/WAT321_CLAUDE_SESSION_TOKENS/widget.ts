@@ -3,7 +3,7 @@ import { WIDGET_SLOT } from "../engine/widgetCatalog";
 import {
   SessionTokenWidget,
   type SessionTokenWidgetDescriptor,
-} from "../shared/ui/sessionTokenWidget";
+} from "../shared/ui/sessionTokens/sessionTokenWidget";
 import type { WidgetState } from "./types";
 
 const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {

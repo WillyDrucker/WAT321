@@ -1,12 +1,12 @@
 import * as vscode from "vscode";
-import { getCodexModelInfo, isKnownCodexModel } from "../providers/codex/models";
-import { formatModelDisplayName } from "../../engine/contracts";
-import { renderStageDisplay } from "../codex-rollout/phaseRender";
-import type { StageInfo } from "../codex-rollout/types";
-import type { LastEntryKind } from "../transcriptClassifier";
+import { getCodexModelInfo, isKnownCodexModel } from "../../providers/codex/models";
+import { formatModelDisplayName } from "../../../engine/contracts";
+import { renderStageDisplay } from "../../codex-rollout/phaseRender";
+import type { StageInfo } from "../../codex-rollout/types";
+import type { LastEntryKind } from "../../transcriptClassifier";
 import type { ClaudeTurnInfo } from "./sessionTokenWidget";
-import { formatPct, formatTokens, makeTokenBar } from "./tokenFormatters";
-import { formatRelativeTime } from "./relativeTime";
+import { formatPct, formatTokens, makeTokenBar } from "../tokenFormatters";
+import { formatRelativeTime } from "../relativeTime";
 
 /**
  * Shared tooltip builder for the Claude and Codex session token

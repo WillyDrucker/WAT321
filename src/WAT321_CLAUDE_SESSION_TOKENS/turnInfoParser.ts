@@ -1,4 +1,4 @@
-import type { ClaudeTurnInfo } from "../shared/ui/sessionTokenWidget";
+import type { ClaudeTurnInfo } from "../shared/ui/sessionTokens/sessionTokenWidget";
 import { parseMostRecentCacheEvent } from "./cacheEventParser";
 
 /**
