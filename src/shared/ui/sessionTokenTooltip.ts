@@ -263,7 +263,7 @@ export function buildSessionTokenTooltip(
   // parseMostRecentCacheEvent.
   if (provider === "Claude" && claudeTurnInfo?.mostRecentCacheEvent) {
     const ev = claudeTurnInfo.mostRecentCacheEvent;
-    md.appendMarkdown(`\n\nMost recent cache HIT: ${ev.description}`);
+    md.appendMarkdown(`\n\nMost recent cache event: ${ev.description}`);
   }
 
   // Auto-Compact lives at the bottom of every session-token tooltip.

@@ -168,23 +168,18 @@ export interface SessionTokenWidgetDescriptor<TState extends { status: string }>
   /** Ms since last mtime bump before the widget returns to idle.
    * Keeps the indicator self-healing. */
   activeThresholdMs: number;
-  /** In-flight-turn freshness window (ms) for a provider that carries
-   * no PID handle. Codex exposes no process signal, so the active
-   * indicator cannot lean on PID liveness to ride a silent stretch,
-   * and modern Codex (GPT-5-codex) reasons silently for tens of
-   * seconds with no rollout write (96s observed after task_started) -
-   * the tight `activeThresholdMs` growth gate collapsed the thinking
-   * indicator mid-turn. The classifier is the authoritative end-of-
-   * turn signal (task_complete / turn_aborted / final_answer collapse
-   * the indicator instantly), so this window only needs to outlast the
-   * longest silent reasoning gap. It applies ONLY while a turn is in
-   * progress; an idle tail still uses the tight no-PID default so the
-   * ticker suspends quickly. Guards solely against a stale
-   * `assistant-pending` tail that never receives an end-state (cold-
-   * launch leftover, partial write): such a tail animates at most this
-   * long, then self-suspends. Omitted for providers (Claude) whose
-   * no-PID path is a degraded lastKnown fallback that must stay on the
-   * tight window because the live classifier signal is not trusted. */
+  /** In-flight-turn freshness window (ms) for a provider with no PID
+   * handle. Codex exposes no process signal, so the indicator cannot
+   * lean on PID liveness through a silent stretch, and modern Codex
+   * reasons silently for tens of seconds with no rollout write, which
+   * the tight `activeThresholdMs` gate read as idle mid-turn. The
+   * classifier owns end-of-turn detection (task_complete / turn_aborted
+   * / final_answer collapse the indicator instantly), so this only
+   * needs to outlast the longest silent gap and applies only while a
+   * turn is in progress. A stale `assistant-pending` tail with no
+   * end-state animates at most this long, then self-suspends. Omitted
+   * for Claude, whose no-PID path is a lastKnown fallback that stays on
+   * the tight window. */
   silentTurnCeilingMs?: number;
   /** Extract render data from an ok state. */
   getRenderData(state: TState & { status: "ok" }): SessionTokenRenderData;

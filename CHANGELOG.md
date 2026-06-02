@@ -5,6 +5,18 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.23] - 2026-06-01
+
+### Fixed
+
+- **The Codex session-tokens widget now finds a session you started from a subfolder of your open workspace.** It previously matched only when the workspace lived inside the session's working directory, not the reverse, so launching Codex from a subdirectory left the widget blank. It now matches both directions, the way the Claude widget already did.
+- **The Codex widget stops showing a session once its rollout is gone.** After a session was deleted or you ran Reset WAT321, the widget could keep displaying the old token count instead of going idle. It now clears as soon as the underlying session file disappears, while an older session that simply scrolled out of the recent-history scan still keeps showing.
+- **The Claude session tooltip's cache line no longer always reads "HIT".** The "Most recent cache" line could say "HIT" even when the event was a cache load or a miss. It now reads "Most recent cache event" so the wording matches what actually happened.
+
+### Changed
+
+- **Fewer duplicate prompts when a bridge dispatch stalls.** When a dispatch to a slow or cold-starting backend was cancelled before it answered, the recovery guidance could lead to re-sending and stacking a duplicate on a backend that was still working. The bridge docs now classify that abort case and cap retries at one, with the late reply delivered through the inbox instead.
+
 ## [1.5.22] - 2026-06-01
 
 ### Fixed

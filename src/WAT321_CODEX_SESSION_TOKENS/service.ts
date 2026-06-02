@@ -194,7 +194,15 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     }
 
     if (!this.cachedRolloutPath || !existsSync(this.cachedRolloutPath)) {
-      if (this.hasGoodData) return;
+      // The tracked rollout has vanished (deleted, Reset WAT321, or
+      // ~/.codex cleared). Codex appends to one file per session and
+      // never rotates it mid-session, so a missing file means the
+      // session is genuinely gone, not transiently unavailable - drop
+      // the cached path and go idle rather than rendering last-good
+      // forever. An aged-but-present session that simply fell outside
+      // the 30-day discovery walk still passes existsSync here, so it
+      // keeps rendering and is never cleared by this branch.
+      this.cachedRolloutPath = null;
       this.setState({ status: "no-session" });
       return;
     }

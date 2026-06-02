@@ -23,11 +23,26 @@ still be running.
 
 Recovery options:
 1. Call `wat321_bridge()` to check for a late arrival.
-2. Retry the same prompt with a higher `timeout_sec`.
+2. Retry the same prompt ONCE with a higher `timeout_sec`.
 3. For Codex: retry with `adaptive: true` to extend while heartbeats
    are coming in.
 4. For any target: retry with `fire_and_forget: true` to detach and
    pick up the reply later via `wat321_bridge()`.
+
+## "This operation was aborted"
+
+The client wait was cancelled before the backend replied, usually a slow
+or cold-starting Local LLM. The backend is probably still running the
+prompt, so treat this as in-flight, not failed.
+
+Recovery, in order:
+1. Do NOT re-send the same prompt in sync mode. The backend is still on
+   the first copy, so a second sync call stacks a duplicate and tends to
+   abort again.
+2. If you need the answer this turn, re-issue ONCE with
+   `fire_and_forget: true`, then drain with `wat321_bridge()`.
+3. Otherwise stop, let the user say it finished, then drain with
+   `wat321_bridge()`.
 
 ## Adaptive abort (Codex, stale heartbeat)
 
@@ -64,6 +79,8 @@ Recovery: reissue without the action field.
   consume double-injects the same reply.
 - Do NOT retry after a "nothing was sent" error. The dispatch genuinely
   did not occur - retrying loops.
+- Retry a transient failure (sync timeout or abort) at most ONCE. Two
+  failures in a row means stop and surface to the user, never a third.
 - Do NOT poll `wat321_ask` or `wat321_bridge` on a timer. The user
   controls cadence.
 - Do NOT manually clear or move inbox files. The user has a Reset

@@ -172,10 +172,14 @@ export function findLatestRollout(
             const cwd = parseCwd(fullPath);
             if (!cwd) continue;
             const cwdNorm = normalizePath(cwd);
+            // Bidirectional match, symmetric with Claude's
+            // walkWorkspaceSessions: also matches a native session
+            // launched from a subfolder of the open workspace.
             const matches =
               wsNorm === "" ||
               cwdNorm === wsNorm ||
-              wsNorm.startsWith(`${cwdNorm}/`);
+              wsNorm.startsWith(`${cwdNorm}/`) ||
+              cwdNorm.startsWith(`${wsNorm}/`);
             if (!matches) continue;
 
             // Read the tail to classify activity. Bounded to the tail
