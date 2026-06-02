@@ -1,8 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { SETTING } from "../../engine/settingsKeys";
-import { openCodeRoutesStateDir } from "../wat321Paths";
+import { SETTING } from "../../../engine/settingsKeys";
+import { openCodeRoutesStateDir } from "../../wat321Paths";
 
 /**
  * Small helpers and constants the SessionTokenWidget composes from.

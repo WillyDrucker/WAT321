@@ -1,4 +1,4 @@
-import type { CacheEvent } from "../shared/ui/sessionTokenWidget";
+import type { CacheEvent } from "../shared/ui/sessionTokens/sessionTokenWidget";
 
 /**
  * Cache LOAD/MISS classifier for Claude transcripts. Walks back

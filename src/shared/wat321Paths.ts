@@ -40,7 +40,6 @@ import { workspaceHash } from "./workspaceHash";
  */
 
 export const WAT321_ROOT = join(homedir(), ".wat321");
-export const BRIDGE_BIN_DIR = join(WAT321_ROOT, "bridge", "bin");
 export const CLIENTS_ROOT = join(WAT321_ROOT, "clients");
 
 /** Active VS Code workspace hash, or "default" when no folder is

@@ -1,5 +1,5 @@
-import type { StageInfo } from "../codex-rollout/types";
-import type { LastEntryKind } from "../transcriptClassifier";
+import type { StageInfo } from "../../codex-rollout/types";
+import type { LastEntryKind } from "../../transcriptClassifier";
 
 /**
  * Type contracts shared by the session-token widget and its provider-

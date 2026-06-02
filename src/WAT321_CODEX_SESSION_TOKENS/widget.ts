@@ -3,7 +3,7 @@ import { WIDGET_SLOT } from "../engine/widgetCatalog";
 import {
   SessionTokenWidget,
   type SessionTokenWidgetDescriptor,
-} from "../shared/ui/sessionTokenWidget";
+} from "../shared/ui/sessionTokens/sessionTokenWidget";
 import { CODEX_BASELINE_TOKENS } from "./autoCompactLimit";
 import type { CodexTokenWidgetState } from "./types";
 

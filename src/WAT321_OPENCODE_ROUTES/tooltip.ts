@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
 import { bridgeStateDir } from "../shared/wat321Paths";
 import { formatPct, formatTokens, makeTokenBar } from "../shared/ui/tokenFormatters";
-import { wrapAndTruncateTitle } from "../shared/ui/sessionTokenTooltip";
+import { wrapAndTruncateTitle } from "../shared/ui/sessionTokens/sessionTokenTooltip";
 import type { BridgeSessionTokens } from "./sessionTokensPoller";
 import type { Heartbeat } from "./statusBarItem";
 

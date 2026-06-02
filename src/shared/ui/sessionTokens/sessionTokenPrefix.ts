@@ -1,4 +1,4 @@
-import type { BridgeStageSnapshot } from "../../engine/bridgeTypes";
+import type { BridgeStageSnapshot } from "../../../engine/bridgeTypes";
 import { isOpenCodeDispatchActive, isPidAlive } from "./sessionTokenHelpers";
 import type {
   SessionTokenRenderData,

@@ -3,7 +3,7 @@ import type {
   CacheEvent,
   CacheEventKind,
   ClaudeTurnInfo,
-} from "../shared/ui/sessionTokenWidget";
+} from "../shared/ui/sessionTokens/sessionTokenWidget";
 
 /**
  * Small extractors for Claude Code's `.jsonl` transcripts. Each
