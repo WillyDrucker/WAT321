@@ -1,13 +1,12 @@
 import { basename } from "node:path";
 import { readFirstLine, readHead } from "../shared/fs/fileReaders";
-import type { LastEntryKind } from "../shared/transcriptClassifier";
 
 /**
- * Parsers for Codex rollout `.jsonl` transcripts. Rollouts live under
- * `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` with one entry per
- * line. Every entry is `{ type, payload }` where payload.type names
- * the specific event kind (session_meta, turn_context, token_count,
- * user_message, etc.).
+ * Field extraction from Codex rollout `.jsonl` transcripts. Rollouts
+ * live under `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` with one
+ * entry per line, each `{ type, payload }` where payload.type names the
+ * event kind (session_meta, turn_context, token_count, user_message).
+ * Turn-state classification lives in `turnClassifier.ts`.
  */
 
 export interface LastTokenCount {
@@ -79,7 +78,7 @@ export function parseLastTokenCount(tail: string): LastTokenCount | null {
  * Used both to match rollouts to a workspace and to label the widget.
  * `readFirstLine` reads in chunks until a newline, so an oversized
  * session_meta first line (routinely 15-25KB on recent Codex CLI
- * rollouts; can grow further as Codex adds metadata) is always
+ * rollouts - can grow further as Codex adds metadata) is always
  * captured intact. */
 export function parseCwd(rolloutPath: string): string | null {
   const firstLine = readFirstLine(rolloutPath);
@@ -182,117 +181,6 @@ export function extractFirstUserMessage(headContent: string): string {
   return "";
 }
 
-/** Classify whether the last meaningful entry in a Codex rollout
- * tail represents a completed assistant turn. Thin wrapper over
- * `classifyCodexTurn` so the detection rules stay in one place.
- *
- * `user` and `assistant-pending` = mid-turn, notification gate should
- * suppress. `assistant-done` and `unknown` = complete, notification
- * gate should fire. The `unknown` -> fire bias matches the original
- * behavior: a missing definitive event must not silently lose a
- * notification. Interrupts (`turn_aborted`) map to `assistant-done`
- * via the classifier, so notifications correctly do not fire on
- * cancelled turns. */
-export function isCodexTurnComplete(tail: string): boolean {
-  const state = classifyCodexTurn(tail);
-  return state === "assistant-done" || state === "unknown";
-}
-
-/** Classify the last meaningful entry in a Codex rollout tail into
- * one of the four turn states used by the session token active
- * indicator. Walks backwards, skips bookkeeping events, returns the
- * first definitive event found:
- *   - `assistant-done` - a completed assistant response OR a turn
- *     explicitly ended by `task_complete` / `turn_aborted`. Codex
- *     writes `event_msg` / `turn_aborted` on user interrupt (Esc /
- *     Ctrl+C) and `event_msg` / `task_complete` at normal turn end.
- *     Both resolve the indicator instantly.
- *   - `assistant-pending` - a tool / function call in flight
- *   - `user` - last event was a user message (user is waiting)
- *   - `unknown` - no definitive event in the tail window
- *
- * Unlike `isCodexTurnComplete` (which biases toward true for
- * notification firing), this biases `unknown` to idle so the thinking
- * indicator does not pin itself on when we cannot tell. */
-export function classifyCodexTurn(tail: string): LastEntryKind {
-  const lines = tail.trimEnd().split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line) continue;
-
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-
-    const payload = entry.payload as Record<string, unknown> | undefined;
-    const ptype = payload?.type as string | undefined;
-
-    // Explicit turn-end signals: Codex writes turn_aborted on user
-    // interrupt and task_complete on normal end of turn. Both mean
-    // the turn is definitively over.
-    if (entry.type === "event_msg" && (ptype === "turn_aborted" || ptype === "task_complete")) {
-      return "assistant-done";
-    }
-
-    // Assistant-response events = done ONLY for the final_answer
-    // phase. Codex 0.124 emits an `agent_message` with
-    // phase=commentary mid-turn ("I'll look into X first") before
-    // the phase=final_answer message at turn end; treating the
-    // commentary message as turn-complete made the thinking
-    // indicator flicker idle in the window between commentary and
-    // the next reasoning/tool event. Only final_answer + the
-    // explicit turn_aborted / task_complete signals close the turn.
-    // Commentary-phase messages fall through to keep scanning so a
-    // later definitive signal (function_call, reasoning) wins.
-    if (entry.type === "event_msg" && ptype === "agent_message") {
-      const phase = payload?.phase;
-      if (phase === "final_answer") return "assistant-done";
-      // phase=commentary or unphased: treat as still-pending, keep
-      // walking backward for a stronger signal.
-      return "assistant-pending";
-    }
-    // `response_item/message` role=assistant has no phase tag; it
-    // fires for both commentary and final_answer. Without phase we
-    // cannot distinguish, so treat as pending and let the backward
-    // walk continue searching for an authoritative done signal.
-    // Without this fallthrough, catching a commentary message as
-    // the tail would mark the turn done mid-work.
-    if (entry.type === "response_item" && ptype === "message" && payload?.role === "assistant") {
-      return "assistant-pending";
-    }
-    if (entry.type === "response.output_text.done") return "assistant-done";
-    if (entry.type === "message" && payload?.role === "assistant") return "assistant-pending";
-
-    // User messages = user is waiting for a response
-    if (ptype === "user_message") return "user";
-
-    // Tool / function calls in flight = assistant is actively working.
-    // Codex emits many call variants depending on which tool fired:
-    // function_call (custom tools), web_search_call (built-in search),
-    // local_shell_call, file_search_call, etc. Any *_call under a
-    // response_item means a tool is mid-flight. Bridge-driven sessions
-    // rely on this heavily - they have no shell access so they lean on
-    // reasoning + built-in tools, which older logic missed entirely.
-    if (ptype === "tool_call" || ptype === "function_call") return "assistant-pending";
-    if (entry.type === "response_item" && typeof ptype === "string" && ptype.endsWith("_call")) {
-      return "assistant-pending";
-    }
-
-    // Reasoning chunks under a response_item mean the model is thinking
-    // and has not yet emitted the final assistant message. Safe to mark
-    // pending: the backwards walk would have returned "assistant-done"
-    // first if a later agent_message existed.
-    if (entry.type === "response_item" && ptype === "reasoning") return "assistant-pending";
-
-    // Everything else (token_count, turn_context, exec_output) is
-    // bookkeeping - keep scanning.
-  }
-  return "unknown";
-}
-
 /** Codex rollout filenames are `rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl`.
  * The session ID is everything after the 7th `-`-separated field. */
 export function extractSessionId(rolloutPath: string): string {
@@ -309,7 +197,7 @@ export function extractSessionId(rolloutPath: string): string {
  *   - `type: "compacted"` (carries the replacement_history payload)
  *   - `type: "event_msg"`, `payload.type: "context_compacted"` (signal-only)
  *
- * Either qualifies; we accept the first match and return its timestamp
+ * Either qualifies. We accept the first match and return its timestamp
  * in ms (epoch). Drives two consumers: the yellow LOAD banner on the
  * trailing render (deliberate context rebuild, not a silent resume) and
  * the compact-completion flash (`CompactFlashMachine` boundary input).
@@ -345,7 +233,7 @@ export function parseLastCompactTimestamp(tail: string): number | null {
       const ts = Date.parse(entry.timestamp);
       if (!Number.isNaN(ts)) return ts;
     }
-    // Compact event without a parseable timestamp; keep walking
+    // Compact event without a parseable timestamp - keep walking
     // for an older one with a usable timestamp.
   }
   return null;

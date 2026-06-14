@@ -13,7 +13,6 @@ import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
 import {
-  classifyCodexTurn,
   extractSessionId,
   parseCwd,
   extractFirstUserMessage,
@@ -22,6 +21,7 @@ import {
   parseLatestModelSlug,
   parseModelSlug,
 } from "./parsers";
+import { classifyCodexTurn } from "./turnClassifier";
 import {
   findLatestRollout,
   getSessionTitle,
@@ -33,11 +33,12 @@ import {
   readPersistedRollout,
 } from "./activeRolloutStore";
 import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
+import { NonActiveCompletionTracker } from "../shared/sessionTokens/nonActiveCompletionTracker";
 import { logNotifEvent } from "../shared/diag/notifEventLog";
 import { resolveAutoCompactTokens } from "./autoCompactLimit";
 
 /** fs.watch in the base class handles instant transcript-change
- * detection; the shared `SESSION_TOKEN_POLL_MS` cadence is a safety
+ * detection. The shared `SESSION_TOKEN_POLL_MS` cadence is a safety
  * net for session discovery and missed watcher events.
  * `SESSION_TOKEN_RESCAN_MS` gates the more expensive full rescan. */
 
@@ -52,8 +53,8 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private lastRolloutScan = 0;
 
   /** Watches ~/.codex/sessions/ for new rollout files. Recursive on
-   * Windows/macOS to catch date-sharded subdirs; falls back to the
-   * 51s poll on Linux where recursive watch is unsupported. The
+   * Windows/macOS to catch date-sharded subdirs, with a fallback to
+   * the 51s poll on Linux where recursive watch is unsupported. The
    * callback nulls both `cachedRolloutPath` and `lastRolloutScan` so
    * the next poll re-picks the newest rollout instead of riding the
    * cache through the rescan window. */
@@ -80,17 +81,11 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     inProgress: 0,
   };
   /** Wall-clock ms when this service last observed the rollout file
-   * grow in byte size. Seeded with kernel mtime on the first poll of
-   * a new rollout (so a stale file is not falsely treated as live)
-   * and refreshed with `Date.now()` on any later poll where size grew.
-   *
-   * The Codex TUI keeps its rollout file open for the lifetime of the
-   * session and Windows lazily flushes mtime on open handles, so the
-   * kernel `st.mtimeMs` value can lag tens of seconds behind real
-   * writes. The widget's 30s freshness gate then collapses the
-   * activity indicator to idle while Codex is still actively
-   * appending lines. Sampling growth here gives the widget a signal
-   * that does not depend on the kernel's mtime cadence. */
+   * grow in byte size. Seeded with kernel mtime on the first poll of a
+   * new rollout (so a stale file is not falsely read as live), then
+   * `Date.now()` on any later poll where size grew. Feeds
+   * `CodexResolvedSession.lastActivityObservedAt` - see that field for
+   * why byte-growth, not kernel mtime, drives the freshness gate. */
   private lastObservedGrowthMs: number | null = null;
   /** Smoothed tokens-per-second tracker. Time axis is rollout mtime
    * (not Date.now()) so idle stretches between writes contribute zero
@@ -103,16 +98,29 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   private readonly tpsTracker = new TpsTracker();
   /** Drives the post-compact completion flash. Codex's `compacted`
    * rollout entry is the only observable signal (post-completion, same
-   * as Claude); the shared machine arms a brief flash on each newly-
+   * as Claude) - the shared machine arms a brief flash on each newly-
    * observed boundary. */
   private readonly compactFlash = new CompactFlashMachine();
 
-  /** Per-rollout turn-state tracker, refreshed each rescan. */
-  private readonly rolloutTurnStates = new Map<
-    string,
-    { turnState: string; mtime: number; reportedAsDone: boolean }
-  >();
-  private pendingNonActiveCompletions: NonActiveCompletion[] = [];
+  /** Detects done-transitions on non-active rollouts in this workspace
+   * so the bridge can fire a completion for a session other than the
+   * tracked one. Keyed by rollout path, with a 120s fresh window for
+   * Codex's long silent reasoning gaps. */
+  private readonly nonActiveTracker =
+    new NonActiveCompletionTracker<RolloutCandidate>({
+      freshWindowMs: 120_000,
+      keyOf: (c) => c.path,
+      turnStateOf: (c) => c.turnState,
+      mtimeOf: (c) => c.mtime,
+      buildCompletion: (c, now) => ({
+        sessionId: extractSessionId(c.path),
+        transcriptPath: c.path,
+        label: c.cwd ? basename(c.cwd) : "Codex",
+        sessionTitle:
+          getSessionTitle(join(homedir(), ".codex"), extractSessionId(c.path)) ?? "",
+        completedAtMs: now,
+      }),
+    });
 
   constructor(workspacePath: string) {
     super(
@@ -152,17 +160,13 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     this.lastObservedGrowthMs = null;
     this.compactFlash.reset();
     this.sessionsWatcher.close();
-    this.rolloutTurnStates.clear();
-    this.pendingNonActiveCompletions = [];
+    this.nonActiveTracker.reset();
     super.reset();
   }
 
   /** Drain non-active rollout completions since the last call. */
   consumeNonActiveCompletions(): NonActiveCompletion[] {
-    if (this.pendingNonActiveCompletions.length === 0) return [];
-    const out = this.pendingNonActiveCompletions;
-    this.pendingNonActiveCompletions = [];
-    return out;
+    return this.nonActiveTracker.drain();
   }
 
   dispose(): void {
@@ -207,7 +211,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       if (result.path) this.cachedRolloutPath = result.path;
       this.cachedInventory = { total: result.total, inProgress: result.inProgress };
       this.lastRolloutScan = now;
-      this.detectNonActiveCompletions(result.candidates, result.path, now);
+      this.nonActiveTracker.observe(result.candidates, result.path, now);
     }
 
     if (!this.cachedRolloutPath || !existsSync(this.cachedRolloutPath)) {
@@ -377,63 +381,4 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     });
   }
 
-  /** Queue done-transitions on non-active rollouts with fresh mtime.
-   * First-read for an unknown rollout is recorded without queuing.
-   * Freshness window exceeds `SESSION_TOKEN_RESCAN_MS` so a rollout
-   * that completes immediately after a rescan still lands inside the
-   * gate on the next one (worst-case detection delay ~= rescan
-   * cadence, not rescan + 30s). */
-  private detectNonActiveCompletions(
-    candidates: readonly RolloutCandidate[],
-    activePath: string | null,
-    now: number
-  ): void {
-    const FRESH_WINDOW_MS = 120_000;
-    const seen = new Set<string>();
-    for (const candidate of candidates) {
-      seen.add(candidate.path);
-      const prev = this.rolloutTurnStates.get(candidate.path);
-      const isDone = candidate.turnState === "assistant-done";
-      const isFresh = now - candidate.mtime <= FRESH_WINDOW_MS;
-
-      if (candidate.path === activePath) {
-        this.rolloutTurnStates.set(candidate.path, {
-          turnState: candidate.turnState,
-          mtime: candidate.mtime,
-          reportedAsDone: isDone,
-        });
-        continue;
-      }
-
-      if (prev === undefined) {
-        this.rolloutTurnStates.set(candidate.path, {
-          turnState: candidate.turnState,
-          mtime: candidate.mtime,
-          reportedAsDone: isDone,
-        });
-        continue;
-      }
-
-      const wasDone = prev.reportedAsDone;
-      const transitionedToDone = isDone && !wasDone;
-      if (transitionedToDone && isFresh) {
-        this.pendingNonActiveCompletions.push({
-          sessionId: extractSessionId(candidate.path),
-          transcriptPath: candidate.path,
-          label: candidate.cwd ? basename(candidate.cwd) : "Codex",
-          sessionTitle:
-            getSessionTitle(join(homedir(), ".codex"), extractSessionId(candidate.path)) ?? "",
-          completedAtMs: now,
-        });
-      }
-      this.rolloutTurnStates.set(candidate.path, {
-        turnState: candidate.turnState,
-        mtime: candidate.mtime,
-        reportedAsDone: isDone || (wasDone && candidate.mtime === prev.mtime),
-      });
-    }
-    for (const key of this.rolloutTurnStates.keys()) {
-      if (!seen.has(key)) this.rolloutTurnStates.delete(key);
-    }
-  }
 }

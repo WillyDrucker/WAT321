@@ -3,7 +3,8 @@ import { join } from "node:path";
 import type { CodexSessionIndex } from "./types";
 import { readTail } from "../shared/fs/fileReaders";
 import { normalizePath } from "../shared/fs/pathUtils";
-import { classifyCodexTurn, parseCwd } from "./parsers";
+import { parseCwd } from "./parsers";
+import { classifyCodexTurn } from "./turnClassifier";
 
 /**
  * Walks Codex's date-sharded rollout tree and picks the active
@@ -32,7 +33,7 @@ import { classifyCodexTurn, parseCwd } from "./parsers";
  */
 
 /** How many calendar day-directories back we walk. 30 days covers
- * any realistic active-session age; older rollouts are ignored. */
+ * any realistic active-session age - older rollouts are ignored. */
 const MAX_DAYS_TO_SCAN = 30;
 
 /** Per-candidate activity weight from the tail classifier. Larger
@@ -150,7 +151,7 @@ function buildCandidate(
   // from days ago) and the candidate competes on mtime alone.
   const tail = readTail(fullPath);
   const rawTurnState = tail ? classifyCodexTurn(tail) : "unknown";
-  // Narrow LastEntryKind to the three states the candidate carries;
+  // Narrow LastEntryKind to the three states the candidate carries -
   // compact-end / interrupted collapse to unknown.
   const turnState: RolloutCandidate["turnState"] =
     rawTurnState === "user" ||

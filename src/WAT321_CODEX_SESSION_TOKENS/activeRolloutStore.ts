@@ -11,7 +11,7 @@ import { parseCwd } from "./parsers";
  * reload instead of vanishing once its rollout file ages past the
  * discovery walk's day-window (`MAX_DAYS_TO_SCAN`). Codex appends to
  * one file in its CREATION-date directory for the whole session, so a
- * session kept open for weeks eventually drops out of the walk; the
+ * session kept open for weeks eventually drops out of the walk - the
  * pointer lets the next launch re-adopt it directly.
  *
  * Per-workspace (`clientStateDir`) so two windows never clobber each
@@ -61,7 +61,7 @@ export function persistRollout(rolloutPath: string): void {
     mkdirSync(clientStateDir(), { recursive: true });
     writeFileAtomic(storePath(), JSON.stringify({ rolloutPath }));
   } catch {
-    // best-effort; never block a poll on persistence failure
+    // best-effort - never block a poll on persistence failure
   }
 }
 
