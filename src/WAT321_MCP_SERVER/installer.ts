@@ -37,13 +37,13 @@ import { createBridgeLogger } from "./outputChannel";
  *   3. Sweep any existing MCP entry by name so `claude mcp add` can
  *      re-register without duplicate-name errors.
  *   4. Register the MCP entry with the wsId injected via `--env`.
- *      Project scope when a workspace folder is open; user scope with
+ *      Project scope when a workspace folder is open - user scope with
  *      the sentinel `default` wsId when VS Code is folderless, so a
  *      window with no folder still gets a working bridge.
  *   5. Pre-allow the unified tool surface in Claude's settings.
  *
  * Uninstall reverses the registration plus the pre-allow list. Script
- * extraction lives in `installerScripts`; the `claude mcp ...`
+ * extraction lives in `installerScripts` - the `claude mcp ...`
  * subprocess wrapper plus the two sweep helpers live in
  * `installerClaudeCli`.
  */
@@ -76,14 +76,14 @@ export async function installUnifiedBridge(
   }
 
   // With a folder open the registration writes to
-  // `<workspace>/.claude/settings.json` at project scope; the CLI takes
+  // `<workspace>/.claude/settings.json` at project scope - the CLI takes
   // its target from the spawn cwd, so pass the folder explicitly. With
   // no folder open the registration falls back to user scope
   // (`~/.claude/settings.json`) with the sentinel `default` wsId, so a
   // folderless VS Code window still gets a working bridge - state lands
   // at `~/.wat321/clients/default/`. The next time the user opens a
   // folder, project scope wins by Claude Code's normal precedence and
-  // the folder gets its own hashed wsId; the leftover user-scope entry
+  // the folder gets its own hashed wsId - the leftover user-scope entry
   // gets swept on the next install.
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const workspaceCwd = workspaceFolder?.uri.fsPath;
