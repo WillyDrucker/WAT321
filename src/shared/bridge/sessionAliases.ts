@@ -11,7 +11,7 @@ import { writeFileAtomic } from "../fs/atomicWrite";
  *     to `{sessionId, instanceId}`
  *   - `activeAliases` per target - the alias the bridge consumer
  *     resolves to when a wat321_ask call omits `session`. The EH menu's
- *     CURRENT row writes this; bin/opencode.mjs reads it.
+ *     CURRENT row writes this - bin/opencode.mjs reads it.
  *
  * `instanceId` on each entry is the catalog id the session was bound to
  * at create time. Persisting it lets the heartbeat layer render the

@@ -4,11 +4,12 @@
  *     plan progress, reasoning/output split)
  *   - `CodexDispatcher` + `TurnMonitor` for bridge adaptive timeout
  *
- * Parser lives in `phaseParser.ts` as pure string -> struct logic; no
- * watchers, no state. Both consumers read their own rollout file and
- * call the parser on the tail buffer they already have.
+ * The `parseStageInfo` parser lives in `stageInfoParser.ts` (re-exported
+ * via `phaseParser.ts`) as pure string -> struct logic - no watchers,
+ * no state. Both consumers read their own rollout file and call the
+ * parser on the tail buffer they already have.
  *
- * Canonical 5-stage sequence. Monotonically advances; a turn cannot
+ * Canonical 5-stage sequence. Monotonically advances - a turn cannot
  * regress to an earlier stage. Drives both the progress fraction in
  * the status bar and the Adaptive dispatcher's budget windows.
  */
@@ -60,7 +61,7 @@ export interface ToolCall {
  * separate from the parse layer keeps the parser pure and lets UI
  * label rules evolve without re-reading the tail. */
 export interface StageDisplay {
-  /** Fraction for the status bar (always N/5). Monotonic; never regresses. */
+  /** Fraction for the status bar (always N/5). Monotonic - never regresses. */
   fraction: string;
   /** Human-readable short label. Context-aware at stage 3/5 - pulled
    * from the active tool name or reasoning presence. */
@@ -75,7 +76,7 @@ export interface StageDisplay {
 }
 
 /** Composite snapshot of a turn in progress. All fields are derived
- * from a single tail read; no I/O side effects. Fields that have no
+ * from a single tail read - no I/O side effects. Fields that have no
  * signal in the tail are null / 0. */
 export interface StageInfo {
   stage: BridgeStage;

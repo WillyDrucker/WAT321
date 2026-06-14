@@ -8,7 +8,7 @@ import { writeFileAtomic } from "../../fs/atomicWrite";
  * `~/.claude/settings.json` `permissions.allow` array.
  *
  * The harness prompts the user to confirm every newly registered MCP
- * tool on first use. WAT321 just installed the server; making the
+ * tool on first use. WAT321 just installed the server - making the
  * user re-authorize each tool is redundant and confusing, so each
  * bridge tier seeds its tool names into the allowlist at install
  * time and removes them at uninstall.
@@ -61,7 +61,7 @@ export function healLegacyAllowlistEntries(logger: MinimalLogger): void {
 
 /** Append `toolNames` to `permissions.allow`. Idempotent - already-
  * present entries are skipped. No-op when the file exists but is
- * unparseable; the user falls back to the standard prompt. */
+ * unparseable - the user falls back to the standard prompt. */
 export function preAllowMcpTools(
   toolNames: readonly string[],
   logger: MinimalLogger

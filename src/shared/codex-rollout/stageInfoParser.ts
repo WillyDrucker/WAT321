@@ -20,7 +20,7 @@ import type {
  * Single-pass state machine over a Codex rollout tail that composes
  * the full `StageInfo` snapshot (stage 1-5, elapsed, plan state,
  * active tool, token breakdown). Scoped to the most recent turn via
- * `extractCurrentTurn`; long-lived rollouts contain many prior
+ * `extractCurrentTurn` - long-lived rollouts contain many prior
  * turns and reading them unscoped would pollute every field and
  * latch stage permanently at `complete`.
  *

@@ -80,7 +80,7 @@ function stripApplicationScopeKeysFromFile(path: string): void {
 }
 
 /** Drop a stuck workspace-scope value via the config API where
- * possible. Best-effort; some scope/value combinations reject and
+ * possible. Best-effort - some scope/value combinations reject and
  * the file-surgery path is the durable fix. */
 async function clearWorkspaceScope(key: string): Promise<void> {
   const config = vscode.workspace.getConfiguration();

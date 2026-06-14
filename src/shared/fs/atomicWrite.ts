@@ -2,7 +2,7 @@ import { renameSync, writeFileSync } from "node:fs";
 
 /**
  * Atomic file write via tmp + rename. Readers polling the target file never
- * see torn bytes; either the prior content or the new content, never a
+ * see torn bytes - either the prior content or the new content, never a
  * half-flushed buffer mid-write.
  *
  * Accepts `string` (written as utf8) or `Buffer` (byte-preserving copy).

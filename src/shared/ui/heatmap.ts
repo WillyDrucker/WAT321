@@ -37,9 +37,6 @@ export const SQUARE_ORANGE_COMPACT = SQUARE_ORANGE;
 const SQUARE_RED = "\uD83D\uDFE5";
 /** Large black square emoji. U+2B1B BLACK LARGE SQUARE. */
 const SQUARE_BLACK = "\u2B1B";
-/** Exported black square for callers building bars outside the
- * heatmap rendering paths (e.g. the compact-progress bar). */
-export const SQUARE_BLACK_EMPTY = SQUARE_BLACK;
 
 export type HeatmapBand = "green" | "yellow" | "red";
 
@@ -58,7 +55,7 @@ export function isHeatmapEnabled(): boolean {
 /** Classify a Codex "remaining" percentage (100 = full, 0 = depleted)
  * into a heatmap band. Used by Codex widgets which report remaining
  * capacity from the rate limit API. The gating on
- * `wat321.enableHeatmap` happens one level up in `renderCodexBar`;
+ * `wat321.enableHeatmap` happens one level up in `renderCodexBar` -
  * this classifier is always safe to call.
  *
  *   remaining > 40%      -> green  (plenty of room)
@@ -138,11 +135,11 @@ export function buildCodexHeatmapBar(
 
 /** Usage percentage at which the yellow band becomes active. Constant
  * across all bar widths. Cell 7 lights up at this threshold in a
- * 10-wide bar; in a 5-wide bar cell 4 lights up at the same point. */
+ * 10-wide bar - in a 5-wide bar cell 4 lights up at the same point. */
 const CLAUDE_YELLOW_THRESHOLD = 70;
 /** Usage percentage at which the red band becomes active. Constant
  * across all bar widths. Cell 9 lights up exactly at this threshold
- * in a 10-wide bar; in a 5-wide bar cell 4 is already lit from pct=70
+ * in a 10-wide bar - in a 5-wide bar cell 4 is already lit from pct=70
  * and upgrades in place from yellow to red. */
 const CLAUDE_RED_THRESHOLD = 85;
 
@@ -163,10 +160,10 @@ const CLAUDE_RED_THRESHOLD = 85;
  *
  *   usedPct  <  70       blue phase   all filled cells blue
  *   70 <= usedPct <  85  yellow phase cells from firstYellowCell up
- *                                     to the current fill are yellow;
+ *                                     to the current fill are yellow -
  *                                     cells below are blue
  *   85 <= usedPct <  100 red phase    cells from firstRedCell up to
- *                                     the current fill are red; cells
+ *                                     the current fill are red - cells
  *                                     below are blue (any previously
  *                                     yellow cell in that range
  *                                     "demotes" back to blue)
@@ -175,7 +172,7 @@ const CLAUDE_RED_THRESHOLD = 85;
  * In a 10-wide bar firstYellowCell=7 and firstRedCell=9, so the
  * yellow band is cells 7-8 and the red band is cells 9-10 with no
  * overlap. In a 5-wide bar firstYellowCell=4 and firstRedCell=4, so
- * cell 4 is yellow during 70-84 and upgrades in place to red at 85;
+ * cell 4 is yellow during 70-84 and upgrades in place to red at 85 -
  * the yellow and red bands share cell 4. That sharing is what lets
  * the compact bar avoid a dead zone after the 85% threshold without
  * needing any rounding hacks. */

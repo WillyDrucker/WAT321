@@ -1,5 +1,5 @@
 import type { StageInfo } from "../../codex-rollout/types";
-import type { LastEntryKind } from "../../transcriptClassifier";
+import type { LastEntryKind } from "../../turnState";
 
 /**
  * Type contracts shared by the session-token widget and its provider-
@@ -58,7 +58,7 @@ export interface ClaudeTurnInfo {
    * summary. */
   lastCompactTimestamp: number | null;
   /** Most recent classified cache event in the lookback window.
-   * Tooltip-only readout; does not drive the banner. Read-only -
+   * Tooltip-only readout - does not drive the banner. Read-only -
    * derived purely from the same transcript tail every other parser
    * field comes from. */
   mostRecentCacheEvent: CacheEvent | null;
@@ -111,7 +111,7 @@ export interface SessionTokenRenderData {
   /** Provider-agnostic: timestamp (ms) of the most recent observed
    * compact event in the underlying transcript / rollout. Drives the
    * widget's compact-aware LOAD banner. Claude sources this from the
-   * `isCompactSummary` user entry; Codex from the `compacted` /
+   * `isCompactSummary` user entry, Codex from the `compacted` /
    * `context_compacted` rollout entry. Null when no compact event is
    * in the scanned tail window. */
   lastCompactTimestamp: number | null;
@@ -140,7 +140,7 @@ export interface SessionTokenRenderData {
     flashUntil: number | null;
   };
   /** Workspace session inventory snapshot. Total = open sessions in
-   * this workspace for the provider; inProgress = subset with an
+   * this workspace for the provider - inProgress = subset with an
    * in-flight turn. Drives the multi-session tooltip disclosure -
    * surfaced as a tooltip line when total > 1 so the user can see
    * "this widget is watching one of N sessions" without a separate
@@ -172,7 +172,7 @@ export interface SessionTokenWidgetDescriptor<TState extends { status: string }>
    * handle. Codex exposes no process signal, so the indicator cannot
    * lean on PID liveness through a silent stretch, and modern Codex
    * reasons silently for tens of seconds with no rollout write, which
-   * the tight `activeThresholdMs` gate read as idle mid-turn. The
+   * the tight `activeThresholdMs` gate reads as idle mid-turn. The
    * classifier owns end-of-turn detection (task_complete / turn_aborted
    * / final_answer collapse the indicator instantly), so this only
    * needs to outlast the longest silent gap and applies only while a

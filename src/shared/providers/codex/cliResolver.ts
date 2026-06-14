@@ -8,7 +8,7 @@ import {
 /**
  * Codex CLI resolver. Bundled binary lives under
  * `bin/<arch>/codex(.exe)` inside the `openai.chatgpt` VS Code
- * extension; PATH fallback is the bare `codex` command.
+ * extension - PATH fallback is the bare `codex` command.
  */
 
 const SPEC = {

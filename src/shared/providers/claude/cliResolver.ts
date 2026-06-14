@@ -8,7 +8,7 @@ import {
 /**
  * Claude Code CLI resolver. Bundled-binary path lives at
  * `resources/native-binary/claude(.exe)` inside the
- * `anthropic.claude-code` VS Code extension; PATH fallback is the
+ * `anthropic.claude-code` VS Code extension - PATH fallback is the
  * bare `claude` command.
  */
 

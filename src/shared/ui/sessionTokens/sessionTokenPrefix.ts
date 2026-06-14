@@ -15,7 +15,7 @@ import type {
  *   2. EH bridge in flight (and not bypassed):
  *      - pre-ceremony: 1Hz logo blink against blank
  *      - ceremony active: provider-specific - Claude uses its native
- *        activeFrames; Codex uses debug-disconnect / debug-connected
+ *        activeFrames - Codex uses debug-disconnect / debug-connected
  *        alternation
  *      - post-ceremony Claude: 1Hz claude / blank (waiting on Codex)
  *      - post-ceremony Codex stage=dispatched: debug-disconnect /
@@ -33,7 +33,7 @@ import type {
  *     Pickle FF call).
  *
  * Bridge ceremony / phase / stage definitions live in
- * `WAT321_EPIC_HANDSHAKE/bridgeStageMap.ts`; both session-token
+ * `WAT321_EPIC_HANDSHAKE/bridgeStageMap.ts`. Both session-token
  * widgets and the bridge widget read the same snapshot, so they
  * always observe the same phase + stage at the same instant.
  */
@@ -68,7 +68,7 @@ export function effectiveActiveThresholdMs(
  * freshness predicate, shared by `pickPrefix` (native branch) and the
  * widget's ticker keep-alive so the two cannot drift. Applies the
  * provider's `silentTurnCeilingMs` (Codex rides a long silent
- * reasoning gap); falls back to the no-PID window otherwise. The idle-
+ * reasoning gap), and falls back to the no-PID window otherwise. The idle-
  * tail freshness check (no turn in progress) deliberately stays a
  * direct `effectiveActiveThresholdMs` call - it omits the ceiling so
  * an idle widget suspends its ticker quickly. */
@@ -108,7 +108,7 @@ export function pickPrefix<TState extends { status: string }>(
 
   // Claude-to-OpenCode / Local LLM dispatches don't flow through the
   // EH bridge stage coordinator. The dispatch handler writes a
-  // heartbeat under the OpenCode Routes state dir; while fresh,
+  // heartbeat under the OpenCode Routes state dir. While fresh,
   // Claude's MCP call is blocked on the OpenCode reply.
   if (
     d.provider === "Claude" &&
@@ -174,7 +174,7 @@ export function pickPrefix<TState extends { status: string }>(
 
   // PID liveness keeps the indicator on through silent thinking
   // (deep Opus reasoning, slow tool calls). Mtime backstop is the
-  // safety net when PID is unavailable or dead; threshold widens to
+  // safety net when PID is unavailable or dead, and threshold widens to
   // 30s on lastKnown fallback where mtime is doing both jobs.
   const pidAlive = data.pid !== undefined && isPidAlive(data.pid);
   if (!pidAlive && !isTurnFresh(data, d, now)) return d.idlePrefix;

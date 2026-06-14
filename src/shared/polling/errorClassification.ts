@@ -29,7 +29,7 @@ export function isNetworkError(message: string): boolean {
 
 /** Parse an HTTP `Retry-After` header value (seconds or HTTP date)
  * into milliseconds. Returns `undefined` if the value is missing or
- * unparseable; callers fall back to the configured backoff. The lower
+ * unparseable - callers fall back to the configured backoff. The lower
  * bound of 1 second prevents a zero/negative value from hammering
  * the endpoint in a tight retry loop. */
 export function parseRetryAfterMs(value: string | undefined): number | undefined {

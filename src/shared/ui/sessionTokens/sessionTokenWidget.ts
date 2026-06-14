@@ -39,14 +39,14 @@ export type {
  *
  * Active detection is three-layer:
  *   1. Classifier (`turnState`). `assistant-done` / `compact-end` /
- *      `interrupted` / `unknown` collapse to idle; only `user` and
+ *      `interrupted` / `unknown` collapse to idle. Only `user` and
  *      `assistant-pending` keep the indicator active.
  *   2. PID liveness. When classifier says in-progress AND the
  *      session has a PID AND the process is alive, keep animating
  *      through silent thinking.
  *   3. Mtime backstop. PID dead / unavailable -> fall back to
  *      `now - mtime < activeThresholdMs`. Short window since the
- *      classifier catches end states; this only fires on CLI crash
+ *      classifier catches end states - this only fires on CLI crash
  *      without a final marker ever landing.
  *
  * Ticker runs at TICK_MS, re-rendering from cached state + wall
@@ -71,7 +71,7 @@ export class SessionTokenWidget<TState extends { status: string }>
    * first bridge dispatch after a cold launch animates immediately
    * instead of waiting up to 15s for the next service poll. */
   private bridgeSub: { dispose(): void } | null = null;
-  /** Display-refresh throttle for the visible TPS suffix. Per-widget;
+  /** Display-refresh throttle for the visible TPS suffix. Per-widget -
    * the Claude widget's cadence does not drag the Codex widget. Reset
    * on session change so a fresh session's first reading appears
    * immediately. */
@@ -209,7 +209,7 @@ export class SessionTokenWidget<TState extends { status: string }>
         // with no observable pre-completion signal. The state machine
         // arms a brief flash on boundary detection so the user sees an
         // acknowledgment before the widget settles into the new post-
-        // compact token count. Bar saturated at 5/5 + 100%; live
+        // compact token count. Bar saturated at 5/5 + 100% - live
         // flashUntil check collapses the skin the instant the window
         // passes instead of waiting for the next service poll.
         const now = Date.now();
@@ -236,7 +236,7 @@ export class SessionTokenWidget<TState extends { status: string }>
         });
         const banner = this.cacheBannerLatch.bannerAt(now);
         if (banner !== null) {
-          // LOAD or MISS text persists for the full 2000ms window;
+          // LOAD or MISS text persists for the full 2000ms window -
           // only the bullet positions blink at 500ms cadence. Prefix
           // stays visible so the brand icon and thinking indicator
           // ride through the flash. Tooltip keeps real data so

@@ -10,7 +10,7 @@ import { healStaleApplicationScopeKeys } from "./workspaceScopeHeal";
  * scope. Necessary because `config.get()` returns the merged effective
  * value and a workspace-level override otherwise survives a global-only
  * reset. Pass `undefined` to remove the user-set value and fall back
- * to the schema default; pass `false` (or any concrete value) to
+ * to the schema default - pass `false` (or any concrete value) to
  * force-set to that value at every scope.
  *
  * Global is always updated. Workspace and WorkspaceFolder are only
@@ -44,7 +44,7 @@ async function updateSettingAllScopes(
  * the row's own tick-origin handler call stack. That is a VS
  * Code rendering bug - scrolling the setting off-screen and back
  * forces a repaint and shows the correct unchecked state. The
- * config value itself is always correct; we cannot fix the stale
+ * config value itself is always correct - we cannot fix the stale
  * paint from an extension. */
 export async function clearCheckboxSetting(key: string): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
@@ -135,7 +135,7 @@ async function resetStatusBarItemVisibility(): Promise<void> {
  * on both usage services) AND to perform cross-tool cleanup that
  * must complete before the wipe (Epic Handshake MCP entry removal
  * from `~/.claude/settings.json`, VS Code globalState keys that
- * would otherwise outlive a disk wipe). May return a Promise; the
+ * would otherwise outlive a disk wipe). May return a Promise - the
  * reset flow awaits it so cleanup finishes before the disk wipe.
  * Individual failures inside are not expected to abort reset. */
 type OnResetCallback = () => void | Promise<void>;
@@ -158,7 +158,7 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
 
   // Heal stuck workspace-scope overrides before the setting writes
   // below, so a stale `.vscode/settings.json` copy can't re-shadow
-  // the cleared values. Reset is the natural moment for this; the
+  // the cleared values. Reset is the natural moment for this - the
   // sweep never finds anything on a clean install.
   healStaleApplicationScopeKeys();
 

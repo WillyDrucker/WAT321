@@ -13,7 +13,7 @@ import { writeFileAtomic } from "../fs/atomicWrite";
  * Append-only JSONL at the configured path with rotation when the
  * file grows past `MAX_LINES_BEFORE_ROTATE`: rewrite atomically with
  * the most recent `KEEP_LINES` entries. One file per provider per
- * workspace; the per-window state machine is the natural granularity
+ * workspace - the per-window state machine is the natural granularity
  * for this log because the cross-window cache only ever holds a
  * single most-recent snapshot.
  *
@@ -70,9 +70,9 @@ export interface TransitionRecord {
    * write." */
   idleForMs?: number | null;
   /** Current poll cadence in ms at the moment of the record. Normal is
-   * `POLL_INTERVAL_MS` (122_000); rate-limited park raises this to
+   * `POLL_INTERVAL_MS` (122_000) - rate-limited park raises this to
    * `retryAfterMs` (up to `RATE_LIMIT_BACKOFF_MS`, 15 minutes).
-   * Sudden cadence drops point at unintentional fast-poll loops; long
+   * Sudden cadence drops point at unintentional fast-poll loops - long
    * stretches at the rate-limit cadence point at "we haven't tried in
    * a while" idle-feel even when the state is technically ok. */
   pollIntervalMs?: number;

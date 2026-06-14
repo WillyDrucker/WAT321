@@ -10,7 +10,7 @@ import { clientStateDir } from "../wat321Paths";
 
 /**
  * Cross-window dedup for completion notifications. Each completion
- * is keyed by `<sessionId>-<bucketedCompletionMs>`; concurrent VS
+ * is keyed by `<sessionId>-<bucketedCompletionMs>` - concurrent VS
  * Code windows race to create the same tag file under
  * `<clientStateDir>/fired-notifications/` and the `wx` flag picks
  * exactly one winner. Sweeps stale tags on each claim.

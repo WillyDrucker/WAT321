@@ -9,7 +9,7 @@ import { join } from "node:path";
  * drifted out of the installed CLI's known set - a class of failure
  * that surfaces as a 404 from the API on the next `thread/resume`.
  *
- * The cache refreshes on Codex CLI upgrades; our validation
+ * The cache refreshes on Codex CLI upgrades, and our validation
  * automatically reflects the current installed set without any
  * WAT321-side change when OpenAI renames or retires a model.
  *
@@ -119,52 +119,6 @@ export function readCodexConfigModel(): string | null {
   }
 }
 
-/** Read the `model_reasoning_effort = "..."` key from
- * `~/.codex/config.toml`. Same scan strategy as `readCodexConfigModel`:
- * top-level only, stop at the first table header. Returns null when
- * the file is missing, the key is unset, or the value is not a string. */
-export function readCodexConfigEffort(): string | null {
-  return readTopLevelStringKey("model_reasoning_effort");
-}
-
-/** Read the `sandbox_mode = "..."` key from `~/.codex/config.toml`.
- * Common values: `read-only`, `workspace-write`, `danger-full-access`.
- * Returns null when unset. Used for read-only surfacing of Codex's
- * current sandbox state in the bridge widget tooltip. */
-export function readCodexConfigSandbox(): string | null {
-  return readTopLevelStringKey("sandbox_mode");
-}
-
-/** Read the `approval_policy = "..."` key from `~/.codex/config.toml`.
- * Common values: `never`, `untrusted`, `on-failure`. Distinct from
- * sandbox: approval gates apply_patch + tool calls; sandbox gates
- * shell + filesystem. Returns null when unset. */
-export function readCodexConfigApproval(): string | null {
-  return readTopLevelStringKey("approval_policy");
-}
-
-/** Generic top-level string key reader for `~/.codex/config.toml`.
- * Stops at the first `[section]` header so a profile-scoped key does
- * not shadow the top-level default. Quotes can be `"..."` or `'...'`. */
-function readTopLevelStringKey(key: string): string | null {
-  const configPath = join(homedir(), ".codex", "config.toml");
-  if (!existsSync(configPath)) return null;
-  try {
-    const raw = readFileSync(configPath, "utf8");
-    const re = new RegExp(`^${key}\\s*=\\s*["']([^"']+)["']\\s*(?:#.*)?$`);
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("#")) continue;
-      if (trimmed.startsWith("[") && trimmed.endsWith("]")) break;
-      const m = re.exec(trimmed);
-      if (m) return m[1];
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 /** Resolve the rich info for a model slug from the cache. Returns null
  * when the cache is unreadable or the slug is not present. Caller can
  * fall back to a slug-only display when null comes back. */
@@ -211,7 +165,7 @@ function modelEntryToInfo(entry: ModelsCacheEntry): CodexModelInfo | null {
  *   1. Codex CLI's configured default (from config.toml) if valid
  *   2. First entry in models_cache.json (a model Codex definitely
  *      supports on this machine)
- *   3. null - no safe repair possible; caller falls back to Reset
+ *   3. null - no safe repair possible, caller falls back to Reset
  * Validating the config.toml default before picking it protects
  * against the case where config itself stores the bad slug (the
  * likely origin of the drift in the first place). */

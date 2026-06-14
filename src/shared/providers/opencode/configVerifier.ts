@@ -6,7 +6,7 @@ import {
 /**
  * Post-spawn check that OpenCode merged our `.opencode.json` `limit`
  * block into its running provider catalog. The limit pins OpenCode's
- * max_tokens + auto-compact budgeting per route; if the merge silently
+ * max_tokens + auto-compact budgeting per route - if the merge silently
  * fails the running process falls back to a 32K default and breaks
  * auto-compact predictability.
  *
