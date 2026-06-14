@@ -22,7 +22,7 @@ interface ModelContextWindow {
   displayName: (modelId: string) => string;
 }
 
-/** Registry of known model context windows. Checked in order;
+/** Registry of known model context windows. Checked in order -
  * first match wins. A third provider adds entries here. */
 export const MODEL_CONTEXT_WINDOWS: readonly ModelContextWindow[] = [
   {
@@ -144,7 +144,7 @@ export interface SessionTokenService<TState> extends Subscribable<TState> {
     pid: number | null;
   };
   /** Compact-completion flash diagnostics. Both Claude and Codex
-   * implement this (each over the shared `CompactFlashMachine`); the
+   * implement this (each over the shared `CompactFlashMachine`) - the
    * method stays optional so a future provider without a compact
    * concept can omit it. Health command renders `state`, current
    * `estimatedDurationMs`, and the rolling history when present. */

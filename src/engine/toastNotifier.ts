@@ -11,7 +11,7 @@ import { SETTING } from "./settingsKeys";
 
 /** Optional probe injected from bootstrap so the toast notifier can
  * skip Codex toasts while the Epic Handshake bridge is dispatching.
- * The engine never imports from a tool; this callback crosses that
+ * The engine never imports from a tool - this callback crosses that
  * boundary in the correct direction (bootstrap wires tool state in). */
 let bridgeActiveProbe: (() => boolean) | null = null;
 
@@ -24,7 +24,7 @@ function isEpicHandshakeBridgeActive(): boolean {
 }
 
 /** Optional consume-on-read probe. The dispatcher writes a one-shot
- * suppress-codex-toast sentinel on successful turn completion; this
+ * suppress-codex-toast sentinel on successful turn completion - this
  * consumer reads it once. Returning true means "the most recent Codex
  * activity was bridge-driven, suppress." Covers the gap where Codex's
  * transcript fires `responseComplete` more than 5s after the bridge's
@@ -57,7 +57,7 @@ function isCodexToastSuppressionEnabled(): boolean {
  *   codex  - per-provider filter (default true)
  *
  * Mode dispatch is literal. "System Notifications" always uses the OS
- * path; "In-App" always uses the editor's notification bar. Auto picks
+ * path - "In-App" always uses the editor's notification bar. Auto picks
  * system when the editor is unfocused and in-app when focused. Unknown
  * mode values fail closed (suppressed) rather than silently selecting
  * a delivery path the user did not choose.
@@ -70,7 +70,7 @@ function isCodexToastSuppressionEnabled(): boolean {
  *   - macOS: `osascript -e 'display notification ...'` (preinstalled,
  *     routes through Notification Center).
  *   - Linux: `notify-send` via libnotify (available on most GNOME /
- *     KDE systems; `notify-send` not present -> delivery fails and is
+ *     KDE systems - `notify-send` not present -> delivery fails and is
  *     recorded as `system-failed`).
  *   - In-App (all platforms): `vscode.window.showInformationMessage`
  *     renders VS Code's own bottom-right toast UI. It is NOT routed
@@ -80,12 +80,12 @@ function isCodexToastSuppressionEnabled(): boolean {
  * failure is recorded in the diagnostic ring buffer (visible in the
  * health command) and the event is not delivered through a different
  * path. A user who picked "System Notifications" and sees no toast
- * should run the health command; causes include unregistered AUMID
+ * should run the health command - causes include unregistered AUMID
  * on Windows, Focus Assist / Do Not Disturb, OS-level notification
  * permission disabled, or `notify-send` missing on Linux.
  *
  * Per-(provider, sessionId) 10s cooldown so distinct sessions can fire
- * concurrent toasts; the same session repeating within 10s collapses.
+ * concurrent toasts - the same session repeating within 10s collapses.
  */
 
 const NOTIFICATION_COOLDOWN_MS = 10_000;

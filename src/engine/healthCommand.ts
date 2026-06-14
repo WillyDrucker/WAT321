@@ -9,7 +9,7 @@ import { clientStateDir } from "../shared/wat321Paths";
 import { getAppUserModelID } from "./windowsToastProcess";
 
 /** Appended callbacks for tool-owned health sections (Epic Handshake
- * etc.). Tools register via `registerHealthSection` during activate;
+ * etc.). Tools register via `registerHealthSection` during activate -
  * the command iterates the list when the panel is rendered. Keeps
  * the engine from importing tool modules directly. */
 type HealthSectionFn = (lines: string[]) => void;
@@ -42,7 +42,7 @@ export function registerHealthSection(fn: HealthSectionFn): vscode.Disposable {
  *
  * All data is read-only from existing service accessors. Nothing
  * here can alter behavior. This is the canonical instrumentation
- * entry point; `grep -rn "\[WAT-DEBUG\]" src/` pulls every diagnostic
+ * entry point - `grep -rn "\[WAT-DEBUG\]" src/` pulls every diagnostic
  * surface for review or wholesale removal.
  */
 
@@ -228,7 +228,7 @@ export function registerHealthCommand(
 ): void {
   // Subscribe to lifecycle and connectivity events once the engine
   // context becomes available. Events are emitted from extension.ts
-  // and bootstrap.ts; we just record them.
+  // and bootstrap.ts - we just record them.
   const ctxOnInit = getCtx();
   if (ctxOnInit) {
     const { events } = ctxOnInit;
@@ -261,7 +261,7 @@ export function registerHealthCommand(
         // Windows toasts on VS Code forks. Surface it prominently so
         // a user seeing no notifications can spot a failed host
         // resolution without reading source. AUMID is discovered
-        // inside the warm PowerShell process at first spawn; until
+        // inside the warm PowerShell process at first spawn - until
         // then this reads `(pending)`.
         const aumid = getAppUserModelID() || "(pending - no toast fired yet)";
         lines.push(`Host appName:    ${vscode.env.appName}`);

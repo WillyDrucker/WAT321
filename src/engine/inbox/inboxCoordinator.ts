@@ -17,7 +17,7 @@ import {
  *     per-client dir).
  *   - 5s polling tick as a missed-event backstop.
  *   - Single debounced `tick()` triggered by any watcher event (envelope
- *     tmp+rename produces 2-3 events; we coalesce).
+ *     tmp+rename produces 2-3 events - we coalesce).
  *   - Typed event emission via EventHub so subscribers (status bar,
  *     toast notifier, future widgets) react off events instead of
  *     polling.
@@ -148,7 +148,7 @@ export class InboxCoordinator implements vscode.Disposable {
               statSync(watched);
               this.tick();
             } catch {
-              // Dir disappeared - drop this single watcher; let the
+              // Dir disappeared - drop this single watcher - let the
               // next tick re-evaluate the target set.
               const existing = this.watchers.get(watched);
               if (existing) {
@@ -172,7 +172,7 @@ export class InboxCoordinator implements vscode.Disposable {
         });
         this.watchers.set(dir, w);
       } catch {
-        // skip this dir; the next tick retries
+        // skip this dir - the next tick retries
       }
     }
   }

@@ -25,7 +25,7 @@ import {
  *
  * Per-target dispatcher registration lets the engine handle dispatch
  * orchestration uniformly while each tier owns its run-turn semantics
- * (Codex spawns app-server; OpenCode posts HTTP/SSE; future targets
+ * (Codex spawns app-server - OpenCode posts HTTP/SSE - future targets
  * implement whatever fits their backend).
  *
  * Graceful shutdown:
@@ -106,7 +106,7 @@ export class OutboundWatcher implements vscode.Disposable {
     }
     this.watchers.clear();
 
-    // Shutdown registered dispatchers in parallel; cap at a few
+    // Shutdown registered dispatchers in parallel - cap at a few
     // seconds so a hung backend can't block VS Code's exit.
     await Promise.race([
       Promise.all(
@@ -170,14 +170,14 @@ export class OutboundWatcher implements vscode.Disposable {
         });
         this.watchers.set(dir, w);
       } catch {
-        // skip; retry next refresh
+        // skip - retry next refresh
       }
     }
   }
 
   /** Scan every registered target's outbound dir for new envelopes
    * and dispatch them. Called by the watcher's debounce timer and on
-   * startup; idempotent because in-flight envelope ids are tracked. */
+   * startup - idempotent because in-flight envelope ids are tracked. */
   private async pollOnce(): Promise<void> {
     if (this.shuttingDown) return;
     const workspacePath = this.activeWorkspace();

@@ -19,7 +19,7 @@ import { allInboundDirs, inboundDir, sentDir } from "./inboxPaths";
  * the mail icon for replies that the active wat321_ask is about to
  * claim. 1 second is well past the sync poll's tick cadence and
  * keeps the user-visible mail-pulse delay imperceptible (any longer
- * is noticeable after Codex finishes its stage walk; any shorter
+ * is noticeable after Codex finishes its stage walk - any shorter
  * narrows the safety margin against a slow sync poll). */
 
 export const LATE_REPLY_THRESHOLD_MS = 1_000;
@@ -107,7 +107,7 @@ export function newestLateReplyAgeMs(workspacePath: string | null): number | nul
 }
 
 /** Fully parsed late-reply list for the picker UI. Parses envelopes
- * via the unified parser; entries that fail to parse are skipped
+ * via the unified parser - entries that fail to parse are skipped
  * with no error surfaced (best-effort - corrupt files shouldn't
  * break the picker). */
 export function listLateReplies(workspacePath: string | null): DrainedReply[] {
@@ -145,7 +145,7 @@ export function listLateReplies(workspacePath: string | null): DrainedReply[] {
 
 /** Drain pending replies (move to sent/, return bodies). Used by the
  * MCP `wat321_bridge()` consumer. Pass `replyId` to drain a single
- * envelope by id-prefix match; omit to drain everything pending.
+ * envelope by id-prefix match - omit to drain everything pending.
  *
  * Returns the drained reply list AFTER moving the files. Move failure
  * is non-fatal - the reply text is still surfaced even if the rename
