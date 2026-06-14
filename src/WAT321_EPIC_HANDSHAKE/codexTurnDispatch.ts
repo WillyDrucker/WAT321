@@ -124,7 +124,7 @@ export async function dispatchTurn(
   let threadId = record.threadId;
   if (threadId === null) {
     // Pre-spawn config validation. `thread/start` accepts any slug
-    // silently; Codex only validates when `turn/start` calls the
+    // silently - Codex only validates when `turn/start` calls the
     // upstream API. Without this check, a config.toml with a bogus
     // model births a zombie thread that fails every turn with a
     // cryptic API error. Catch it here before any side effect lands.
@@ -145,7 +145,7 @@ export async function dispatchTurn(
     record = spawned.record;
   } else {
     // Pre-flight model validation. Every `thread/resume` ships the
-    // rollout's stored `session_meta.model` to the API; if that slug
+    // rollout's stored `session_meta.model` to the API - if that slug
     // is no longer in the user's `~/.codex/models_cache.json` the
     // next turn 404s. Validation is lossy in the cache-unreadable
     // case (returns true) so a missing cache never gates a legit
@@ -284,7 +284,7 @@ async function runTurnWithCompactRetry(
 ): Promise<string> {
   const { workspacePath, wsHash, logger } = deps;
   // Wait mode resolution: prefer the envelope's `wait_mode` field
-  // (per-call args from the MCP caller); fall back to the sticky
+  // (per-call args from the MCP caller) - fall back to the sticky
   // flag for back-compat with older MCP servers. Wait mode is locked
   // during in-flight turns (menu guard) so the snapshot holds for
   // the full turn even if the user flips the toggle.

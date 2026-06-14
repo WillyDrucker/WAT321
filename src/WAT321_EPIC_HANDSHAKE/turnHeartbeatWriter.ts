@@ -7,7 +7,7 @@ import type { WaitMode } from "./waitMode";
 /**
  * Per-turn heartbeat writer. The bridge status bar widget polls the
  * heartbeat file every second to drive its stage glyph, latch, and
- * tooltip; `runTurnOnce` writes through this factory so the file
+ * tooltip - `runTurnOnce` writes through this factory so the file
  * format and atomic write semantics live in one place.
  *
  * Atomic tmp+rename is load-bearing - the status-bar reader runs
@@ -32,7 +32,7 @@ export interface HeartbeatWriterOptions {
 
 export interface HeartbeatWriter {
   /** Write a heartbeat at the given stage. Stage entry is stamped on
-   * first observation; subsequent calls at the same stage refresh
+   * first observation - subsequent calls at the same stage refresh
    * `lastProgressAt` without bumping the stamp. */
   write(stage: string, info?: HeartbeatStageInfo): void;
   /** Latest stage this writer has observed. The liveness heartbeat

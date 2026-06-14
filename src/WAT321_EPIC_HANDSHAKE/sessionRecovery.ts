@@ -41,7 +41,7 @@ export interface RecoverableSession {
  * of the first file whose name contains the given threadId. Used by
  * the TurnMonitor to stat + tail the bridge-specific rollout (not
  * just "newest by mtime for this workspace" which may be a user TUI
- * session). Returns null if not found. Best-effort walk; filesystem
+ * session). Returns null if not found. Best-effort walk - filesystem
  * errors are silently swallowed. */
 export function findRolloutPath(threadId: string): string | null {
   const root = join(homedir(), ".codex", "sessions");
@@ -73,11 +73,11 @@ export function findRolloutPath(threadId: string): string | null {
  * including it in a recoverable or bulk-delete set. Basename match on
  * the thread name is not enough on its own - two workspaces named `foo`
  * in different parent paths would collide. Returns null on any parse
- * failure; callers treat that as "do not claim ownership". */
+ * failure - callers treat that as "do not claim ownership". */
 function readRolloutCwd(rolloutPath: string): string | null {
   // `readFirstLine` reads in chunks until a newline, so an oversized
   // session_meta first line (routinely 15-25KB on recent Codex CLI
-  // rollouts; can grow further as Codex adds metadata) is always
+  // rollouts - can grow further as Codex adds metadata) is always
   // captured intact. Previous `readHead` at 8KB default truncated
   // mid-object for any rollout whose session_meta exceeded the cap,
   // silently rejecting every affected session from bridge discovery.
@@ -97,7 +97,7 @@ function readRolloutCwd(rolloutPath: string): string | null {
 }
 
 /** Read `session_meta.payload.model` from the rollout header. Locked
- * at session creation; every `thread/resume` ships this value to the
+ * at session creation - every `thread/resume` ships this value to the
  * API. A slug that's no longer in the user's Codex `models_cache.json`
  * (because the CLI upgraded and renamed or retired that model) 404s
  * on the next resume. The dispatcher uses this to gate broken sessions
@@ -119,7 +119,7 @@ export function readRolloutModelSlug(rolloutPath: string): string | null {
 }
 
 /** Rewrite `session_meta.payload.model` on a bridge-owned rollout to a
- * valid slug. Only the first line gets modified; every subsequent
+ * valid slug. Only the first line gets modified - every subsequent
  * turn event passes through byte-for-byte. Writes to a tmp file and
  * atomic-renames so a partial write cannot leave the rollout truncated.
  *
@@ -182,7 +182,7 @@ function pathsMatch(a: string, b: string): boolean {
 
 /** List every Codex session in the local index whose thread_name
  * matches our bridge pattern for this workspace. Sorted by counter
- * descending (newest first). Read-only scan; we never mutate Codex
+ * descending (newest first). Read-only scan - we never mutate Codex
  * state here. Used by the Recover action to let the user reattach
  * the bridge to a previously-abandoned session. */
 export function listRecoverableSessions(workspacePath: string): RecoverableSession[] {
@@ -211,7 +211,7 @@ export function listRecoverableSessions(workspacePath: string): RecoverableSessi
         // deleted - the entry stays but the rollout file is gone.
         // Filter out entries whose rollout no longer exists so the
         // Recover dropdown only offers live sessions. We never edit
-        // Codex's index; stale entries just don't surface in our UI.
+        // Codex's index - stale entries just don't surface in our UI.
         const rolloutPath = findRolloutPath(entry.id);
         if (rolloutPath === null) continue;
         // Basename-scoped thread-name match is ambiguous when two

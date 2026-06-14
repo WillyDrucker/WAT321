@@ -70,7 +70,7 @@ export interface TurnMonitorOptions {
   /** Disable stall detection, hard-cap, and phase-0 "never activated"
    * checks entirely. For Fire-and-Forget, where the user explicitly
    * opted out of waiting - letting Codex run as long as it needs is
-   * the whole point. The reply lands when it lands; if Codex truly
+   * the whole point. The reply lands when it lands - if Codex truly
    * hangs the user can cancel from the widget or reset the session.
    * Default false. */
   disableAllTimeouts?: boolean;

@@ -14,7 +14,7 @@ import { workspaceHash } from "../shared/workspaceHash";
  * current Codex `thread_id`, a session counter (increments on reset),
  * and a friendly display name derived from the workspace folder.
  *
- * Reset command nulls `thread_id` and bumps `sessionCounter`; next
+ * Reset command nulls `thread_id` and bumps `sessionCounter` - next
  * prompt spawns a fresh thread with the incremented S<N> in the name.
  *
  * Atomic tmp+rename on every write - a crash mid-write cannot corrupt
@@ -26,7 +26,7 @@ export interface BridgeThreadRecord {
    * reset. When null, next prompt creates a fresh thread. */
   threadId: string | null;
   /** 1-indexed counter appended to thread name as `S<N>`. Incremented
-   * on every reset; helps users see which session is current in the
+   * on every reset - helps users see which session is current in the
    * Codex TUI picker and avoids name collisions on rapid resets. */
   sessionCounter: number;
   /** Absolute workspace path this record belongs to. Redundant with
@@ -117,7 +117,7 @@ export function loadBridgeThreadRecord(workspacePath: string): BridgeThreadRecor
 }
 
 /** Atomic write via tmp + rename. Returns silently on rename failure
- * (e.g. EBUSY); caller can re-call to retry. Persists per-workspace
+ * (e.g. EBUSY) - caller can re-call to retry. Persists per-workspace
  * bridge thread state to `~/.wat321/epic-handshake/bridge-thread.<wsHash>.json`. */
 export function saveBridgeThreadRecord(record: BridgeThreadRecord): void {
   const path = recordPath(record.workspacePath);

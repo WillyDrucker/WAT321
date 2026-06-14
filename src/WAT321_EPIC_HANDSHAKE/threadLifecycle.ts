@@ -19,7 +19,7 @@ import type { EpicHandshakeLogger } from "./types";
  *   - `noteSuccess` / `noteFailure` track the consecutive-failure
  *     counter that drives threshold-based rotation.
  *
- * No `this`; takes everything explicitly so it can be called from
+ * No `this` - takes everything explicitly so it can be called from
  * the dispatcher class without inheritance entanglement.
  */
 

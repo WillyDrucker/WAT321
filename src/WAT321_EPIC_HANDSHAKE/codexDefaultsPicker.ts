@@ -49,7 +49,7 @@ import { isPaused, setPaused } from "./statusBarState";
  * No persistent settings: overrides live only in flag files under
  * `~/.wat321/epic-handshake/`. Reset WAT321 wipes them, so "default"
  * is the safe fallback after a reset. The codex config.toml supplies
- * the model baseline; a user who only wants to follow their codex
+ * the model baseline - a user who only wants to follow their codex
  * config never has to touch this picker - the absence of an override
  * means codex uses its own config.
  *
@@ -63,7 +63,7 @@ type DefaultsRow = vscode.QuickPickItem & {
 
 /** Headline for the "CODEX MODEL SETTINGS" row in the sessions
  * submenu. Capitalized "Default" suffix when every override matches
- * the baseline; otherwise just "CODEX MODEL SETTINGS" so users can
+ * the baseline - otherwise just "CODEX MODEL SETTINGS" so users can
  * tell at a glance whether anything is overridden. */
 export function codexDefaultsHeadline(): string {
   return everythingAtDefault()
@@ -114,7 +114,7 @@ export async function showCodexDefaultsPicker(
     // Sandbox lives at the top level rather than nested inside
     // Effort because read-only vs full-access is the highest-
     // frequency adjustment for many users (per-session safety
-    // toggle); burying it one menu deep adds friction.
+    // toggle) - burying it one menu deep adds friction.
     const sandboxLabel = sandbox === "full-access" ? "FULL-ACCESS" : "READ-ONLY";
     const sandboxNext = sandbox === "full-access" ? "READ-ONLY" : "FULL-ACCESS";
     // *default* tag means "pristine slot" - the user hasn't picked

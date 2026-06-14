@@ -15,7 +15,7 @@ import { currentWorkspacePath, isPaused } from "./statusBarState";
 /**
  * Late-reply inbox sub-pickers. Replies arriving after a Fire-and-Forget
  * timeout (or any other path that bypassed the synchronous `reply` MCP
- * call) accumulate in `inbox/claude/<wsHash>/`; this module renders them
+ * call) accumulate in `inbox/claude/<wsHash>/` - this module renders them
  * and lets the user copy or bulk-discard.
  *
  * Each picker takes a `dispatch` callback so Pause/Resume/Cancel/Back
@@ -120,7 +120,7 @@ export async function showLateRepliesPicker(
         inFlight,
       });
       // Pause/Resume/Cancel: user's done with retrieval for now.
-      // Discard: handler already cleared; exit.
+      // Discard: handler already cleared - exit.
       return;
     }
 

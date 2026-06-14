@@ -10,7 +10,7 @@ import { BIN_DIR, EPIC_HANDSHAKE_DIR } from "./constants";
  * clipboard images for bridge prompts. Runs on every Epic Handshake
  * activate so the helper stays fresh after vsix upgrades.
  *
- * MCP server registration is owned by `WAT321_MCP_SERVER/installer.ts`;
+ * MCP server registration is owned by `WAT321_MCP_SERVER/installer.ts` -
  * this file is for the clipboard helper only.
  */
 

@@ -27,7 +27,7 @@ import {
 
 /**
  * Main QuickPick entry point for the Epic Handshake widget. The
- * status bar item registers a command that calls `showMainMenu`;
+ * status bar item registers a command that calls `showMainMenu` -
  * action handling lives in `statusBarMenuActions.ts` and is wired
  * here via `createMenuDispatch`. Sub-pickers (menuPickers.ts,
  * lateReplyPickers.ts, codexDefaultsPicker.ts) receive the same
@@ -107,7 +107,7 @@ const STAGE_LABELS: Record<Stage, string> = {
 
 /** Stuck-on-flush thresholds for the writing-stage warning copy. The
  * bridge auto-abort fires at 10 minutes of no heartbeat updates
- * (issue #61); the lower bars below surface a hint in the menu well
+ * (issue #61) - the lower bars below surface a hint in the menu well
  * before that so the operator can cancel + retry instead of waiting
  * out the full window. Read-only - only changes what string the
  * cancel-adjacent status row shows. */
@@ -195,7 +195,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // Wait mode locks while a turn is in flight. Switching mid-turn
   // would let the in-flight envelope's dispatcher flags go out of
   // sync with the newly-selected mode. The row stays visible showing
-  // the current mode but cannot flip; the action-handler guard
+  // the current mode but cannot flip - the action-handler guard
   // enforces the lock even if the click lands between build and
   // handle.
   const waitModeItem: Item | null = paused
@@ -279,7 +279,7 @@ export async function showMainMenu(opts: { inFlight: boolean }): Promise<void> {
   // Backup safety net for the rare case where Codex's app-server has
   // cached stale config or otherwise needs a hard reset. Bundles
   // cancel + clear + force-kill so the user has one click instead of
-  // three. Resumes the active S<n> bridge thread on the next prompt;
+  // three. Resumes the active S<n> bridge thread on the next prompt -
   // does NOT touch the Codex VS Code extension itself (that would
   // require a full window reload). Always visible because the value
   // is exactly that it works when nothing else does.

@@ -25,7 +25,7 @@
  * strictly so TypeScript enforces correctness on the wire shape.
  * Results are typed as `unknown` - callers do their own runtime shape
  * check. This insulates us from minor server-side schema changes: if
- * Codex adds a field, our code keeps working; if a field we rely on
+ * Codex adds a field, our code keeps working - if a field we rely on
  * goes missing, the runtime check fails loud at exactly the call site
  * that cares.
  */
@@ -52,7 +52,7 @@ export interface JsonRpcSuccessResponse<TResult = unknown> {
 }
 
 /** A JSON-RPC 2.0 error response. The `data` field is protocol-
- * specific; we treat it as unknown and let callers inspect. */
+ * specific - we treat it as unknown and let callers inspect. */
 export interface JsonRpcErrorResponse {
   jsonrpc: "2.0";
   id: number;
@@ -103,7 +103,7 @@ export type CodexApprovalPolicy =
  * Per-turn `model`, `effort`, and `sandboxPolicy` overrides are
  * applied on every `turn/start` (see `TurnStartParams`). The Codex
  * Session Settings menu picker writes runtime override flag files
- * that turnRunner reads on every dispatch; the flags persist across
+ * that turnRunner reads on every dispatch - the flags persist across
  * activations and clear on Reset WAT321.
  * `sessionStartSource` is echoed into the rollout metadata and
  * helps distinguish bridge-spawned sessions from user-spawned ones
@@ -146,7 +146,7 @@ export type TurnSandboxPolicy =
  * `codex-effort.flag`) on every turn. Toggling any of them in the
  * Codex Defaults picker takes effect on the next prompt - per-turn
  * pass-through, no thread reset. `model` and `effort` accept null
- * when no override is set; Codex falls back to the thread / config
+ * when no override is set - Codex falls back to the thread / config
  * default in that case. Verified empirically that Codex enforces
  * per-turn values (turn_context records them and the tool router
  * blocks out-of-policy operations). */
@@ -167,11 +167,11 @@ export interface TurnStartParams {
 }
 
 /** Supported input item types in a `turn/start`. Bridge only sends
- * text; images and file attachments are deferred. */
+ * text - images and file attachments are deferred. */
 export type TurnInputItem = { type: "text"; text: string };
 
 /** `turn/interrupt` params. Cancels an in-flight turn on a thread.
- * `turnId` is optional; the app-server accepts a thread-level cancel
+ * `turnId` is optional - the app-server accepts a thread-level cancel
  * and resolves it against the currently active turn, which is what
  * Bridge wants since there is always at most one turn per thread. */
 export interface TurnInterruptParams {

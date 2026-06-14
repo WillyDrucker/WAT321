@@ -8,7 +8,7 @@ import { readTail } from "../shared/fs/fileReaders";
  * a single short grace window: a long reply that was mid-stream when
  * the interrupt fired can take seconds to commit its final
  * `task_complete` + `agent_message` to the rollout. A polling loop
- * catches that late commit; a single `setTimeout` would miss it and
+ * catches that late commit - a single `setTimeout` would miss it and
  * produce a synthetic "max turn duration" error reply when Codex
  * actually had a real reply one second later.
  *
@@ -47,7 +47,7 @@ export const ROLLOUT_RECOVERY_FAST_WINDOW_MS = 5_000;
  * in the background so a long task, mid-turn compact, or slow flush
  * still lands the reply in the inbox via the normal completion path.
  * The MCP tool's caller-side timeout has already returned to the AI
- * by the time this engages - no AI wait is extended; only the
+ * by the time this engages - no AI wait is extended - only the
  * extension-side watcher persists. 30 min covers the realistic upper
  * bound of a single Codex turn before declaring it truly stuck. */
 export const LATE_DELIVERY_WINDOW_MS = 30 * 60_000;
@@ -64,7 +64,7 @@ export const LATE_DELIVERY_POLL_MS = 5_000;
 
 /** Single-shot rollout-recovery attempt. Returns the final assistant
  * text when the current-turn slice has both `stage=complete` and a
- * non-empty assistant message; returns null otherwise. The poller
+ * non-empty assistant message - returns null otherwise. The poller
  * below calls this on each tick. */
 export function tryRolloutRecovery(rolloutPath: string | null): string | null {
   if (!rolloutPath) return null;

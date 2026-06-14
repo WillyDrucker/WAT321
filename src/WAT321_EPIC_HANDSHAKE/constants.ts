@@ -66,7 +66,7 @@ export function waitModeFlashFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `wait-mode-flash.${wsHash}.flag`);
 }
 /** Per-workspace consume-on-read sentinel. Written by the dispatcher
- * on successful turn completion; the toast notifier consumes-and-
+ * on successful turn completion - the toast notifier consumes-and-
  * deletes it when Codex's transcript-driven `responseComplete` fires
  * within the freshness window. Decouples bridge-completion suppression
  * from the 5s `returning` flag latch so a slow Codex transcript write
@@ -126,7 +126,7 @@ export function codexEffortFlagPath(wsHash: string): string {
 }
 
 /** Pre-partition root-level sentinels. Retired by the activate-time
- * sweep; runtime code only reads `<name>.<wsHash>.flag` paths. */
+ * sweep - runtime code only reads `<name>.<wsHash>.flag` paths. */
 export const LEGACY_FLAG_PATHS: readonly string[] = [
   join(EPIC_HANDSHAKE_DIR, "in-flight.flag"),
   join(EPIC_HANDSHAKE_DIR, "processing.flag"),

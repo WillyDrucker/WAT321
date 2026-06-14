@@ -70,7 +70,7 @@ export function readWaitStatus(wsHash: string | null): WaitStatus | null {
   // process. Sync mode uses 2x its declared timeout (typical 120s
   // declared -> 4 min stale cutoff). Adaptive declares the hard
   // ceiling (10-30 min) so 2x that would leave a stuck tooltip for
-  // up to an hour; cap adaptive cleanup at a flat 15 min instead,
+  // up to an hour - cap adaptive cleanup at a flat 15 min instead,
   // which is generous for the adaptive stall threshold (2 min) and
   // covers any legitimate long turn without trailing past a real
   // crash.

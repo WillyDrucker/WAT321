@@ -16,7 +16,7 @@ import { isPaused, setPaused } from "./statusBarState";
 /**
  * Sub-pickers spawned from the Codex Model Settings parent picker:
  *   - `pickModel`: any visibility=list slug from the local
- *     models_cache.json. Active row gets a ✔️ prefix; rows matching
+ *     models_cache.json. Active row gets a ✔️ prefix - rows matching
  *     the codex config.toml baseline get a trailing `*default*` tag.
  *   - `pickEffort`: model-specific supported effort list (falls back
  *     to the standard low/medium/high/xhigh quartet when the model
@@ -65,7 +65,7 @@ export async function pickModel(
       const isDefault = m.slug === baseline;
       const isCurrent =
         m.slug === current || (current === null && m.slug === baseline);
-      // Active row gets a leading green check after the iconPath;
+      // Active row gets a leading green check after the iconPath -
       // *default* still tags the trailing slot so the user can see
       // at a glance whether the active pick matches the baseline.
       const checkPrefix = isCurrent ? "✔️ " : "";

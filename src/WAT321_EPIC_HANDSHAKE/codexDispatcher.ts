@@ -31,16 +31,16 @@ import type { EpicHandshakeLogger } from "./types";
  * This file owns the orchestration shell: inbox watching, per-envelope
  * claim arbitration, app-server lifecycle (spawn / initialize / idle
  * shutdown / force-restart), and reply envelope writing. The per-turn
- * thread / dispatch / recover flow lives in `codexTurnDispatch.ts`;
+ * thread / dispatch / recover flow lives in `codexTurnDispatch.ts` -
  * the actual turn run loop lives in `turnRunner.ts`.
  */
 
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 /** Per-envelope claim TTL. Two VS Code windows on the same workspace
- * each watch the same `inbox/codex/<wsHash>/` directory; without a
+ * each watch the same `inbox/codex/<wsHash>/` directory - without a
  * claim, both would dispatch the same envelope and write duplicate
  * replies. TTL exceeds the monitor's hard cap so a healthy long-
- * running turn never reclaims; a crashed dispatcher's claim ages out
+ * running turn never reclaims - a crashed dispatcher's claim ages out
  * and the surviving window picks up the orphan on its next scan. */
 const ENVELOPE_CLAIM_TTL_MS = 30 * 60 * 1000;
 
@@ -171,7 +171,7 @@ export class CodexDispatcher {
 
   /** Idle-timer callback. The app-server child must never be idle-
    * killed during an active turn (#81). Reset is called at turn
-   * start and on every successful turn end; this guard handles the
+   * start and on every successful turn end - this guard handles the
    * regression case where the timer arms during a turn. When the
    * timer fires with `this.processing` still true, re-schedule THIS
    * check (not a full new idle window) for 60s so the next firing
@@ -207,7 +207,7 @@ export class CodexDispatcher {
         const envelopePath = join(this.inboxCodex, f);
         const claimPath = `${envelopePath}.claim`;
         // Cross-window arbitration: same-workspace siblings race on
-        // the same inbox dir. Claim before reading; loser skips. TTL
+        // the same inbox dir. Claim before reading - loser skips. TTL
         // reclaims stale claims so a crashed dispatcher cannot
         // deadlock the envelope forever.
         if (!tryAcquireClaim(claimPath, ENVELOPE_CLAIM_TTL_MS)) continue;
@@ -254,7 +254,7 @@ export class CodexDispatcher {
       );
       this.writeReply(env, { body: reply, intent: "assessment" });
       // Belt-and-suspenders sentinel write. dispatchTurn also writes
-      // this on its success and recovery paths; the read side is
+      // this on its success and recovery paths - the read side is
       // consume-on-read so a double-write is harmless.
       writeSuppressCodexToast(this.workspacePath);
       moveToSent(path, this.sentCodex);
@@ -267,7 +267,7 @@ export class CodexDispatcher {
       // verdicts arrive AFTER Codex's underlying work has landed on
       // disk (the failure is in the reply-marshal step, not the work
       // itself). Tersely refusing here strands Claude with no path
-      // forward; we surface the on-disk + inbox check hints and gate
+      // forward - we surface the on-disk + inbox check hints and gate
       // re-issue on "nothing landed".
       this.writeReply(env, {
         body:

@@ -4,7 +4,7 @@ import { resolveOpenCodeCli } from "../shared/providers/opencode/cliResolver";
 
 /**
  * CLI presence probes for the Epic Handshake enable-flow gate. EH
- * needs Claude plus at least one of (Codex, OpenCode); we resolve
+ * needs Claude plus at least one of (Codex, OpenCode) - we resolve
  * each binary via the shared resolver (PATH plus bundled-extension
  * fallback) and refuse activation when nothing is reachable.
  */

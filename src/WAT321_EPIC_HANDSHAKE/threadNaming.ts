@@ -80,7 +80,7 @@ export function collectExistingSessionCounters(
  *
  * `currentCounter` is kept on the call signature for back-compat but
  * ignored - the canonical source is now Codex's session_index. The
- * stored counter on `bridge-thread.<wsHash>.json` is a hint only;
+ * stored counter on `bridge-thread.<wsHash>.json` is a hint only -
  * this function trusts what's actually present in the TUI. */
 export function nextCollisionFreeCounter(
   workspacePath: string,

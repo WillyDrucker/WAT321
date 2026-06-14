@@ -10,7 +10,7 @@ import {
 import { workspaceHash } from "../shared/workspaceHash";
 
 /** Drop the cancel sentinel for this workspace. The status-bar
- * menu's Cancel action calls this; `runTurnOnce` polls the sentinel
+ * menu's Cancel action calls this - `runTurnOnce` polls the sentinel
  * every 500ms inside the active turn promise and interrupts Codex
  * on detect. Workspace-scoped so a sibling VS Code instance's turn
  * is never cancelled by a click in this window. */
@@ -34,16 +34,16 @@ const SUPPRESS_CODEX_TOAST_FRESHNESS_MS = 30_000;
  *   in-flight.<wshash>.flag   - present from turn dispatch start
  *                               until clear
  *   processing.<wshash>.flag  - present once Codex emits its first
- *                               streaming delta; cleared on turn
+ *                               streaming delta - cleared on turn
  *                               completion/failure
- *   returning.<wshash>.flag   - written on success; auto-cleared
+ *   returning.<wshash>.flag   - written on success - auto-cleared
  *                               5000ms later
  *
  * All flags are per-workspace so a turn in workspace A never makes
  * workspace B's status bar render "busy" on the same machine.
  *
  * All flags are best-effort. A missed write only costs a missed
- * animation frame; never block the turn on flag I/O.
+ * animation frame - never block the turn on flag I/O.
  */
 
 export function writeInFlightFlag(workspacePath: string): void {

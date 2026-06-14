@@ -31,7 +31,7 @@ import { isPaused, setPaused } from "./statusBarState";
  * Manage Sessions submenu (EH widget) for opencode-serve-backed
  * targets: "opencode" (cloud / Big Pickle) and "local" (local LLM).
  *
- * Both targets share opencode serve's session machinery; the only
+ * Both targets share opencode serve's session machinery - the only
  * differences are the alias-map namespace and the instance kind
  * filter. A single parameterized picker handles both. Codex's
  * picker stays separate because Codex sessions live in Codex's own
@@ -41,8 +41,8 @@ import { isPaused, setPaused } from "./statusBarState";
  *   - BACK
  *   - <TOOL> MODEL: <name>           (one click switches catalog instance)
  *   - CURRENT <TOOL> SESSION         (click opens switch sub-picker)
- *   - RESET <TOOL> SESSION           (toast confirm; clears active alias)
- *   - DELETE <TOOL> SESSION (S#)     (toast confirm; only when active)
+ *   - RESET <TOOL> SESSION           (toast confirm - clears active alias)
+ *   - DELETE <TOOL> SESSION (S#)     (toast confirm - only when active)
  *   - DELETE ALL <TOOL> SESSIONS (#) (toast confirm)
  *   - PAUSE/RESUME, CANCEL
  *
@@ -253,7 +253,7 @@ export async function showLocalLLMSessionsPicker(): Promise<"back" | undefined> 
 
 /** Register the cross-tier commands so the OpenCode Routes widget
  * click can route here without violating the tier-import rule
- * (OpenCode Routes cannot import from EH directly; command dispatch
+ * (OpenCode Routes cannot import from EH directly - command dispatch
  * is the engine-blessed crossing). */
 export function registerSessionPickerCommands(
   context: vscode.ExtensionContext

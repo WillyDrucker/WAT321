@@ -13,7 +13,7 @@ import type { EpicHandshakeLogger } from "./types";
  *
  *  - liveness   - re-emit the heartbeat at the current stage while
  *                 Codex is alive but quiet (long tool calls can run
- *                 minutes between RPC events); reject when an FF
+ *                 minutes between RPC events) - reject when an FF
  *                 turn observes the app-server child die.
  *  - silent     - rollout shows the turn complete with fresh text
  *    completion   before the `turn/completed` notification arrives.

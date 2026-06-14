@@ -36,7 +36,7 @@ const CLIPBOARD_STAGING_DIR = join(
 const STAGING_TTL_MS = 5 * 60 * 1000;
 
 /** Purge clipboard-staged images older than the TTL. Called once at
- * tier activate. Best-effort; individual unlink failures are ignored. */
+ * tier activate. Best-effort - individual unlink failures are ignored. */
 export function sweepStaleClipboardStages(logger: EpicHandshakeLogger): void {
   if (!existsSync(CLIPBOARD_STAGING_DIR)) return;
   const cutoff = Date.now() - STAGING_TTL_MS;
@@ -143,7 +143,7 @@ end run
       return;
     }
     if (process.platform === "linux") {
-      // xclip is the common path; wayland users may need wl-paste.
+      // xclip is the common path - wayland users may need wl-paste.
       // We only wire xclip here - wl-paste can be a follow-up.
       const xc = spawn("sh", [
         "-c",

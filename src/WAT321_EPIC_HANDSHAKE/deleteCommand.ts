@@ -32,7 +32,7 @@ import { workspaceHash } from "../shared/workspaceHash";
  * We reach into Codex's own state files here - philosophically we
  * avoid this in shipping code, but the explicit confirmation dialog
  * is the user's informed opt-in. The non-destructive alternative is
- * the soft Reset command. Step mechanics live in `deleteCommandSteps`;
+ * the soft Reset command. Step mechanics live in `deleteCommandSteps` -
  * the empty-result diagnostic lives in `deleteCommandDiagnostic`.
  */
 
@@ -144,7 +144,7 @@ export async function deleteAllCodexSessions(
       );
       return;
     }
-    // Per-entry breakdown goes to the output channel; toast stays short
+    // Per-entry breakdown goes to the output channel - toast stays short
     // and points the user there.
     logger.info("[delete-all] (0) diagnostic:");
     for (const row of diag.rows) logger.info(`  ${row}`);

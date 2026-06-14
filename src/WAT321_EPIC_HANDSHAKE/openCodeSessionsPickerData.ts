@@ -13,7 +13,7 @@ import { isPaused, setPaused } from "./statusBarState";
 /**
  * Data sources, row builders, and the switch sub-picker for the
  * OpenCode / Local-LLM "Manage Sessions" submenu. The main picker
- * shell lives in `openCodeSessionsPicker.ts`; this file owns
+ * shell lives in `openCodeSessionsPicker.ts` - this file owns
  * everything that does NOT directly drive the parent QuickPick
  * lifecycle.
  */
@@ -260,7 +260,7 @@ export function buildDeleteAllRow(ctx: RowBuilderContext): PickerRow {
 }
 
 /** Switch-session sub-picker. Returns the alias the user picked (or
- * null to indicate no change). `back` returns to the parent picker;
+ * null to indicate no change). `back` returns to the parent picker -
  * pause/resume/cancel signaled via the void return. The caller re-
  * opens the parent picker on its own. */
 export type SwitchOutcome =

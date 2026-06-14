@@ -39,7 +39,7 @@ import { stallWindowFor } from "./turnMonitorStallWindow";
  * or cap via `onStall` / `onHardCap`, and the caller sends
  * `turn/interrupt` + writes the error envelope. Successful turn
  * completion is the caller's responsibility (turn/completed RPC or
- * rollout task_complete); the monitor just stops when `stop()` is
+ * rollout task_complete) - the monitor just stops when `stop()` is
  * invoked.
  */
 
@@ -76,7 +76,7 @@ export class TurnMonitor {
     // for "reply lands when it lands", so stall detection, hard cap,
     // and phase-0 "never activated" checks all go silent. Rollout
     // polling still runs because the stage-progress heartbeat is how
-    // the status bar widget animates; only the failure-inducing
+    // the status bar widget animates - only the failure-inducing
     // timers are disabled.
     if (!this.options.disableAllTimeouts) {
       this.hardCapTimer = setTimeout(() => {
@@ -189,7 +189,7 @@ export class TurnMonitor {
     //      exists on disk. Pinning to the first resolved path would
     //      strand the monitor on a stale file that no longer receives
     //      new events.
-    // The resolver is a cheap readdirSync walk; calling it every 5s
+    // The resolver is a cheap readdirSync walk - calling it every 5s
     // is negligible and keeps the monitor honest.
     const fresh = this.options.resolveRolloutPath();
     if (fresh !== this.resolvedRolloutPath) {
@@ -289,7 +289,7 @@ export class TurnMonitor {
     }
     // Fire-and-Forget disables stall detection entirely.
     if (this.options.disableAllTimeouts) return;
-    // Phase 0 has its own (tighter) timer; do not double-arm the
+    // Phase 0 has its own (tighter) timer - do not double-arm the
     // stall timer until we have crossed into phase 1+.
     if (this.currentStage === "dispatched") return;
     const window = stallWindowFor(

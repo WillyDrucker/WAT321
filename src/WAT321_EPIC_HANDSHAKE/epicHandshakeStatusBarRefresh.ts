@@ -78,7 +78,7 @@ export interface RefreshContext {
 }
 
 /** Mail-pulse subscription handler. Invoked on every Claude
- * `session.responseComplete`; bumps the pulse counter up to a cap of
+ * `session.responseComplete` - bumps the pulse counter up to a cap of
  * 3 so the widget reminds the user of a pending bridge reply each
  * time they finish a Claude turn, then settles back to idle. */
 export function onClaudeResponseComplete(
@@ -220,7 +220,7 @@ export function refreshEpicHandshakeItem(
   } else if (processing) {
     // Pulse info icon on/off at 1Hz against the empty square to
     // keep the status bar cell width constant. Adaptive overrides
-    // with the numbered stage glyph; if no heartbeat landed yet,
+    // with the numbered stage glyph - if no heartbeat landed yet,
     // fall back to stage=dispatched so the widget stays on the
     // glyph track rather than switching frames.
     icon = adaptive
@@ -285,7 +285,7 @@ export function refreshEpicHandshakeItem(
       state.mailPulseStartedAt !== null &&
       now - state.mailPulseStartedAt < MAIL_PULSE_DURATION_MS;
     if (ageFromArrival > MAIL_VISIBLE_WINDOW_MS) {
-      // Mail visible window elapsed. Fall through to idle visually;
+      // Mail visible window elapsed. Fall through to idle visually -
       // envelope stays on disk for the dispatcher's 1-hour TTL or
       // until a prompt consumes it via collectLateReplies.
       icon = "$(wat321-epic-handshake)";

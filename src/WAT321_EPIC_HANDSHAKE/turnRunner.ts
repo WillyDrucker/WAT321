@@ -149,7 +149,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
     /** After the initial 30s rollout-recovery exhausts on a stall or
      * hard-cap, fall through to a longer background watch instead of
      * rejecting. Codex frequently lands a real reply after a perceived
-     * stall (long task, mid-turn compact, slow flush); the MCP tool's
+     * stall (long task, mid-turn compact, slow flush) - the MCP tool's
      * caller-side timeout has already returned to the AI so no caller
      * wait is extended - this just lets the eventual reply land in the
      * inbox via the normal completion path. Only after the long window
@@ -271,7 +271,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
         // producing output. Flip the status bar from "sending" to the
         // "processing" animation. Deliberately NOT forcing stage 4 -
         // Codex emits agent_message in two phases (commentary + final
-        // _answer) and the delta does not include phase; rely on the
+        // _answer) and the delta does not include phase - rely on the
         // rollout poller for stage 4 detection.
         writeProcessingFlag(workspacePath);
         processingSignaled = true;
@@ -287,7 +287,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       // Arrival of turn/completed is itself proof the turn happened,
       // even if every prior notification was lost. The non-success
       // and empty-items recovery branches below gate on
-      // ourTurnObserved; set it here to unblock them.
+      // ourTurnObserved - set it here to unblock them.
       ourTurnObserved = true;
       monitor.forceStage("complete");
 
@@ -368,7 +368,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
 
     // Background watchers: liveness heartbeat, silent-completion
     // recovery, user-cancel sentinel. See `turnWatchers.ts` for the
-    // per-watcher rationale; the disposer here clears all three
+    // per-watcher rationale - the disposer here clears all three
     // intervals on cleanup.
     const disposeWatchers = attachTurnWatchers({
       envelopeId: env.id,
@@ -408,7 +408,7 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
     client
       .sendRequest("turn/start", turnStartParams)
       .then(() => {
-        // turn/start returned with the turn object; we still wait
+        // turn/start returned with the turn object - we still wait
         // for turn/completed notification (above)
       })
       .catch((err) => {

@@ -12,7 +12,7 @@ import type { EpicHandshakeLogger } from "./types";
  * JSON-RPC dispatch helper for `AppServerClient`. Owns the pending-
  * request map, the notification handler registry, and the frame
  * parser. The client owns the child process and the stdin write
- * side; this helper handles everything that arrives back over
+ * side - this helper handles everything that arrives back over
  * stdout, plus failure surfaces (timeout, transport error,
  * shutdown) that need to reject pending requests cleanly.
  *

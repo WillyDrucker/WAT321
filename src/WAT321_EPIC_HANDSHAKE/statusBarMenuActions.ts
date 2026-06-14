@@ -38,7 +38,7 @@ import {
  * circular import with `statusBarMenus.ts`.
  *
  * The locked-mid-turn toast appears verbatim for every action that
- * mutates dispatcher / thread state; sub-menu rows that render as
+ * mutates dispatcher / thread state - sub-menu rows that render as
  * locked already route through `in-flight-locked` for the same toast,
  * but the action-time guards here are race protection for the window
  * between menu build and click.
@@ -161,7 +161,7 @@ export function createMenuDispatch(deps: MenuDispatchDeps): DispatchAction {
         break;
       case "codex-defaults":
         // Sandbox + model + effort live as per-turn overrides written
-        // by the picker; switching while a turn is outstanding means
+        // by the picker - switching while a turn is outstanding means
         // the in-flight envelope used one set of values while the user
         // expected another.
         if (isBridgeBusy(ctx.ws)) {
@@ -179,12 +179,12 @@ export function createMenuDispatch(deps: MenuDispatchDeps): DispatchAction {
         break;
       case "wait-mode-toggle": {
         // Binary toggle between Adaptive and Fire-and-Forget. Standard
-        // is internal-only; if `currentWaitMode` returns "standard" the
+        // is internal-only - if `currentWaitMode` returns "standard" the
         // toggle resolves to FF and the next click grounds to Adaptive.
         // The 2500ms bolt-square flash on the status bar is the visual
-        // confirmation; flag is workspace-scoped so only THIS window
+        // confirmation - flag is workspace-scoped so only THIS window
         // flashes. Race guard: a bridge turn may have started between
-        // menu build and click; re-check here and route to the locked
+        // menu build and click - re-check here and route to the locked
         // toast instead of switching mid-flight.
         if (isBridgeBusy(ctx.ws)) {
           void vscode.window.showInformationMessage(
@@ -207,7 +207,7 @@ export function createMenuDispatch(deps: MenuDispatchDeps): DispatchAction {
       }
       case "in-flight-locked":
         // Unified toast for any locked-mid-turn row. The label already
-        // says "Disabled - Message In-Flight"; this toast explains why
+        // says "Disabled - Message In-Flight" - this toast explains why
         // and reminds the user that cancel / restart-bridge remain
         // available if the turn is truly stuck.
         showLockedToast();

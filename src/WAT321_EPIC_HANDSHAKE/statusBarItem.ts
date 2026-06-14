@@ -22,7 +22,7 @@ import { showMainMenu } from "./statusBarMenus";
  *
  * This file owns the VS Code item lifecycle (creation, command
  * registration, event subscription wiring, dispose). Render logic
- * lives in `epicHandshakeStatusBarRefresh.ts`; data sources live in
+ * lives in `epicHandshakeStatusBarRefresh.ts` - data sources live in
  * `epicHandshakeStatusBarSources.ts`. Wait mode setters are re-
  * exported here so callers outside this folder retain a single
  * import path.
@@ -82,7 +82,7 @@ export function createEpicHandshakeStatusBarItem(
   // grabs attention with an initial 5-second pulse. Each subsequent
   // completed Claude turn triggers another pulse, up to 3 total.
   // Rationale: the user keeps typing to Claude about unrelated
-  // things; pulsing on each turn reminds them a Codex reply is
+  // things - pulsing on each turn reminds them a Codex reply is
   // sitting in the bridge inbox. After 3 pulses OR 5 minutes from
   // arrival (whichever first), the widget returns to idle visually.
   // The envelope file stays until the dispatcher's 1-hour TTL sweep
