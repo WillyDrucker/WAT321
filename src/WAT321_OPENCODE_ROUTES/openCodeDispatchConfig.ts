@@ -23,7 +23,7 @@ import { CONFIG_PATH as OPENCODE_ROUTES_CONFIG_PATH } from "./constants";
  */
 
 /** Subset of the OpenCode Routes config the extension's `config.ts`
- * writes. Only the fields this dispatcher reads are typed; the rest
+ * writes. Only the fields this dispatcher reads are typed - the rest
  * of the file (API keys, data retention, etc.) is irrelevant here. */
 export interface OpenCodeRoutesConfigSlice {
   /** Live URL of the managed `opencode serve` subprocess. Empty when
@@ -81,8 +81,8 @@ export function readAliasMap(): AliasMap {
   }
 }
 
-/** Resolve a catalog instance. Explicit id wins; falling back to the
- * kind-filtered active instance; final fallback to any kind-matching
+/** Resolve a catalog instance. Explicit id wins - falling back to the
+ * kind-filtered active instance - final fallback to any kind-matching
  * entry. Mirrors the MCP-side `opencode/config.mjs:findInstance`
  * fallback chain so dispatchers behave identically across processes. */
 export function findInstance(
@@ -105,7 +105,7 @@ export function findInstance(
 }
 
 /** Resolve the session alias the dispatcher should target. Explicit
- * `sessionAlias` on the envelope wins; otherwise read the active
+ * `sessionAlias` on the envelope wins - otherwise read the active
  * alias from disk. Returns null when no session is configured
  * (one-shot path). The envelope's `sessionAlias` is populated from
  * the caller's `session` arg on `wat321_ask` so a caller can target

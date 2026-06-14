@@ -27,14 +27,13 @@ import {
  *
  * 10-minute hard cap on every POST: long enough for cold local
  * models, short enough that a hung backend doesn't sit forever in
- * flight. Anything longer is a hang; the user gets a structured
+ * flight. Anything longer is a hang - the user gets a structured
  * timeout envelope they can act on rather than a silent indefinite
  * wait.
  */
 
 const ANON_BASE_URL = "https://opencode.ai/zen/v1";
 const DISPATCH_TIMEOUT_MS = 10 * 60_000;
-export const HTTP_DISPATCH_TIMEOUT_MS = DISPATCH_TIMEOUT_MS;
 
 export interface DispatchPathArgs {
   target: "opencode" | "local";
@@ -47,7 +46,7 @@ export interface DispatchPathArgs {
 /** Anonymous one-shot via opencode.ai/zen. Used when no session
  * alias is resolved - common path for "ask Big Pickle" without the
  * user having created a session. Model selection follows the
- * resolved instance's `model` field; falls back to `big-pickle`. */
+ * resolved instance's `model` field - falls back to `big-pickle`. */
 export async function runZenOneShot(
   args: DispatchPathArgs
 ): Promise<DispatchResult> {
@@ -98,7 +97,7 @@ export async function runZenOneShot(
       }>;
       model?: string;
     };
-    // Body parsed; assistant text in hand. Advance to `writing` (4).
+    // Body parsed - assistant text in hand. Advance to `writing` (4).
     setStage("writing");
     const choice = data?.choices?.[0]?.message;
     const text = choice?.content || choice?.reasoning_content || "";

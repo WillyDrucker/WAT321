@@ -5,7 +5,7 @@ import { bridgeStateDir } from "../shared/wat321Paths";
 /**
  * Background poller that reads OpenCode session token data for the
  * bridge's active aliases and exposes a synchronous snapshot. The
- * OpenCode Routes widget renders at 1Hz; this poller runs every 3s
+ * OpenCode Routes widget renders at 1Hz - this poller runs every 3s
  * to keep the displayed `tokens / window  pct%` figures fresh without
  * blocking the render loop on a network fetch.
  *
@@ -22,7 +22,7 @@ import { bridgeStateDir } from "../shared/wat321Paths";
  *
  * Lives in the OpenCode Routes tier because both the data source
  * (OpenCode harness) and the consumer (OpenCode Routes widget) belong
- * here. Engine never imports from this file; cross-tier consumers
+ * here. Engine never imports from this file - cross-tier consumers
  * subscribe via engine events rather than importing directly.
  */
 
@@ -36,7 +36,7 @@ const FETCH_TIMEOUT_MS = 2_000;
  * "Auto-Compact at ~X" matches OpenCode's actual trigger. */
 const COMPACTION_BUFFER = 20_000;
 /** Soft cap on how many recent messages the poller hydrates per
- * session. Long sessions can carry hundreds of messages; the latest
+ * session. Long sessions can carry hundreds of messages - the latest
  * assistant turn with output > 0 is always within the last few
  * positions, so a small page keeps the read cheap. */
 const MESSAGE_PAGE_LIMIT = 10;
@@ -58,7 +58,7 @@ export interface BridgeSessionTokens {
   /** Display name for the active model on this session. Local LLM:
    * llama-server's `model_alias`, stripped of `.gguf` and quantization
    * tag (`Qwen3-8B-Q5_K_M.gguf` -> `Qwen3-8B`). Falls back to null
-   * when the probe returns no usable name; the tooltip then omits the
+   * when the probe returns no usable name - the tooltip then omits the
    * specific model and uses the catalog alias instead. Remote
    * (Zen routes): null - the catalog alias (Big Pickle, GPT 5 Nano,
    * etc.) is the right display string for those, and the widget
@@ -149,14 +149,14 @@ function cleanLocalModelName(raw: string): string {
   let name = raw.replace(/\.gguf$/i, "");
   // Quantization tags follow a -Q[0-9] / -IQ[0-9] / -F[0-9] pattern at
   // the very end of the filename. Strip a single trailing tag if
-  // present; leave the model identifier intact otherwise.
+  // present - leave the model identifier intact otherwise.
   name = name.replace(/-(Q|IQ|F)\d+(_[A-Z0-9]+)*$/i, "");
   return name;
 }
 
 /** Probe llama-server's `/props` for the runtime context window AND
  * the loaded model alias. Local LLM's catalog `contextWindow` is just
- * a fallback; the loaded model decides the actual limit. Result is
+ * a fallback - the loaded model decides the actual limit. Result is
  * cached for 30s on the caller side - this just performs the raw
  * fetch. */
 async function probeLocalProps(endpoint: string): Promise<LocalProps> {
@@ -199,7 +199,7 @@ interface PollerInputs {
   /** Local LLM endpoint for the `/props` probe. */
   localEndpoint: () => string;
   /** Catalog context window per target. The OpenCode Routes widget reads from
-   * the merged config; this getter abstracts that lookup so the
+   * the merged config - this getter abstracts that lookup so the
    * poller does not need to import `config.ts`. */
   catalogContextWindow: (target: BridgeTarget) => number | null;
 }
@@ -292,13 +292,13 @@ export class BridgeSessionTokensPoller {
     }
     // Cache even when contextUsed is 0. Brand-new sessions (no prior
     // assistant turn) and mid-stream dispatches (assistant output still
-    // 0) are legitimate zero-states; bailing here stranded the widget
+    // 0) are legitimate zero-states - bailing here stranded the widget
     // in the liveTokens-only fallback for the entire first dispatch.
     // Caching with the resolved contextWindow lets the widget render
     // projected tokens + percent from the first heartbeat.
     const contextUsed = computeContextUsed(messages);
 
-    const { contextWindow, modelDisplayName } = await this.resolveLocalProps(target);
+    const { contextWindow, modelDisplayName } = await this.resolveTargetProps(target);
     const autoCompactTokens =
       contextWindow !== null
         ? Math.max(0, contextWindow - COMPACTION_BUFFER)
@@ -319,7 +319,7 @@ export class BridgeSessionTokensPoller {
    * catalog window when the probe fails. Remote (Zen) routes use the
    * catalog window and leave `modelDisplayName` null - the widget
    * resolves the display string from the instance catalog. */
-  private async resolveLocalProps(
+  private async resolveTargetProps(
     target: BridgeTarget
   ): Promise<{ contextWindow: number | null; modelDisplayName: string | null }> {
     const catalog = this.inputs.catalogContextWindow(target);

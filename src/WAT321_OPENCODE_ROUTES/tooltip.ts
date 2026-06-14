@@ -86,7 +86,7 @@ function mapPhaseToStage(currentPhase: string | undefined): {
 }
 
 /** `Model: name (window context)` formatter. Local LLM uses the probed
- * `model_alias` when available; remote uses the catalog alias. Window
+ * `model_alias` when available - remote uses the catalog alias. Window
  * suffix omitted when unknown. */
 function formatModelLine(
   catalogAlias: string,

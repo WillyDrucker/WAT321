@@ -21,7 +21,7 @@ import {
  * (no `item.command` ever set) - all session/instance management
  * routes through the Epic Handshake dropdown or the command palette
  * surface this file registers. Render states (hidden / idle / in-
- * flight / stale) live in `openCodeStatusBarRefresh.ts`; data
+ * flight / stale) live in `openCodeStatusBarRefresh.ts` - data
  * sources live in `openCodeStatusBarSources.ts`. This file owns the
  * VS Code item lifecycle: creation, command registration, poller
  * wiring, 1Hz refresh interval, dispose.
@@ -72,7 +72,7 @@ export function createOpenCodeRoutesStatusBarItem(
   // OpenCode's message log so the widget renders `S1 12K 31%` style
   // figures parallel to Claude / Codex session tokens. Lookups are
   // closures over the merged config so the poller stays decoupled
-  // from the config-file path; refreshes every 3s and caches by
+  // from the config-file path - refreshes every 3s and caches by
   // sessionId.
   const sessionTokensPoller = new BridgeSessionTokensPoller({
     serveUrl: () => readConfigSnapshot()?.openCodeServerUrl ?? "",
