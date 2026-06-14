@@ -9,16 +9,16 @@ import { isNotificationsEnabled, subscribeToNotifications } from "./engine/toast
 import { ClaudeUsageSharedService } from "./shared/claude-usage/service";
 import { CodexUsageSharedService } from "./shared/codex-usage/service";
 import { readTail } from "./shared/fs/fileReaders";
-import { classifyLastEntry } from "./shared/transcriptClassifier";
 import { activateWidget } from "./shared/usageWidgetActivation";
 import { parseLastAssistantText as parseCodexAssistantText } from "./shared/codex-rollout/assistantTextParser";
 import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/service";
+import { isClaudeTurnComplete } from "./WAT321_CLAUDE_SESSION_TOKENS/turnClassifier";
 import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
 import { ClaudeUsageErrorWidget } from "./WAT321_CLAUDE_USAGE_ERROR/widget";
 import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
 import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/widget";
-import { isCodexTurnComplete } from "./WAT321_CODEX_SESSION_TOKENS/parsers";
+import { isCodexTurnComplete } from "./WAT321_CODEX_SESSION_TOKENS/turnClassifier";
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/service";
 import { CodexSessionTokensWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
 import { CodexUsageErrorWidget } from "./WAT321_CODEX_USAGE_ERROR/widget";
@@ -28,7 +28,7 @@ import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/widget";
 /**
  * Provider registration and activation factories. Each provider
  * registers itself with the engine's ProviderRegistry via a
- * descriptor + activation function. The registry handles lifecycle;
+ * descriptor + activation function. The registry handles lifecycle -
  * this file handles provider-specific wiring.
  */
 
@@ -65,19 +65,6 @@ function watchProviderAvailability(
   };
   usageService.subscribe(listener);
   return { dispose: () => usageService.unsubscribe(listener) };
-}
-
-/** Claude turn-completion classifier. Only `assistant-done` fires a
- * notification. The classifier deliberately distinguishes:
- *   - `assistant-pending` (tool_use in flight) - mid-turn, suppress
- *   - `compact-end` (auto-compact summary marker) - engine rotated
- *     context behind the scenes; the user's task isn't done, suppress
- *   - `interrupted` (user hit Esc / Ctrl+C) - user aborted, suppress
- *   - `unknown` (system / summary / unparseable) - suppress
- * so mid-turn writes, compaction events, and aborts do not all
- * masquerade as the same "Claude finished" notification. */
-function isClaudeTurnComplete(tail: string): boolean {
-  return classifyLastEntry(tail) === "assistant-done";
 }
 
 /** Register both providers with the engine and subscribe engine-level

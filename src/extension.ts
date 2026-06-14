@@ -38,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
   // unregistered AUMID causes Windows to silently discard the toast
   // with zero logging, so getting this right matters across every VS
   // Code fork (Insiders, VSCodium, Cursor, Windsurf). Setter is a
-  // no-op outside Windows paths; safe to call unconditionally.
+  // no-op outside Windows paths - safe to call unconditionally.
   if (process.platform === "win32") {
     setHostAppName(vscode.env.appName);
     // Reset the warm-PS circuit breaker when the window regains focus.
@@ -50,7 +50,7 @@ export function activate(context: vscode.ExtensionContext) {
     // toasts. Resetting on focus regain pays a single fresh spawn
     // attempt at the moment the user is actually there to notice if
     // notifications are still broken. Underlying problems re-trip the
-    // breaker; this just removes the stale-cooldown failure mode.
+    // breaker - this just removes the stale-cooldown failure mode.
     let lastFocused = vscode.window.state.focused;
     context.subscriptions.push(
       vscode.window.onDidChangeWindowState((s) => {
@@ -88,7 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(epicHandshake);
 
   // OpenCode Routes tier (local + cloud LLMs). Independent of Epic
-  // Handshake; the unified `wat321` MCP server (registered by the MCP
+  // Handshake - the unified `wat321` MCP server (registered by the MCP
   // Server tier) handles dispatch for both. Wrapped in try/catch so a
   // fatal bug in this tier never takes down the core Claude / Codex
   // widgets - OpenCode Routes is opt-in, the usage widgets are not.
@@ -139,7 +139,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Sweep the unified bridge's MCP entry + pre-allowed tool list
     // (mcp__wat321__wat321_ask, etc.) from ~/.claude/settings.json so
     // a fresh re-enable starts from a clean Claude config. EH's
-    // resetCleanup handles the registration removal at the CLI layer;
+    // resetCleanup handles the registration removal at the CLI layer -
     // this second pass covers the pre-allowed tool surface that lives
     // in the user-scope settings file. Idempotent.
     try {
@@ -184,7 +184,7 @@ function handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
 
   // statusBarPriority requires a window reload to take effect because
   // VS Code reads the priority once when each status bar item is
-  // created and never recomputes. Passive toast nudges the user; no
+  // created and never recomputes. Passive toast nudges the user - no
   // modal, no action button (matches the rest of WAT321's voice).
   if (e.affectsConfiguration(`wat321.${SETTING.statusBarPriority}`)) {
     void vscode.window.showInformationMessage(
