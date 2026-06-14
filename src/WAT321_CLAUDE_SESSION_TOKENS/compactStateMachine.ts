@@ -9,12 +9,12 @@ import { parseRecentCompactBoundaries } from "./turnInfoParser";
  * Claude-tier adapter over the shared `CompactFlashMachine`.
  *
  * Architecture constraint. Claude Code buffers the `<command-name>/
- * compact</command-name>` user entry until the compact completes;
- * auto-compact never writes any pre-completion entry at all. The only
+ * compact</command-name>` user entry until the compact completes.
+ * Auto-compact never writes any pre-completion entry at all. The only
  * observable signal is the structured `type:"system",
  * subtype:"compact_boundary"` entry at the end of the operation, so the
  * display is end-only: on a fresh boundary, fire a brief completion
- * flash; otherwise idle. (Live in-flight detection would require
+ * flash - otherwise idle. (Live in-flight detection would require
  * writing into `~/.claude/`, outside WAT321's contract - see the
  * compact in-flight investigation in WAT321_SESSION_EXTENDED.)
  *
@@ -32,7 +32,7 @@ const HISTORICAL_WINDOW = 3;
 /** Flash hold for trigger:"auto" boundaries. Auto-compact lands
  * without warning - a brief beat is enough acknowledgment. */
 const AUTO_COMPACT_FLASH_MS = 1_500;
-/** Flash hold for trigger:"manual" boundaries. Manual is user-typed;
+/** Flash hold for trigger:"manual" boundaries. Manual is user-typed -
  * they're actively watching, so hold a little longer. */
 const MANUAL_COMPACT_FLASH_MS = 2_500;
 
@@ -44,8 +44,8 @@ export class CompactStateMachine {
   private readonly core = new CompactFlashMachine();
 
   /** Parse the Claude tail into a normalized observation and fold it
-   * into the shared machine. Public signature unchanged from the
-   * pre-extraction machine so the service / widget need no edits. */
+   * into the shared machine. Public signature matches what the
+   * service / widget call, so neither needs edits. */
   sync(args: { tail: string; sessionId: string; now: number }): CompactSnapshot {
     const { tail, sessionId, now } = args;
     const recent = parseRecentCompactBoundaries(tail, HISTORICAL_WINDOW);

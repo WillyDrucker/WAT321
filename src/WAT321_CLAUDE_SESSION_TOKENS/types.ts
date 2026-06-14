@@ -1,5 +1,4 @@
-import type { StatusBarWidget as GenericStatusBarWidget } from "../engine/serviceTypes";
-import type { LastEntryKind } from "../shared/transcriptClassifier";
+import type { LastEntryKind } from "../shared/turnState";
 import type { CompactSnapshot } from "./compactStateMachine";
 import type { ClaudeTurnInfo } from "./parsers";
 
@@ -24,15 +23,15 @@ export interface ResolvedSession {
    * `autoCompactPct * contextWindowSize` because recent Claude Code
    * releases stack a small reserve on the override rather than
    * replacing the default formula. Widget uses the nominal product
-   * for the bar + "N/M" numerator (that's the user's target); this
+   * for the bar + "N/M" numerator (that's the user's target) - this
    * effective value drives the "Auto-Compact at ~X" label so the
    * advertised fire point matches observed behavior. */
   autoCompactEffectiveTokens: number;
   source: "live" | "lastKnown"; // live = CLI process active, lastKnown = fallback from transcript mtime
-  lastActiveAt: number; // ms - live: Date.now(); lastKnown: transcript file mtime
+  lastActiveAt: number; // ms - live: Date.now(), lastKnown: transcript file mtime
   /** Last transcript entry classification. Drives the active-state
    * indicator. `user` and `assistant-pending` mean a response is in
-   * flight; `assistant-done` and `unknown` are idle. Interrupts are
+   * flight. `assistant-done` and `unknown` are idle. Interrupts are
    * mapped to `assistant-done` by the classifier so the widget
    * returns to idle immediately. */
   turnState: LastEntryKind;
@@ -80,6 +79,3 @@ export type WidgetState =
   | { status: "no-session" }
   | { status: "waiting" } // session exists but no usage data yet
   | { status: "ok"; session: ResolvedSession };
-
-/** Claude session token widget contract. */
-export type StatusBarWidget = GenericStatusBarWidget<WidgetState>;

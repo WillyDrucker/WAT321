@@ -12,12 +12,12 @@ import { parseMostRecentCacheEvent } from "./cacheEventParser";
  *     presence, and the compact-summary watermark.
  *   - `parseRecentCompactBoundaries(tail, limit)` -> structured
  *     end-of-compact signals from `system/compact_boundary` entries
- *     (Claude Code v2.1.126+). Drives the compact state machine's
- *     clean-exit transition.
+ *     (recent Claude Code releases). Drives the compact state
+ *     machine's clean-exit transition.
  */
 
 /** Structured signal Claude Code writes at the end of every
- * compact. Empirically verified against CLI v2.1.126-v2.1.143.
+ * compact. Empirically verified against recent Claude Code releases.
  *
  *   {
  *     "type": "system",
@@ -170,7 +170,7 @@ export function parseTurnInfo(tail: string): ClaudeTurnInfo {
     }
 
     if (--thinkingScanBudget <= 0 && usageLocked && activeToolLocked) {
-      // Have enough signal; bail rather than walk the rest of the
+      // Have enough signal - bail rather than walk the rest of the
       // tail. thinkingScanBudget also caps how far back we look for
       // thinking blocks so very old blocks do not keep the indicator
       // on.

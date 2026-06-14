@@ -16,13 +16,12 @@ import { parseCwd } from "./parsers";
  *   2. ONLY if the workspace path is empty (folderless VS Code), fall
  *      through to the globally-newest .jsonl across every project dir.
  *
- * The global fallback is gated on `workspacePath === ""` because firing
- * it when a folder IS open produced cross-workspace contamination -
- * Stage 1 missing meant Stage 2 returned some other workspace's freshly
- * active transcript and the widget displayed its tokens / label / turn
- * state under the wrong project. Post-gate: a workspace with no
- * transcripts yet stays in `waiting` / `no-session` instead of borrowing
- * another workspace's activity.
+ * The global fallback is gated on `workspacePath === ""` to avoid
+ * cross-workspace contamination: with a folder open, a Stage 1 miss
+ * would let Stage 2 return another workspace's freshly active
+ * transcript and the widget would show its tokens / label / turn state
+ * under the wrong project. A workspace with no transcripts yet stays in
+ * `waiting` / `no-session` instead of borrowing another's activity.
  */
 
 export interface LastKnownTranscript {
