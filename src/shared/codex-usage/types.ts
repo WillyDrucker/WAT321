@@ -1,6 +1,5 @@
 import type {
   ServiceState as GenericServiceState,
-  StatusBarWidget as GenericStatusBarWidget,
 } from "../../engine/serviceTypes";
 
 export interface CodexUsageResponse {
@@ -47,6 +46,3 @@ interface AdditionalRateLimit {
 
 /** Codex-specialized service state: ok payload is a CodexUsageResponse. */
 export type ServiceState = GenericServiceState<CodexUsageResponse>;
-
-/** Codex-specialized status bar widget contract. */
-export type StatusBarWidget = GenericStatusBarWidget<ServiceState>;

@@ -1,7 +1,7 @@
 /**
  * Smoothed tokens-per-second tracker shared by Claude and Codex
  * session-token services. Cumulative-count samples at transcript-mtime
- * instants in; stable rate reflecting only active write periods out.
+ * instants in - stable rate reflecting only active write periods out.
  * Mtime time axis, minimum window age, idle-gap reset, and
  * baseline-anchor design all documented in `WAT321_MEMORY_EXTENDED.md`.
  */
@@ -11,7 +11,7 @@ const WINDOW_MS = 60_000;
 const IDLE_GAP_MS = 10_000;
 /** Window must span at least this many ms of mtime before a rate is
  * computable. The very first sample-pair after a session starts captures
- * a step function (cache-creation tokens roll in all at once); waiting a
+ * a step function (cache-creation tokens roll in all at once) - waiting a
  * couple of seconds lets that spike smooth out before a number reaches
  * the widget. 2s is the sweet spot - long enough to skip past the
  * cache-creation pair, short enough that the user sees TPS appear
@@ -34,7 +34,7 @@ export class TpsTracker {
    * sample even when `samples` was just emptied. Without this, an idle
    * clear on call N followed by a stale-token sample on call N+1 would
    * push the stale value as a new baseline (samples is empty so `last`
-   * is undefined; the guard's `last !== undefined` short-circuits) and
+   * is undefined - the guard's `last !== undefined` short-circuits) and
    * the next real sample would average against an artificially-old
    * timestamp, sagging the rate. */
   private lastObservedTokens: number | null = null;
@@ -90,7 +90,7 @@ export class TpsTracker {
       // widget does not keep showing the pre-reset rate until the new
       // window ages in - that reads as ghost activity on a session
       // that just shed tokens. `lastObservedTokens = tokens` is
-      // already the post-rollback anchor; the next sample with new
+      // already the post-rollback anchor - the next sample with new
       // tokens IS a real delta so awaitingBaseline stays cleared.
       this.samples = [];
       this.lastValue = null;

@@ -69,7 +69,7 @@ export function getCachedStatus(provider: ProviderKey): StatusSummary | null {
 
 /** Fire-and-forget refresh. No-ops when a recent fetch is still
  * fresh, or when a fetch for the same provider is already in
- * flight. Never throws; every error path is swallowed so callers
+ * flight. Never throws - every error path is swallowed so callers
  * can invoke this from render paths without try/catch scaffolding. */
 export function refreshIfStale(provider: ProviderKey): void {
   const cached = cache.get(provider);

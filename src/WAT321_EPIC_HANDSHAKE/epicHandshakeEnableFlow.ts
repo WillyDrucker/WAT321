@@ -2,6 +2,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import * as vscode from "vscode";
 import { workspaceHash } from "../shared/workspaceHash";
 import { SETTING } from "../engine/settingsKeys";
+import { resetCliResolverCache } from "../shared/providers/cliResolver";
 import {
   isClaudeAvailable,
   isCodexAvailable,
@@ -12,7 +13,7 @@ import { applyDefaultWaitMode, currentWaitMode } from "./statusBarItem";
 
 /**
  * Settings-driven enable / disable flow for the Epic Handshake tier.
- * The tier class in `index.ts` owns construction and runtime state;
+ * The tier class in `index.ts` owns construction and runtime state -
  * this module owns the "user just flipped the checkbox" path - CLI
  * preflight, bridge registration, dispatcher start/stop, the friendly
  * unflip-and-warn surface when prerequisites are missing, and the
@@ -39,7 +40,7 @@ export function isEpicHandshakeEnabled(): boolean {
 }
 
 /** Epic Handshake routes Claude to Codex and/or OpenCode. Claude is
- * always required; at least one of (Codex, OpenCode) must also be
+ * always required - at least one of (Codex, OpenCode) must also be
  * enabled in WAT321's own settings. */
 export function epicHandshakeProvidersPresent(): boolean {
   const cfg = vscode.workspace.getConfiguration("wat321");
@@ -88,6 +89,10 @@ export async function runEnableFlow(deps: EnableFlowDeps): Promise<void> {
       cancellable: false,
     },
     async (progress) => {
+      // Flush CLI resolver caches so a backend the user just installed
+      // is re-probed now instead of returning a stale "missing" result
+      // cached earlier this session.
+      resetCliResolverCache();
       progress.report({ message: "checking Claude Code install..." });
       const claudeAvailable = await isClaudeAvailable();
       if (!claudeAvailable) {
@@ -99,7 +104,7 @@ export async function runEnableFlow(deps: EnableFlowDeps): Promise<void> {
 
       // At least one of Codex / OpenCode must be reachable for the
       // bridge to do anything useful. Either present => activation
-      // proceeds; the unified bridge handlers gracefully report "not
+      // proceeds - the unified bridge handlers gracefully report "not
       // installed" on dispatches to whichever backend is missing.
       progress.report({ message: "checking backend installs..." });
       const [codexAvailable, openCodeAvailable] = await Promise.all([
@@ -198,7 +203,7 @@ export function watchEnableSetting(deps: EnableFlowDeps): vscode.Disposable {
 /** Seed the per-workspace wait-mode flag at activate time. Respects
  * an existing flag (this window or a prior session already set one)
  * unless `force: true`. The setting only seeds Standard / fresh
- * install state; menu toggles always override. */
+ * install state - menu toggles always override. */
 export function seedDefaultWaitMode(opts: { force?: boolean } = {}): void {
   try {
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;

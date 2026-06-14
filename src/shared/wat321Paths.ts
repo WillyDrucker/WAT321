@@ -45,7 +45,7 @@ export const CLIENTS_ROOT = join(WAT321_ROOT, "clients");
 /** Active VS Code workspace hash, or "default" when no folder is
  * open. The extension sets `WAT321_WORKSPACE_ID` on `process.env` at
  * activate so spawned subprocesses (e.g. the OpenCode harness) inherit
- * it; the MCP installer injects the same value via `--env` so
+ * it - the MCP installer injects the same value via `--env` so
  * channel.mjs sees it at boot. Computed fresh on every call so a
  * mid-session workspace change is picked up. */
 export function workspaceId(): string {
@@ -64,7 +64,7 @@ export function bridgeStateDir(): string {
 }
 
 /** Per-client OpenCode Routes state dir. The on-disk literal stays
- * `model-bridge/` for upgrader compatibility; the helper name reflects
+ * `model-bridge/` for upgrader compatibility - the helper name reflects
  * the LOGICAL purpose (OpenCode Routes tier state) rather than the
  * historical literal. Renaming the dir would look like lost sessions
  * and config to existing installs. */

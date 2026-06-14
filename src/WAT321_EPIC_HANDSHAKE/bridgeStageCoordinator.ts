@@ -58,7 +58,7 @@ export class BridgeStageCoordinator
 
   constructor(private readonly events: EventHub) {}
 
-  /** Begin self-driven monitoring. Idempotent; second call no-ops. */
+  /** Begin self-driven monitoring. Idempotent - second call no-ops. */
   start(): void {
     if (this.interval !== null) return;
     this.tick();
@@ -78,7 +78,7 @@ export class BridgeStageCoordinator
   }
 
   /** Lazy-attach fs.watch on EH_DIR. Created by the EH tier on
-   * activate; if missing here we'll retry on the next tick once the
+   * activate - if missing here we'll retry on the next tick once the
    * tier creates it. Watch failure is non-fatal - the polling timer
    * keeps state fresh regardless. */
   private attachWatcher(): void {
@@ -117,7 +117,7 @@ export class BridgeStageCoordinator
   /** Recompute the snapshot from current heartbeat + flag state.
    * Emits `bridge.phaseChanged` and `bridge.stageChanged` on
    * transitions. Called automatically by the polling timer and the
-   * fs-watch debounce; external callers can tick manually. */
+   * fs-watch debounce - external callers can tick manually. */
   tick(): BridgeStageSnapshot {
     if (this.watcher === null) this.attachWatcher();
     const next = this.compute();

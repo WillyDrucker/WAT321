@@ -54,7 +54,7 @@ import {
  *     (session lifecycle), and `wat321_bridge` (single-purpose inbox
  *     drain) via MCP auto-discovery.
  *   - The extension-side `CodexDispatcher` watches `inbox/codex/` and
- *     drives `codex app-server` to produce replies; replies land in
+ *     drives `codex app-server` to produce replies - replies land in
  *     `inbox/claude/` where the blocking `wat321_ask` call picks them
  *     up synchronously, or where `wat321_bridge()` drains them when
  *     the caller used fire-and-forget.
@@ -68,7 +68,7 @@ import {
 /** How long the restart-bridge orchestration waits between writing
  * the cancel sentinel and force-killing the app-server child. Long
  * enough for an in-flight runTurnOnce to observe the flag and write
- * its "cancelled by user" reply; short enough that recovery feels
+ * its "cancelled by user" reply - short enough that recovery feels
  * snappy. */
 const RESTART_CANCEL_GRACE_MS = 500;
 const STATUS_BAR_REFRESH_MS = 1000;
@@ -179,7 +179,7 @@ class EpicHandshakeTier {
       );
     });
     // Consume-on-read complement: the dispatcher writes a one-shot
-    // suppress sentinel on successful turn complete; the notifier
+    // suppress sentinel on successful turn complete - the notifier
     // drains it when Codex's transcript responseComplete fires
     // (which can land >5s after the returning flag clears).
     setRecentCodexCompletionConsumer(() => {
@@ -265,7 +265,7 @@ class EpicHandshakeTier {
     this.logger.info(`startBridge workspace=${ws}`);
     // Refresh stage-clipboard.mjs on every activate. The script is
     // invoked by Claude via Bash (absolute path under
-    // ~/.wat321/epic-handshake/bin/); without this refresh, an
+    // ~/.wat321/epic-handshake/bin/) - without this refresh, an
     // extension upgrade would leave the old helper on disk and Claude
     // sessions would run stale code. Idempotent + best-effort.
     try {

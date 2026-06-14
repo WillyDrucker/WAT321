@@ -11,7 +11,7 @@ import { findRolloutPath } from "./threadPersistence";
  * all belong to a sibling workspace sharing this basename, or the
  * rollouts could be missing on disk. Each scanned bridge-pattern
  * entry produces one classification row that the caller writes to
- * the output channel; the short summary suits a toast. Returns null
+ * the output channel - the short summary suits a toast. Returns null
  * when the index has no bridge-pattern entries at all (genuine
  * clean state - no diagnostic needed).
  */

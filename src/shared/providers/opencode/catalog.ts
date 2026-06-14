@@ -5,7 +5,7 @@
  * The local instance's endpoint is supplied at config-build time
  * from the `wat321.localEndpoint` setting (the only
  * piece of instance state worth exposing - whichever LLM you have
- * loaded on that server is what the local instance answers with;
+ * loaded on that server is what the local instance answers with -
  * swap freely via the LLMs desktop shortcuts and WAT321 follows).
  *
  * Cloud instances are hardcoded since their endpoints + model ids
@@ -32,9 +32,9 @@ export interface CatalogEntry {
   apiKeyRef: string;
   /** OpenCode provider id used by the harness on dispatch. Maps to
    * the provider key registered in the WAT321-managed `opencode.json`.
-   * Local instances drive the harness via the `llama.cpp` provider;
+   * Local instances drive the harness via the `llama.cpp` provider -
    * cloud instances drive it via the `zen` provider with a shared API
-   * key. The harness needs an explicit provider; auto-discovery only
+   * key. The harness needs an explicit provider - auto-discovery only
    * fills in the model id for local entries. */
   harnessProviderID: "llama.cpp" | "zen";
   /** Dispatchable without an API key when true. Free-tier Zen routes
@@ -51,7 +51,7 @@ export interface CatalogEntry {
    * `limit.context: 0` for our user-added providers), so we hardcode
    * conservative best-known values per route here. Local LLM is
    * resolved at runtime via llama-server's `/props.n_ctx` since the
-   * loaded model decides; the catalog value is a fallback only. Leave
+   * loaded model decides - the catalog value is a fallback only. Leave
    * undefined when the route's underlying model is unknown - the
    * widget then renders cumulative tokens without a percentage bar. */
   contextWindow?: number;
@@ -88,7 +88,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     harnessProviderID: "zen",
     anonymousAccess: true,
     // Conservative lower-bound estimate. Big Pickle rotates between
-    // multiple frontier models with varying windows; 200K is the
+    // multiple frontier models with varying windows, so 200K is the
     // safest assumption that covers common Claude / GPT routes.
     contextWindow: 200_000,
   },

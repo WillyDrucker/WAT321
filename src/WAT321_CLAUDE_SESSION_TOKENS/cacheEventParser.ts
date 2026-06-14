@@ -1,15 +1,19 @@
 import type { CacheEvent } from "../shared/ui/sessionTokens/sessionTokenWidget";
+import {
+  CACHE_REBUILD_CREATION_MIN,
+  CACHE_REBUILD_RATIO_DENOM,
+} from "../shared/ui/sessionTokens/sessionTokenHelpers";
 
 /**
  * Cache LOAD/MISS classifier for Claude transcripts. Walks back
  * through up to `lookback` assistant turns and reports the most
  * recent cache event. Pure transcript-derived. Reads only the same
- * `tail` string the rest of the parser already operates on; no
+ * `tail` string the rest of the parser already operates on - no
  * file reads, no HTTP calls, no process spawns. Output powers a
  * tooltip-only readout - no banner flashing, no alarms.
  *
  * Detection (per turn, newest first):
- *   - cc >= REBUILD_CC_FLOOR AND cc >= cr * REBUILD_RATIO_DENOM
+ *   - cc >= CACHE_REBUILD_CREATION_MIN AND cc >= cr * CACHE_REBUILD_RATIO_DENOM
  *     -> rebuild detected. Classify by:
  *       - preceding user has `isCompactSummary` -> LOAD-compact
  *       - gap from prior assistant ts to current user ts >
@@ -20,7 +24,7 @@ import type { CacheEvent } from "../shared/ui/sessionTokens/sessionTokenWidget";
  *   - No rebuild in the lookback window -> HIT-clean.
  *
  * Read-only diagnosis. The cache LOAD/MISS banner thresholds in
- * `sessionTokenCacheBannerLatch` are unaffected; this only adds
+ * `sessionTokenCacheBannerLatch` are unaffected - this only adds
  * tooltip visibility for events that would otherwise be silent.
  */
 
@@ -29,11 +33,11 @@ import type { CacheEvent } from "../shared/ui/sessionTokens/sessionTokenWidget";
 const CACHE_TTL_GAP_MS = 5 * 60 * 1000;
 /** Tool-result content size flagged as "large payload". */
 const LARGE_TOOL_RESULT_BYTES = 50_000;
-/** Cache-rebuild detection mirrors the banner latch thresholds.
- * Do not adjust without a fresh false-fire audit - loosening either
- * value re-introduces the LOAD-against-incremental-write bug. */
-const REBUILD_CC_FLOOR = 5_000;
-const REBUILD_RATIO_DENOM = 2;
+// Cache-rebuild detection shares the banner-latch thresholds
+// (CACHE_REBUILD_CREATION_MIN / CACHE_REBUILD_RATIO_DENOM in
+// sessionTokenHelpers) so the tooltip and banner never disagree. One
+// source of truth - loosening either re-introduces the
+// LOAD-against-incremental-write bug.
 
 interface TurnRecord {
   assistantTs: number;
@@ -53,13 +57,13 @@ export function parseMostRecentCacheEvent(
   // turns[0] is the most recent assistant turn.
   for (let i = 0; i < turns.length; i++) {
     const t = turns[i];
-    if (t.cc < REBUILD_CC_FLOOR) continue;
+    if (t.cc < CACHE_REBUILD_CREATION_MIN) continue;
     const ago = describeTurnsAgo(i);
 
     // Compact-driven rebuilds qualify on the creation floor alone -
     // mirrors the banner's `meetsCompact` exception. Compact bundles
     // a fresh summary alongside surviving system prompt + tools, so
-    // creation is meaningful but reads can be non-trivial; the
+    // creation is meaningful but reads can be non-trivial - the
     // strict ratio gate would miss most compact LOADs and let the
     // tooltip disagree with the banner. Check before the ratio gate.
     if (t.isPostCompact) {
@@ -70,7 +74,7 @@ export function parseMostRecentCacheEvent(
       };
     }
 
-    if (t.cc < t.cr * REBUILD_RATIO_DENOM) continue;
+    if (t.cc < t.cr * CACHE_REBUILD_RATIO_DENOM) continue;
     const prior = turns[i + 1];
     if (prior !== undefined && t.userTs !== null) {
       const gapMs = t.userTs - prior.assistantTs;

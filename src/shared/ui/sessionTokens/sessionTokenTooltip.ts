@@ -3,7 +3,7 @@ import { getCodexModelInfo, isKnownCodexModel } from "../../providers/codex/mode
 import { formatModelDisplayName } from "../../../engine/contracts";
 import { renderStageDisplay } from "../../codex-rollout/phaseRender";
 import type { StageInfo } from "../../codex-rollout/types";
-import type { LastEntryKind } from "../../transcriptClassifier";
+import type { LastEntryKind } from "../../turnState";
 import type { ClaudeTurnInfo } from "./sessionTokenWidget";
 import { formatPct, formatTokens, makeTokenBar } from "../tokenFormatters";
 import { formatRelativeTime } from "../relativeTime";
@@ -23,7 +23,7 @@ const CLAMP = "\u{1F5DC}\u{FE0F}";
  * tooltip wraps at the rendered line, but we need a soft per-line
  * limit to prevent very long titles from creating an unreadably
  * wide tooltip. The wrap helper allows up to two visual lines before
- * ellipsis-truncating; line two ends at the same per-line cap. */
+ * ellipsis-truncating - line two ends at the same per-line cap. */
 const MAX_TITLE_LINE_LEN = 38;
 
 export interface SessionTokenTooltipInput {
@@ -40,7 +40,7 @@ export interface SessionTokenTooltipInput {
   ceiling: number;
   /** Tokens subtracted from both numerator and denominator before
    * computing the percentage. Codex passes `CODEX_BASELINE_TOKENS`
-   * (12,000); Claude passes 0. */
+   * (12,000). Claude passes 0. */
   baselineTokens?: number;
   /** Present on a `lastKnown` session, absent on a live session.
    * When present, the tooltip adds a "Last active: X ago" line so
@@ -66,7 +66,7 @@ export interface SessionTokenTooltipInput {
   autoCompactEffectiveTokens?: number;
   /** Codex-only: per-turn effort override (low / medium / high /
    * xhigh). Sourced from the bridge snapshot. Null means no override
-   * is set; the tooltip falls back to the model's
+   * is set, and the tooltip falls back to the model's
    * `default_reasoning_level` so the user always sees what Codex will
    * actually run. */
   codexEffort?: "low" | "medium" | "high" | "xhigh" | null;
@@ -75,7 +75,7 @@ export interface SessionTokenTooltipInput {
    * bridge is currently driving this Codex session - phase is non-idle
    * in the bridgeStageCoordinator snapshot. The block is hidden for
    * standalone Codex sessions because the surrounding Codex CLI
-   * already shows the same info inline; surfacing it twice clutters
+   * already shows the same info inline - surfacing it twice clutters
    * the tooltip. Defaults to false at the type level. */
   bridgeActive?: boolean;
   /** Claude-only: total wait budget (seconds) for the in-flight Codex
@@ -176,7 +176,7 @@ export function buildSessionTokenTooltip(
     md.appendMarkdown(`${prefix}Model: ${modelName}${effortSegment}${windowLabel}  \n`);
     if (codexModelInvalid) {
       md.appendMarkdown(
-        `_Model not in your installed Codex's known set. The next prompt will fail; repair via the bridge menu._  \n`
+        `_Model not in your installed Codex's known set. The next prompt will fail - repair via the bridge menu._  \n`
       );
     }
   }
@@ -229,7 +229,7 @@ export function buildSessionTokenTooltip(
   // flight, and (3) we have structured rollout state. Standalone Codex
   // sessions show the same info in the Codex CLI itself, so duplicating
   // it in the tooltip just clutters the hover. The block carries
-  // stage / plan / tool / token-split lines; the legacy "% cached"
+  // stage / plan / tool / token-split lines - the legacy "% cached"
   // line is intentionally dropped because its semantics weren't clear
   // from the rendered string.
   if (
@@ -258,7 +258,7 @@ export function buildSessionTokenTooltip(
 
   // Claude cache-event readout. Always shown when claudeTurnInfo is
   // present (regardless of in-flight). One blank line above so it
-  // stands as its own clean line; no further detail trails the
+  // stands as its own clean line - no further detail trails the
   // description. Read-only: derived from the transcript tail by
   // parseMostRecentCacheEvent.
   if (provider === "Claude" && claudeTurnInfo?.mostRecentCacheEvent) {
@@ -269,7 +269,7 @@ export function buildSessionTokenTooltip(
   // Auto-Compact lives at the bottom of every session-token tooltip.
   // Claude's effective trigger may differ from the nominal ceiling
   // when Claude Code's internal reserve stacks with the percentage
-  // override; `autoCompactEffectiveTokens` captures that drift. Codex
+  // override - `autoCompactEffectiveTokens` captures that drift. Codex
   // computes the trigger from `(ceiling * 90) / 95` to mirror the
   // upstream `context_window * 9 / 10` formulation against our 95%
   // effective-window ceiling.
@@ -289,7 +289,7 @@ export function buildSessionTokenTooltip(
 
 /** Wrap a long session title across up to two lines, breaking on a
  * word boundary inside the first line's character budget. Titles
- * that fit on one line are returned unchanged; titles that exceed
+ * that fit on one line are returned unchanged - titles that exceed
  * two lines are ellipsis-truncated. Exported so the OpenCode Routes
  * widget can reuse the same wrap logic for OpenCode / Local LLM
  * session titles. */
@@ -312,7 +312,7 @@ export function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
 /** True while the session is mid-turn - stage-info tooltip lines
  * only make sense during an in-flight response. Only `user` (waiting
  * on the model) and `assistant-pending` (model actively working)
- * qualify; `assistant-done`, `compact-end`, `interrupted`, and
+ * qualify. `assistant-done`, `compact-end`, `interrupted`, and
  * `unknown` all read as idle. */
 function isTurnActive(turnState: LastEntryKind | undefined): boolean {
   return turnState === "user" || turnState === "assistant-pending";
@@ -321,7 +321,7 @@ function isTurnActive(turnState: LastEntryKind | undefined): boolean {
 /** Effort label that goes after the model name in the tooltip header.
  *
  * Codex: explicit reasoning level. The bridge per-turn override wins
- * when set; otherwise fall back to the model's
+ * when set - otherwise fall back to the model's
  * `default_reasoning_level` from `~/.codex/models_cache.json` so the
  * user always sees what Codex will actually run, not just what was
  * overridden.
@@ -330,10 +330,10 @@ function isTurnActive(turnState: LastEntryKind | undefined): boolean {
  * persistent analog is whether the most recent assistant turns
  * actually used extended thinking (the model emitting `thinking`
  * content blocks). Read this from `claudeTurnInfo.hasThinkingRecent`
- * rather than from a setting; on/off is the only signal we have.
+ * rather than from a setting - on/off is the only signal we have.
  *
  * Returns null when there is nothing useful to display (Codex with no
- * effort and no model default; Claude not currently using thinking). */
+ * effort and no model default, Claude not currently using thinking). */
 function resolveEffortLabel(
   provider: "Claude" | "Codex",
   modelId: string,

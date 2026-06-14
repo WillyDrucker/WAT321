@@ -22,7 +22,7 @@ import { workspaceHash } from "../shared/workspaceHash";
  * envelopes older than this without a fresh heartbeat are treated
  * as crashed-mid-turn leftovers and ignored. Five minutes is well
  * past any legitimate dispatch latency (the dispatcher picks up an
- * envelope within seconds; the longest real bridge turn observed in
+ * envelope within seconds - the longest real bridge turn observed in
  * the wild is sub-10 minutes total, with heartbeats refreshing
  * every few seconds inside that window). Without this gate, a
  * stale flag from a prior crash keeps the status bar animating

@@ -12,7 +12,7 @@ import {
  *   - `bridgeStageCoordinator` for the 5-stage glyph animation.
  *   - The Claude session-tokens widget animation gate.
  *   - The MCP server's adaptive wait loop (separately, via its own
- *     mjs path; see `WAT321_MCP_SERVER/bin/codex.mjs`).
+ *     mjs path - see `WAT321_MCP_SERVER/bin/codex.mjs`).
  *
  * Heartbeat staleness: files older than HEARTBEAT_STALENESS_MS without
  * a fresh write are treated as dead turns and skipped. The dispatcher

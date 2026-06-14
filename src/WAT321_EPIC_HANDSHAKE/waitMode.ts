@@ -15,7 +15,7 @@ import { adaptiveFlagPath, EPIC_HANDSHAKE_DIR, fireAndForgetFlagPath } from "./c
  *                         (kept in sync so neither interrupts the
  *                         other early).
  *   - `fire-and-forget` - per-workspace `fire-and-forget.<wsHash>.flag`
- *                         present. MCP tool returns immediately;
+ *                         present. MCP tool returns immediately -
  *                         reply lands in inbox. Dispatcher runs with
  *                         all timers disabled.
  *
@@ -106,7 +106,7 @@ export function applyWaitMode(mode: WaitMode, workspacePath: string): void {
     try {
       writeFileAtomic(path, new Date().toISOString());
     } catch {
-      // best-effort; next refresh reflects whichever state the writes
+      // best-effort - next refresh reflects whichever state the writes
       // actually achieved
     }
   };

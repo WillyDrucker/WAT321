@@ -9,7 +9,7 @@ import { spawn, type ChildProcess } from "node:child_process";
  * AppUserModelID (AUMID) via `Get-StartApps`, echoes the resolved
  * value to stdout for the health command, then enters a ReadLine
  * loop. Each subsequent toast is a one-line expression piped via
- * stdin; the session variable `$aumid` is reused so we do not
+ * stdin - the session variable `$aumid` is reused so we do not
  * interpolate the AUMID per toast.
  *
  * AUMID matters because Windows silently discards a toast whose
@@ -17,7 +17,7 @@ import { spawn, type ChildProcess } from "node:child_process";
  * Start-menu shortcut. Zero logging, zero user-visible signal. VS
  * Code family forks (Insiders, VSCodium, Cursor, Windsurf) each
  * register their own AUMID via Squirrel at install. `Get-StartApps`
- * enumerates these; we match by `vscode.env.appName` passed in at
+ * enumerates these - we match by `vscode.env.appName` passed in at
  * spawn time. Final fallback is the `powershell` AUMID which is
  * always registered - the toast delivers, but the origin chip reads
  * "Windows PowerShell" instead of the host name.
@@ -62,7 +62,7 @@ function recordBootstrapFailure(): void {
 
 /** Set the host app name used at warm-process bootstrap for
  * `Get-StartApps` matching. Call from `extension.ts activate()` with
- * `vscode.env.appName`. Idempotent; takes effect on the next warm-
+ * `vscode.env.appName`. Idempotent - takes effect on the next warm-
  * process spawn. */
 export function setHostAppName(name: string): void {
   if (typeof name === "string") hostAppName = name;
@@ -92,7 +92,7 @@ export function getAppUserModelID(): string {
 
 /** Escape for a PowerShell single-quoted string literal: double any
  * embedded single quotes. `appName` is user-controllable only in the
- * sense that a forked host can set it to arbitrary text; still
+ * sense that a forked host can set it to arbitrary text - still
  * escape defensively. */
 function escapePowershellSingleQuoted(s: string): string {
   return s.replace(/'/g, "''");
@@ -233,7 +233,7 @@ function ensureProcess(): ChildProcess | null {
 
     // First spawn pays ~500ms for WinRT assembly loads plus ~200-
     // 500ms for Get-StartApps. PowerShell buffers stdin during
-    // bootstrap so toast commands queue cleanly; only the first
+    // bootstrap so toast commands queue cleanly - only the first
     // toast feels any delay, and it is still faster than a cold
     // spawn per notification.
     return proc;
@@ -246,7 +246,7 @@ function ensureProcess(): ChildProcess | null {
 
 /** Fire a 3-line Windows toast via the warm PowerShell process.
  * Returns `true` on successful stdin write, `false` on spawn or
- * write failure. No silent mode switch on failure; the caller
+ * write failure. No silent mode switch on failure - the caller
  * records the outcome for diagnostics and a user who picked System
  * Notifications gets System Notifications or nothing. */
 export function showToast(

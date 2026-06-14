@@ -1,23 +1,11 @@
+import type { LastEntryKind } from "../shared/turnState";
+
 /**
- * Classifier for the last parseable entry in a Claude transcript tail.
- * Consumed by the notification bridge in bootstrap.ts for turn-
- * completion gating AND by the session token widget's thinking
- * indicator. The two consumers want different shapes from the same
- * tail, so the classifier distinguishes:
- *
- *   - `assistant-done`    - real model response complete (fires toast)
- *   - `assistant-pending` - tool_use mid-turn (active, no toast)
- *   - `user`              - prompt or tool_result waiting on the model
- *   - `compact-end`       - auto-compact summary entry (idle, no toast)
- *   - `interrupted`       - Esc / Ctrl+C abort (idle, no toast)
- *   - `unknown`           - unparseable / empty (idle, suppress)
- *
- * `compact-end` and `interrupted` are idle for the widget but remain
- * distinct from `assistant-done` so completion toasts only fire for
- * a real model response.
- *
- * Lives in shared/ rather than the Claude session token tool because
- * cross-tool concerns belong in shared infrastructure.
+ * Turn-state classification for Claude transcript tails - the single
+ * home for "what is the last turn doing" on the Claude side. Two
+ * consumers read the same tail with different needs: classifyClaudeTurn
+ * (drives the widget thinking indicator) and isClaudeTurnComplete (the
+ * notification gate, which only fires on a real model response).
  */
 
 /** Marker text Claude Code writes to the transcript when the user
@@ -57,40 +45,9 @@ function isCompactMarker(text: string): boolean {
   return false;
 }
 
-/** Classification of the last parseable JSONL entry in a Claude
- * transcript tail. */
-export type LastEntryKind =
-  /** Last entry is a user message (prompt or tool_result). Claude
-   * is about to respond. */
-  | "user"
-  /** Last entry is an assistant message containing an unresolved
-   * `tool_use` block. Claude is waiting on tool execution. */
-  | "assistant-pending"
-  /** Last entry is an assistant text-only message. Turn complete - a
-   * real model response landed. This is the only kind that should
-   * fire a "response complete" toast. */
-  | "assistant-done"
-  /** Last entry is the auto-compact summary marker. Structurally a
-   * user-type entry, semantically the terminal state of an internal
-   * compaction event (the model is about to resume the same task on
-   * a fresh context window). The widget treats it as idle (same as
-   * assistant-done) so the thinking indicator stops spinning, but the
-   * toast notifier suppresses it - the user's task is not actually
-   * complete, the engine just rotated context behind the scenes. */
-  | "compact-end"
-  /** Last entry is the user-interrupt marker (Esc / Ctrl+C). The
-   * widget treats it as idle so the thinking indicator stops; the
-   * toast notifier suppresses it because the user explicitly aborted
-   * and a "Claude finished" toast would misrepresent that. */
-  | "interrupted"
-  /** Could not classify (empty tail, unparseable, unknown type).
-   * Treated as "idle" by callers so a broken scanner never blocks
-   * permanently. */
-  | "unknown";
-
 /** Walk a tail buffer backwards, parsing the last non-empty JSONL
  * line, and classify it. Returns `"unknown"` on any failure mode. */
-export function classifyLastEntry(tail: string): LastEntryKind {
+export function classifyClaudeTurn(tail: string): LastEntryKind {
   const lines = tail.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const raw = lines[i].trim();
@@ -149,4 +106,17 @@ export function classifyLastEntry(tail: string): LastEntryKind {
     // Other entry types (system, summary, etc.) keep walking.
   }
   return "unknown";
+}
+
+/** Claude turn-completion gate for notifications. Only `assistant-done`
+ * fires a toast. The classifier deliberately distinguishes:
+ *   - `assistant-pending` (tool_use in flight) - mid-turn, suppress
+ *   - `compact-end` (auto-compact summary marker) - engine rotated
+ *     context behind the scenes, the user's task isn't done, suppress
+ *   - `interrupted` (user hit Esc / Ctrl+C) - user aborted, suppress
+ *   - `unknown` (system / summary / unparseable) - suppress
+ * so mid-turn writes, compaction events, and aborts do not all
+ * masquerade as the same "Claude finished" notification. */
+export function isClaudeTurnComplete(tail: string): boolean {
+  return classifyClaudeTurn(tail) === "assistant-done";
 }

@@ -6,7 +6,7 @@
  *
  * The concrete `BridgeStageCoordinator` class lives under
  * `WAT321_EPIC_HANDSHAKE/` because bridge state is single-tool, not
- * cross-cutting. Engine owns only the type contract + event surface;
+ * cross-cutting. Engine owns only the type contract + event surface -
  * the EH tier owns the implementation and lifecycle.
  */
 
@@ -24,7 +24,7 @@ export type BridgeStage =
   | "complete";
 
 /** Minimal heartbeat info the snapshot exposes. The full `TurnHeartbeat`
- * type lives inside the EH tier; status-bar widgets only need
+ * type lives inside the EH tier - status-bar widgets only need
  * `turnStartedAt` to compute ceremony elapsed-since-start plus
  * `target` to suppress their debug ceremony on off-target dispatches,
  * so the structural subset stays in engine and the wider type stays

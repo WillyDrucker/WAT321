@@ -3,7 +3,7 @@
  * widgets.
  *
  * The underlying tps value updates as fast as the transcript writes
- * (sub-second during streaming on Claude/Codex; per heartbeat write on
+ * (sub-second during streaming on Claude/Codex - per heartbeat write on
  * the OpenCode widget). Rendering every change makes the "NNtps" string
  * flicker rapidly. This class caches the displayed value and refreshes
  * it on a flat 1-second cadence so the visible number ticks at a
@@ -23,7 +23,7 @@ export class TpsThrottle {
 
   /** Return the value the widget should display right now. Pass the
    * latest raw tps reading from cached state on each render. Inside
-   * the refresh interval the cached displayed value is returned;
+   * the refresh interval the cached displayed value is returned -
    * once the interval elapses, the displayed value snaps to the
    * latest reading. */
   next(currentTps: number | null | undefined): number | null | undefined {

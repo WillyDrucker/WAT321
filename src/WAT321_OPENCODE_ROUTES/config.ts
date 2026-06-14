@@ -12,10 +12,10 @@ import { resolveApiKeys } from "./secrets";
  * Read VS Code settings + runtime preferences + SecretStorage and
  * atomically write the merged config the MCP server consumes.
  * `channel.mjs` runs in a separate process spawned by Claude Code
- * and cannot reach VS Code; this file is the bridge between the
+ * and cannot reach VS Code - this file is the bridge between the
  * three state surfaces and the MCP server.
  *
- * The instance catalog is hardcoded (`shared/providers/opencode/catalog.ts`);
+ * The instance catalog is hardcoded (`shared/providers/opencode/catalog.ts`) -
  * only the local endpoint is user-configurable via settings. All Zen
  * instances share one SecretStorage-backed API key. Active-instance
  * selection is the only per-task knob in `preferences.json`, driven
@@ -42,7 +42,7 @@ export interface OpenCodeRouteInstance {
    * the missing-key error clearly. Empty for local instances. */
   apiKeyRef: string;
   /** OpenCode provider id used by the harness. Mirrors the catalog
-   * entry's `harnessProviderID`; `channel.mjs` reads it directly when
+   * entry's `harnessProviderID` - `channel.mjs` reads it directly when
    * building `{providerID, modelID}` for `/session/:id/message`. */
   harnessProviderID: "llama.cpp" | "zen";
   /** Model context window in tokens, copied from the catalog. The
@@ -114,7 +114,7 @@ export async function readConfigFromSettings(
     // Anonymous-access instances (free-tier Zen routes verified to
     // accept no Authorization header) are never "missing" a key -
     // missing key just means they fall through to the free path.
-    // Keyed call still wins when a key is present; this only affects
+    // Keyed call still wins when a key is present - this only affects
     // the "needs API key" rejection in channel.mjs.
     const apiKeyMissing =
       entry.apiKeyRef.length > 0 &&

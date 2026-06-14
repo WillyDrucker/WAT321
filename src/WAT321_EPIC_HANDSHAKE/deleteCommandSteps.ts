@@ -17,7 +17,7 @@ import type { EpicHandshakeLogger } from "./types";
  * failure at one step still lets the others run. Codex never cleans
  * its own index when rollouts are removed out-of-band, so the bulk
  * path's `orphanSweepPattern` argument lets the index strip also drop
- * entries whose rollout file is gone; without that sweep, deleted-
+ * entries whose rollout file is gone - without that sweep, deleted-
  * out-of-band orphans would keep `nextCollisionFreeCounter`'s gap-
  * fill from landing back at S1.
  */
@@ -103,7 +103,7 @@ export function stripSessionIndexEntries(
 
 /** Null the bridge-thread record at `recordPath`: threadId=null,
  * counter bumped to the gap-filled next, failure fields reset. When
- * `knownRecord` is non-null the caller already parsed the record;
+ * `knownRecord` is non-null the caller already parsed the record -
  * pass null to defensively re-read it (used by the bulk path which
  * doesn't load the record at the start). Returns the projected next
  * counter, or null if the record can't be read / written. */

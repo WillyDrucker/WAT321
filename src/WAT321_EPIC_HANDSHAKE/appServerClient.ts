@@ -131,7 +131,7 @@ export class AppServerClient {
 
     // Codex app-server's stderr is intentionally drained and ignored.
     // The server emits structured operational logs there that the
-    // extension cannot act on; surfacing them would only add noise.
+    // extension cannot act on - surfacing them would only add noise.
     child.stderr?.resume();
 
     child.on("error", (err) => {
@@ -306,7 +306,7 @@ export class AppServerClient {
    * "Restart Codex Bridge" menu action calls this when the user
    * wants the running app-server gone now (cached stale config,
    * misbehaving connection, etc.). Any in-flight pending requests
-   * are rejected synchronously so callers unwind cleanly. Idempotent;
+   * are rejected synchronously so callers unwind cleanly. Idempotent -
    * subsequent calls no-op once `child` is null. */
   forceKill(): void {
     if (this.isShuttingDown) return;

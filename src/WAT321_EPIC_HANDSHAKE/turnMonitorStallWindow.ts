@@ -15,7 +15,7 @@ import type { StageInfo } from "../shared/codex-rollout/types";
  * tool call, signalled by `reasoningTokens > 0`.
  *
  * The floor (`stallFloorMs`) lets Fire-and-Forget ride out long chained
- * tool calls; Standard/Adaptive leave it at 0.
+ * tool calls - Standard/Adaptive leave it at 0.
  */
 
 const SHELL_COMMAND_WINDOW_MS = 180_000;

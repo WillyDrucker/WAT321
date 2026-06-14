@@ -10,7 +10,7 @@ import { makeBackItem, makeSeparator } from "./menuCommon";
  * `clients/<wsId>/model-bridge/sessions/`, summarizing turns +
  * compacts + last-turn timestamp per thread, with row-level erase
  * or bulk "Erase all". The unified MCP server writes through other
- * paths; this surface exists to clean up rollouts that still land
+ * paths - this surface exists to clean up rollouts that still land
  * on the harness path.
  */
 

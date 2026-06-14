@@ -63,7 +63,7 @@ export function readHead(
  * Read and return the first complete line of a file. Reads in 16KB
  * chunks until a newline is found or the file ends. Safe for rollouts
  * whose `session_meta` first line routinely exceeds 8KB (env dumps,
- * MCP tool listings, git metadata push it to 15-25KB; future Codex
+ * MCP tool listings, git metadata push it to 15-25KB - future Codex
  * versions may grow it further). Capped at `maxBytes` to prevent
  * runaway reads on a malformed file with no newlines. Returns null
  * on I/O error or when no newline appears before `maxBytes`.

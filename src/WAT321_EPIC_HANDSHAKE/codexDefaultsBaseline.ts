@@ -14,7 +14,7 @@ import { currentWorkspacePath } from "./statusBarState";
 
 /**
  * Baseline + label helpers for the Codex Model Settings picker. The
- * three override flag files are workspace-scoped; `currentWsHash`
+ * three override flag files are workspace-scoped - `currentWsHash`
  * partitions reads so two VS Code windows on different projects
  * stay isolated. "Baseline" is the codex config.toml default for
  * model + model's own default-effort + read-only sandbox - the
@@ -85,7 +85,7 @@ export function baselineModel(): string | null {
   return readCodexConfigModel();
 }
 
-/** Model's own default effort from the cache; falls back to
+/** Model's own default effort from the cache - falls back to
  * `"medium"` when no model context applies. */
 export function baselineEffort(): CodexEffortLevel | null {
   const model = readCodexModelOverride(currentWsHash()) ?? baselineModel();

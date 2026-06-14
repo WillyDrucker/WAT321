@@ -16,7 +16,7 @@ import { CATALOG } from "./catalog";
  * Local llama.cpp's `limit` block is omitted entirely so reasoning
  * models (Qwen3, DeepSeek R1) have headroom to emit chain-of-thought
  * before tool_calls. OpenCode's schema rejects a partial limit block
- * (1.14.39+ requires both `context` and `output` when `limit` is
+ * (recent OpenCode releases require both `context` and `output` when `limit` is
  * present), so the choice is "both fields" or "no block at all" -
  * the latter lets OpenCode's 32K fallback apply, which matches what
  * the widget already shows for the local route.
@@ -89,7 +89,7 @@ export function buildOpenCodeJson(localEndpoint: string): string {
           apiKey: "not-needed",
         },
         // OpenCode rejects any modelID not declared in this map. The
-        // local LLM is whatever llama.cpp / Ollama / vLLM has loaded;
+        // local LLM is whatever llama.cpp / Ollama / vLLM has loaded -
         // llama.cpp ignores the request's `model` field entirely so
         // one fixed canonical name suffices and stays correct across
         // server-side model swaps.
@@ -113,7 +113,7 @@ export function buildOpenCodeJson(localEndpoint: string): string {
         mode: "primary",
         prompt: RESEARCH_AGENT_PROMPT,
         // Default-deny + explicit webfetch allow. OpenCode's `tools`
-        // map shape is deprecated in favor of `permission`; this also
+        // map shape is deprecated in favor of `permission` - this also
         // future-proofs against new tools OpenCode adds upstream
         // (a wildcard deny keeps newcomers off by default rather than
         // auto-allowing whatever ships next).

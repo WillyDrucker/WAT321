@@ -3,7 +3,8 @@ import { join } from "node:path";
 import type { CodexSessionIndex } from "./types";
 import { readTail } from "../shared/fs/fileReaders";
 import { normalizePath } from "../shared/fs/pathUtils";
-import { classifyCodexTurn, parseCwd } from "./parsers";
+import { parseCwd } from "./parsers";
+import { classifyCodexTurn } from "./turnClassifier";
 
 /**
  * Walks Codex's date-sharded rollout tree and picks the active
@@ -32,7 +33,7 @@ import { classifyCodexTurn, parseCwd } from "./parsers";
  */
 
 /** How many calendar day-directories back we walk. 30 days covers
- * any realistic active-session age; older rollouts are ignored. */
+ * any realistic active-session age - older rollouts are ignored. */
 const MAX_DAYS_TO_SCAN = 30;
 
 /** Per-candidate activity weight from the tail classifier. Larger
@@ -100,6 +101,83 @@ export interface RolloutCandidate {
   cwd: string;
 }
 
+/** Internal scoring shape for one rollout candidate, richer than the
+ * exported RolloutCandidate (carries the ranking inputs). */
+interface Candidate {
+  path: string;
+  mtime: number;
+  activity: number;
+  inProgress: boolean;
+  fresh: boolean;
+  isHot: boolean;
+  turnState: RolloutCandidate["turnState"];
+  cwd: string;
+}
+
+/** Stat + classify one rollout file into a ranking candidate, or null
+ * when it cannot be read or its cwd does not belong to this workspace.
+ * Shared by the day-window walk and the sticky-path injection so both
+ * score a candidate identically. */
+function buildCandidate(
+  fullPath: string,
+  wsNorm: string,
+  now: number
+): Candidate | null {
+  let mtime = 0;
+  try {
+    mtime = statSync(fullPath).mtimeMs;
+  } catch {
+    return null;
+  }
+
+  const cwd = parseCwd(fullPath);
+  if (!cwd) return null;
+  const cwdNorm = normalizePath(cwd);
+  // Bidirectional match, symmetric with Claude's walkWorkspaceSessions:
+  // also matches a native session launched from a subfolder of the open
+  // workspace.
+  const matches =
+    wsNorm === "" ||
+    cwdNorm === wsNorm ||
+    wsNorm.startsWith(`${cwdNorm}/`) ||
+    cwdNorm.startsWith(`${wsNorm}/`);
+  if (!matches) return null;
+
+  // Read the tail to classify activity. Bounded to the tail window so
+  // this stays cheap even on multi-MB rollouts. Freshness-gated: a
+  // non-zero activity score only counts when the rollout was written
+  // within ACTIVITY_FRESHNESS_MS. Outside that window the tail's
+  // classification is treated as stale (often an orphaned mid-write
+  // from days ago) and the candidate competes on mtime alone.
+  const tail = readTail(fullPath);
+  const rawTurnState = tail ? classifyCodexTurn(tail) : "unknown";
+  // Narrow LastEntryKind to the three states the candidate carries -
+  // compact-end / interrupted collapse to unknown.
+  const turnState: RolloutCandidate["turnState"] =
+    rawTurnState === "user" ||
+    rawTurnState === "assistant-pending" ||
+    rawTurnState === "assistant-done"
+      ? rawTurnState
+      : "unknown";
+  const rawActivity = ACTIVITY_SCORE[rawTurnState] ?? 0;
+  const activityFresh = now - mtime <= ACTIVITY_FRESHNESS_MS;
+  const activity = activityFresh ? rawActivity : 0;
+  const inventoryFresh = now - mtime <= INVENTORY_WINDOW_MS;
+  const isHot = now - mtime <= HOT_RECENCY_MS;
+  const inProgress = turnState === "assistant-pending" || turnState === "user";
+
+  return {
+    path: fullPath,
+    mtime,
+    activity,
+    inProgress,
+    fresh: inventoryFresh,
+    isHot,
+    turnState,
+    cwd,
+  };
+}
+
 /** Find the rollout JSONL the widget should track for the current
  * workspace AND tally how many sibling rollouts in the same
  * workspace are currently open (with how many in-progress). Ranks
@@ -109,7 +187,8 @@ export interface RolloutCandidate {
  * the same walk so there is no extra cost. */
 export function findLatestRollout(
   codexDir: string,
-  workspacePath: string
+  workspacePath: string,
+  stickyPath?: string | null
 ): RolloutDiscoveryResult {
   const sessionsDir = join(codexDir, "sessions");
   if (!existsSync(sessionsDir)) {
@@ -117,23 +196,13 @@ export function findLatestRollout(
   }
 
   const wsNorm = normalizePath(workspacePath);
-
-  interface Candidate {
-    path: string;
-    mtime: number;
-    activity: number;
-    inProgress: boolean;
-    fresh: boolean;
-    isHot: boolean;
-    turnState: "user" | "assistant-pending" | "assistant-done" | "unknown";
-    cwd: string;
-  }
+  const now = Date.now();
   const candidates: Candidate[] = [];
   let daysScanned = 0;
 
   try {
     const years = readdirSync(sessionsDir).sort().reverse();
-    for (const year of years) {
+    outer: for (const year of years) {
       const yearDir = join(sessionsDir, year);
       try { if (!statSync(yearDir).isDirectory()) continue; } catch { continue; }
 
@@ -144,9 +213,7 @@ export function findLatestRollout(
 
         const days = readdirSync(monthDir).sort().reverse();
         for (const day of days) {
-          if (daysScanned >= MAX_DAYS_TO_SCAN) {
-            return rankCandidates(candidates);
-          }
+          if (daysScanned >= MAX_DAYS_TO_SCAN) break outer;
           daysScanned++;
 
           const dayDir = join(monthDir, day);
@@ -161,63 +228,8 @@ export function findLatestRollout(
           }
 
           for (const file of files) {
-            const fullPath = join(dayDir, file);
-            let mtime = 0;
-            try {
-              mtime = statSync(fullPath).mtimeMs;
-            } catch {
-              continue;
-            }
-
-            const cwd = parseCwd(fullPath);
-            if (!cwd) continue;
-            const cwdNorm = normalizePath(cwd);
-            // Bidirectional match, symmetric with Claude's
-            // walkWorkspaceSessions: also matches a native session
-            // launched from a subfolder of the open workspace.
-            const matches =
-              wsNorm === "" ||
-              cwdNorm === wsNorm ||
-              wsNorm.startsWith(`${cwdNorm}/`) ||
-              cwdNorm.startsWith(`${wsNorm}/`);
-            if (!matches) continue;
-
-            // Read the tail to classify activity. Bounded to the tail
-            // window so this stays cheap even on multi-MB rollouts.
-            // Freshness-gated: a non-zero activity score only counts
-            // when the rollout was written within ACTIVITY_FRESHNESS_MS.
-            // Outside that window the tail's classification is treated
-            // as stale (often an orphaned mid-write from days ago) and
-            // the candidate competes on mtime alone.
-            const tail = readTail(fullPath);
-            const rawTurnState = tail ? classifyCodexTurn(tail) : "unknown";
-            // Narrow LastEntryKind to the three states the candidate
-            // carries; compact-end / interrupted collapse to unknown.
-            const turnState: RolloutCandidate["turnState"] =
-              rawTurnState === "user" ||
-              rawTurnState === "assistant-pending" ||
-              rawTurnState === "assistant-done"
-                ? rawTurnState
-                : "unknown";
-            const rawActivity = ACTIVITY_SCORE[rawTurnState] ?? 0;
-            const now = Date.now();
-            const activityFresh = now - mtime <= ACTIVITY_FRESHNESS_MS;
-            const activity = activityFresh ? rawActivity : 0;
-            const inventoryFresh = now - mtime <= INVENTORY_WINDOW_MS;
-            const isHot = now - mtime <= HOT_RECENCY_MS;
-            const inProgress =
-              turnState === "assistant-pending" || turnState === "user";
-
-            candidates.push({
-              path: fullPath,
-              mtime,
-              activity,
-              inProgress,
-              fresh: inventoryFresh,
-              isHot,
-              turnState,
-              cwd,
-            });
+            const candidate = buildCandidate(join(dayDir, file), wsNorm, now);
+            if (candidate) candidates.push(candidate);
           }
         }
       }
@@ -225,6 +237,21 @@ export function findLatestRollout(
   } catch {
     // ignore
   }
+
+  // Keep an already-tracked session in contention even after its rollout
+  // has aged past the day-window walk above. A long-running Codex session
+  // appends to one file in its CREATION-date directory for its whole life,
+  // so once that directory falls outside MAX_DAYS_TO_SCAN the walk can no
+  // longer reach it. Re-score the sticky path directly so it competes on
+  // the same activity-then-recency footing, and a genuinely newer session
+  // can still take over. buildCandidate re-applies the workspace cwd gate,
+  // so a sticky path can never widen scope to another project's session -
+  // discovery stays strictly project-scoped (no cross-instance leakage).
+  if (stickyPath && !candidates.some((c) => c.path === stickyPath)) {
+    const sticky = buildCandidate(stickyPath, wsNorm, now);
+    if (sticky) candidates.push(sticky);
+  }
+
   return rankCandidates(candidates);
 }
 
@@ -237,18 +264,7 @@ export function findLatestRollout(
  * in-flight turns) from the same candidate list so the widget
  * tooltip surfaces multi-session disclosure without a second walk.
  * Returns `{ path: null, total: 0, inProgress: 0 }` on empty list. */
-function rankCandidates(
-  candidates: {
-    path: string;
-    mtime: number;
-    activity: number;
-    inProgress: boolean;
-    fresh: boolean;
-    isHot: boolean;
-    turnState: "user" | "assistant-pending" | "assistant-done" | "unknown";
-    cwd: string;
-  }[]
-): RolloutDiscoveryResult {
+function rankCandidates(candidates: Candidate[]): RolloutDiscoveryResult {
   let total = 0;
   let inProgress = 0;
   for (const c of candidates) {

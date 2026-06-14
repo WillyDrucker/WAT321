@@ -19,7 +19,7 @@ import {
  * Surfaces sessions whose stored `session_meta.model` is no longer in
  * the local Codex models cache (drifted across a Codex CLI upgrade
  * that renamed or retired that slug). Auto-detects repairable sessions
- * via cache lookup; falls back to a force-repair input box when the
+ * via cache lookup - falls back to a force-repair input box when the
  * cache claims everything is valid but prompts still fail.
  *
  * The shared submenu in `menuPickers.ts` calls `findRepairableSessions`

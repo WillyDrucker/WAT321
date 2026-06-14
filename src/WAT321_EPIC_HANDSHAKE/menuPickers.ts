@@ -45,7 +45,7 @@ export async function showSessionsSubmenu(opts: {
   // effort - all three are per-turn overrides on `turn/start`, so the
   // change takes effect on the next prompt without a thread reset.
   // Locks during an in-flight bridge turn because the override flags
-  // are read mid-turn; switching while a turn is outstanding would
+  // are read mid-turn - switching while a turn is outstanding would
   // mean the in-flight envelope used different values than the user
   // expected. All locked rows share the same `(Disabled - Message
   // In-Flight)` suffix + lock icon so the user reads disabled state
@@ -64,7 +64,7 @@ export async function showSessionsSubmenu(opts: {
 
   // CODEX SESSION row. Labels show the active S# when one exists, else
   // "Created on next prompt to Codex". Click opens the recover-session
-  // picker so the user can switch among recoverable sessions; the
+  // picker so the user can switch among recoverable sessions - the
   // active row in that subpicker carries a green check. Locked during
   // an in-flight turn - switching the active session mid-turn would
   // leave the in-flight envelope writing to a thread the user is no

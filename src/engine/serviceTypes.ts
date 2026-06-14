@@ -1,12 +1,10 @@
-import type * as vscode from "vscode";
-
 /**
  * Generic state-machine types every poller surfaces, plus the listener
- * and status-bar-widget contracts they hand to subscribers. Lives in
+ * contract they hand to subscribers. Lives in
  * the engine layer so any future engine-tier consumer can subscribe to
  * service state without inverting the dependency graph through `shared/`.
  *
- * The success payload is provider-specific (`TData`); everything else
+ * The success payload is provider-specific (`TData`) - everything else
  * is shared shape. Tools and shared helpers import these here too -
  * the engine is the single source of truth for the contract.
  */
@@ -21,7 +19,7 @@ export type ServiceState<TData> =
       rateLimitedAt: number;
       /** Optional friendlier reason string extracted from the
        * server's 429 response body (Anthropic returns a JSON error
-       * shape; Codex returns plain text). Displayed as an extra
+       * shape - Codex returns plain text). Displayed as an extra
        * line in the rate-limited tooltip when present. Absent if
        * the body was unparseable or empty. */
       serverMessage?: string;
@@ -40,12 +38,3 @@ export type ServiceState<TData> =
 
 /** Generic listener callback for service state changes. */
 export type StateListener<TState> = (state: TState) => void;
-
-/**
- * Status bar widget contract. All widgets accept a state value and render
- * it. TState is usually a ServiceState<TData> for usage widgets or a
- * SessionTokenState for the session token widgets.
- */
-export interface StatusBarWidget<TState> extends vscode.Disposable {
-  update(state: TState): void;
-}

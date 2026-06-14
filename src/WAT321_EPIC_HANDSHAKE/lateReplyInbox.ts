@@ -9,7 +9,7 @@
  *
  *   import { listLateReplies, type DrainedReply } from "../engine/inbox";
  *
- * The legacy type name `LateReply` aliases `DrainedReply`; the engine
+ * The legacy type name `LateReply` aliases `DrainedReply` - the engine
  * version carries every field the legacy shape did (filename, fullPath,
  * body, createdAt, intent, sizeKb, sentDestPath, source) plus an
  * `envelope` field for callers that want the full parsed shape.

@@ -18,7 +18,7 @@ import {
 
 /** Transcript writes older than this are treated as state replay /
  * stale session switch artifacts and do not fire a notification.
- * A real turn completion writes to the transcript within seconds;
+ * A real turn completion writes to the transcript within seconds -
  * 30 seconds gives headroom for slow systems without letting stale
  * activations through. */
 const RECENT_ACTIVITY_WINDOW_MS = 30_000;
@@ -72,7 +72,7 @@ export function bridgeSessionResponse(
 ): vscode.Disposable {
   let prevContextUsed = -1;
   // Path switch resets the baseline so a contextUsed comparison
-  // across rollouts cannot fire a phantom responseComplete; the
+  // across rollouts cannot fire a phantom responseComplete - the
   // path-switch completion trigger handles the "turn finished during
   // a session switch" case explicitly.
   let prevTranscriptPath: string | null = null;

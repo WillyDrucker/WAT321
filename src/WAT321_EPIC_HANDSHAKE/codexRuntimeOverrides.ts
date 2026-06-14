@@ -22,7 +22,7 @@ import {
  * processing / paused flags.
  *
  * Per-turn override is the entire mechanism. `thread/start` passes
- * permissive defaults so the thread itself never restricts; the
+ * permissive defaults so the thread itself never restricts - the
  * authoritative state for any given turn comes from these flag files
  * being read at `turn/start` time. Codex enforces whatever it's told
  * per-turn (verified via probe: turn_context records the override AND

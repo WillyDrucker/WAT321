@@ -17,9 +17,10 @@ import {
 } from "../shared/polling/constants";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
-import { classifyLastEntry } from "../shared/transcriptClassifier";
+import { classifyClaudeTurn } from "./turnClassifier";
 import { logNotifEvent } from "../shared/diag/notifEventLog";
 import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
+import { NonActiveCompletionTracker } from "../shared/sessionTokens/nonActiveCompletionTracker";
 import { CompactStateMachine } from "./compactStateMachine";
 import { parseFirstUserMessage, parseLastUsage } from "./parsers";
 import { parseTurnInfo } from "./turnInfoParser";
@@ -33,7 +34,7 @@ import {
 } from "./transcriptDiscovery";
 
 /** fs.watch in the base class handles instant transcript-change
- * detection; the shared `SESSION_TOKEN_POLL_MS` cadence is a safety
+ * detection. The shared `SESSION_TOKEN_POLL_MS` cadence is a safety
  * net for session discovery and any missed watcher events.
  * `SESSION_TOKEN_RESCAN_MS` gates the more expensive full rescan. */
 
@@ -80,13 +81,23 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.triggerPoll();
   });
 
-  /** Per-session turn-state tracker for non-active completion
-   * detection. Updated each poll from the candidate walk. */
-  private readonly sessionTurnStates = new Map<
-    string,
-    { turnState: string; mtime: number; reportedAsDone: boolean }
-  >();
-  private pendingNonActiveCompletions: NonActiveCompletion[] = [];
+  /** Detects done-transitions on non-active sessions in this workspace
+   * so the bridge can fire a completion for a session other than the
+   * tracked one. Keyed by sessionId, with a 30s fresh window. */
+  private readonly nonActiveTracker =
+    new NonActiveCompletionTracker<SessionCandidate>({
+      freshWindowMs: 30_000,
+      keyOf: (c) => c.entry.sessionId,
+      turnStateOf: (c) => c.turnState,
+      mtimeOf: (c) => c.mtime,
+      buildCompletion: (c, now) => ({
+        sessionId: c.entry.sessionId,
+        transcriptPath: c.transcriptPath,
+        label: basename(c.entry.cwd) || c.entry.cwd,
+        sessionTitle: parseFirstUserMessage(c.transcriptPath),
+        completedAtMs: now,
+      }),
+    });
 
   constructor(workspacePath: string) {
     super(
@@ -113,8 +124,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.compactStateMachine.reset();
     this.sessionsWatcher.close();
     this.settingsWatcher.close();
-    this.sessionTurnStates.clear();
-    this.pendingNonActiveCompletions = [];
+    this.nonActiveTracker.reset();
     super.reset();
   }
 
@@ -130,10 +140,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
 
   /** Drain non-active completions since the last call. */
   consumeNonActiveCompletions(): NonActiveCompletion[] {
-    if (this.pendingNonActiveCompletions.length === 0) return [];
-    const out = this.pendingNonActiveCompletions;
-    this.pendingNonActiveCompletions = [];
-    return out;
+    return this.nonActiveTracker.drain();
   }
 
   private emitOk(session: ResolvedSession): void {
@@ -315,7 +322,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       usage.outputTokens;
 
     const tokensPerSecond = this.tpsTracker.add(sessionId, mtime, contextUsed);
-    const turnState = classifyLastEntry(tail);
+    const turnState = classifyClaudeTurn(tail);
     const compactState = this.compactStateMachine.sync({
       tail,
       sessionId,
@@ -327,7 +334,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     // pick above - no second walk, no second round of tail reads.
     const workspaceSessionInventory = tallyWorkspaceSessions(candidates);
 
-    this.detectNonActiveCompletions(candidates, sessionId, now);
+    this.nonActiveTracker.observe(candidates, sessionId, now);
 
     this.emitOk({
       sessionId,
@@ -350,64 +357,4 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     });
   }
 
-  /** Queue done-transitions on non-active sessions with fresh mtime.
-   * First-read for an unknown session is recorded but never queued;
-   * a stable done-state does not re-fire (per-session reportedAsDone
-   * gate). */
-  private detectNonActiveCompletions(
-    candidates: readonly SessionCandidate[],
-    activeSessionId: string,
-    now: number
-  ): void {
-    const FRESH_WINDOW_MS = 30_000;
-    const seen = new Set<string>();
-    for (const candidate of candidates) {
-      const sid = candidate.entry.sessionId;
-      seen.add(sid);
-      const prev = this.sessionTurnStates.get(sid);
-      const isDone = candidate.turnState === "assistant-done";
-      const isFresh = now - candidate.mtime <= FRESH_WINDOW_MS;
-
-      if (sid === activeSessionId) {
-        // Active session handled by the main bridge path; track state
-        // so a future ranking flip inherits a real baseline.
-        this.sessionTurnStates.set(sid, {
-          turnState: candidate.turnState,
-          mtime: candidate.mtime,
-          reportedAsDone: isDone,
-        });
-        continue;
-      }
-
-      if (prev === undefined) {
-        // First read: record without queuing.
-        this.sessionTurnStates.set(sid, {
-          turnState: candidate.turnState,
-          mtime: candidate.mtime,
-          reportedAsDone: isDone,
-        });
-        continue;
-      }
-
-      const wasDone = prev.reportedAsDone;
-      const transitionedToDone = isDone && !wasDone;
-      if (transitionedToDone && isFresh) {
-        this.pendingNonActiveCompletions.push({
-          sessionId: sid,
-          transcriptPath: candidate.transcriptPath,
-          label: basename(candidate.entry.cwd) || candidate.entry.cwd,
-          sessionTitle: parseFirstUserMessage(candidate.transcriptPath),
-          completedAtMs: now,
-        });
-      }
-      this.sessionTurnStates.set(sid, {
-        turnState: candidate.turnState,
-        mtime: candidate.mtime,
-        reportedAsDone: isDone || (wasDone && candidate.mtime === prev.mtime),
-      });
-    }
-    for (const sid of this.sessionTurnStates.keys()) {
-      if (!seen.has(sid)) this.sessionTurnStates.delete(sid);
-    }
-  }
 }

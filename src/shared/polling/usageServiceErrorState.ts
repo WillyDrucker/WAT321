@@ -64,8 +64,8 @@ export class UsageServiceErrorState {
   private consecutiveErrors = 0;
   /** Transient 429s tagged cold-start that we have absorbed while
    * an ok state is on display. The usage endpoint cold-polls 429 on
-   * brief idle gaps (most visibly at the 5h billing-window rollover);
-   * flipping the widget straight to the "Idle" skin violates the
+   * brief idle gaps (most visibly at the 5h billing-window rollover).
+   * Flipping the widget straight to the "Idle" skin violates the
    * last-known-good principle - the user just had valid numbers a
    * minute ago. We keep rendering the prior ok state for a few more
    * polls, then fall through to the full rate-limited park if the

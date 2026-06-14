@@ -3,15 +3,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readTail } from "../shared/fs/fileReaders";
 import { getProjectKey, normalizePath } from "../shared/fs/pathUtils";
-import {
-  classifyLastEntry,
-  type LastEntryKind,
-} from "../shared/transcriptClassifier";
+import type { LastEntryKind } from "../shared/turnState";
+import { classifyClaudeTurn } from "./turnClassifier";
 import type { SessionEntry } from "./types";
 
 /**
  * Live-session discovery for Claude. `walkWorkspaceSessions` does the
- * `~/.claude/sessions/*.json` I/O once per poll; `rankActiveSession`
+ * `~/.claude/sessions/*.json` I/O once per poll. `rankActiveSession`
  * and `tallyWorkspaceSessions` are pure consumers over that result.
  *
  * The lastKnown fallback (`findLastKnownTranscript`) lives in
@@ -27,7 +25,7 @@ export {
 /** Per-session snapshot surfaced by the walker. Carries every field
  * the rank and tally consumers need so neither has to re-read the
  * session file or the transcript tail. `turnState` is `"unknown"`
- * when the transcript could not be read; `mtime` falls back to
+ * when the transcript could not be read, and `mtime` falls back to
  * `entry.startedAt` in the same case. */
 export interface SessionCandidate {
   entry: SessionEntry;
@@ -125,7 +123,7 @@ export function walkWorkspaceSessions(
       }
 
       const tail = readTail(transcriptPath);
-      const turnState = tail ? classifyLastEntry(tail) : "unknown";
+      const turnState = tail ? classifyClaudeTurn(tail) : "unknown";
 
       candidates.push({ entry, transcriptPath, mtime, turnState });
     } catch {

@@ -4,7 +4,7 @@
  * read consistently:
  *
  *   5hr window:    "Resets 1:30AM (3hr 30min)"
- *   weekly window: "Resets in Thu (4d 1hr)"
+ *   weekly window: "Resets in Thu (4d 1hr)", "Resets in Tue (40min)" in the last hour
  *
  * Callers pass a ms-epoch timestamp (Claude: `new Date(iso).getTime()`,
  * Codex: `reset_at * 1000`). The helper returns the full string including
@@ -50,7 +50,15 @@ export function formatWeeklyReset(resetAtMs: number): string {
   const totalHrs = Math.floor(diff / 3_600_000);
   const d = Math.floor(totalHrs / 24);
   const h = totalHrs % 24;
-  const countdown = d > 0 ? `${d}d ${h}hr` : `${h}hr`;
+  // Inside the final hour, hour-only granularity reads "0hr" while the
+  // reset is still minutes away. Drop to minutes so the last hour stays
+  // meaningful, matching the five-hour formatter's sub-hour behavior.
+  const countdown =
+    d > 0
+      ? `${d}d ${h}hr`
+      : h > 0
+        ? `${h}hr`
+        : `${Math.floor(diff / 60_000)}min`;
 
   return `Resets in ${dayName} (${countdown})`;
 }

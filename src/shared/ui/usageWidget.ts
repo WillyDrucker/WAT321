@@ -14,7 +14,7 @@ import { classifyUsageNonOk } from "./usageNonOkClassifier";
 
 /**
  * Config-driven usage widget. Bars are always visible. The ok branch
- * renders fresh data with the provider's text color; every non-ok branch
+ * renders fresh data with the provider's text color - every non-ok branch
  * reuses the same bar layout (last-known cached data when available, else
  * a 0% scaffold) under the dim idle color. The one-word state label
  * ("Loading", "Refreshing", "Idle", "Offline", ...) lives on a separate

@@ -4,7 +4,7 @@ import * as vscode from "vscode";
  * Logger for the unified WAT321 Bridge tier. Mirrors the per-tier
  * loggers in WAT321_EPIC_HANDSHAKE and WAT321_OPENCODE_ROUTES so the
  * "WAT321: ..." entries in the Output panel dropdown feel consistent.
- * Hidden by default; surfaced manually when diagnosing the unified
+ * Hidden by default - surfaced manually when diagnosing the unified
  * MCP server's install / dispatch behavior.
  */
 

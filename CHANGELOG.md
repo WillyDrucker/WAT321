@@ -5,6 +5,22 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.25] - 2026-06-14
+
+### Fixed
+
+- **The weekly usage countdown now shows minutes in its final hour instead of "0hr".** A reset about forty minutes away used to read "Resets in Tue (0hr)" while the web app showed "40 min", because the weekly formatter floored anything under an hour to zero. It now drops to minutes inside the last hour, the way the five-hour countdown already did.
+
+- **The Codex session-tokens widget keeps tracking a session you have kept open for weeks.** A Codex session writes to a single file in its creation-day folder for its whole life, so one left running past the 30-day discovery window aged out of the scan and the widget went blank mid-session. The widget now holds onto the session it is already tracking and re-adopts it after a window reload, while still confirming every candidate belongs to your workspace so another window's session can never leak in.
+
+- **Cancelling a Codex turn no longer pops a false "Codex finished" notification.** When you interrupted a Codex turn with Esc or Ctrl+C, the cancelled turn was treated like a completed one and could fire a completion toast. An interrupt is now recognized as cancelled, so the indicator settles quietly without claiming the work finished.
+
+- **A backend you install after the fact is picked up when you turn Epic Handshake on again.** If you enabled Epic Handshake, saw that the Codex or OpenCode CLI was missing, then installed it, turning Epic Handshake on again used to keep reporting it as missing until you reloaded the window. The check now re-probes for the CLIs each time you enable, so a freshly installed backend is found right away.
+
+### Changed
+
+- **A large internal cleanup with no change to how the widgets behave.** The whole codebase had a naming, comments, and dead-code pass: clearer module names, leaner comments, and removal of code that nothing used anymore, for a net reduction of around 550 lines. This is housekeeping to keep the extension easy to work in, and apart from the fixes above it does not change anything you see in the status bar or how the extension runs.
+
 ## [1.5.24] - 2026-06-01
 
 ### Changed

@@ -16,12 +16,12 @@ import type { SessionTokenRenderData } from "./sessionTokenTypes";
  * awaiting-first-load latch) and the flash-window timestamps. Pure-
  * input / pure-output: `observe(data)` is called once per `ok` render
  * with the latest render data and decides whether a banner should
- * fire; `bannerAt(now)` returns what to display right now (or null).
+ * fire. `bannerAt(now)` returns what to display right now (or null).
  *
  * Read-only contract (load-bearing): no HTTP calls, no process
  * spawns, no file writes - only in-memory state mutations driving a
  * 2-second visual pulse. Thresholds in sessionTokenHelpers are tuned
- * against 25k+ sampled signatures; do not loosen without a fresh
+ * against 25k+ sampled signatures - do not loosen without a fresh
  * false-fire audit.
  *
  * Claude path (cc/cr tokens available):
@@ -94,7 +94,7 @@ export function createCacheBannerLatch(): CacheBannerLatch {
         lastUsageSignature = null;
         // Brand-new Claude session arms the latch so its first turn
         // fires LOAD as the genuine first cache build. Codex (info
-        // undefined) leaves the latch off; the Codex path uses
+        // undefined) leaves the latch off - the Codex path uses
         // newCompactObserved exclusively as its LOAD trigger.
         awaitingFirstLoad = info !== undefined;
       }
@@ -145,7 +145,7 @@ export function createCacheBannerLatch(): CacheBannerLatch {
   }
 
   /** Four 500ms frames across 2000ms, alternating colored emoji and
-   * black-circle off frame. Text persists the whole window; only the
+   * black-circle off frame. Text persists the whole window - only the
    * bullets blink. */
   function bannerAt(now: number): string | null {
     if (cacheLoadFlashStartedAt !== null) {

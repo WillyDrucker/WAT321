@@ -1,7 +1,6 @@
-import type { StatusBarWidget as GenericStatusBarWidget } from "../engine/serviceTypes";
 import type { StageInfo } from "../shared/codex-rollout/types";
 import type { CompactFlashSnapshot } from "../shared/polling/compactFlashMachine";
-import type { LastEntryKind } from "../shared/transcriptClassifier";
+import type { LastEntryKind } from "../shared/turnState";
 
 /** Entry from ~/.codex/session_index.jsonl */
 export interface CodexSessionIndex {
@@ -18,11 +17,11 @@ export interface CodexResolvedSession {
   modelSlug: string; // e.g. "gpt-5.1-mini"
   contextUsed: number; // last_token_usage.total_tokens (matches Codex native hover)
   contextWindowSize: number; // effective model context window from token_count
-  autoCompactTokens: number; // effective context window ceiling (matches Codex native hover); actual compact trigger is ~90/95 of this
+  autoCompactTokens: number; // effective context window ceiling (matches Codex native hover) - actual compact trigger is ~90/95 of this
   lastActiveAt: number; // ms - rollout file mtime (display metadata only)
   /** Extension-observed growth timestamp (ms). Set to wall-clock
    * `Date.now()` on every poll where the rollout file's byte size
-   * grew; seeded with the kernel mtime when a new rollout is first
+   * grew - seeded with the kernel mtime when a new rollout is first
    * picked up so a stale file does not falsely read as "just active".
    *
    * Drives the active-indicator freshness gate in place of the kernel
@@ -37,7 +36,7 @@ export interface CodexResolvedSession {
   lastActivityObservedAt: number;
   /** Last rollout event classification. Drives the active-state
    * indicator. `user` and `assistant-pending` mean a response is in
-   * flight; `assistant-done` and `unknown` are idle. */
+   * flight. `assistant-done` and `unknown` are idle. */
   turnState: LastEntryKind;
   /** Stage + tool + plan snapshot parsed from the same tail read
    * that populated `turnState`. Drives the active-state tooltip
@@ -84,6 +83,3 @@ export type CodexTokenWidgetState =
   | { status: "no-session" }
   | { status: "waiting" }
   | { status: "ok"; session: CodexResolvedSession };
-
-/** Codex session token widget contract. */
-export type StatusBarWidget = GenericStatusBarWidget<CodexTokenWidgetState>;

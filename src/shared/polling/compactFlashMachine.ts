@@ -5,7 +5,7 @@
  * operation finishes - the only observable signal is the boundary
  * entry at the end (`compact_boundary` for Claude, `compacted` for
  * Codex). So the machine is end-only: on a newly-observed boundary,
- * arm a brief completion flash; otherwise idle.
+ * arm a brief completion flash - otherwise idle.
  *
  * Provider parsers stay tier-local and feed a normalized
  * `CompactObservation` (newest boundary timestamp, the flash hold to
@@ -26,18 +26,18 @@ const DEFAULT_DURATION_MS = 120_000;
 export const COMPACT_BAR_CELL_COUNT = 5;
 
 /** Normalized, provider-agnostic view of compact state derived from a
- * transcript / rollout tail. Provider parsers produce this; the shared
+ * transcript / rollout tail. Provider parsers produce this - the shared
  * machine consumes it. */
 export interface CompactObservation {
   /** Timestamp (ms) of the newest compact boundary in the tail, or
    * null when none is present. */
   newestBoundaryAt: number | null;
   /** Flash hold to arm when a newly-observed boundary fires. Claude
-   * varies it by trigger (manual longer than auto); Codex passes a
+   * varies it by trigger (manual longer than auto) - Codex passes a
    * single fixed value since its marker carries no trigger field. */
   flashDurationMs: number;
   /** Recent boundary durations (ms) for the health-command estimate.
-   * Claude supplies real values from `compactMetadata.durationMs`;
+   * Claude supplies real values from `compactMetadata.durationMs` -
    * Codex has no duration field and supplies an empty array. */
   recentDurationsMs: readonly number[];
 }
@@ -46,11 +46,11 @@ export interface CompactFlashSnapshot {
   state: "idle" | "flashing-completion";
   /** Current best estimate of total compact duration in ms. Rolling
    * average of recent boundary durations, or the default. Health-
-   * command diagnostic only; no visual effect. */
+   * command diagnostic only - no visual effect. */
   estimatedDurationMs: number;
   /** 100 during flash (saturated final reading), 0 when idle. */
   percent: number;
-  /** Filled cells in the bar. Flash uses all five; idle = 0. */
+  /** Filled cells in the bar. Flash uses all five - idle = 0. */
   barsFilled: number;
   /** Wall-clock ms at which a `flashing-completion` window expires.
    * The widget consults this on every ticker frame so the flash

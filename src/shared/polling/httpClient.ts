@@ -16,7 +16,7 @@ export interface HttpGetJsonOptions {
   abortController: AbortController;
   /**
    * Optional non-200 response parser. Called with the raw body and response
-   * headers. If it returns an HttpError, that error is thrown; otherwise a
+   * headers. If it returns an HttpError, that error is thrown - otherwise a
    * plain Error with the status line is thrown. Use this to pull Retry-After
    * or other response-header data into the error object.
    */

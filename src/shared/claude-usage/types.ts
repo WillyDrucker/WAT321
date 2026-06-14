@@ -1,6 +1,5 @@
 import type {
   ServiceState as GenericServiceState,
-  StatusBarWidget as GenericStatusBarWidget,
 } from "../../engine/serviceTypes";
 
 export interface UsageResponse {
@@ -16,6 +15,3 @@ export interface UsageResponse {
 
 /** Claude-specialized service state: ok payload is a Claude UsageResponse. */
 export type ServiceState = GenericServiceState<UsageResponse>;
-
-/** Claude-specialized status bar widget contract. */
-export type StatusBarWidget = GenericStatusBarWidget<ServiceState>;

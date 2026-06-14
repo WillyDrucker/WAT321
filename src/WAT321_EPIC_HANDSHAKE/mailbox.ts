@@ -12,7 +12,7 @@ import type { EpicHandshakeLogger } from "./types";
  *     downstream consumer (conversation lives in Claude's own
  *     transcript), so we just bound disk footprint.
  *   - inbox/claude/ - 1 hour sweep for stale late replies. A user
- *     who walks away should not return to unbounded mail; 1h is
+ *     who walks away should not return to unbounded mail - 1h is
  *     long enough that a useful reply had real chances to be seen.
  */
 
@@ -20,7 +20,7 @@ const SENT_TTL_MS = 5 * 60 * 1000;
 const STALE_INBOX_TTL_MS = 60 * 60 * 1000;
 
 /** Remove sent/codex/ envelopes older than the TTL, then run the
- * stale-inbox sweep. Best-effort throughout; never throws. */
+ * stale-inbox sweep. Best-effort throughout - never throws. */
 export function purgeSent(opts: {
   sentCodex: string;
   inboxClaude: string;

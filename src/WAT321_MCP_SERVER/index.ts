@@ -20,7 +20,7 @@ import { bridgeStateDir } from "../shared/wat321Paths";
  *   - auto-create OpenCode S1 session on OpenCode Routes enable
  *
  * Epic Handshake's enabled flag is the single switch for the bridge.
- * Disabling EH sweeps the unified MCP entry; enabling installs it.
+ * Disabling EH sweeps the unified MCP entry - enabling installs it.
  */
 
 export { installUnifiedBridge, registerUnifiedBridgeCommands } from "./installer";
@@ -28,7 +28,6 @@ export { registerAutoCreateOpenCodeS1 } from "./autoCreateSession";
 
 export const BRIDGE_DIR = bridgeStateDir();
 export const BRIDGE_CONFIG_PATH = join(BRIDGE_DIR, "config.json");
-export const BRIDGE_ALIASES_PATH = join(BRIDGE_DIR, "session-aliases.json");
 
 interface BridgeConfig {
   enabled: {

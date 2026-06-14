@@ -39,7 +39,7 @@ export function writeOutbound(
 }
 
 /** Write an inbound (backend -> Claude) envelope. The MCP poller
- * and the inbox coordinator watch the inbound dir; this lands a
+ * and the inbox coordinator watch the inbound dir - this lands a
  * reply visible to both within ~50ms. */
 export function writeInbound(
   env: Envelope,

@@ -30,7 +30,7 @@ export interface DispatchResult {
   /** Reply body to write into the inbound envelope. */
   body: string;
   /** True when the dispatch errored. The inbound envelope is still
-   * written so the user gets *some* feedback; the body should contain
+   * written so the user gets *some* feedback - the body should contain
    * a human-readable error message. */
   error?: boolean;
   /** Optional alias override for the inbound envelope. Lets tiers

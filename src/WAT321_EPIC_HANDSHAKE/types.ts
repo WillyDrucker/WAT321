@@ -1,7 +1,7 @@
 /**
  * Minimal logger interface used by the JSON-RPC client, dispatcher,
  * and installer. Dependency-free (no `vscode` import) so tests can
- * inject a console or array-backed implementation; the extension
+ * inject a console or array-backed implementation - the extension
  * wires a VS Code output channel via `outputChannel.ts`.
  *
  * This is the one place in WAT321 where debug logging is allowed.

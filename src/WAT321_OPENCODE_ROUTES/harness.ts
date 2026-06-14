@@ -24,7 +24,7 @@ import { openCodeRoutesStateDir } from "../shared/wat321Paths";
  *   - cwd is the workdir so opencode discovers the JSON next to it
  *
  * `getServerUrl()` returns "" until the spawned server passes the
- * readiness probe; consumers gate visibility on that.
+ * readiness probe - consumers gate visibility on that.
  */
 
 export const OPENCODE_WORKDIR = join(openCodeRoutesStateDir(), "opencode-workdir");
@@ -53,8 +53,8 @@ export interface HarnessLogger {
 
 export interface OpenCodeManager {
   /** Reconcile the running subprocess against the supplied inputs.
-   * Spawns when enabled and not yet running; restarts when the
-   * provider-affecting inputs (endpoint or zen key) changed; kills
+   * Spawns when enabled and not yet running - restarts when the
+   * provider-affecting inputs (endpoint or zen key) changed - kills
    * when disabled. Returns the current URL once readiness completes
    * or "" when not yet up. */
   reconcile(inputs: OpenCodeManagerInputs): Promise<string>;
@@ -94,7 +94,7 @@ async function pickEphemeralPort(): Promise<number> {
 }
 
 /** Probe `http://127.0.0.1:<port>/app` until it answers or times out.
- * OpenCode's serve mode exposes `/app` for the embedded UI; even
+ * OpenCode's serve mode exposes `/app` for the embedded UI - even
  * without HTML it returns a non-network-error response once bound.
  *
  * Each probe runs under its own AbortController so a stalled fetch
@@ -182,7 +182,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     // loop dies and orphans the child. opencode serve has no on-disk
     // state worth flushing - graceful SIGTERM with a 2s timeout was
     // racing dispose() returns. SIGKILL on Windows maps to
-    // TerminateProcess; on POSIX it is the unblockable signal.
+    // TerminateProcess - on POSIX it is the unblockable signal.
     try {
       handle.kill("SIGKILL");
     } catch {
@@ -311,7 +311,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
         inFlight = null;
         // Drain any inputs that arrived during the run. Fire-and-
         // forget: callers from the original reconcile have already
-        // resolved with the in-flight result; the second pass
+        // resolved with the in-flight result - the second pass
         // updates internal state and republishes URL transitions
         // via onUrlChanged for downstream config rewrites.
         if (pendingInputs !== null) {

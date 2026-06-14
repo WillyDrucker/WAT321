@@ -59,7 +59,7 @@ function readOpenCodeRoutesConfigSnapshot(): OpenCodeRoutesConfigSnapshot | null
 function pickInstance(cfg: OpenCodeRoutesConfigSnapshot): OpenCodeRoutesInstance | null {
   const instances = Array.isArray(cfg.instances) ? cfg.instances : [];
   // Prefer the user's active instance when it's a remote (the auto-S1
-  // exists for OpenCode targets specifically; local instances get a
+  // exists for OpenCode targets specifically - local instances get a
   // separate auto-S1 when the local-llm target lands).
   const active = instances.find((i) => i.id === cfg.activeInstanceId);
   if (active && active.kind === "remote") return active;
@@ -140,7 +140,7 @@ export async function ensureOpenCodeS1(): Promise<void> {
 export function registerAutoCreateOpenCodeS1(
   context: vscode.ExtensionContext
 ): vscode.Disposable {
-  // Run once on activate. Fire-and-forget; the inner wait handles
+  // Run once on activate. Fire-and-forget - the inner wait handles
   // opencode serve startup latency.
   void ensureOpenCodeS1();
 

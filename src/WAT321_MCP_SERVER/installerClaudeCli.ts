@@ -87,7 +87,7 @@ export async function runClaudeCli(
 /** Strip dormant `wat321` MCP entries from `~/.claude.json`'s
  * per-project `mcpServers` map when their args[0] does not match the
  * current bin path. Claude Code reads project-scope MCP from each
- * workspace's `.mcp.json`; the entries under `~/.claude.json`
+ * workspace's `.mcp.json` - the entries under `~/.claude.json`
  * `projects.X.mcpServers.wat321` are dormant artifacts from an
  * earlier registration mechanism that point at a path which no
  * longer exists. Harmless but accumulating - sweep once on every
@@ -138,7 +138,7 @@ export function sweepStaleClaudeJsonEntries(logger: UnifiedLogger): void {
       `swept ${stripped} stale wat321 entry/entries from ~/.claude.json projects tree`
     );
   } catch {
-    // dormant entries are inert; next install retries
+    // dormant entries are inert - next install retries
   }
 }
 

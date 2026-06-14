@@ -13,7 +13,7 @@ import {
 /**
  * Pure stage-walker over the Epic Handshake bridge latch. Given the
  * previous latch and a heartbeat, returns the next latch + the stage
- * to display this tick. Owned by the coordinator; no I/O, no mutation
+ * to display this tick. Owned by the coordinator - no I/O, no mutation
  * of its inputs.
  *
  * Three transitions live here:
@@ -109,7 +109,7 @@ function startNewEnvelope(hb: TurnHeartbeat, now: number): AdvanceLatchResult {
 
 /** Hold path: target is at-or-below displayed, no force-advance is
  * due. Tracks the complete-walk-hold window when the latch sits on
- * stage 5; releases the latch once that window elapses. */
+ * stage 5 - releases the latch once that window elapses. */
 function holdStage(
   prevLatch: LatchState,
   refreshedTarget: BridgeStage,

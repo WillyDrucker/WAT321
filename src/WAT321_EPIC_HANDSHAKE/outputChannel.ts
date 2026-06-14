@@ -7,7 +7,7 @@ import type { EpicHandshakeLogger } from "./types";
 /**
  * VS Code output-channel-backed implementation of
  * `EpicHandshakeLogger`. The one place in WAT321 where debug logging
- * is allowed; never `console.log` or any other side path.
+ * is allowed - never `console.log` or any other side path.
  *
  * A JSON-RPC child process + event stream is harder to debug than
  * the pure-pull usage widgets, so we need a focused output channel.

@@ -15,7 +15,7 @@ import { showToast as showWindowsToast } from "./windowsToastProcess";
  * In-App (any platform): `vscode.window.showInformationMessage`.
  *
  * `showSystemNotification` returns false when the OS path failed to
- * even spawn; on macOS/Linux a spawn-success does not guarantee user
+ * even spawn - on macOS/Linux a spawn-success does not guarantee user
  * visibility (Focus Assist, missing notify-send, permissions) - the
  * notifier records the outcome the same way regardless.
  */
@@ -43,8 +43,8 @@ function escapeAppleScript(s: string): string {
  * caller records `system` for every fire-and-forget `notify-send`
  * even when the binary is missing - the bool return is synchronous
  * but the spawn `'error'` event arrives asynchronously. The first
- * call still over-reports; every call after that records correctly.
- * Map cleared by manual reset only; in practice the user installs
+ * call still over-reports - every call after that records correctly.
+ * Map cleared by manual reset only - in practice the user installs
  * `notify-send` (or fixes Mac permissions) once and the entry stays
  * stale, which is fine - a real fix path on the user side does not
  * regress the next-call accuracy. */

@@ -67,7 +67,7 @@ export function buildUsageTooltipHtml(input: UsageTooltipInput): vscode.Markdown
 
   // Build the heading icon prefix. If a color is supplied, wrap in a
   // styled span so the codicon inherits it. VS Code renders the
-  // codicon glyph via the `codicon` font; CSS `color` on the parent
+  // codicon glyph via the `codicon` font - CSS `color` on the parent
   // cascades to the glyph.
   // `&nbsp;&nbsp;` after the icon guarantees visible spacing since
   // plain whitespace collapses in markdown and `margin-right` on a

@@ -14,7 +14,7 @@ export const TICK_MS = 250;
 /** OpenCode dispatch heartbeat. The MCP server's dispatch path writes
  * this file at `~/.wat321/clients/<wsId>/model-bridge/heartbeat.json`
  * for the duration of every Claude-to-OpenCode / Claude-to-Local-LLM call
- * with a 5s keepalive cadence; the file is unlinked on completion.
+ * with a 5s keepalive cadence - the file is unlinked on completion.
  * The 15s staleness budget covers one missed keepalive plus normal
  * filesystem latency without ever lingering past a real dispatch. */
 const OPENCODE_HEARTBEAT_PATH = join(openCodeRoutesStateDir(), "heartbeat.json");
@@ -55,7 +55,7 @@ export function tpsSuffix(
   if (mode === "minimal") return "";
   // Gated by `wat321.enableTokensPerSecondCounters`. Off by default
   // so the widget reads as plain token count + percentage. Token
-  // counts stay regardless; only the rate suffix follows this setting.
+  // counts stay regardless - only the rate suffix follows this setting.
   if (
     !vscode.workspace
       .getConfiguration("wat321")
@@ -69,7 +69,7 @@ export function tpsSuffix(
 }
 
 /** `process.kill(pid, 0)` is the portable Node liveness check - signal
- * 0 is test-only, never delivered. ESRCH means the process is gone;
+ * 0 is test-only, never delivered. ESRCH means the process is gone,
  * EPERM means alive but we lack permission to signal (still alive
  * for our purposes). */
 export function isPidAlive(pid: number): boolean {
@@ -82,7 +82,7 @@ export function isPidAlive(pid: number): boolean {
   }
 }
 
-/** Cache-banner flash window. 2000ms total; the LOAD/MISS text persists
+/** Cache-banner flash window. 2000ms total - the LOAD/MISS text persists
  * the entire window. Bullets blink at 500ms cadence between colored
  * emoji (red MISS / yellow LOAD) and black-circle emoji (off frame).
  * After 2000ms the widget returns to the normal token readout. */
@@ -101,16 +101,16 @@ export const CACHE_BANNER_FLASH_MS = 2000;
  *      the surviving system prompt + tools, so creation is meaningful
  *      but reads are also non-trivial - the strict ratio gate would
  *      miss most of these. The marker (parser-detected
- *      `isCompactSummary`) is the source of truth; ratio drops when
+ *      `isCompactSummary`) is the source of truth - ratio drops when
  *      it's set.
  *
  * Floor thresholds derived from sampling 25k+ unique signatures: tiny
- * creation events are normal mid-turn caching of new content; real
+ * creation events are normal mid-turn caching of new content - real
  * rebuilds always >= 5k. */
 export const CACHE_REBUILD_CREATION_MIN = 5_000;
 export const CACHE_REBUILD_RATIO_DENOM = 2;
 
-/** Two-banner classification. Same 2000ms flash cadence for both;
+/** Two-banner classification. Same 2000ms flash cadence for both -
  * color signals cause:
  *
  *   yellow LOAD = deliberate cache build (cold start / session resume

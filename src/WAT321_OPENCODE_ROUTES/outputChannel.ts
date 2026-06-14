@@ -4,7 +4,7 @@ import * as vscode from "vscode";
  * Logger for the OpenCode Routes tier. Mirrors the
  * `WAT321_EPIC_HANDSHAKE/outputChannel.ts` shape so the per-tier
  * "WAT321: ..." entries in the Output panel dropdown feel consistent.
- * Hidden by default; users open it from the dropdown when diagnosing
+ * Hidden by default - users open it from the dropdown when diagnosing
  * connection issues.
  */
 

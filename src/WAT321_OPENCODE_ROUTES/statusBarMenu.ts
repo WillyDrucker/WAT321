@@ -26,7 +26,7 @@ import { zenKeyMenu } from "./zenKeyMenu";
  *   - 🟡 PAUSE / 🟢 RESUME and 🔴 CANCEL at the bottom of every menu
  *
  * Settings.json carries the master `enabled` flag plus the local
- * endpoint URL. The instance catalog is hardcoded; active-instance
+ * endpoint URL. The instance catalog is hardcoded - active-instance
  * selection is the only per-task knob, persisted in preferences.json.
  * Pause/Cancel are flag files under the per-client
  * `~/.wat321/clients/<wsId>/model-bridge/` directory that `channel.mjs`
@@ -34,7 +34,7 @@ import { zenKeyMenu } from "./zenKeyMenu";
  *
  * Action handlers (pickActiveInstance, testConnection,
  * resetSessionTotals) live in `statusBarMenuActions.ts` symmetric with
- * EH's actions file. Sessions submenu lives in `sessionsMenu.ts`; the
+ * EH's actions file. Sessions submenu lives in `sessionsMenu.ts` - the
  * Zen API key picker lives in `zenKeyMenu.ts`.
  */
 
@@ -45,7 +45,7 @@ import { zenKeyMenu } from "./zenKeyMenu";
  * a server restart, so the row is informational only.
  *
  * Cached for 30s per endpoint so a flurry of menu opens does not
- * pound /props. The cache invalidates after the TTL; if the user
+ * pound /props. The cache invalidates after the TTL - if the user
  * restarts the server with a different `-c`, the next menu open
  * after the TTL picks up the new value. */
 const N_CTX_CACHE_TTL_MS = 30_000;
@@ -128,7 +128,7 @@ export async function showOpenCodeRoutesMenu(
 
   // Probe llama-server's /props for the active local instance so the
   // menu can surface its actual `n_ctx`. The probe has a tight 1.5s
-  // ceiling and a 30s cache; if the server is unreachable the row
+  // ceiling and a 30s cache - if the server is unreachable the row
   // falls back to "(unknown)" instead of blocking the menu open.
   const localKvNCtx =
     active?.kind === "local"

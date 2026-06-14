@@ -25,7 +25,7 @@ import type { EnvelopeTarget } from "./envelope";
  *
  * The Codex paths are encoded directly here rather than imported from
  * `WAT321_EPIC_HANDSHAKE/constants`. Engine is the authoritative router
- * for the unified inbox abstraction across targets; reverse-importing
+ * for the unified inbox abstraction across targets - reverse-importing
  * from a tool tier would invert the dep-direction rule (engine never
  * depends on tiers). The EH tier still owns the same path constants
  * for its own internal use - this file just stops piggybacking on

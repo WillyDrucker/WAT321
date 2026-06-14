@@ -36,7 +36,7 @@ export interface Heartbeat {
   /** Workspace hash mirror of workspacePath for filtering callers
    * that already have the hash. Computed by the writer. */
   workspaceHash: string;
-  /** Coarse stage label. Codex walks all 5; non-Codex backends pin to
+  /** Coarse stage label. Codex walks all 5 - non-Codex backends pin to
    * `working` for the duration. */
   stage: HeartbeatStage;
   /** Codex: name of the tool the current stage is executing. Null
@@ -54,7 +54,7 @@ export interface Heartbeat {
    * "ms-since-start" against `Date.now()` directly. */
   turnStartedAt?: number;
   /** Per-stage first-entered timestamps. Codex populates each as the
-   * dispatcher walks stages; missing keys = stage not yet reached. */
+   * dispatcher walks stages - missing keys = stage not yet reached. */
   stageEnteredAt?: Partial<Record<HeartbeatStage, number>>;
   /** Wait mode this dispatch is running under. Surfaced on the
    * heartbeat so widget gates and MCP-side adaptive logic see the

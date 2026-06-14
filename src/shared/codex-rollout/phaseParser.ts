@@ -1,12 +1,8 @@
 import {
-  argumentsPreview,
-  getPayloadField,
   getPayloadType,
-  parsePlanArguments,
   splitLines,
   tryParseEntry,
 } from "./rolloutEntry";
-import type { PlanState, ToolCall } from "./types";
 
 /**
  * Pure parsers for Codex rollout JSONL tails. No fs, no watchers,
@@ -28,14 +24,12 @@ import type { PlanState, ToolCall } from "./types";
  * section 7.1 for the inventory.
  */
 
-const MAX_TOOL_HISTORY_SCAN = 500;
-
 /** Re-export so callers can still import `parseStageInfo` from
  * this module path. */
 export { parseStageInfo } from "./stageInfoParser";
 
 /** Slice a rollout tail to the lines belonging to the most recent
- * turn. A turn begins at an `event_msg > task_started` entry; every
+ * turn. A turn begins at an `event_msg > task_started` entry - every
  * prior turn is dropped. Returns the full tail unchanged when no
  * `task_started` is found (pre-turn or tail window too small to
  * include the boundary). Used by `parseStageInfo` for turn-scoped
@@ -54,77 +48,4 @@ export function extractCurrentTurn(tail: string): string {
     }
   }
   return tail;
-}
-
-/** Return the most recent `update_plan` function_call's plan array
- * within the current turn, or null if the current turn has no
- * `update_plan` invocations. Turn-scoped via `extractCurrentTurn`
- * so a plan from a prior turn does not leak into this turn's view.
- * Walks backwards for efficiency on long tails. */
-export function parseActivePlan(tail: string): PlanState | null {
-  const scoped = extractCurrentTurn(tail);
-  const lines = splitLines(scoped);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const entry = tryParseEntry(lines[i]);
-    if (!entry) continue;
-    if (
-      entry.type !== "response_item" ||
-      getPayloadType(entry) !== "function_call" ||
-      getPayloadField<string>(entry, "name") !== "update_plan"
-    ) {
-      continue;
-    }
-    const argsRaw = getPayloadField<unknown>(entry, "arguments");
-    const plan = parsePlanArguments(argsRaw);
-    if (plan !== null) return plan;
-  }
-  return null;
-}
-
-/** Return every tool call in the current turn in chronological
- * order, pairing each `function_call` with its
- * `function_call_output` via `call_id` when the output is present.
- * Turn-scoped via `extractCurrentTurn` so prior turns' tools do
- * not inflate the history. Capped at the most recent
- * `MAX_TOOL_HISTORY_SCAN` lines so the walk stays bounded for very
- * long turns. */
-export function parseToolCallHistory(tail: string): ToolCall[] {
-  const scoped = extractCurrentTurn(tail);
-  const lines = splitLines(scoped);
-  const start = Math.max(0, lines.length - MAX_TOOL_HISTORY_SCAN);
-  const calls: ToolCall[] = [];
-  const indexByCallId = new Map<string, number>();
-
-  for (let i = start; i < lines.length; i++) {
-    const entry = tryParseEntry(lines[i]);
-    if (!entry) continue;
-    if (entry.type !== "response_item") continue;
-    const payloadType = getPayloadType(entry);
-
-    if (payloadType === "function_call") {
-      const name = getPayloadField<string>(entry, "name") ?? "";
-      const callId = getPayloadField<string>(entry, "call_id") ?? "";
-      const argsRaw = getPayloadField<unknown>(entry, "arguments");
-      const tool: ToolCall = {
-        name,
-        callId,
-        timestamp: entry.timestamp,
-        argumentsPreview: argumentsPreview(argsRaw),
-        completed: false,
-      };
-      if (callId) indexByCallId.set(callId, calls.length);
-      calls.push(tool);
-      continue;
-    }
-
-    if (payloadType === "function_call_output") {
-      const callId = getPayloadField<string>(entry, "call_id") ?? "";
-      if (!callId) continue;
-      const idx = indexByCallId.get(callId);
-      if (idx !== undefined) {
-        calls[idx] = { ...calls[idx], completed: true };
-      }
-    }
-  }
-  return calls;
 }

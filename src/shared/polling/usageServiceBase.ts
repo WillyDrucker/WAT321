@@ -360,7 +360,7 @@ export abstract class UsageServiceBase<TResponse> {
     return true;
   }
 
-  /** Claim the shared cache lock; on contention, adopt the
+  /** Claim the shared cache lock. On contention, adopt the
    * existing cache or schedule a retry. Returns true when the
    * claim succeeded (caller may proceed). */
   private tryClaimOrFallback(): boolean {

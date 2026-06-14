@@ -123,55 +123,43 @@ export function refreshStatusBarItem(ctx: RefreshContext): void {
   let text: string;
   let tooltipSig: string;
   let tooltip: vscode.MarkdownString;
-  if (liveHeartbeat) {
-    const startedMs = new Date(liveHeartbeat.startedAt).getTime();
-    const elapsedMs = Number.isFinite(startedMs) ? Date.now() - startedMs : 0;
-    const stale =
-      Number.isFinite(startedMs) &&
-      elapsedMs > liveHeartbeat.timeoutMs * STALE_HEARTBEAT_MULTIPLIER;
-    if (stale) {
-      text = `${idleIcon} ${idleAlias}${sessionTokensSuffix}`;
-      tooltipSig = idleSig({
-        idleAlias,
-        needsKey,
-        usageSig,
-        activeBridgeAlias,
-        sessionTokens,
-      });
-      tooltip = buildOpenCodeRoutesTooltip({
-        hb: null,
-        catalogAlias: idleAlias,
-        catalogContextWindow: active.contextWindow ?? null,
-        retention,
-        needsKey,
-        sessionTokens,
-        target: activeBridgeTarget,
-        activeBridgeAlias,
-      });
-    } else {
-      const live = composeInFlightText({
-        heartbeat: liveHeartbeat,
-        idleAlias,
-        sessionTokens,
-        sessionTokensSuffix,
-        tpsThrottle,
-        elapsedMs,
-      });
-      text = live.text;
-      tooltipSig = `live:${liveHeartbeat.currentPhase || "DISPATCH"}:${(liveHeartbeat.phaseTrace || []).length}:${usageSig}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
-      tooltip = buildOpenCodeRoutesTooltip({
-        hb: liveHeartbeat,
-        catalogAlias: live.alias,
-        catalogContextWindow: active.contextWindow ?? null,
-        retention: liveHeartbeat.dataRetention ?? retention,
-        needsKey: false,
-        sessionTokens,
-        target: activeBridgeTarget,
-        activeBridgeAlias,
-      });
-    }
+
+  const startedMs = liveHeartbeat ? new Date(liveHeartbeat.startedAt).getTime() : NaN;
+  const elapsedMs = Number.isFinite(startedMs) ? Date.now() - startedMs : 0;
+  // Stale = heartbeat present but elapsed past timeout * multiplier (a
+  // dispatch that ghosted without clearing). Falls through to the idle
+  // skin rather than counting up forever.
+  const stale =
+    liveHeartbeat !== null &&
+    Number.isFinite(startedMs) &&
+    elapsedMs > liveHeartbeat.timeoutMs * STALE_HEARTBEAT_MULTIPLIER;
+
+  if (liveHeartbeat && !stale) {
+    const live = composeInFlightText({
+      heartbeat: liveHeartbeat,
+      idleAlias,
+      sessionTokens,
+      sessionTokensSuffix,
+      tpsThrottle,
+      elapsedMs,
+    });
+    text = live.text;
+    tooltipSig = `live:${liveHeartbeat.currentPhase || "DISPATCH"}:${(liveHeartbeat.phaseTrace || []).length}:${usageSig}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
+    tooltip = buildOpenCodeRoutesTooltip({
+      hb: liveHeartbeat,
+      catalogAlias: live.alias,
+      catalogContextWindow: active.contextWindow ?? null,
+      retention: liveHeartbeat.dataRetention ?? retention,
+      needsKey: false,
+      sessionTokens,
+      target: activeBridgeTarget,
+      activeBridgeAlias,
+    });
   } else {
-    const badge = needsKey ? " $(wat321-square-alert)" : "";
+    // Idle, or a stale heartbeat treated as idle. The missing-key badge
+    // shows only when truly idle (no heartbeat at all) - a stale
+    // heartbeat means a dispatch ran, so the key is known good.
+    const badge = !liveHeartbeat && needsKey ? " $(wat321-square-alert)" : "";
     text = `${idleIcon} ${idleAlias}${sessionTokensSuffix}${badge}`;
     tooltipSig = idleSig({
       idleAlias,
@@ -214,7 +202,7 @@ function computeIdleSessionSuffix(args: {
   // Brand-new session with zero turns reads as `0 0%` which is
   // technically correct yet less useful than the per-instance
   // lifetime counter at idle. Show per-session only once it has real
-  // tokens; otherwise fall to lifetime so the bar always carries
+  // tokens - otherwise fall to lifetime so the bar always carries
   // some signal.
   if (sessionTokens && sessionTokens.contextUsed > 0) {
     const pctSuffix =

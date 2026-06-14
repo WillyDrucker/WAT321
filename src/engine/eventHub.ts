@@ -7,7 +7,7 @@ import type {
 
 /**
  * Typed fire-and-forget event hub for cross-cutting concerns.
- * Providers and tools emit events; any consumer subscribes.
+ * Providers and tools emit events - any consumer subscribes.
  * No state retention - each emission is independent.
  *
  * Type safety is enforced via the `AppEvents` interface map:

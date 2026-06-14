@@ -27,7 +27,7 @@ type NotifEventKind =
   | "notifier-decision";
 
 /** Specific gate or fire path inside `sessionResponseBridge`. Shared
- * with the bridge so the literal union has a single home; the
+ * with the bridge so the literal union has a single home - the
  * `fire-*` prefix is load-bearing for the bridge's
  * `reason.startsWith("fire-")` check. */
 export type BridgeDecisionReason =
@@ -120,7 +120,7 @@ function eventLogPath(): string {
  *    sessionId is the filename without extension.
  *  - Codex:  `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<UUID>.jsonl`
  *    where `<ts>` is `YYYY-MM-DDThh-mm-ss` (six dash-separated
- *    parts). The UUID is everything after the sixth dash; older
+ *    parts). The UUID is everything after the sixth dash - older
  *    rollout filenames without the timestamp still hash through the
  *    full basename fallback. */
 export function sessionIdFromPath(

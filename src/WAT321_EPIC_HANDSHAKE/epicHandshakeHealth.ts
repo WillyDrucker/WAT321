@@ -19,7 +19,7 @@ import type { BridgeThreadRecord } from "./threadPersistence";
 
 /** Cached CLI version lookups so a single health command invocation
  * spends ~1ms per provider rather than re-running `--version` every
- * time. Keyed by command path; one spawn per binary across the entire
+ * time. Keyed by command path - one spawn per binary across the entire
  * VS Code lifetime. */
 const cliVersionCache = new Map<string, string | null>();
 
@@ -62,7 +62,7 @@ export function appendEpicHandshakeHealth(lines: string[]): void {
   // my claude/codex coming from?" - especially relevant now that the
   // bridge can fall back to the marketplace extension's bundled binary
   // when nothing is on PATH. peek* returns undefined when no probe has
-  // run yet (rare in practice; isClaudeAvailable runs at activate).
+  // run yet (rare in practice - isClaudeAvailable runs at activate).
   const claude = peekResolvedClaudeCli();
   const codex = peekResolvedCodexCli();
   const opencode = peekResolvedOpenCodeCli();

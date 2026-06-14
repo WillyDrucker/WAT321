@@ -67,7 +67,7 @@ export const KICKSTART_ACTIVITY_WINDOW_MS = 30_000;
 /** Escalating minimum park times for the activity-driven kickstart
  * gate. Indexed by the `consecutiveFailedKickstarts` counter,
  * clamped to the final element. Element 0 is the responsive fresh
- * park; each subsequent element is a progressive friction step
+ * park - each subsequent element is a progressive friction step
  * applied after a kickstart round has failed (all post-wake strikes
  * exhausted without a successful fetch). The final element matches
  * `RATE_LIMIT_BACKOFF_MS` so once we reach it the kickstart is
@@ -119,7 +119,7 @@ export const NETWORK_ERROR_ABSORPTION_THRESHOLD = 2;
 
 /** Retry interval used while absorbing a network-class error. The
  * normal 122s poll cadence would stretch the spinner past the user's
- * "still trying" expectation; 30s lands the second retry in the
+ * "still trying" expectation - 30s lands the second retry in the
  * 35-40s total spin range before the offline skin renders. */
 export const NETWORK_ERROR_RETRY_MS = 30_000;
 

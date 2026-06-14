@@ -9,15 +9,15 @@ import type {
 /**
  * Stage definitions, timing constants, and shared types for the Epic
  * Handshake bridge state machine. `bridgeStageCoordinator` owns
- * lifecycle and orchestration; `bridgeStageWalker` owns the per-tick
- * advance logic; this file owns what the stages mean.
+ * lifecycle and orchestration - `bridgeStageWalker` owns the per-tick
+ * advance logic - this file owns what the stages mean.
  *
  * Stage map - what each square-N cycle means:
  *
  *   1 dispatched   square-one   <-> arrow-right   outbound to Codex
  *     Codex side:  app-server child spawning OR thread/start +
  *                  turn/start being dialed in. Cold first dispatch
- *                  can run ~20s; subsequent dispatches over the same
+ *                  can run ~20s - subsequent dispatches over the same
  *                  connection move through in <1s.
  *     Entry:       writeHeartbeat("dispatched") when turnRunner starts.
  *     Exit:        observeRpcProgress("turn-started") or rollout
@@ -92,19 +92,19 @@ export const STAGE_MAX_HOLD_MS: Record<BridgeStage, number> = {
 export const CEREMONY_MS = 4000;
 
 /** Backstop polling interval. fs-watch on EH_DIR drives most ticks
- * instantly; the timer remains for time-based progressions
+ * instantly - the timer remains for time-based progressions
  * (ceremony window expiring, stage min-hold elapsing during
  * dispatcher silence). */
 export const TICK_INTERVAL_MS = 1000;
 
 /** How long the coordinator stays idle before the polling timer
- * suspends itself. fs-watch keeps state correct in the meantime;
+ * suspends itself. fs-watch keeps state correct in the meantime -
  * suspending saves the 1Hz fs op cost during long idle stretches.
  * The next fs-watch event resumes the timer immediately. */
 export const IDLE_SUSPEND_MS = 30_000;
 
 /** Coalesce fs-watch fire bursts. Atomic tmp+rename triggers 2-3
- * events in rapid succession; 50ms absorbs the burst without feeling
+ * events in rapid succession - 50ms absorbs the burst without feeling
  * laggy. */
 export const WATCH_DEBOUNCE_MS = 50;
 
@@ -127,7 +127,7 @@ export const LATCH_ORPHAN_GRACE_MS = 3000;
  * writing) when Codex has already finished and the walker just needs
  * to catch up. Triggered when lastTargetStage reaches `complete`
  * while the walker is still walking. Stage 1 keeps its full floor
- * for the ceremony; stage 5 keeps its full hold + completion window.
+ * for the ceremony - stage 5 keeps its full hold + completion window.
  * 500ms lets stages 3 and 4 flash visibly on a sub-12s fast turn
  * instead of being skipped invisibly. */
 export const FAST_WALK_INTERMEDIATE_MS = 500;
@@ -152,7 +152,7 @@ export interface LatchState {
    * `turnStartedAt`). Drives ceremony detection. Falls back to
    * latch entry when the heartbeat lacks a turn start. */
   turnStartedAt: number;
-  /** Set when the synthetic walker reaches `complete`; gives stage
+  /** Set when the synthetic walker reaches `complete` - gives stage
    * 5 its hold window before the coordinator releases the envelope. */
   completeWalkAt: number | null;
   /** Highest stage seen on this envelope's heartbeat across reads.

@@ -47,7 +47,7 @@ import { workspaceHash } from "../shared/workspaceHash";
  */
 
 /** Move root-level legacy envelopes into the partitioned workspace
- * layout. Routes by the envelope's own `workspace_path` field;
+ * layout. Routes by the envelope's own `workspace_path` field -
  * unparseable or workspace-less envelopes archive to
  * `sent/<dir>/legacy/` for human inspection. */
 export function migrateLegacyEnvelopes(logger: EpicHandshakeLogger): void {
@@ -117,7 +117,7 @@ function migrateLegacyDir(
 
 /** Copy an account-global legacy sentinel into the active window's
  * per-workspace path, first-window-wins. Idempotent via the empty
- * per-workspace gate; the legacy sweep below removes the global file
+ * per-workspace gate - the legacy sweep below removes the global file
  * after this runs so subsequent activates skip. Best-effort. */
 function migrateLegacyFlag(globalPath: string, perWorkspacePath: string): void {
   try {
@@ -138,7 +138,7 @@ function migrateLegacyFlag(globalPath: string, perWorkspacePath: string): void {
 /** Sweep any orphan runtime files left behind by a prior crash or
  * abrupt VS Code exit. Called once on activate. The 1h safety TTL
  * for in-inbox mail (`sweepStaleInboxMail` in mailbox.ts, fires on
- * every bridge dispatch) handles genuinely-stale replies; this
+ * every bridge dispatch) handles genuinely-stale replies - this
  * function only clears short-lived sentinels (in-flight, processing,
  * returning, cancel, wait-mode flash) that a prior crash could have
  * left in a misleading state.
@@ -148,7 +148,7 @@ function migrateLegacyFlag(globalPath: string, perWorkspacePath: string): void {
  * restarted (long-running fire-and-forget scrape, mid-flight close)
  * must survive activation so the next `wat321_ask` or `wat321_bridge`
  * call can deliver it. A "clean slate" sweep that moved every pending
- * reply to sent/ on activate would cause silent reply loss; the 1h
+ * reply to sent/ on activate would cause silent reply loss - the 1h
  * TTL on subsequent dispatches catches truly stale entries without
  * stranding fresh ones. */
 export function clearStaleRuntimeFiles(): void {
@@ -164,7 +164,7 @@ export function clearStaleRuntimeFiles(): void {
       removeIfExists(returningFlagPath(hash));
       removeIfExists(cancelFlagPath(hash));
       removeIfExists(waitModeFlashFlagPath(hash));
-      // Suppress-toast sentinel is per-turn and consume-on-read; any
+      // Suppress-toast sentinel is per-turn and consume-on-read - any
       // leftover from a prior session is by definition stale and would
       // otherwise eat the first unrelated Codex toast in this session.
       removeIfExists(suppressCodexToastFlagPath(hash));

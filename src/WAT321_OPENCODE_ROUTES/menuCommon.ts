@@ -8,7 +8,7 @@ import * as vscode from "vscode";
  * menu, structured rows in between.
  *
  * Color emoji prefixes carry the affordance because VS Code's
- * QuickPickItem icon API does not honor per-row tinting; the Unicode
+ * QuickPickItem icon API does not honor per-row tinting - the Unicode
  * circles read at a glance even when the workbench codicons are all
  * monochrome.
  */
@@ -17,7 +17,7 @@ type Item = vscode.QuickPickItem & { action: string };
 
 /** Pause / Resume factory. Always shown at the bottom of every menu
  * so the user can pause future dispatches mid-task. Pause refuses
- * NEW tool calls; the in-flight call keeps running and finishes
+ * NEW tool calls - the in-flight call keeps running and finishes
  * normally. The drain tools (`model_bridge_inbox`, `model_bridge_list`)
  * stay reachable while paused. */
 export function makePauseResumeItem(paused: boolean): Item {

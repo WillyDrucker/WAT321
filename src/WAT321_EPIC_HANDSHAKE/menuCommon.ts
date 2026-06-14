@@ -60,7 +60,7 @@ export type DispatchAction = (
 ) => Promise<void>;
 
 /** Pass-through wrapper for QuickPick opens. Retained as the single
- * seam every menu call site funnels through; the body is a no-op
+ * seam every menu call site funnels through - the body is a no-op
  * today and is a candidate for inlining if a future audit confirms
  * no seam is needed. */
 export async function withMenuLifecycle<T>(fn: () => Thenable<T>): Promise<T> {
@@ -68,7 +68,7 @@ export async function withMenuLifecycle<T>(fn: () => Thenable<T>): Promise<T> {
 }
 
 /** Pause/Resume factory. Always shown so the user can pause future
- * dispatches mid-turn (only blocks NEW prompts; the in-flight turn
+ * dispatches mid-turn (only blocks NEW prompts - the in-flight turn
  * keeps running). RESUME shows when the bridge is currently paused.
  * Color circle prefix (yellow for pause, green for resume) reads at
  * a glance even when the icon glyph is monochrome - VS Code's

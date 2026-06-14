@@ -52,7 +52,7 @@ export function activateOpenCodeRoutes(
   // OutboundWatcher + per-target OpenCodeDispatcher. The watcher
   // fs-watches `<bridgeStateDir>/dispatch/<target>/` for outbound
   // envelopes written by the MCP server's fire-and-forget path and
-  // hands each to the matching dispatcher; the dispatcher makes the
+  // hands each to the matching dispatcher - the dispatcher makes the
   // actual HTTP/SSE call to opencode serve (or anonymous Zen) and
   // returns a `DispatchResult`. The engine writes the inbound reply
   // envelope so `wat321_bridge()` picks it up on next drain.
@@ -96,7 +96,7 @@ export function activateOpenCodeRoutes(
       .replace(/\/+$/, "");
     const zenKey = (await readSecret(context, ZEN_API_KEY_SECRET)) ?? "";
 
-    // Managed local opencode-serve is the only harness target now;
+    // Managed local opencode-serve is the only harness target now -
     // when OpenCode is enabled, reconcile spawns it. Disabling
     // OpenCode kills the subprocess.
     const managedUrl = await openCodeManager.reconcile({

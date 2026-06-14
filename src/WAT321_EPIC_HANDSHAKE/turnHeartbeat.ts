@@ -41,7 +41,7 @@ export type BridgeTarget = "codex" | "opencode" | "local";
 export interface TurnHeartbeat {
   envelopeId: string;
   /** Backend that produced this heartbeat. Codex / OpenCode / Local
-   * each write their own heartbeats; the session-token widgets read
+   * each write their own heartbeats - the session-token widgets read
    * this to skip the debug-connect ceremony for off-target dispatches
    * (the Codex widget should NOT animate when a Big Pickle FF call
    * is in flight). Optional for back-compat with older heartbeat
@@ -67,7 +67,7 @@ export interface TurnHeartbeat {
    * bridge ceremony). Without carrying this on the heartbeat the
    * widget can only read the sticky flag, which lags behind per-call
    * args passed to `wat321_ask`. Optional for back-compat with older
-   * dispatchers; absent means fall back to the flag. */
+   * dispatchers - absent means fall back to the flag. */
   waitMode?: WaitMode;
 }
 
@@ -125,7 +125,7 @@ export function readNewestHeartbeat(
       }
       if (parsed.workspaceHash !== wsHash) continue;
       // Engine-tier dispatchers (non-Codex) write the per-turn id as
-      // `dispatchId`; the Codex dispatcher (which predates the unified
+      // `dispatchId` - the Codex dispatcher (which predates the unified
       // engine) writes it as `envelopeId`. Both name the same UUID -
       // accept either so the bridge stage coordinator sees every
       // backend's heartbeat through a single reader.

@@ -171,7 +171,7 @@ export function readLastUsedInstanceId(): string | null {
  * wins over the configured `activeInstanceId` for DISPLAY so the
  * widget reflects the most recent dispatch (e.g. user just ran Big
  * Pickle - widget shows Big Pickle even if their default routing is
- * local-llm). Routing decisions still consult `activeInstanceId`;
+ * local-llm). Routing decisions still consult `activeInstanceId` -
  * this only affects what label/stats render. */
 export function activeInstanceFrom(
   snap: ConfigSnapshot
@@ -188,7 +188,7 @@ export function activeInstanceFrom(
 
 /** Bridge target ("opencode" or "local") for the displayed instance
  * so the active S# can be looked up in the alias map. Local LLM
- * maps to "local"; every Zen route (Big Pickle and friends) maps to
+ * maps to "local" - every Zen route (Big Pickle and friends) maps to
  * "opencode". Null when no instance is selected. */
 export function targetForInstance(
   instance: ConfigSnapshot["instances"][number] | null
