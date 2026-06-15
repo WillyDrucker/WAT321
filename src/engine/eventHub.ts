@@ -1,9 +1,5 @@
 import type * as vscode from "vscode";
 import type { ProviderKey } from "./contracts";
-import type {
-  BridgePhase,
-  BridgeStage,
-} from "./bridgeTypes";
 
 /**
  * Typed fire-and-forget event hub for cross-cutting concerns.
@@ -22,10 +18,7 @@ import type {
 /** Every event the engine can emit. Add new events here as the
  * engine grows. Handlers receive the exact payload type.
  *
- * Provider lifecycle events feed `healthCommand`'s transition log.
- * Bridge events emitted by `BridgeStageCoordinator` drive instant
- * status-bar refresh on phase / stage transitions instead of widgets
- * polling heartbeat files. */
+ * Provider lifecycle events feed `healthCommand`'s transition log. */
 export interface AppEvents {
   "provider.activated": { provider: ProviderKey };
   "provider.deactivated": { provider: ProviderKey };
@@ -49,21 +42,6 @@ export interface AppEvents {
     completionMs: number;
   };
   "engine.reset": Record<string, never>;
-  "bridge.phaseChanged": {
-    from: BridgePhase;
-    to: BridgePhase;
-    workspacePath: string | null;
-  };
-  "bridge.stageChanged": {
-    from: BridgeStage | null;
-    to: BridgeStage | null;
-    workspacePath: string | null;
-  };
-  "inbox.countChanged": {
-    from: number;
-    to: number;
-    workspacePath: string | null;
-  };
 }
 
 type Handler<T> = (payload: T) => void;

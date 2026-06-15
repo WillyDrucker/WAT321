@@ -25,9 +25,7 @@ const WIDGETS = [
   { id: "wat321.codexUsageStatus",      name: "Codex Usage Status",           provider: "codex",  slot: 4 },
   { id: "wat321.codexWeekly",           name: "Codex Usage (Weekly)",         provider: "codex",  slot: 5 },
   { id: "wat321.sessionTokens",         name: "Claude Session Tokens",        provider: "claude", slot: 6 },
-  { id: "wat321.epicHandshake",         name: "Epic Handshake",               provider: "engine", slot: 7 },
-  { id: "wat321.codexSessionTokens",    name: "Codex Session Tokens",         provider: "codex",  slot: 8 },
-  { id: "wat321.modelBridge",           name: "OpenCode Routes",                 provider: "engine", slot: 9 },
+  { id: "wat321.codexSessionTokens",    name: "Codex Session Tokens",         provider: "codex",  slot: 7 },
 ] as const satisfies readonly WidgetDescriptor[];
 
 /** Every widget ID registered in the catalog. Used by Reset WAT321
@@ -55,9 +53,7 @@ export const WIDGET_SLOT = {
   codexUsageStatus: 4,
   codexUsageWeekly: 5,
   claudeSessionTokens: 6,
-  epicHandshake: 7,
-  codexSessionTokens: 8,
-  openCodeRoutes: 9,
+  codexSessionTokens: 7,
 } as const;
 
 /** Derived reverse map: slot number -> widget ID. Built from

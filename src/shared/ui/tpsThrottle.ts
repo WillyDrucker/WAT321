@@ -3,8 +3,8 @@
  * widgets.
  *
  * The underlying tps value updates as fast as the transcript writes
- * (sub-second during streaming on Claude/Codex - per heartbeat write on
- * the OpenCode widget). Rendering every change makes the "NNtps" string
+ * (sub-second during streaming on Claude and Codex). Rendering every
+ * change makes the "NNtps" string
  * flicker rapidly. This class caches the displayed value and refreshes
  * it on a flat 1-second cadence so the visible number ticks at a
  * comfortable readable pace independent of the underlying signal rate.

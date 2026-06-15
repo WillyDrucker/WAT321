@@ -5,6 +5,14 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-15
+
+### Removed
+
+- **Epic Handshake has graduated into its own standalone product, and WAT321 is now a focused Claude and Codex usage extension.** The bridge that let you ask Codex, OpenCode, and local models from a Claude session is leaving WAT321 so it can grow on its own, and everything that powered it has been lifted out wholesale - the dispatcher, the OpenCode and local-LLM routing, and the two runtime dependencies it needed. What is left is exactly what most people install WAT321 for: the usage bars, the session-token widgets, the heatmap, and the finish notifications, in a noticeably smaller download.
+
+- **Upgrading from a version that had Epic Handshake on cleans up the old bridge for you.** On first launch the new version quietly removes the leftover bridge registration, restores your Claude settings to how they were, and clears the retired bridge files from `~/.wat321/` - touching only what the old bridge itself created and leaving the rest of your setup alone. A fresh install has nothing to clean and skips it.
+
 ## [1.5.25] - 2026-06-14
 
 ### Fixed

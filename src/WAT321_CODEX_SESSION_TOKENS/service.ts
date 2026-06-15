@@ -2,7 +2,6 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { CodexResolvedSession, CodexTokenWidgetState } from "./types";
-import { parseStageInfo } from "../shared/codex-rollout/phaseParser";
 import { readHead, readTail } from "../shared/fs/fileReaders";
 import { CompactFlashMachine } from "../shared/polling/compactFlashMachine";
 import {
@@ -91,10 +90,8 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
    * (not Date.now()) so idle stretches between writes contribute zero
    * seconds to the denominator. Source is cumulative `usage.tokens`
    * because Codex updates that field on every mid-turn `token_count`
-   * event - `stageInfo.outputTokens` only refreshes at turn boundary
-   * and would either miss the entire turn or jump in one tick. See
-   * `shared/sessionTokens/tpsTracker.ts` for the windowing, idle-gap
-   * reset, and minimum-age guards. */
+   * event. See `shared/sessionTokens/tpsTracker.ts` for the windowing,
+   * idle-gap reset, and minimum-age guards. */
   private readonly tpsTracker = new TpsTracker();
   /** Drives the post-compact completion flash. Codex's `compacted`
    * rollout entry is the only observable signal (post-completion, same
@@ -338,7 +335,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       this.cachedAutoCompactModel = this.cachedModelSlug ?? "";
     }
 
-    const stageInfo = parseStageInfo(tail);
     const tokensPerSecond = this.tpsTracker.add(
       sessionId,
       rolloutMtime,
@@ -373,7 +369,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       lastActiveAt: rolloutMtime,
       lastActivityObservedAt,
       turnState,
-      stageInfo,
       lastCompactTimestamp: lastCompactAt,
       tokensPerSecond,
       compactState,

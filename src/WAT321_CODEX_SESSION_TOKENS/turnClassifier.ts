@@ -88,9 +88,7 @@ export function classifyCodexTurn(tail: string): LastEntryKind {
     // Codex emits many call variants depending on which tool fired:
     // function_call (custom tools), web_search_call (built-in search),
     // local_shell_call, file_search_call, etc. Any *_call under a
-    // response_item means a tool is mid-flight. Bridge-driven sessions
-    // rely on this heavily - they have no shell access so they lean on
-    // reasoning + built-in tools.
+    // response_item means a tool is mid-flight.
     if (ptype === "tool_call" || ptype === "function_call") return "assistant-pending";
     if (entry.type === "response_item" && typeof ptype === "string" && ptype.endsWith("_call")) {
       return "assistant-pending";
