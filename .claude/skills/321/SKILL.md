@@ -10,6 +10,7 @@ description: Router for the /321 skill family. Resolves -<Flag> against AIDOCS/_
 ## How to invoke
 
 ```
+/321 -Setup            onboard a project: fresh fill or migrate (deregistered at graduation)
 /321 -UpdateSession    refresh SESSION (Current State + LIFO)
 /321 -UpdateMemory     distill MEMORY (LIFO + Big-6) + BACKLOG
 /321 -Update           the daily driver: chain -UpdateSession then -UpdateMemory (-FULL propagates)
@@ -35,4 +36,4 @@ Unknown flag -> list the available flags from `skills.dispatch` and exit. Do not
 - **Resolve and load.** The router does not duplicate sub-skill logic.
 - **Body paths come from `_index.json`.** Do not hardcode them here.
 - **Variant suffixes pass through.** Tokens after the skill flag (`-FULL`, `-CHECK`, etc.) reach the sub-skill body as arguments. The router only resolves the first token.
-- **Registration is mechanical.** A skill body in `AIDOCS/SKILL/` plus `sync` registers it for dispatch - adding one needs no router edit. The quick-ref above is a human usage hint, reconciled by hand at graduation when `-Setup` is deregistered (`-Update` Phase 2).
+- **Registration is mechanical.** A skill body in `AIDOCS/SKILL/` plus `sync` registers it for dispatch - adding one needs no router edit. The quick-ref above is a human usage hint, reconciled mechanically: `graduate` and `upgrade` both prune any `/321 -Flag` line whose `SKILL_<Name>.md` body is no longer on disk, so the deregistered `-Setup` line drops on its own at graduation.
