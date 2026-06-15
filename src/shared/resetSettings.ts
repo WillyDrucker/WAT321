@@ -159,15 +159,13 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
   // sweep never finds anything on a clean install.
   healStaleApplicationScopeKeys();
 
-  // Reset hook: awaited so cross-tool cleanup (MCP uninstall,
-  // globalState clears) completes BEFORE the disk wipe below. Also
-  // clears kickstart escalation counters on running services so a
-  // user trapped in a sustained outage gets the responsive fresh-
-  // park cadence back immediately. Runs after the stuck-override
-  // heal (so any hard-fail aborts before this) and before the
-  // setting writes (so no user-visible churn overlaps). Handler
-  // errors are swallowed - reset must complete even if a hook
-  // throws.
+  // Reset hook: awaited before the disk wipe below. Clears kickstart
+  // escalation counters on running services so a user trapped in a
+  // sustained outage gets the responsive fresh-park cadence back
+  // immediately. Runs after the stuck-override heal (so any hard-fail
+  // aborts before this) and before the setting writes (so no
+  // user-visible churn overlaps). Handler errors are swallowed -
+  // reset must complete even if a hook throws.
   try {
     await onReset?.();
   } catch {

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getCodexModelInfo, isKnownCodexModel } from "../../providers/codex/models";
+import { getCodexModelDefaultEffort, isKnownCodexModel } from "../../providers/codex/models";
 import { formatModelDisplayName } from "../../../engine/contracts";
 import type { ClaudeTurnInfo } from "./sessionTokenWidget";
 import { formatPct, formatTokens, makeTokenBar } from "../tokenFormatters";
@@ -121,7 +121,7 @@ export function buildSessionTokenTooltip(
       provider === "Codex" && !isKnownCodexModel(modelId);
     const prefix = codexModelInvalid ? "⚠ " : "";
     // Effort tag dot-separated between model and context window.
-    // Codex: per-turn override > model's default_reasoning_level.
+    // Codex: the model's default_reasoning_level from the local cache.
     // Claude: the persistent equivalent is whether extended thinking
     // is firing in recent turns (Claude has no UI knob like Codex's
     // effort, but the thinking-block presence is its closest analog).
@@ -130,7 +130,7 @@ export function buildSessionTokenTooltip(
     md.appendMarkdown(`${prefix}Model: ${modelName}${effortSegment}${windowLabel}  \n`);
     if (codexModelInvalid) {
       md.appendMarkdown(
-        `_Model not in your installed Codex's known set. The next prompt will fail - repair via the bridge menu._  \n`
+        `_Model not in your installed Codex's known set - it may have been renamed or retired. Pick a current model in Codex._  \n`
       );
     }
   }
@@ -230,7 +230,7 @@ function resolveEffortLabel(
   claudeTurnInfo: ClaudeTurnInfo | undefined
 ): string | null {
   if (provider === "Codex") {
-    const effective = getCodexModelInfo(modelId)?.defaultEffort ?? null;
+    const effective = getCodexModelDefaultEffort(modelId);
     if (effective === null) return null;
     return effective.charAt(0).toUpperCase() + effective.slice(1);
   }

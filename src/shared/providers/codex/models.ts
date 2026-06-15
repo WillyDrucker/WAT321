@@ -3,52 +3,29 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 /**
- * Read-only accessor for `~/.codex/models_cache.json`, the
- * authoritative list of model slugs Codex CLI recognizes locally.
- * Used to detect bridge sessions whose stored `session_meta.model` has
- * drifted out of the installed CLI's known set - a class of failure
- * that surfaces as a 404 from the API on the next `thread/resume`.
+ * Read-only accessor for `~/.codex/models_cache.json`, the list of
+ * model slugs the Codex CLI recognizes locally. The session-token
+ * tooltip uses it to flag a stored model slug that has drifted out of
+ * the installed CLI's known set (a renamed or retired model, which
+ * would 404 on the next prompt) and to show the model's default
+ * reasoning level.
  *
- * The cache refreshes on Codex CLI upgrades, and our validation
- * automatically reflects the current installed set without any
- * WAT321-side change when OpenAI renames or retires a model.
- *
- * Safe to call on every dispatch: the file is typically under 4KB and
- * parsed in a fraction of a ms. Failures collapse to `null` / `true`
- * so a missing or unreadable cache never gates legitimate work.
+ * The cache refreshes on Codex CLI upgrades, so validation reflects
+ * the current installed set automatically. Safe to call on every
+ * render: the file is typically under 4KB and parsed in a fraction of
+ * a ms. Failures collapse to `null` / `true` so a missing or
+ * unreadable cache never gates display.
  */
 
 const MODELS_CACHE_PATH = join(homedir(), ".codex", "models_cache.json");
 
-interface ReasoningLevelEntry {
-  effort?: string;
-  description?: string;
-}
-
 interface ModelsCacheEntry {
   slug?: string;
-  display_name?: string;
-  description?: string;
   default_reasoning_level?: string;
-  supported_reasoning_levels?: ReasoningLevelEntry[];
-  visibility?: string;
-  priority?: number;
 }
 
 interface ModelsCacheFile {
   models?: ModelsCacheEntry[];
-}
-
-/** Public-facing shape for the model + effort picker. Carries everything
- * the picker needs to render a row (display_name + description) and
- * everything the effort sub-picker needs after the user picks a model
- * (the supported effort list with per-effort descriptions). */
-export interface CodexModelInfo {
-  slug: string;
-  displayName: string;
-  description: string;
-  defaultEffort: string | null;
-  supportedEfforts: { effort: string; description: string }[];
 }
 
 /** Read and parse `~/.codex/models_cache.json`. Returns null on any
@@ -64,9 +41,8 @@ function readModelsCache(): ModelsCacheFile | null {
 }
 
 /** List of every model slug present in the local Codex cache. Empty
- * array when the cache is unreadable. Used by the repair picker to
- * suggest a replacement slug, and by diagnostics. */
-export function listKnownCodexSlugs(): string[] {
+ * array when the cache is unreadable. */
+function listKnownCodexSlugs(): string[] {
   const cache = readModelsCache();
   if (!cache?.models) return [];
   const out: string[] = [];
@@ -80,7 +56,7 @@ export function listKnownCodexSlugs(): string[] {
 
 /** True if the slug appears in the local Codex models cache. Returns
  * `true` when the cache cannot be read (missing / malformed) so a
- * broken cache never gates a dispatch - the fallback matches prior
+ * broken cache never gates display - the fallback matches prior
  * behavior where no validation ran at all. Returns `false` only when
  * the cache is readable AND the slug is definitely not present. */
 export function isKnownCodexModel(slug: string | null): boolean {
@@ -90,88 +66,14 @@ export function isKnownCodexModel(slug: string | null): boolean {
   return known.includes(slug);
 }
 
-/** Read the `model = "..."` key from `~/.codex/config.toml`. Minimal
- * TOML scan - we only care about the top-level `model` string, which
- * is the Codex CLI's default model slug. Returns null when the file
- * is missing, the key is unset, or the value is not a string. Safe
- * for display paths. */
-export function readCodexConfigModel(): string | null {
-  const configPath = join(homedir(), ".codex", "config.toml");
-  if (!existsSync(configPath)) return null;
-  try {
-    const raw = readFileSync(configPath, "utf8");
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("#")) continue;
-      // Match `model = "slug"` or `model='slug'` at the top level.
-      // Nested `[profiles.*]` sections may also define `model`, but
-      // we scan the whole file top-down and pick the first match -
-      // the top-level one precedes any section header by convention.
-      // Stop at the first `[section]` header so a profile-scoped
-      // model doesn't shadow the top-level default.
-      if (trimmed.startsWith("[") && trimmed.endsWith("]")) break;
-      const m = /^model\s*=\s*["']([^"']+)["']\s*(?:#.*)?$/.exec(trimmed);
-      if (m) return m[1];
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/** Resolve the rich info for a model slug from the cache. Returns null
- * when the cache is unreadable or the slug is not present. Caller can
- * fall back to a slug-only display when null comes back. */
-export function getCodexModelInfo(slug: string): CodexModelInfo | null {
+/** The model's default reasoning level from the cache, or null when
+ * the cache is unreadable or the slug is absent / carries no default.
+ * Used by the session-token tooltip to show the effort Codex runs. */
+export function getCodexModelDefaultEffort(slug: string): string | null {
   const cache = readModelsCache();
   if (!cache?.models) return null;
   for (const entry of cache.models) {
-    if (entry.slug !== slug) continue;
-    return modelEntryToInfo(entry);
+    if (entry.slug === slug) return entry.default_reasoning_level ?? null;
   }
   return null;
-}
-
-/** All models the user should see in the picker. Filters by
- * `visibility === "list"` (matching Codex's own UI behavior - hidden
- * models like preview slugs stay out of the dropdown), and sorts by
- * `priority` ascending so the recommended model lands first. */
-export function listSelectableCodexModels(): CodexModelInfo[] {
-  const cache = readModelsCache();
-  if (!cache?.models) return [];
-  const selectable = cache.models.filter((m) => m.visibility === "list");
-  selectable.sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999));
-  return selectable
-    .map((m) => modelEntryToInfo(m))
-    .filter((m): m is CodexModelInfo => m !== null);
-}
-
-function modelEntryToInfo(entry: ModelsCacheEntry): CodexModelInfo | null {
-  if (typeof entry.slug !== "string" || entry.slug.length === 0) return null;
-  return {
-    slug: entry.slug,
-    displayName: entry.display_name ?? entry.slug,
-    description: entry.description ?? "",
-    defaultEffort: entry.default_reasoning_level ?? null,
-    supportedEfforts: (entry.supported_reasoning_levels ?? [])
-      .filter((e): e is { effort: string; description?: string } =>
-        typeof e.effort === "string"
-      )
-      .map((e) => ({ effort: e.effort, description: e.description ?? "" })),
-  };
-}
-
-/** Pick a repair target for an invalid model slug. Priority:
- *   1. Codex CLI's configured default (from config.toml) if valid
- *   2. First entry in models_cache.json (a model Codex definitely
- *      supports on this machine)
- *   3. null - no safe repair possible, caller falls back to Reset
- * Validating the config.toml default before picking it protects
- * against the case where config itself stores the bad slug (the
- * likely origin of the drift in the first place). */
-export function preferredRepairSlug(): string | null {
-  const configDefault = readCodexConfigModel();
-  if (configDefault && isKnownCodexModel(configDefault)) return configDefault;
-  const known = listKnownCodexSlugs();
-  return known.length > 0 ? known[0] : null;
 }

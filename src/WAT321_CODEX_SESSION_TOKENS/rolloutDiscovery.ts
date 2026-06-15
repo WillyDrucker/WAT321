@@ -181,9 +181,9 @@ function buildCandidate(
  * workspace AND tally how many sibling rollouts in the same
  * workspace are currently open (with how many in-progress). Ranks
  * the active pick by activity-then-mtime so a concurrently-active
- * native Codex session wins against an idle bridge rollout even
- * when the bridge's last write was newer. Inventory is computed in
- * the same walk so there is no extra cost. */
+ * Codex session wins against an idle rollout even when the idle
+ * one's last write was newer. Inventory is computed in the same
+ * walk so there is no extra cost. */
 export function findLatestRollout(
   codexDir: string,
   workspacePath: string,
