@@ -12,6 +12,7 @@ import {
   setHostAppName,
 } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
+import { removeLegacyBridge } from "./shared/legacyBridgeRemoval";
 
 /**
  * Top-level entry point. Creates the engine context, registers
@@ -51,6 +52,11 @@ export function activate(context: vscode.ExtensionContext) {
       })
     );
   }
+
+  // One-time removal of the pre-1.6.0 Epic Handshake bridge for
+  // upgraders (see legacyBridgeRemoval). Best-effort and idempotent -
+  // a fresh install with no prior bridge is a no-op.
+  removeLegacyBridge(context);
 
   ctx = createEngineContext();
 
