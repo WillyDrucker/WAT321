@@ -3,7 +3,7 @@ import type { LastEntryKind } from "../../turnState";
 
 /**
  * Type contracts shared by the session-token widget and its provider-
- * specific consumers (Claude / Codex parsers, OpenCode poller).
+ * specific consumers (Claude / Codex parsers).
  *
  * Defined in `shared/ui` rather than per-tier so the generic widget
  * can reference these types without inverting the shared -> tool

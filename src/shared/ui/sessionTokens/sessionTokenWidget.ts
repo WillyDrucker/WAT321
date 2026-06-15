@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import type { BridgeStageReader } from "../../../engine/bridgeTypes";
 import { getSessionTokenDisplayMode } from "../../../engine/displayMode";
 import { getWidgetPriority } from "../../../engine/widgetCatalog";
 import { SQUARE_ORANGE_COMPACT } from "../heatmap";
@@ -9,7 +8,6 @@ import {
 } from "./sessionTokenCacheBannerLatch";
 import {
   COMPACT_PROGRESS_COLOR,
-  isOpenCodeDispatchActive,
   isPidAlive,
   TICK_MS,
   tpsSuffix,
@@ -67,10 +65,6 @@ export class SessionTokenWidget<TState extends { status: string }>
   private descriptor: SessionTokenWidgetDescriptor<TState>;
   private lastState: TState | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
-  /** Push subscription to bridge phase + stage transitions so the
-   * first bridge dispatch after a cold launch animates immediately
-   * instead of waiting up to 15s for the next service poll. */
-  private bridgeSub: { dispose(): void } | null = null;
   /** Display-refresh throttle for the visible TPS suffix. Per-widget -
    * the Claude widget's cadence does not drag the Codex widget. Reset
    * on session change so a fresh session's first reading appears
@@ -80,10 +74,7 @@ export class SessionTokenWidget<TState extends { status: string }>
    * adoption + LOAD/MISS flash timing. */
   private cacheBannerLatch: CacheBannerLatch = createCacheBannerLatch();
 
-  constructor(
-    descriptor: SessionTokenWidgetDescriptor<TState>,
-    private readonly bridgeStage: BridgeStageReader
-  ) {
+  constructor(descriptor: SessionTokenWidgetDescriptor<TState>) {
     this.descriptor = descriptor;
     this.item = vscode.window.createStatusBarItem(
       descriptor.id,
@@ -93,10 +84,6 @@ export class SessionTokenWidget<TState extends { status: string }>
     this.item.name = `WAT321: ${descriptor.provider} Session Tokens`;
     this.item.text = `${descriptor.idlePrefix} ${descriptor.provider} -`;
     this.item.tooltip = `No active ${descriptor.provider} session`;
-    this.bridgeSub = bridgeStage.onChange(() => {
-      this.render();
-      this.ensureTicker();
-    });
   }
 
   update(state: TState): void {
@@ -106,7 +93,6 @@ export class SessionTokenWidget<TState extends { status: string }>
   }
 
   /** True when an animation needs the 250ms sampling cadence:
-   *   - bridge widget is mid-turn (any non-idle phase)
    *   - cache LOAD or MISS flash window is open
    *   - transcript was active within the last `activeThresholdMs`
    *
@@ -115,10 +101,6 @@ export class SessionTokenWidget<TState extends { status: string }>
    * it. Avoids the 4Hz tick during long idle stretches. */
   private animationsActive(): boolean {
     const now = Date.now();
-    if (this.bridgeStage.snapshot().phase !== "idle") return true;
-    if (this.descriptor.provider === "Claude" && isOpenCodeDispatchActive()) {
-      return true;
-    }
     if (this.cacheBannerLatch.isFlashing(now)) return true;
     if (this.lastState?.status === "ok") {
       const data = this.descriptor.getRenderData(
@@ -226,12 +208,10 @@ export class SessionTokenWidget<TState extends { status: string }>
           return;
         }
 
-        const snapshot = this.bridgeStage.snapshot();
         const mode = getSessionTokenDisplayMode();
         const prefix = pickPrefix({
           descriptor: d,
           data,
-          snapshot,
           now,
         });
         const banner = this.cacheBannerLatch.bannerAt(now);
@@ -264,20 +244,8 @@ export class SessionTokenWidget<TState extends { status: string }>
           ceiling: data.ceiling,
           baselineTokens: data.baselineTokens,
           lastActiveAt: data.lastActiveAt,
-          stageInfo: data.stageInfo,
           claudeTurnInfo: data.claudeTurnInfo,
-          turnState: data.turnState,
           autoCompactEffectiveTokens: data.autoCompactEffectiveTokens,
-          codexEffort: snapshot.codexEffort,
-          bridgeActive: snapshot.phase !== "idle",
-          bridgeWaitTimeoutSec:
-            d.provider === "Claude"
-              ? snapshot.waitInfo?.timeoutSec ?? null
-              : null,
-          bridgeWaitMode:
-            d.provider === "Claude"
-              ? snapshot.waitInfo?.mode ?? "sync"
-              : "sync",
           workspaceSessionInventory: data.workspaceSessionInventory,
         });
         this.item.show();
@@ -291,8 +259,6 @@ export class SessionTokenWidget<TState extends { status: string }>
       clearInterval(this.ticker);
       this.ticker = null;
     }
-    this.bridgeSub?.dispose();
-    this.bridgeSub = null;
     this.item.dispose();
   }
 }

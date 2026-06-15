@@ -132,12 +132,9 @@ async function resetStatusBarItemVisibility(): Promise<void> {
  * stuck-override heal runs, but before any setting writes or disk
  * wipes. Used to clear in-memory state on running services that
  * `rmSync(~/.wat321/)` cannot reach (kickstart escalation counters
- * on both usage services) AND to perform cross-tool cleanup that
- * must complete before the wipe (Epic Handshake MCP entry removal
- * from `~/.claude/settings.json`, VS Code globalState keys that
- * would otherwise outlive a disk wipe). May return a Promise - the
- * reset flow awaits it so cleanup finishes before the disk wipe.
- * Individual failures inside are not expected to abort reset. */
+ * on both usage services). May return a Promise - the reset flow
+ * awaits it so cleanup finishes before the disk wipe. Individual
+ * failures inside are not expected to abort reset. */
 type OnResetCallback = () => void | Promise<void>;
 
 async function performClear(onReset?: OnResetCallback): Promise<void> {
@@ -197,25 +194,11 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes(SETTING.notificationsMode, undefined),
     updateSettingAllScopes(SETTING.notificationsClaude, undefined),
     updateSettingAllScopes(SETTING.notificationsCodex, undefined),
-    // Epic Handshake force-written to `false`: reset is the user's
-    // "something is wrong, clean slate" signal, so the bridge should
-    // require an explicit opt-in to re-enable. OpenCode clears to
-    // undefined so its schema default (true) takes effect.
-    updateSettingAllScopes(SETTING.epicHandshakeEnabled, false),
-    updateSettingAllScopes(SETTING.epicHandshakeSuppressCodexNotifications, undefined),
-    updateSettingAllScopes(SETTING.enableOpenCode, undefined),
-    updateSettingAllScopes(SETTING.localEndpoint, undefined),
     resetStatusBarItemVisibility(),
   ]);
 
   // Scoped wipe: only this workspace's client state plus the shared
-  // usage caches. Bin scripts under `~/.wat321/bridge/bin/` and
-  // `~/.wat321/epic-handshake/bin/` are bundled-with-the-.vsix
-  // content, not state - other VS Code windows' `channel.mjs`
-  // processes spawn from those files, so wiping bin globally would
-  // silently kill peer windows' MCP servers. Per-tier per-workspace
-  // EH state (inbox/sent/<wsHash>/, runtime flags) is wiped by EH's
-  // resetCleanup which already ran above.
+  // usage caches.
   try {
     const cliDir = clientStateDir();
     if (existsSync(cliDir)) rmSync(cliDir, { recursive: true, force: true });

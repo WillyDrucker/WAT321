@@ -1,9 +1,6 @@
 import * as vscode from "vscode";
 import { getCodexModelInfo, isKnownCodexModel } from "../../providers/codex/models";
 import { formatModelDisplayName } from "../../../engine/contracts";
-import { renderStageDisplay } from "../../codex-rollout/phaseRender";
-import type { StageInfo } from "../../codex-rollout/types";
-import type { LastEntryKind } from "../../turnState";
 import type { ClaudeTurnInfo } from "./sessionTokenWidget";
 import { formatPct, formatTokens, makeTokenBar } from "../tokenFormatters";
 import { formatRelativeTime } from "../relativeTime";
@@ -46,52 +43,15 @@ export interface SessionTokenTooltipInput {
    * When present, the tooltip adds a "Last active: X ago" line so
    * the user knows they are looking at a snapshot. */
   lastActiveAt?: number;
-  /** Codex-only: stage + tool + plan snapshot from the rollout.
-   * When turnState indicates an in-flight turn AND stageInfo is
-   * populated, the tooltip adds Plan / Tool / Token-split lines so
-   * the user sees what Codex is currently doing. */
-  stageInfo?: StageInfo;
   /** Claude-only: tool_use name, tool call counter, thinking-block
    * presence, and cache-hit split. Rendered under the Auto-Compact
-   * line when provider is Claude and turnState indicates in-flight. */
+   * line when provider is Claude. */
   claudeTurnInfo?: ClaudeTurnInfo;
-  /** Current turn classification. Used to gate the stageInfo render:
-   * the plan / tool / reasoning lines only make sense while the
-   * session is actively mid-turn. */
-  turnState?: LastEntryKind;
   /** Claude-only: real compaction fire point. When supplied, the
    * "Auto-Compact at ~X" line uses this value with a `~` prefix to
    * signal approximate, matching the Codex pattern. Falls back to
    * `ceiling` when absent (older callers, Codex path). */
   autoCompactEffectiveTokens?: number;
-  /** Codex-only: per-turn effort override (low / medium / high /
-   * xhigh). Sourced from the bridge snapshot. Null means no override
-   * is set, and the tooltip falls back to the model's
-   * `default_reasoning_level` so the user always sees what Codex will
-   * actually run. */
-  codexEffort?: "low" | "medium" | "high" | "xhigh" | null;
-  /** Codex-only gate for the mid-turn richness block (Codex: X/5,
-   * plan / tool / token-split lines). True when the Epic Handshake
-   * bridge is currently driving this Codex session - phase is non-idle
-   * in the bridgeStageCoordinator snapshot. The block is hidden for
-   * standalone Codex sessions because the surrounding Codex CLI
-   * already shows the same info inline - surfacing it twice clutters
-   * the tooltip. Defaults to false at the type level. */
-  bridgeActive?: boolean;
-  /** Claude-only: total wait budget (seconds) for the in-flight Codex
-   * dispatch. When set, a "Waiting on Codex: Ns" line renders below
-   * the progress bar so the user can see how long Claude will hold
-   * before timing out. Null when no bridge dispatch is blocking.
-   * Static value - the tooltip rebuilds on each widget render cycle
-   * so the read refreshes naturally without a live countdown. */
-  bridgeWaitTimeoutSec?: number | null;
-  /** Claude-only: which wait mode is driving the in-flight dispatch.
-   * `"adaptive"` renders a different wait line ("Adaptive wait on
-   * Codex (extends while making progress)") because adaptive has no
-   * fixed deadline - showing a fixed seconds budget would mislead.
-   * Defaults to `"sync"` when omitted so older callers keep the
-   * existing "Waiting on Codex: Ns" line. */
-  bridgeWaitMode?: "sync" | "adaptive";
   /** Multi-session disclosure. When the user has more than one
    * session open in this workspace (e.g. two Claude TUIs in the
    * same project, two Codex rollouts in the same cwd), the tooltip
@@ -115,14 +75,8 @@ export function buildSessionTokenTooltip(
     ceiling,
     baselineTokens = 0,
     lastActiveAt,
-    stageInfo,
     claudeTurnInfo,
-    turnState,
     autoCompactEffectiveTokens,
-    codexEffort,
-    bridgeActive = false,
-    bridgeWaitTimeoutSec = null,
-    bridgeWaitMode = "sync",
     workspaceSessionInventory,
   } = input;
 
@@ -171,7 +125,7 @@ export function buildSessionTokenTooltip(
     // Claude: the persistent equivalent is whether extended thinking
     // is firing in recent turns (Claude has no UI knob like Codex's
     // effort, but the thinking-block presence is its closest analog).
-    const effortLabel = resolveEffortLabel(provider, modelId, codexEffort, claudeTurnInfo);
+    const effortLabel = resolveEffortLabel(provider, modelId, claudeTurnInfo);
     const effortSegment = effortLabel ? ` · ${effortLabel}` : "";
     md.appendMarkdown(`${prefix}Model: ${modelName}${effortSegment}${windowLabel}  \n`);
     if (codexModelInvalid) {
@@ -205,56 +159,6 @@ export function buildSessionTokenTooltip(
     `${FOLDER} ${label} ${formatTokens(contextUsed)} / ${formatTokens(ceiling)}\n\n`
   );
   md.appendMarkdown(`${bar} ${formatPct(pctUsed)} used\n\n`);
-
-  // Claude-only: while a Claude-to-Codex bridge dispatch is blocking,
-  // surface the wait shape so the user knows whether Claude is on a
-  // fixed budget (sync) or extending while Codex makes progress
-  // (adaptive). Adaptive intentionally omits a numeric budget - its
-  // useful "expected to finish" answer is "as long as the dispatcher
-  // keeps refreshing its heartbeat sidecar". Adaptive does carry a
-  // 30-minute hard ceiling in the MCP server and dispatcher, but
-  // surfacing it as a countdown reads as the wrong signal: users
-  // expect adaptive to "just work".
-  if (provider === "Claude" && typeof bridgeWaitTimeoutSec === "number") {
-    if (bridgeWaitMode === "adaptive") {
-      md.appendMarkdown(
-        `Adaptive wait on Codex (extends while making progress)\n\n`
-      );
-    } else {
-      md.appendMarkdown(`Waiting on Codex: ${bridgeWaitTimeoutSec} seconds\n\n`);
-    }
-  }
-  // Codex mid-turn richness. Only renders when (1) the Epic Handshake
-  // bridge is actively driving this Codex session, (2) a turn is in
-  // flight, and (3) we have structured rollout state. Standalone Codex
-  // sessions show the same info in the Codex CLI itself, so duplicating
-  // it in the tooltip just clutters the hover. The block carries
-  // stage / plan / tool / token-split lines - the legacy "% cached"
-  // line is intentionally dropped because its semantics weren't clear
-  // from the rendered string.
-  if (
-    provider === "Codex" &&
-    stageInfo &&
-    bridgeActive &&
-    isTurnActive(turnState)
-  ) {
-    const display = renderStageDisplay(stageInfo);
-    const lines: string[] = [];
-    lines.push(`Codex: ${display.fraction} ${display.label}`);
-    if (display.planLine) lines.push(display.planLine);
-    if (display.toolLine) lines.push(display.toolLine);
-    if (stageInfo.toolCallCount > 0) {
-      lines.push(
-        `${stageInfo.toolCallCount} tool call${stageInfo.toolCallCount === 1 ? "" : "s"} this turn`
-      );
-    }
-    if (stageInfo.reasoningTokens > 0 || stageInfo.outputTokens > 0) {
-      lines.push(
-        `Thinking ${formatTokens(stageInfo.reasoningTokens)}, output ${formatTokens(stageInfo.outputTokens)} (last turn)`
-      );
-    }
-    md.appendMarkdown(`\n\n${lines.join("  \n")}`);
-  }
 
   // Claude cache-event readout. Always shown when claudeTurnInfo is
   // present (regardless of in-flight). One blank line above so it
@@ -290,10 +194,8 @@ export function buildSessionTokenTooltip(
 /** Wrap a long session title across up to two lines, breaking on a
  * word boundary inside the first line's character budget. Titles
  * that fit on one line are returned unchanged - titles that exceed
- * two lines are ellipsis-truncated. Exported so the OpenCode Routes
- * widget can reuse the same wrap logic for OpenCode / Local LLM
- * session titles. */
-export function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
+ * two lines are ellipsis-truncated. */
+function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
   if (!sessionTitle) return "";
   if (sessionTitle.length <= MAX_TITLE_LINE_LEN) return sessionTitle;
   // Find the last space at or before MAX_TITLE_LINE_LEN so the wrap
@@ -309,22 +211,10 @@ export function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
   return `${firstLine}\n${remainder.slice(0, MAX_TITLE_LINE_LEN - 3)}...`;
 }
 
-/** True while the session is mid-turn - stage-info tooltip lines
- * only make sense during an in-flight response. Only `user` (waiting
- * on the model) and `assistant-pending` (model actively working)
- * qualify. `assistant-done`, `compact-end`, `interrupted`, and
- * `unknown` all read as idle. */
-function isTurnActive(turnState: LastEntryKind | undefined): boolean {
-  return turnState === "user" || turnState === "assistant-pending";
-}
-
 /** Effort label that goes after the model name in the tooltip header.
  *
- * Codex: explicit reasoning level. The bridge per-turn override wins
- * when set - otherwise fall back to the model's
- * `default_reasoning_level` from `~/.codex/models_cache.json` so the
- * user always sees what Codex will actually run, not just what was
- * overridden.
+ * Codex: the model's `default_reasoning_level` from
+ * `~/.codex/models_cache.json` so the user sees what Codex will run.
  *
  * Claude: there is no UI-level effort knob like Codex's. The closest
  * persistent analog is whether the most recent assistant turns
@@ -333,16 +223,14 @@ function isTurnActive(turnState: LastEntryKind | undefined): boolean {
  * rather than from a setting - on/off is the only signal we have.
  *
  * Returns null when there is nothing useful to display (Codex with no
- * effort and no model default, Claude not currently using thinking). */
+ * model default, Claude not currently using thinking). */
 function resolveEffortLabel(
   provider: "Claude" | "Codex",
   modelId: string,
-  codexEffort: "low" | "medium" | "high" | "xhigh" | null | undefined,
   claudeTurnInfo: ClaudeTurnInfo | undefined
 ): string | null {
   if (provider === "Codex") {
-    const effective =
-      codexEffort ?? (getCodexModelInfo(modelId)?.defaultEffort ?? null);
+    const effective = getCodexModelInfo(modelId)?.defaultEffort ?? null;
     if (effective === null) return null;
     return effective.charAt(0).toUpperCase() + effective.slice(1);
   }

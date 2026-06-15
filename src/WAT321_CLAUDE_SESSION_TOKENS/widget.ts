@@ -1,4 +1,3 @@
-import type { BridgeStageReader } from "../engine/bridgeTypes";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 import {
   SessionTokenWidget,
@@ -50,7 +49,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
 };
 
 export class ClaudeSessionTokensWidget extends SessionTokenWidget<WidgetState> {
-  constructor(bridgeStage: BridgeStageReader) {
-    super(descriptor, bridgeStage);
+  constructor() {
+    super(descriptor);
   }
 }

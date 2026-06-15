@@ -26,8 +26,4 @@ export const SETTING = {
   notificationsClaude: "notifications.claude",
   notificationsCodex: "notifications.codex",
   clearAllData: "clearAllData",
-  epicHandshakeEnabled: "epicHandshake.enabled",
-  epicHandshakeSuppressCodexNotifications: "epicHandshake.suppressCodexNotifications",
-  enableOpenCode: "enableOpenCode",
-  localEndpoint: "localEndpoint",
 } as const satisfies Record<string, string>;

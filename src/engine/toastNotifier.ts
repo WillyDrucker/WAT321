@@ -9,45 +9,6 @@ import {
 } from "./notificationPlatforms";
 import { SETTING } from "./settingsKeys";
 
-/** Optional probe injected from bootstrap so the toast notifier can
- * skip Codex toasts while the Epic Handshake bridge is dispatching.
- * The engine never imports from a tool - this callback crosses that
- * boundary in the correct direction (bootstrap wires tool state in). */
-let bridgeActiveProbe: (() => boolean) | null = null;
-
-export function setBridgeActiveProbe(fn: (() => boolean) | null): void {
-  bridgeActiveProbe = fn;
-}
-
-function isEpicHandshakeBridgeActive(): boolean {
-  return bridgeActiveProbe?.() === true;
-}
-
-/** Optional consume-on-read probe. The dispatcher writes a one-shot
- * suppress-codex-toast sentinel on successful turn completion - this
- * consumer reads it once. Returning true means "the most recent Codex
- * activity was bridge-driven, suppress." Covers the gap where Codex's
- * transcript fires `responseComplete` more than 5s after the bridge's
- * `returning` flag has cleared (so `isEpicHandshakeBridgeActive` would
- * return false). */
-let recentCodexCompletionConsumer: (() => boolean) | null = null;
-
-export function setRecentCodexCompletionConsumer(
-  fn: (() => boolean) | null
-): void {
-  recentCodexCompletionConsumer = fn;
-}
-
-function consumeRecentBridgeCompletion(): boolean {
-  return recentCodexCompletionConsumer?.() === true;
-}
-
-function isCodexToastSuppressionEnabled(): boolean {
-  return vscode.workspace
-    .getConfiguration("wat321")
-    .get<boolean>(SETTING.epicHandshakeSuppressCodexNotifications, true);
-}
-
 /**
  * Toast notification delivery.
  *
@@ -107,7 +68,6 @@ export type NotificationOutcome =
   | "suppressed-provider"
   | "suppressed-off"
   | "suppressed-unknown-mode"
-  | "suppressed-epic-handshake"
   | "suppressed-multi-window";
 
 export interface NotificationDiagnostic {
@@ -211,27 +171,6 @@ function handleResponseComplete(
     record({ ...baseDiag, outcome: "suppressed-provider" });
     return;
   }
-  // Epic Handshake bridge suppression: when a prompt is in flight or
-  // just completed, Codex's transcript updates trigger its normal
-  // "response complete" toast at roughly the same moment Claude's tool
-  // result flows back and fires its own toast. The user only wanted
-  // the Claude toast in that case - two toasts about the same event
-  // is noise. Two suppression sources, in priority order:
-  //   1. Bridge currently active (in-flight or 5s returning latch).
-  //   2. Recent bridge completion sentinel - one-shot, consume-on-read,
-  //      30s freshness window. Covers slow Codex transcript writes that
-  //      land after the returning latch has cleared.
-  // Claude toasts are never suppressed, and Codex toasts fire normally
-  // when the user is working in Codex independently of the bridge.
-  if (
-    payload.provider === "codex" &&
-    isCodexToastSuppressionEnabled() &&
-    (isEpicHandshakeBridgeActive() || consumeRecentBridgeCompletion())
-  ) {
-    record({ ...baseDiag, outcome: "suppressed-epic-handshake" });
-    return;
-  }
-
   const ckey = cooldownKey(payload.provider, payload.sessionId);
   const lastTime = lastNotificationTime.get(ckey) ?? 0;
   if (now - lastTime < NOTIFICATION_COOLDOWN_MS) {
