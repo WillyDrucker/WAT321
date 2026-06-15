@@ -1,4 +1,3 @@
-import type { StageInfo } from "../../codex-rollout/types";
 import type { LastEntryKind } from "../../turnState";
 
 /**
@@ -94,11 +93,6 @@ export interface SessionTokenRenderData {
    * so the tooltip does not read as "last active" on a currently-
    * active session. */
   lastActiveAt?: number;
-  /** Codex-only: stage + tool + plan + token breakdown parsed from
-   * the rollout. Drives the tooltip richness during active turns
-   * (current tool name, plan progress, reasoning-vs-output split,
-   * cache hit rate). Undefined for Claude sessions. */
-  stageInfo?: StageInfo;
   /** Claude-only: tool-use name, tool call counter, thinking-block
    * presence, and cache-hit token split from the most recent turn.
    * Undefined for Codex sessions. */

@@ -16,7 +16,7 @@ export const TICK_MS = 250;
 export const COMPACT_PROGRESS_COLOR = "#f59e0b";
 
 /** Inline TPS suffix for the widget text. Three-digit max (services
- * cap at 999), one decimal below 10 so a slow local LLM at 3.4 tps
+ * cap at 999), one decimal below 10 so a slow model at 3.4 tps
  * does not round to 3. Suppressed in minimal mode. Returns an empty
  * string when no reading is available yet (fresh session, no
  * completed turn) so the widget does not show "0tps" before the

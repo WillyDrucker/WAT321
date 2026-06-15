@@ -18,16 +18,15 @@ import { classifyCodexTurn } from "./turnClassifier";
  * recent window so a machine with years of rollouts does not pay
  * the stat cost on every cycle.
  *
- * Ranking is activity-first, not mtime-first: in a workspace where
- * the EH bridge writes rollouts on most prompts, the bridge wins
- * pure mtime competition against a freshly-typed-into native Codex
- * VS Code session, leaving the user's actual session invisible to
- * the widget. We instead read each candidate's tail, classify its
- * last turn (`assistant-pending` > `user` > `assistant-done` >
- * `unknown`), and break ties by file mtime. This way:
- *   - Bridge mid-dispatch wins when nothing else is active.
- *   - A native session the user is prompting wins over an idle bridge
- *     even when the bridge's last rollout write was more recent.
+ * Ranking is activity-first, not mtime-first: when a workspace has
+ * more than one Codex session, the one whose rollout was written most
+ * recently is not necessarily the one the user is working in. We
+ * instead read each candidate's tail, classify its last turn
+ * (`assistant-pending` > `user` > `assistant-done` > `unknown`), and
+ * break ties by file mtime. This way:
+ *   - A session with an in-flight turn wins when nothing else is active.
+ *   - A session the user is prompting wins over an idle one even when
+ *     the idle one's last rollout write was more recent.
  *   - When two sessions are concurrently active, the most-recent
  *     write breaks the tie.
  */
