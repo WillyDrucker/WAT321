@@ -16,7 +16,6 @@ WAT321 ships with **six read-only widgets** - three for Claude, three for Codex 
 - 2 real-time session token status bars
 - System notifications when a response finishes
 - Heatmap for progress bars
-- Epic Handshake - ask Codex, OpenCode and Local LLM requests from Claude using natural language!
 - Available on the VS Marketplace, Open VSX Registry, and as a direct `.vsix` download
 
 ---
@@ -61,12 +60,6 @@ Real-time token count for your active Codex session. Same layout and activity in
 Get notified when Claude or Codex finishes a response. Works on Windows, Linux, and macOS.
 
 <img src="images/screenshots/NOTIFICATION_TOAST.png" alt="Notification toast" width="364">
-
-### Epic Handshake *(opt-in)*
-
-<img src="images/screenshots/EPIC_HANDSHAKE_STATUS_BAR.png" alt="Epic Handshake status bar" width="140">
-
-Lets you say things like *"Ask Codex to review this..."*, *"Have Big Pickle take a swing at this"*, or *"Find out what the local LLM thinks of..."* using natural language in any Claude session. The bridge picks the right backend by alias, dispatches the prompt, and the reply lands in the conversation alongside Claude's own answer - no Claude tokens consumed for the other model's work.
 
 ---
 
@@ -129,7 +122,6 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - **Claude Usage / Codex Usage** poll each provider's stats endpoint on a safe interval (~2 minutes) with rate-limit protection.
 - **Session Tokens** read local CLI files only - no API calls, no network. Yellow `LOAD` flashes during deliberate cache rebuilds (`/compact` or reload). Red `MISS` is reserved for unexpected eviction.
 - Everything WAT321 writes is a disposable cache inside `~/.wat321/`. Settings changes take effect immediately with no reload.
-- **Epic Handshake** adds a widget between the Claude and Codex session token bars. With it on, Claude understands plain-language asks like *"ask Codex..."*, *"ask Big Pickle..."*, or *"ask the local LLM..."* - the bridge picks the right backend for you, sends the prompt over, and the reply lands right in your Claude conversation. Click the Epic Handshake widget anytime to open the dropdown menu. Manage sessions, models and effort as needed.
 
 ## What It Doesn't Do
 
@@ -143,7 +135,6 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - Claude widgets need an active Claude account with CLI credentials (`~/.claude/.credentials.json`)
 - Codex widgets need Codex CLI credentials (`~/.codex/auth.json`)
 - Session token widgets need an active session in the respective CLI tool
-- Epic Handshake needs Claude Code plus at least one of: Codex CLI, an OpenCode Zen account (https://opencode.ai/), or a local OpenAI-compatible chat endpoint (llama.cpp `--jinja`, Ollama, vLLM, LM Studio)
 
 ## Supported Plans
 
