@@ -2,14 +2,23 @@ import * as vscode from "vscode";
 import { SETTING } from "../../engine/settingsKeys";
 import { makeBar as makeClaudeBarDefault } from "../claude-usage/formatters";
 import { makeBar as makeCodexBarDefault } from "../codex-usage/formatters";
+import { makeProgressBar } from "./progressBar";
+import type { UsageStyle } from "./usageDisplay";
 
 /**
- * Heatmap coloring for WAT321 usage progress bars. Two models:
+ * Heatmap coloring for WAT321 usage progress bars. Two models,
+ * picked by bar direction:
  *
- *   - **Codex (band-based):** single color for the filled portion,
- *     shifts green -> yellow -> red as remaining capacity drops.
- *   - **Claude (rolling):** per-cell coloring. Cells past 70% turn
- *     yellow, past 85% turn red. Yellow demotes to blue in red phase.
+ *   - **Ascending (rolling):** per-cell coloring - the backfill
+ *     keeps the provider's base color and only cells past the
+ *     thresholds turn yellow then red, so a warning reads as an
+ *     accent, never a wall of color. Yellow demotes to base in the
+ *     red phase. Claude gates at 70/85 used, Codex at 60/75 used
+ *     (its native bands expressed on the used scale).
+ *   - **Descending (band):** one color for the whole remaining
+ *     fill - a draining fill is only a few cells by the time the
+ *     gates hit, so per-cell positions degenerate. Codex gates at
+ *     40/25 remaining, Claude at 30/15 remaining.
  *
  * Gated on `wat321.enableHeatmap` (default on). `renderClaudeBar` and
  * `renderCodexBar` are the dispatch points for all rendering surfaces.
@@ -52,6 +61,14 @@ export function isHeatmapEnabled(): boolean {
     .get<boolean>(SETTING.enableHeatmap, true);
 }
 
+/** Codex heatmap thresholds, defined on remaining capacity (sourced
+ * from the ChatGPT usage dashboard). The used-direction rolling bar
+ * derives its cell gates from these same values expressed on the
+ * used scale (yellow at 60% used, red at 75%), so both directions
+ * always agree on the moment severity starts. */
+const CODEX_YELLOW_REMAINING_THRESHOLD = 40;
+const CODEX_RED_REMAINING_THRESHOLD = 25;
+
 /** Classify a Codex "remaining" percentage (100 = full, 0 = depleted)
  * into a heatmap band. Used by Codex widgets which report remaining
  * capacity from the rate limit API. The gating on
@@ -63,14 +80,13 @@ export function isHeatmapEnabled(): boolean {
  *   remaining <= 25%     -> red    (approaching depletion)
  */
 export function bandFromRemaining(remainingPct: number): HeatmapBand {
-  if (remainingPct <= 25) return "red";
-  if (remainingPct <= 40) return "yellow";
+  if (remainingPct <= CODEX_RED_REMAINING_THRESHOLD) return "red";
+  if (remainingPct <= CODEX_YELLOW_REMAINING_THRESHOLD) return "yellow";
   return "green";
 }
 
-/** Return the emoji fill character for a band. Used internally by
- * `buildCodexHeatmapBar` and exposed for widgets that need the raw
- * color mapping. */
+/** Return the emoji fill character for a band. Internal to the
+ * Codex bar builders. */
 function fillCharForBand(band: HeatmapBand): string {
   switch (band) {
     case "green":
@@ -102,14 +118,10 @@ function fillCharForBand(band: HeatmapBand): string {
  *      in the red band so the critical state is always visible.
  *
  *   2. **Fully depleted override**. At exactly 0% remaining (100%
- *      used) every cell renders red. This mirrors the Claude 100%
- *      override and makes "maxed out" unmistakable even though the
- *      metaphor of "filling from the right" would otherwise leave
- *      the bar empty. */
-export function buildCodexHeatmapBar(
-  usedPct: number,
-  width: number
-): string {
+ *      used) every cell renders black - the bar represents what is
+ *      left, so a fully empty bar is the honest reading of "nothing
+ *      left". The used-direction bars own the all-red treatment. */
+function buildCodexHeatmapBar(usedPct: number, width: number): string {
   const clamped = Math.max(0, Math.min(100, usedPct));
   const remainingPct = Math.max(0, 100 - clamped);
 
@@ -136,12 +148,13 @@ export function buildCodexHeatmapBar(
 /** Usage percentage at which the yellow band becomes active. Constant
  * across all bar widths. Cell 7 lights up at this threshold in a
  * 10-wide bar - in a 5-wide bar cell 4 lights up at the same point. */
-const CLAUDE_YELLOW_THRESHOLD = 70;
+export const CLAUDE_YELLOW_THRESHOLD = 70;
 /** Usage percentage at which the red band becomes active. Constant
  * across all bar widths. Cell 9 lights up exactly at this threshold
  * in a 10-wide bar - in a 5-wide bar cell 4 is already lit from pct=70
- * and upgrades in place from yellow to red. */
-const CLAUDE_RED_THRESHOLD = 85;
+ * and upgrades in place from yellow to red. Exported (with the yellow
+ * gate) so the HTML tooltip color keys off the same moment. */
+export const CLAUDE_RED_THRESHOLD = 85;
 
 /** Build a Claude "rolling" heatmap progress bar with per-cell
  * coloring.
@@ -176,10 +189,7 @@ const CLAUDE_RED_THRESHOLD = 85;
  * the yellow and red bands share cell 4. That sharing is what lets
  * the compact bar avoid a dead zone after the 85% threshold without
  * needing any rounding hacks. */
-export function buildClaudeHeatmapBar(
-  usedPct: number,
-  width: number
-): string {
+function buildClaudeHeatmapBar(usedPct: number, width: number): string {
   const clamped = Math.max(0, Math.min(100, usedPct));
 
   // At exactly 100 (or any clamped-to-100 value), every cell is red.
@@ -217,14 +227,99 @@ export function buildClaudeHeatmapBar(
   return cells.join("");
 }
 
+/** Build the Claude bar in remaining style - the fill is capacity
+ * left, draining right to left. Claude's rolling per-cell rule
+ * encodes used-position, which has no visual meaning on a draining
+ * bar, so remaining style colors the whole fill by phase using the
+ * SAME thresholds (yellow at 70% used, red at 85%). Edge handling
+ * follows the remaining-bar grammar the Codex bar established: all
+ * black when depleted, and a minimum of one red cell while red-phase
+ * capacity remains so "almost gone" never reads as "no data". */
+function buildClaudeRemainingHeatmapBar(usedPct: number, width: number): string {
+  const clamped = Math.max(0, Math.min(100, usedPct));
+  const remainingPct = 100 - clamped;
+  if (remainingPct <= 0) {
+    return SQUARE_BLACK.repeat(width);
+  }
+  let fillChar = SQUARE_BLUE;
+  if (clamped >= CLAUDE_RED_THRESHOLD) {
+    fillChar = SQUARE_RED;
+  } else if (clamped >= CLAUDE_YELLOW_THRESHOLD) {
+    fillChar = SQUARE_YELLOW;
+  }
+  let filled = Math.round((remainingPct / 100) * width);
+  if (clamped >= CLAUDE_RED_THRESHOLD && filled < 1) {
+    filled = 1;
+  }
+  filled = Math.min(filled, width);
+  return fillChar.repeat(filled) + SQUARE_BLACK.repeat(width - filled);
+}
+
+/** Build the Codex bar in used style - the fill is consumption,
+ * growing left to right, using the same rolling per-cell model as
+ * the Claude ascending bar so a warning reads as an accent, never a
+ * wall (a whole-fill band here would paint 8 red cells the moment
+ * 75% hits). The backfill stays green and only cells past the gate
+ * positions color: with gates at 60/75 used (the native 40/25
+ * remaining bands on the used scale), a 10-wide bar lights cell 6
+ * yellow at 60, cells 6-7 through 74, then cell 8 red at 75 with
+ * the yellow demoting back to green - and a 5-wide bar gates at
+ * cells 3 and 4. Edge handling follows the used-bar grammar: every
+ * cell red at 100% so maxed out is unmistakable, and a fresh window
+ * is honestly near empty - no minimum-cell rule, because an empty
+ * used bar means "barely used", not "no data". */
+function buildCodexUsedHeatmapBar(usedPct: number, width: number): string {
+  const clamped = Math.max(0, Math.min(100, usedPct));
+  if (clamped >= 100) {
+    return SQUARE_RED.repeat(width);
+  }
+  const yellowThreshold = 100 - CODEX_YELLOW_REMAINING_THRESHOLD;
+  const redThreshold = 100 - CODEX_RED_REMAINING_THRESHOLD;
+  const filled = Math.round((clamped / 100) * width);
+  const firstYellowCell = Math.round((yellowThreshold / 100) * width);
+  const firstRedCell = Math.round((redThreshold / 100) * width);
+
+  const cells: string[] = [];
+  for (let i = 0; i < width; i++) {
+    if (i >= filled) {
+      cells.push(SQUARE_BLACK);
+      continue;
+    }
+    const cellPos = i + 1; // 1-indexed to match firstYellowCell/firstRedCell
+    if (clamped >= redThreshold && cellPos >= firstRedCell) {
+      cells.push(SQUARE_RED);
+    } else if (
+      clamped >= yellowThreshold &&
+      clamped < redThreshold &&
+      cellPos >= firstYellowCell
+    ) {
+      cells.push(SQUARE_YELLOW);
+    } else {
+      cells.push(SQUARE_GREEN);
+    }
+  }
+  return cells.join("");
+}
+
 /** Render a Claude usage progress bar at the requested width,
  * respecting the `wat321.enableHeatmap` setting. Returns the rolling
  * per-cell heatmap bar when on, or the default solid-blue bar when
- * off. Shared by status bar widgets and tooltip builders. */
+ * off. `style` follows `wat321.usageDisplay` - "used" (Claude's
+ * native fill-up) is the default so existing call sites are
+ * unchanged, "remaining" renders the draining variant. Shared by
+ * status bar widgets and tooltip builders. */
 export function renderClaudeBar(
   usedPct: number,
-  width: number = 10
+  width: number = 10,
+  style: UsageStyle = "used"
 ): string {
+  if (style === "remaining") {
+    if (isHeatmapEnabled()) {
+      return buildClaudeRemainingHeatmapBar(usedPct, width);
+    }
+    const remainingPct = 100 - Math.max(0, Math.min(100, usedPct));
+    return makeProgressBar(remainingPct, width, SQUARE_BLUE);
+  }
   if (isHeatmapEnabled()) {
     return buildClaudeHeatmapBar(usedPct, width);
   }
@@ -234,11 +329,21 @@ export function renderClaudeBar(
 /** Render a Codex usage progress bar at the requested width,
  * respecting the `wat321.enableHeatmap` setting. Returns the
  * band-based heatmap bar when on, or the default solid-green bar
- * when off. Shared by status bar widgets and tooltip builders. */
+ * when off. `style` follows `wat321.usageDisplay` - "remaining"
+ * (Codex's native count-down) is the default so existing call sites
+ * are unchanged, "used" renders the fill-up variant. Shared by
+ * status bar widgets and tooltip builders. */
 export function renderCodexBar(
   usedPct: number,
-  width: number = 10
+  width: number = 10,
+  style: UsageStyle = "remaining"
 ): string {
+  if (style === "used") {
+    if (isHeatmapEnabled()) {
+      return buildCodexUsedHeatmapBar(usedPct, width);
+    }
+    return makeProgressBar(Math.max(0, Math.min(100, usedPct)), width, SQUARE_GREEN);
+  }
   if (isHeatmapEnabled()) {
     return buildCodexHeatmapBar(usedPct, width);
   }

@@ -19,6 +19,7 @@ export const SETTING = {
   enableClaude: "enableClaude",
   enableCodex: "enableCodex",
   displayMode: "displayMode",
+  usageDisplay: "usageDisplay",
   statusBarPriority: "statusBarPriority",
   enableHeatmap: "enableHeatmap",
   enableTokensPerSecondCounters: "enableTokensPerSecondCounters",
