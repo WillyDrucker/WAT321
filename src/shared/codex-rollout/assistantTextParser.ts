@@ -12,8 +12,11 @@
  * Codex's rollout format evolves across CLI versions, so all known
  * shapes are checked. Returns "" if none found.
  *
- * Lives in `shared/codex-rollout/` and is read by the Codex
- * session-token tier to render the notification preview.
+ * Lives in `shared/codex-rollout/` so both the Codex session-token
+ * widget (notification preview rendering) and the Epic Handshake
+ * dispatcher (rollout-recovery fallback when `turn/completed` arrives
+ * after our subscription disposed) can read assistant text without
+ * a tool tier importing another tool's parser.
  */
 export function parseLastAssistantText(tail: string): string {
   const lines = tail.trimEnd().split("\n");

@@ -12,7 +12,14 @@ import {
   setHostAppName,
 } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
-import { removeLegacyBridge } from "./shared/legacyBridgeRemoval";
+import { workspaceId } from "./shared/wat321Paths";
+import {
+  registerAutoCreateOpenCodeS1,
+  registerBridgeConfigWriter,
+  registerUnifiedBridgeCommands,
+} from "./WAT321_MCP_SERVER";
+import { activateEpicHandshake } from "./WAT321_EPIC_HANDSHAKE";
+import { activateOpenCodeRoutes } from "./WAT321_OPENCODE_ROUTES";
 
 /**
  * Top-level entry point. Creates the engine context, registers
@@ -53,14 +60,52 @@ export function activate(context: vscode.ExtensionContext) {
     );
   }
 
-  // One-time removal of the pre-1.6.0 Epic Handshake bridge for
-  // upgraders (see legacyBridgeRemoval). Best-effort and idempotent -
-  // a fresh install with no prior bridge is a no-op.
-  removeLegacyBridge(context);
+  // Set WAT321_WORKSPACE_ID on the extension host's process env so any
+  // subprocess this extension spawns (the OpenCode harness, the Codex
+  // bridge channel, the warm PowerShell toast) inherits the same wsId
+  // the path helpers use. Claude Code's MCP layer doesn't read this -
+  // the installer injects WAT321_WORKSPACE_ID separately via the MCP
+  // entry's --env. Both surfaces resolve to the same value because
+  // workspaceId() is deterministic.
+  process.env.WAT321_WORKSPACE_ID = workspaceId();
 
   ctx = createEngineContext();
 
-  context.subscriptions.push(...registerProviders(ctx));
+  // Bridge config writer maintains the per-client
+  // `~/.wat321/clients/<wsId>/bridge/config.json` so the unified MCP
+  // server can read enabled-target flags at startup. Cheap on activate,
+  // cheap on settings change.
+  registerBridgeConfigWriter(context);
+  registerUnifiedBridgeCommands(context);
+  registerAutoCreateOpenCodeS1(context);
+
+  // Epic Handshake tier activates first so its bridge-stage
+  // coordinator exists by the time the Claude / Codex session-token
+  // widgets construct in registerProviders. The session-token widgets
+  // depend on the bridge stage reader for their prefix animations
+  // (debug-disconnect ceremony, stage glyph cycle, etc.).
+  const epicHandshake = activateEpicHandshake(context, ctx.events);
+  context.subscriptions.push(epicHandshake);
+
+  // OpenCode Routes tier (local + cloud LLMs). Independent of Epic
+  // Handshake - the unified `wat321` MCP server (registered by the MCP
+  // Server tier) handles dispatch for both. Wrapped in try/catch so a
+  // fatal bug in this tier never takes down the core Claude / Codex
+  // widgets - OpenCode Routes is opt-in, the usage widgets are not.
+  let openCodeRoutes: { resetCleanup: () => Promise<void>; dispose: () => void } | null = null;
+  try {
+    openCodeRoutes = activateOpenCodeRoutes(context);
+    context.subscriptions.push(openCodeRoutes);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showWarningMessage(
+      `WAT321 OpenCode Routes failed to activate; usage widgets continue working. (${msg})`
+    );
+  }
+
+  context.subscriptions.push(
+    ...registerProviders(ctx, epicHandshake.bridgeStage)
+  );
 
   const config = vscode.workspace.getConfiguration("wat321");
   lastNotificationMode = config.get<string>(SETTING.notificationsMode, "System Notifications");
@@ -82,10 +127,27 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // --- Command palette ---
+  // Reset hook awaits Epic Handshake cleanup (MCP uninstall from
+  // ~/.claude/settings.json + globalState key removal) before the
+  // disk wipe runs, so a prior MCP entry cannot survive as a zombie.
   registerClearSettingsCommand(context, async () => {
     ctx?.providers.resetAllKickstartEscalation();
     ctx?.providers.resetAllTokenServices();
     ctx?.events.emit("engine.reset", {});
+    await epicHandshake.resetCleanup();
+    if (openCodeRoutes) await openCodeRoutes.resetCleanup();
+    // Sweep the unified bridge's MCP entry + pre-allowed tool list
+    // (mcp__wat321__wat321_ask, etc.) from ~/.claude/settings.json so
+    // a fresh re-enable starts from a clean Claude config. EH's
+    // resetCleanup handles the registration removal at the CLI layer -
+    // this second pass covers the pre-allowed tool surface that lives
+    // in the user-scope settings file. Idempotent.
+    try {
+      const { uninstallUnifiedBridge } = await import("./WAT321_MCP_SERVER/installer");
+      await uninstallUnifiedBridge();
+    } catch {
+      // best-effort - reset continues regardless
+    }
   });
   registerHealthCommand(context, () => ctx);
 }
@@ -114,6 +176,7 @@ function handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
 
   if (
     e.affectsConfiguration(`wat321.${SETTING.displayMode}`) ||
+    e.affectsConfiguration(`wat321.${SETTING.usageDisplay}`) ||
     e.affectsConfiguration(`wat321.${SETTING.enableHeatmap}`) ||
     e.affectsConfiguration(`wat321.${SETTING.enableTokensPerSecondCounters}`)
   ) {

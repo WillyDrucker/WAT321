@@ -8,6 +8,23 @@ import { getNotificationDiagnostics } from "./toastNotifier";
 import { clientStateDir } from "../shared/wat321Paths";
 import { getAppUserModelID } from "./windowsToastProcess";
 
+/** Appended callbacks for tool-owned health sections (Epic Handshake
+ * etc.). Tools register via `registerHealthSection` during activate -
+ * the command iterates the list when the panel is rendered. Keeps
+ * the engine from importing tool modules directly. */
+type HealthSectionFn = (lines: string[]) => void;
+const healthSections: HealthSectionFn[] = [];
+
+export function registerHealthSection(fn: HealthSectionFn): vscode.Disposable {
+  healthSections.push(fn);
+  return {
+    dispose: () => {
+      const i = healthSections.indexOf(fn);
+      if (i >= 0) healthSections.splice(i, 1);
+    },
+  };
+}
+
 /**
  * [WAT-DEBUG] Diagnostic command exposed in the palette as
  * `WAT321: Show Provider Health`. Opens a read-only output panel
@@ -265,6 +282,14 @@ export function registerHealthCommand(
       renderTransitions(lines);
       lines.push("");
       renderNotifications(lines);
+      lines.push("");
+      for (const fn of healthSections) {
+        try {
+          fn(lines);
+        } catch {
+          lines.push("  (health section errored)");
+        }
+      }
       lines.push("");
       lines.push(`Timestamp: ${new Date().toLocaleString()}`);
 

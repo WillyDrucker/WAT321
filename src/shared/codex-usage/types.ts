@@ -1,3 +1,7 @@
+import type {
+  ServiceState as GenericServiceState,
+} from "../../engine/serviceTypes";
+
 export interface CodexUsageResponse {
   plan_type: string;
   rate_limit: {
@@ -39,3 +43,6 @@ interface AdditionalRateLimit {
     secondary_window: RateLimitWindow | null;
   } | null;
 }
+
+/** Codex-specialized service state: ok payload is a CodexUsageResponse. */
+export type ServiceState = GenericServiceState<CodexUsageResponse>;

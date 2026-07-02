@@ -1,3 +1,7 @@
+import type {
+  ServiceState as GenericServiceState,
+} from "../../engine/serviceTypes";
+
 export interface UsageResponse {
   five_hour: { utilization: number; resets_at: string } | null;
   seven_day: { utilization: number; resets_at: string } | null;
@@ -8,3 +12,6 @@ export interface UsageResponse {
     utilization: number | null;
   } | null;
 }
+
+/** Claude-specialized service state: ok payload is a Claude UsageResponse. */
+export type ServiceState = GenericServiceState<UsageResponse>;

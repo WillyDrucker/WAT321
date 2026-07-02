@@ -1,3 +1,4 @@
+import type { StageInfo } from "../shared/codex-rollout/types";
 import type { CompactFlashSnapshot } from "../shared/polling/compactFlashMachine";
 import type { LastEntryKind } from "../shared/turnState";
 
@@ -37,6 +38,12 @@ export interface CodexResolvedSession {
    * indicator. `user` and `assistant-pending` mean a response is in
    * flight. `assistant-done` and `unknown` are idle. */
   turnState: LastEntryKind;
+  /** Stage + tool + plan snapshot parsed from the same tail read
+   * that populated `turnState`. Drives the active-state tooltip
+   * richness (current tool name, plan progress, reasoning vs output
+   * split, cache hit rate). Parser is shared with the Epic Handshake
+   * dispatcher. */
+  stageInfo: StageInfo;
   /** Timestamp (ms) of the most recent `compacted` / `context_compacted`
    * rollout entry. Drives compact-aware banner classification: the
    * widget fires a yellow LOAD banner once per new compact observation,

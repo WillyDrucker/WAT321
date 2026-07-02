@@ -1,15 +1,21 @@
 import * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
-import { renderClaudeBar } from "../ui/heatmap";
+import {
+  CLAUDE_RED_THRESHOLD,
+  CLAUDE_YELLOW_THRESHOLD,
+  renderClaudeBar,
+} from "../ui/heatmap";
 import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
+import { resolveUsageStyle } from "../ui/usageDisplay";
 import { buildUsageTooltipHtml } from "../ui/usageTooltipHtml";
 import { getMaxLabel } from "./formatters";
 import type { UsageResponse } from "./types";
 
-/** Claude full-mode bar color ramp (used-percent based). */
+/** Claude full-mode bar color, keyed to the same used-percent gates
+ * as the status-bar heatmap so hover and widget always agree. */
 function claudeBarColor(usedPct: number): string {
-  if (usedPct >= 80) return "#ef4444";
-  if (usedPct >= 50) return "#f59e0b";
+  if (usedPct >= CLAUDE_RED_THRESHOLD) return "#ef4444";
+  if (usedPct >= CLAUDE_YELLOW_THRESHOLD) return "#f59e0b";
   return "#3b82f6";
 }
 
@@ -27,6 +33,14 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
   const wResetMs = isoToMs(usage.seven_day?.resets_at);
   const wReset = wResetMs !== null ? formatWeeklyReset(wResetMs) : "Resets unknown";
   const planLabel = getMaxLabel(usage.extra_usage);
+  // Tooltip percents, labels, and embedded bars follow the same
+  // usage style as the status bar so the hover never contradicts
+  // the widget next to it. Color ramps stay keyed to used percent.
+  const style = resolveUsageStyle("claude");
+  const showRemaining = style === "remaining";
+  const pctLabel = showRemaining ? "remaining" : "used";
+  const sShown = showRemaining ? Math.max(0, 100 - sPct) : sPct;
+  const wShown = showRemaining ? Math.max(0, 100 - wPct) : wPct;
 
   if (getDisplayMode() === "minimal") {
     // Minimal tooltip uses emoji bars so heatmap rules stay uniform
@@ -41,11 +55,11 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
     md.appendMarkdown(
       `$(claude)&nbsp;&nbsp;**Claude usage limits** ${planLabel}\n\n`
     );
-    md.appendMarkdown(`**Current session (5hr)** ${sPct}% used  \n`);
-    md.appendMarkdown(`${renderClaudeBar(sPct, 10)}  \n`);
+    md.appendMarkdown(`**Current session (5hr)** ${sShown}% ${pctLabel}  \n`);
+    md.appendMarkdown(`${renderClaudeBar(sPct, 10, style)}  \n`);
     md.appendMarkdown(`\u{29D7} ${sReset}\n\n`);
-    md.appendMarkdown(`**Weekly limits** ${wPct}% used  \n`);
-    md.appendMarkdown(`${renderClaudeBar(wPct, 10)}  \n`);
+    md.appendMarkdown(`**Weekly limits** ${wShown}% ${pctLabel}  \n`);
+    md.appendMarkdown(`${renderClaudeBar(wPct, 10, style)}  \n`);
     md.appendMarkdown(`\u{29D7} ${wReset}\n\n`);
     md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
     return md;
@@ -58,15 +72,15 @@ export function buildTooltip(usage: UsageResponse): vscode.MarkdownString {
     rows: [
       {
         title: "Current session (5hr)",
-        valueLabel: `${sPct}% used`,
-        barFillPct: sPct,
+        valueLabel: `${sShown}% ${pctLabel}`,
+        barFillPct: sShown,
         barColor: claudeBarColor(sPct),
         resetLine: sReset,
       },
       {
         title: "Weekly limits",
-        valueLabel: `${wPct}% used`,
-        barFillPct: wPct,
+        valueLabel: `${wShown}% ${pctLabel}`,
+        barFillPct: wShown,
         barColor: claudeBarColor(wPct),
         resetLine: wReset,
       },

@@ -21,6 +21,13 @@ AGENTS.md
 .gitignore
 package-lock.json
 eslint.config.mjs
+media/svg/**
+media/fonts/wat321-icons.svg
+media/fonts/wat321-icons.symbol.svg
+media/fonts/wat321-icons.ttf
+media/fonts/wat321-icons.eot
+media/fonts/wat321-icons.woff2
+media/fonts/wat321-icons.codepoints.json
 scripts/**
 .env
 .env.*

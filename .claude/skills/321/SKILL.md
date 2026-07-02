@@ -10,7 +10,6 @@ description: Router for the /321 skill family. Resolves -<Flag> against AIDOCS/_
 ## How to invoke
 
 ```
-/321 -Setup            onboard a project: fresh fill or migrate (deregistered at graduation)
 /321 -UpdateSession    refresh SESSION (Current State + LIFO)
 /321 -UpdateMemory     distill MEMORY (LIFO + Big-6) + BACKLOG
 /321 -Update           the daily driver: chain -UpdateSession then -UpdateMemory (-FULL propagates)

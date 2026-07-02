@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { BridgeStageReader } from "./engine/bridgeTypes";
 import type { ProviderGroup, ProviderKey, Subscribable } from "./engine/contracts";
 import { setProviderActive } from "./engine/displayMode";
 import type { EngineContext } from "./engine/engineContext";
@@ -67,17 +68,22 @@ function watchProviderAvailability(
 }
 
 /** Register both providers with the engine and subscribe engine-level
- * event consumers. Call once from extension.ts activate(). */
+ * event consumers. Call once from extension.ts activate(). The
+ * `bridgeStage` reader comes from the EH tier (which activates first
+ * in extension.ts) and feeds the session-token widgets so they can
+ * render the bridge ceremony / stage glyph cycle without polling
+ * heartbeat files directly. */
 export function registerProviders(
-  ctx: EngineContext
+  ctx: EngineContext,
+  bridgeStage: BridgeStageReader
 ): vscode.Disposable[] {
   ctx.providers.register(
     { key: "claude", displayName: "Claude", settingKey: SETTING.enableClaude },
-    () => buildClaudeGroup(ctx)
+    () => buildClaudeGroup(ctx, bridgeStage)
   );
   ctx.providers.register(
     { key: "codex", displayName: "Codex", settingKey: SETTING.enableCodex },
-    () => buildCodexGroup(ctx)
+    () => buildCodexGroup(ctx, bridgeStage)
   );
 
   return [
@@ -85,7 +91,10 @@ export function registerProviders(
   ];
 }
 
-function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
+function buildClaudeGroup(
+  ctx: EngineContext,
+  bridgeStage: BridgeStageReader
+): ProviderGroup {
   const usageService = new ClaudeUsageSharedService();
   const tokenService = new ClaudeSessionTokenService(getWorkspacePath());
 
@@ -95,7 +104,7 @@ function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new ClaudeUsage5hrWidget()),
     ...activateWidget(usageService, new ClaudeUsageErrorWidget()),
     ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
-    ...activateWidget(tokenService, new ClaudeSessionTokensWidget()),
+    ...activateWidget(tokenService, new ClaudeSessionTokensWidget(bridgeStage)),
     watchProviderAvailability("claude", usageService, ctx),
     bridgeSessionResponse({
       provider: "claude",
@@ -117,7 +126,10 @@ function buildClaudeGroup(ctx: EngineContext): ProviderGroup {
   return { disposables, usageService, tokenService };
 }
 
-function buildCodexGroup(ctx: EngineContext): ProviderGroup {
+function buildCodexGroup(
+  ctx: EngineContext,
+  bridgeStage: BridgeStageReader
+): ProviderGroup {
   const usageService = new CodexUsageSharedService();
   const tokenService = new CodexSessionTokenService(getWorkspacePath());
 
@@ -127,7 +139,7 @@ function buildCodexGroup(ctx: EngineContext): ProviderGroup {
     ...activateWidget(usageService, new CodexUsage5hrWidget()),
     ...activateWidget(usageService, new CodexUsageErrorWidget()),
     ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
-    ...activateWidget(tokenService, new CodexSessionTokensWidget()),
+    ...activateWidget(tokenService, new CodexSessionTokensWidget(bridgeStage)),
     watchProviderAvailability("codex", usageService, ctx),
     bridgeSessionResponse({
       provider: "codex",

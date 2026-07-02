@@ -3,6 +3,7 @@ import { buildTooltip } from "../shared/codex-usage/tooltipBuilder";
 import type { CodexUsageResponse } from "../shared/codex-usage/types";
 import { renderCodexBar } from "../shared/ui/heatmap";
 import { getCodexTextColor } from "../shared/ui/textColors";
+import { resolveUsageStyle } from "../shared/ui/usageDisplay";
 import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidget";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 
@@ -14,11 +15,22 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   providerKey: "codex",
   getDisplayPct: (data) => {
     const usedPct = data.rate_limit?.secondary_window?.used_percent ?? 0;
-    return getRemainingPct(usedPct);
+    const remainingPct = getRemainingPct(usedPct);
+    if (resolveUsageStyle("codex") === "used") {
+      return 100 - remainingPct;
+    }
+    return remainingPct;
   },
-  renderBar: (remainingPct, width) => renderCodexBar(100 - remainingPct, width),
+  renderBar: (pct, width) => {
+    const style = resolveUsageStyle("codex");
+    const usedPct = style === "used" ? pct : 100 - pct;
+    return renderCodexBar(usedPct, width, style);
+  },
   buildTooltip: (data) => buildTooltip(data),
-  getTextColor: (mode, remainingPct) => getCodexTextColor(mode, 100 - remainingPct),
+  getTextColor: (mode, pct) => {
+    const usedPct = resolveUsageStyle("codex") === "used" ? pct : 100 - pct;
+    return getCodexTextColor(mode, usedPct);
+  },
   formatText: (mode, pct, bar5, bar10) => {
     if (mode === "minimal") return `$(openai) Weekly [${pct}%]`;
     if (mode === "compact") return `$(openai) Weekly ${bar5} ${pct}%`;

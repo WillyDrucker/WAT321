@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="240"
+   height="300"
+   viewBox="0 0 240 300"
+   fill="none"
+   version="1.1"
+   id="svg5"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs id="defs1" />
+  <g
+     id="g5">
+    <!-- Inverted OpenCode logo as a single nonzero-winding path so
+         the icon-font generator (which strips fill-rule and fills
+         under nonzero by default) still produces the cutouts.
+         Subpath winding order:
+           - Outer (CW):       contributes +1 fill
+           - White hole (CCW): contributes -1 (cancels to 0 inside)
+           - Inner box (CW):   contributes +1 again inside the hole
+         Net result: foreground / hole / foreground stacking, same
+         visual as the original three-color invert layout. -->
+    <path
+       style="fill:#211e1e"
+       d="M 0,0 H 240 V 300 H 0 Z M 47,46 V 253 H 193 V 46 Z M 60,120 H 180 V 240 H 60 Z"
+       id="opencode-invert" />
+  </g>
+</svg>

@@ -175,7 +175,7 @@ export interface ProviderDescriptor {
 export interface WidgetDescriptor {
   id: string;
   name: string;
-  provider: ProviderKey;
+  provider: ProviderKey | "engine";
   slot: number;
 }
 

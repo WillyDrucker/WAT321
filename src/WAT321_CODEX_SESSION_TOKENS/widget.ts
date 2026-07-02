@@ -1,3 +1,4 @@
+import type { BridgeStageReader } from "../engine/bridgeTypes";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 import {
   SessionTokenWidget,
@@ -21,7 +22,8 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
   // rollout write (96s observed after task_started). The classifier
   // collapses the indicator instantly on a real end-state, so an
   // in-flight turn rides this wider window instead of dropping to idle
-  // mid-reasoning.
+  // mid-reasoning. The EH bridge path is unaffected (it animates off
+  // its own heartbeat, not rollout freshness).
   silentTurnCeilingMs: 180_000,
   getRenderData: (state) => {
     const { session } = state;
@@ -40,6 +42,7 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
       // open-handle mtime-lag rationale.
       transcriptMtimeMs: session.lastActivityObservedAt,
       turnState: session.turnState,
+      stageInfo: session.stageInfo,
       lastCompactTimestamp: session.lastCompactTimestamp,
       tokensPerSecond: session.tokensPerSecond,
       compactState: session.compactState,
@@ -49,7 +52,7 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
 };
 
 export class CodexSessionTokensWidget extends SessionTokenWidget<CodexTokenWidgetState> {
-  constructor() {
-    super(descriptor);
+  constructor(bridgeStage: BridgeStageReader) {
+    super(descriptor, bridgeStage);
   }
 }

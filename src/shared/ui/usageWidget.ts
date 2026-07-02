@@ -37,8 +37,11 @@ export interface UsageWidgetDescriptor<TData> {
    * indicator and surfaces it as a tooltip line when an incident is live. */
   providerKey: ProviderKey;
   /** Extract the display percentage from the ok data. This is whatever
-   * the widget shows: "used %" for Claude, "remaining %" for Codex. The
-   * `renderBar` and `getTextColor` callbacks receive this same value. */
+   * the widget shows - each provider's native quantity under the Auto
+   * usage display ("used %" for Claude, "remaining %" for Codex), or
+   * the flipped quantity when `wat321.usageDisplay` overrides the
+   * style. The `renderBar` and `getTextColor` callbacks receive this
+   * same value. */
   getDisplayPct(data: TData): number;
   /** Render the progress bar at a given width. Width 0 inputs (no cached
    * data yet) must produce a full-blank bar - that is what makes the
