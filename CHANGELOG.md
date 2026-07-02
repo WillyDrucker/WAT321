@@ -5,7 +5,19 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.26] - unreleased
+## [1.5.26] - 2026-07-02
+
+### Added
+
+- **Choose which way your usage bars count.** A new Usage Display setting sits in Settings General, right under Display Mode. Auto (the default) keeps exactly what you have today - Claude fills up as you use it, the way claude.ai shows it, and Codex counts down what's left, the way the ChatGPT dashboard does. Pick **Show Used** or **Show Remaining** and both providers count the same way - bars, percents, and tooltips all flip together, the change applies the moment you pick it, and every warning color still arrives at exactly the same real usage it always did.
+
+### Changed
+
+- **A heads-up in the README that Epic Handshake is graduating.** The bridge is headed to its own full standalone desktop app, and a future WAT321 version will hand things over to it. Nothing changes in this release - the note is there so the move never catches you by surprise.
+
+### Fixed
+
+- **Hover tooltips now change color at the same moment as the bars.** The full and compact tooltip bars had their own color points - amber from 50% for both providers, red at 80% used for Claude and 20% remaining for Codex - so a hover could look more or less urgent than the widget it sits on. Both now key off the exact same thresholds as the status bar heatmap.
 
 ## [1.5.25] - 2026-06-14
 

@@ -338,22 +338,38 @@
             "order": 1,
             "markdownDescription": "Status bar display density. Auto adjusts based on how many providers are active. **Full + Compact** keeps usage widgets at full size while shrinking session-token labels - useful when the status bar is full and you want to free space without losing usage detail."
           },
+          "wat321.usageDisplay": {
+            "type": "string",
+            "default": "Auto",
+            "enum": [
+              "Auto",
+              "Show Used",
+              "Show Remaining"
+            ],
+            "enumDescriptions": [
+              "Match each provider's website - Claude shows usage used, Codex shows capacity remaining",
+              "How much you have used - all widgets fill left to right, counting up from 0% toward 100%",
+              "How much you have left - all widgets count down from 100%, draining right to left"
+            ],
+            "order": 2,
+            "markdownDescription": "What the usage bars and percentages show. **Auto** mirrors each provider's own status page - Claude counts usage up, Codex counts what's left down. Pick **Show Used** or **Show Remaining** to make both providers count the same way. Colors and warning thresholds stay the same either way."
+          },
           "wat321.enableHeatmap": {
             "type": "boolean",
             "default": true,
-            "order": 2,
+            "order": 3,
             "markdownDescription": "Enable heatmap colors on the usage progress bar. The bars gradually shift through warning colors as you get closer to your limits so tight sessions stand out at a glance."
           },
           "wat321.enableTokensPerSecondCounters": {
             "type": "boolean",
             "default": false,
-            "order": 3,
+            "order": 4,
             "markdownDescription": "**WIP** - Enable TPS counters in Session Tokens widgets. Adds a tokens-per-second readout next to the live token count for Claude, Codex, and the OpenCode/Local LLM widgets."
           },
           "wat321.statusBarPriority": {
             "type": "number",
             "default": 1001,
-            "order": 4,
+            "order": 5,
             "markdownDescription": "Base priority for WAT321 status bar items. Higher values appear further left. Adjust if widgets overlap with other extensions. *Requires window reload.*"
           }
         }

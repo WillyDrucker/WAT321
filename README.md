@@ -17,6 +17,7 @@ WAT321 ships with **six read-only widgets** - three for Claude, three for Codex 
 - System notifications when a response finishes
 - Heatmap for progress bars
 - Epic Handshake - ask Codex, OpenCode and Local LLM requests from Claude using natural language!
+  - *Heads up - Epic Handshake is graduating into a full standalone desktop app and will be removed from WAT321 in a future version.*
 - Available on the VS Marketplace, Open VSX Registry, and as a direct `.vsix` download
 
 ---
@@ -113,6 +114,12 @@ WAT321 supports four display densities. Search **"wat321"** in **Settings** and 
 <p><img src="images/screenshots/DISPLAY_MODE_SETTINGS.png" alt="Display mode settings" width="320"></p>
 
 <img src="images/screenshots/COMPACT_MODE_HEATMAP.png" alt="Compact Mode" width="768">
+
+## Usage Display
+
+Choose which way the usage bars and percentages count. **Auto** (default) matches each provider's website - or pick **Show Used** / **Show Remaining** to make both providers count the same way.
+
+<p><img src="images/screenshots/USAGE_DISPLAY_SETTINGS.png" alt="Usage display settings" width="320"></p>
 
 ## Customize Visible Widgets
 
