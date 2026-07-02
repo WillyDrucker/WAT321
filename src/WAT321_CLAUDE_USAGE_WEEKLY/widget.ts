@@ -2,6 +2,7 @@ import { buildTooltip } from "../shared/claude-usage/tooltipBuilder";
 import type { UsageResponse } from "../shared/claude-usage/types";
 import { renderClaudeBar } from "../shared/ui/heatmap";
 import { getClaudeTextColor } from "../shared/ui/textColors";
+import { resolveUsageStyle } from "../shared/ui/usageDisplay";
 import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidget";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 
@@ -11,8 +12,18 @@ const descriptor: UsageWidgetDescriptor<UsageResponse> = {
   slot: WIDGET_SLOT.claudeUsageWeekly,
   providerName: "Claude",
   providerKey: "claude",
-  getDisplayPct: (data) => data.seven_day?.utilization ?? 0,
-  renderBar: (pct, width) => renderClaudeBar(pct, width),
+  getDisplayPct: (data) => {
+    const usedPct = data.seven_day?.utilization ?? 0;
+    if (resolveUsageStyle("claude") === "remaining") {
+      return Math.max(0, Math.min(100, 100 - usedPct));
+    }
+    return usedPct;
+  },
+  renderBar: (pct, width) => {
+    const style = resolveUsageStyle("claude");
+    const usedPct = style === "remaining" ? 100 - pct : pct;
+    return renderClaudeBar(usedPct, width, style);
+  },
   buildTooltip: (data) => buildTooltip(data),
   getTextColor: (mode) => getClaudeTextColor(mode),
   formatText: (mode, pct, bar5, bar10) => {
