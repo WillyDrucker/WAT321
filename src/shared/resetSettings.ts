@@ -191,6 +191,7 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     updateSettingAllScopes(SETTING.enableClaude, undefined),
     updateSettingAllScopes(SETTING.enableCodex, undefined),
     updateSettingAllScopes(SETTING.displayMode, undefined),
+    updateSettingAllScopes(SETTING.usageDisplay, undefined),
     updateSettingAllScopes(SETTING.statusBarPriority, undefined),
     updateSettingAllScopes(SETTING.enableHeatmap, undefined),
     updateSettingAllScopes(SETTING.enableTokensPerSecondCounters, undefined),
