@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-WAT321 (Willy's AI Tools) is a VS Code extension showing real-time Claude and Codex usage status-bar widgets plus the Epic Handshake MCP bridge between AI CLIs. Marketplace `WillyDrucker.wat321`, public repo `github.com/WillyDrucker/WAT321`. Part of the 321Done family. Identity, architecture, and conventions live in `AIDOCS/WAT321_MEMORY.md`.
+WAT321 (Willy's AI Tools) is a VS Code extension showing real-time Claude and Codex usage in status-bar widgets: five-hour usage, plan status, and weekly usage for each provider, plus a live session-token counter for each. Marketplace `WillyDrucker.wat321`, public repo `github.com/WillyDrucker/WAT321`. Part of the 321Done family. Identity, architecture, and conventions live in `AIDOCS/WAT321_MEMORY.md`.
 
 ## Cold-start load order
 
