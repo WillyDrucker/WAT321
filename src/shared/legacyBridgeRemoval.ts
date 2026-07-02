@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
@@ -35,12 +35,14 @@ import { writeFileAtomic } from "./fs/atomicWrite";
  * client's `*-transitions.jsonl`, `fired-notifications/`,
  * `notification-events.jsonl`, and `usage-snapshot.json`.
  *
- * Best-effort and idempotent: every step swallows its own errors so a
- * locked file never blocks activation. The user-wide surfaces run once
- * (gated by globalState); each open workspace's `.mcp.json` is swept on
- * every activation so a workspace first opened after the heal already
- * ran still self-heals (its dead entry would otherwise have Claude
- * Code spawn a deleted runtime).
+ * Best-effort and idempotent: a locked file never blocks activation. The
+ * user-wide surfaces are gated by globalState, but the guard is set ONLY
+ * when every target was already absent or cleaned successfully - a failed
+ * write (a Claude config locked by a concurrent writer, say) leaves the
+ * guard unset so the next activation retries. Each open workspace's
+ * `.mcp.json` is swept on every activation regardless, so a workspace
+ * first opened after the guard was set still self-heals (its dead entry
+ * would otherwise have Claude Code spawn a deleted runtime).
  */
 
 const LEGACY_MCP_NAME = "wat321";
@@ -50,7 +52,10 @@ const PER_CLIENT_BRIDGE_SUBDIRS = ["bridge", "model-bridge"] as const;
 const WAT321_DIR = join(homedir(), ".wat321");
 const CLAUDE_JSON = join(homedir(), ".claude.json");
 const CLAUDE_SETTINGS = join(homedir(), ".claude", "settings.json");
-const HEAL_DONE_KEY = "wat321.legacyBridgeRemoved";
+// Bumped to .v2 with the guard fix: the prior logic could set the key
+// after a failed cleanup, so a new key forces those installs to retry
+// (the sweep is idempotent, so a needless retry is a no-op).
+const HEAL_DONE_KEY = "wat321.legacyBridgeRemoved.v2";
 
 /** Remove the legacy bridge. Call once from `activate`. */
 export function removeLegacyBridge(context: vscode.ExtensionContext): void {
@@ -61,12 +66,20 @@ export function removeLegacyBridge(context: vscode.ExtensionContext): void {
     sweepWorkspaceMcpJson(folder.uri.fsPath);
   }
 
-  // User-wide surfaces: run once.
+  // User-wide surfaces: run until they fully succeed. Set the guard only
+  // when every target was already absent or cleaned, so a locked config
+  // retries on a later activation instead of being recorded as done.
   if (context.globalState.get<boolean>(HEAL_DONE_KEY) === true) return;
-  removeAllowlistEntries();
-  sweepClaudeJsonEntries();
-  removeBridgeState();
-  void context.globalState.update(HEAL_DONE_KEY, true);
+  const allowlistOk = removeAllowlistEntries();
+  const claudeJsonOk = sweepClaudeJsonEntries();
+  const stateOk = removeBridgeState();
+  if (allowlistOk && claudeJsonOk && stateOk) {
+    void context.globalState
+      .update(HEAL_DONE_KEY, true)
+      .then(undefined, () => {
+        // best-effort: a failed guard write just retries next activation
+      });
+  }
 }
 
 /** Delete the `wat321` server from one workspace's `.mcp.json`. If that
@@ -96,34 +109,34 @@ function sweepWorkspaceMcpJson(workspacePath: string): void {
 }
 
 /** Strip every `mcp__wat321__*` entry from `permissions.allow` in
- * `~/.claude/settings.json`, leaving the rest of the file untouched. */
-function removeAllowlistEntries(): void {
+ * `~/.claude/settings.json`, leaving the rest of the file untouched.
+ * Returns false only when a needed write failed (nothing-to-do is true). */
+function removeAllowlistEntries(): boolean {
   const parsed = readJsonObject(CLAUDE_SETTINGS);
-  if (parsed === null) return;
+  if (parsed === null) return true;
   const permissions = parsed.permissions;
-  if (typeof permissions !== "object" || permissions === null) return;
+  if (typeof permissions !== "object" || permissions === null) return true;
   const holder = permissions as { allow?: unknown };
-  if (!Array.isArray(holder.allow)) return;
+  if (!Array.isArray(holder.allow)) return true;
   const before = holder.allow.length;
+  // Keep everything that is NOT a `mcp__wat321__*` string - including any
+  // non-string entries, which we never own and must not silently drop.
   const filtered = holder.allow.filter(
-    (t): t is string => typeof t === "string" && !t.startsWith(ALLOWLIST_PREFIX)
+    (t) => typeof t !== "string" || !t.startsWith(ALLOWLIST_PREFIX)
   );
-  if (filtered.length === before) return;
+  if (filtered.length === before) return true;
   holder.allow = filtered;
-  try {
-    writeFileAtomic(CLAUDE_SETTINGS, `${JSON.stringify(parsed, null, 2)}\n`);
-  } catch {
-    // best-effort
-  }
+  return writeFileAtomic(CLAUDE_SETTINGS, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
 /** Remove `wat321` MCP entries from `~/.claude.json` - the top-level
  * `mcpServers` (user scope) and any dormant `projects.*.mcpServers`
  * (an older registration mechanism). Writes only when something was
- * actually removed, so a config with none is read but never rewritten. */
-function sweepClaudeJsonEntries(): void {
+ * actually removed, so a config with none is read but never rewritten.
+ * Returns false only when that rewrite failed. */
+function sweepClaudeJsonEntries(): boolean {
   const parsed = readJsonObject(CLAUDE_JSON);
-  if (parsed === null) return;
+  if (parsed === null) return true;
   let changed = deleteServerEntry(parsed.mcpServers);
   const projects = parsed.projects;
   if (typeof projects === "object" && projects !== null) {
@@ -134,12 +147,8 @@ function sweepClaudeJsonEntries(): void {
       }
     }
   }
-  if (!changed) return;
-  try {
-    writeFileAtomic(CLAUDE_JSON, `${JSON.stringify(parsed, null, 2)}\n`);
-  } catch {
-    // best-effort
-  }
+  if (!changed) return true;
+  return writeFileAtomic(CLAUDE_JSON, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
 /** Delete the `wat321` key from an `mcpServers` map if present.
@@ -155,30 +164,42 @@ function deleteServerEntry(servers: unknown): boolean {
 /** Delete the bridge runtime and state from `~/.wat321/`: the
  * top-level bridge dirs and the bridge subdirs of each client. WAT321's
  * own per-client state (usage transitions, fired-notifications,
- * notification events, usage snapshot) is left in place. */
-function removeBridgeState(): void {
+ * notification events, usage snapshot) is left in place. Returns false
+ * only when a removal failed - a missing path counts as success. */
+function removeBridgeState(): boolean {
+  let ok = true;
   for (const dir of BRIDGE_STATE_DIRS) {
-    safeRmDir(join(WAT321_DIR, dir));
+    if (!safeRmDir(join(WAT321_DIR, dir))) ok = false;
   }
   const clientsRoot = join(WAT321_DIR, "clients");
   let clientIds: string[];
   try {
     clientIds = readdirSync(clientsRoot);
   } catch {
-    return;
+    return ok;
   }
   for (const id of clientIds) {
+    const clientDir = join(clientsRoot, id);
+    // Skip a symlinked client dir: a planted link could redirect the
+    // recursive delete outside ~/.wat321. Real client dirs are plain.
+    try {
+      if (lstatSync(clientDir).isSymbolicLink()) continue;
+    } catch {
+      continue;
+    }
     for (const sub of PER_CLIENT_BRIDGE_SUBDIRS) {
-      safeRmDir(join(clientsRoot, id, sub));
+      if (!safeRmDir(join(clientDir, sub))) ok = false;
     }
   }
+  return ok;
 }
 
-function safeRmDir(path: string): void {
+function safeRmDir(path: string): boolean {
   try {
     rmSync(path, { recursive: true, force: true });
+    return true;
   } catch {
-    // best-effort
+    return false;
   }
 }
 

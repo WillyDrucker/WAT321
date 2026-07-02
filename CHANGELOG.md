@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.6.1] - unreleased
 
+### Fixed
+
+- **The one-time bridge cleanup no longer marks itself done if part of it could not run.** If a locked or in-use Claude config file blocked a step, the cleanup used to record success anyway and never try again, leaving a dead bridge registration behind. It now records itself done only after every step succeeds and retries on a later launch otherwise. It also leaves any unusual entries in your permission list untouched and skips symlinked client folders entirely.
+
 ## [1.6.0] - 2026-06-15
 
 ### Removed
