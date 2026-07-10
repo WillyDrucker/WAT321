@@ -5,7 +5,20 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.28] - unreleased
+## [1.5.28] - 2026-07-10
+
+### Changed
+
+- **Each Epic Handshake session now remembers its own model and effort.** Set S1 to GPT-5.5 at Xhigh and that is what it stays, through closing the window, rebooting, and resuming days later. Codex itself does not remember this, so WAT321 now does. Your choice belongs to the session you made it in rather than leaking across every project in the folder, and switching models keeps the effort you picked whenever the new model supports it. Delete or reset a session and it comes back on whatever Codex currently recommends, which today is GPT-5.6 Sol at Low.
+- **A brand-new session starts on whatever Codex recommends, not on whatever your machine happens to be set to.** WAT321 used to read the model out of your `~/.codex/config.toml`, which meant a fresh install behaved differently on two machines for reasons nothing in the interface explained. It no longer reads that file at all, and the *default* tag in the model picker now means what Codex itself calls default. Your Codex command line keeps doing exactly what your config tells it to. Nothing in that file is read, written, or changed.
+
+### Fixed
+
+- **Repairing a session no longer undoes itself on the next prompt.** Repair rewrote the session's stored model but the next prompt sent the old one straight back, so the repair reported success and then failed immediately afterward.
+- **Resetting no longer brings back the model you just cleared.** Reset WAT321 would clear your model and then quietly recover it again from the session's own history.
+- **Deleting a session now really does return it to the default.** It was carrying the old model into the session that replaced it.
+- **Recovering a session restores the model it was last running**, rather than the one it happened to be created with.
+- **Asking Codex through the bridge no longer lands on OpenCode.** A request with no backend named could route to a backend you had switched off, which surfaced as the bridge looking broken rather than as a missing choice.
 
 ## [1.5.27] - 2026-07-10
 
