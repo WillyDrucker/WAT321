@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { getCodexModelInfo, isKnownCodexModel } from "../../providers/codex/models";
+import type { CodexEffortOverride } from "../../../engine/bridgeTypes";
 import { formatModelDisplayName } from "../../../engine/contracts";
 import { renderStageDisplay } from "../../codex-rollout/phaseRender";
 import type { StageInfo } from "../../codex-rollout/types";
@@ -65,11 +66,11 @@ export interface SessionTokenTooltipInput {
    * `ceiling` when absent (older callers, Codex path). */
   autoCompactEffectiveTokens?: number;
   /** Codex-only: per-turn effort override (low / medium / high /
-   * xhigh). Sourced from the bridge snapshot. Null means no override
-   * is set, and the tooltip falls back to the model's
-   * `default_reasoning_level` so the user always sees what Codex will
-   * actually run. */
-  codexEffort?: "low" | "medium" | "high" | "xhigh" | null;
+   * xhigh, plus max and ultra on the models that advertise them).
+   * Sourced from the bridge snapshot. Null means no override is set,
+   * and the tooltip falls back to the model's `default_reasoning_level`
+   * so the user always sees what Codex will actually run. */
+  codexEffort?: CodexEffortOverride;
   /** Codex-only gate for the mid-turn richness block (Codex: X/5,
    * plan / tool / token-split lines). True when the Epic Handshake
    * bridge is currently driving this Codex session - phase is non-idle
@@ -156,13 +157,14 @@ export function buildSessionTokenTooltip(
     const windowLabel = contextWindowSize
       ? ` (${formatTokens(contextWindowSize)} context)`
       : "";
-    // Codex-only: flag a stored model slug that's absent from the
-    // local `~/.codex/models_cache.json`. Every `thread/resume` ships
-    // the stored slug to the API, so an unknown slug guarantees a 404
-    // on the next prompt. Prefixing a warning badge lets the user
-    // spot config drift before dispatching. Claude model IDs aren't
-    // validated this way - Claude's slugs come from WAT321's own
-    // MODEL_CONTEXT_WINDOWS table, not a user-editable cache.
+    // Codex-only: flag a stored model slug the running app-server does
+    // not advertise (from its `model/list` catalog, falling back to
+    // `~/.codex/models_cache.json` before the bridge has answered).
+    // Every `thread/resume` ships the stored slug to the API, so an
+    // unknown slug guarantees a 404 on the next prompt. Prefixing a
+    // warning badge lets the user spot config drift before dispatching.
+    // Claude model IDs aren't validated this way - Claude's slugs come
+    // from WAT321's own MODEL_CONTEXT_WINDOWS table, not a user cache.
     const codexModelInvalid =
       provider === "Codex" && !isKnownCodexModel(modelId);
     const prefix = codexModelInvalid ? "⚠ " : "";
@@ -337,7 +339,7 @@ function isTurnActive(turnState: LastEntryKind | undefined): boolean {
 function resolveEffortLabel(
   provider: "Claude" | "Codex",
   modelId: string,
-  codexEffort: "low" | "medium" | "high" | "xhigh" | null | undefined,
+  codexEffort: CodexEffortOverride | undefined,
   claudeTurnInfo: ClaudeTurnInfo | undefined
 ): string | null {
   if (provider === "Codex") {
