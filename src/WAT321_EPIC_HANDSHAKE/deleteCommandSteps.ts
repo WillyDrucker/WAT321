@@ -102,11 +102,16 @@ export function stripSessionIndexEntries(
 }
 
 /** Null the bridge-thread record at `recordPath`: threadId=null,
- * counter bumped to the gap-filled next, failure fields reset. When
- * `knownRecord` is non-null the caller already parsed the record -
- * pass null to defensively re-read it (used by the bulk path which
- * doesn't load the record at the start). Returns the projected next
- * counter, or null if the record can't be read / written. */
+ * counter bumped to the gap-filled next, failure fields reset, pinned
+ * model + effort forgotten. When `knownRecord` is non-null the caller
+ * already parsed the record - pass null to defensively re-read it (used
+ * by the bulk path which doesn't load the record at the start). Returns
+ * the projected next counter, or null if the record can't be read /
+ * written.
+ *
+ * Clearing the pin is what makes "delete the session" the way back to
+ * Codex's current recommendation. Keep this in step with
+ * `resetBridgeThread`, which does the same for the Reset path. */
 export function clearBridgeThreadRecord(
   workspacePath: string,
   recordPath: string,
@@ -139,6 +144,9 @@ export function clearBridgeThreadRecord(
     consecutiveFailures: 0,
     lastError: null,
     lastSuccessAt: null,
+    model: null,
+    effort: null,
+    pinResolved: true,
   };
   if (!writeFileAtomic(recordPath, JSON.stringify(next, null, 2))) {
     logger.warn(`${warnLabel}: atomic write rejected`);

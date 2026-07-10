@@ -109,8 +109,31 @@ export function createOutputChannelLogger(): {
     },
   };
 
+  active = logger;
   return {
     logger,
-    dispose: () => channel.dispose(),
+    dispose: () => {
+      active = null;
+      channel.dispose();
+    },
   };
+}
+
+/** Swallows everything. Used before activate and after dispose so
+ * `epicHandshakeLogger()` never hands back null. */
+const SILENT: EpicHandshakeLogger = {
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  show: () => undefined,
+};
+
+let active: EpicHandshakeLogger | null = null;
+
+/** The live logger, for the few call sites too deep in the menu chain
+ * to have one threaded to them (the Codex Defaults picker, which may
+ * populate the model catalog when it opens). Not a general escape
+ * hatch: prefer an injected logger wherever the wiring already reaches. */
+export function epicHandshakeLogger(): EpicHandshakeLogger {
+  return active ?? SILENT;
 }

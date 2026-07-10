@@ -6,7 +6,7 @@ import { clearCodexCatalog } from "../shared/providers/codex/modelCatalog";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { workspaceHash } from "../shared/workspaceHash";
 import { AppServerClient } from "./appServerClient";
-import { syncCodexCatalog } from "./codexCatalogSync";
+import { hydrateCodexCatalog, syncCodexCatalog } from "./codexCatalogSync";
 import { dispatchTurn } from "./codexTurnDispatch";
 import {
   inboxClaudeDir,
@@ -100,6 +100,12 @@ export class CodexDispatcher {
     this.runPurge();
     this.purgeTimer = setInterval(() => this.runPurge(), 5 * 60 * 1000);
     this.purgeTimer.unref?.();
+    // Load the model catalog this binary wrote on a previous run. Reads
+    // one small file and spawns nothing, so it does not violate the
+    // tier's no-activate-time-daemon rule. Without it the model picker
+    // in a fresh window falls back to the shared, frequently clobbered
+    // ~/.codex/models_cache.json until the first dispatch lands.
+    void hydrateCodexCatalog(this.logger);
     this.logger.info("codex dispatcher started");
   }
 
@@ -113,12 +119,19 @@ export class CodexDispatcher {
   }
 
   /** Eagerly spawn the codex app-server child process and complete
-   * `initialize` without dispatching any turn. Idempotent. Called at
-   * tier activate (deferred 2s) and after `forceRestart()` so the
-   * first user-visible dispatch pays only `thread/start` + `turn/
-   * start` latency (~1-3s) instead of the full ~20s cold-start
-   * chain. Failures are logged and swallowed - the first real
-   * dispatch surfaces the problem the normal way. */
+   * `initialize` without dispatching any turn. Idempotent.
+   *
+   * NOT called at activate. The tier deliberately spawns no codex
+   * daemon on activation (see `index.ts`), so the only caller is
+   * `restartBridge()`, whose whole point is to leave the bridge ready.
+   * The first user-visible dispatch otherwise pays the cold-start chain
+   * itself. An earlier version of this comment claimed an activate-time
+   * call that never existed, which hid the fact that the model catalog
+   * stays empty until something dispatches. `hydrateCodexCatalog` in
+   * `start()` covers the picker for that window.
+   *
+   * Failures are logged and swallowed - the first real dispatch
+   * surfaces the problem the normal way. */
   async prewarm(): Promise<void> {
     if (this.client !== null) return;
     try {
@@ -363,8 +376,10 @@ export class CodexDispatcher {
     );
     // Not awaited: the catalog is a display / validation convenience and
     // must not sit in front of the first turn. Readers fall back to the
-    // cache file until it lands. Never touches the idle timer.
-    void syncCodexCatalog(client, resolved?.command ?? "codex", this.logger);
+    // cache file until it lands. Never touches the idle timer. Also
+    // persists the answer under this binary's identity so the next
+    // window starts truthful.
+    void syncCodexCatalog(client, resolved, this.logger);
     return client;
   }
 }

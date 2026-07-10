@@ -246,7 +246,7 @@ class EpicHandshakeTier {
     clearClipboardStaging();
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (ws) {
-      wipeWorkspaceEpicHandshakeState(workspaceHash(ws));
+      wipeWorkspaceEpicHandshakeState(ws);
     }
   }
 

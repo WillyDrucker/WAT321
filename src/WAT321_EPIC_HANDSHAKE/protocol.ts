@@ -144,15 +144,18 @@ export type TurnSandboxPolicy =
  * `approvalPolicy` is always `"never"` - the bridge has no UI to
  * relay Codex's approval prompts back mid-turn.
  *
- * `sandboxPolicy`, `model`, and `effort` are read from per-session
- * override flag files (`codex-full-access.flag`, `codex-model.flag`,
- * `codex-effort.flag`) on every turn. Toggling any of them in the
- * Codex Defaults picker takes effect on the next prompt - per-turn
- * pass-through, no thread reset. `model` and `effort` accept null
- * when no override is set - Codex falls back to the thread / config
- * default in that case. Verified empirically that Codex enforces
- * per-turn values (turn_context records them and the tool router
- * blocks out-of-policy operations). */
+ * All three are re-read on every turn, so a change in the Codex Model
+ * Settings picker takes effect on the next prompt with no thread reset.
+ * They come from two different scopes: `sandboxPolicy` from the
+ * workspace's `codex-sandbox.<wsHash>.flag`, and `model` + `effort` from
+ * the session's `BridgeThreadRecord` (see `codexSessionSettings.ts`).
+ *
+ * `model` and `effort` accept null, which Codex reads as "inherit from
+ * the thread / config.toml". A pinned session never sends a null model.
+ * Verified empirically that Codex enforces per-turn values (turn_context
+ * records them and the tool router blocks out-of-policy operations), and
+ * that a thread does NOT remember its model across an app-server
+ * restart, which is why `model` is re-sent on every turn. */
 export interface TurnStartParams {
   threadId: string;
   /** Input content. We send a single text block constructed from
