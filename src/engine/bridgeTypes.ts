@@ -47,12 +47,34 @@ export interface BridgeHeartbeatInfo {
  * EH tier to read it. */
 export type BridgeWaitMode = "standard" | "adaptive" | "fire-and-forget";
 
+/** A Codex reasoning level.
+ *
+ * THE canonical home for this shape. `engine` is the lowest tier that
+ * needs it, so the EH tier and `shared/ui` both import it here rather
+ * than each declaring their own copy.
+ *
+ * The named members are the levels shipping today and exist so editors
+ * complete them. The trailing `string` arm keeps the type OPEN, because
+ * the authoritative list is whatever each model advertises under
+ * `supportedReasoningEfforts` from the `model/list` RPC, not anything
+ * WAT321 declares. A closed union is what silently dropped `max` and
+ * `ultra` when GPT-5.6 shipped them. Validity is decided at runtime
+ * against the live catalog, never by this type. */
+export type CodexEffortLevel =
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra"
+  | (string & {});
+
 /** Codex per-turn effort override (workspace-scoped). Null means
- * "no override set" - Codex falls back to the model's
- * `default_reasoning_level`. Surfaced through the snapshot so the
+ * "no override set" - Codex falls back to the model's own
+ * `defaultReasoningEffort`. Surfaced through the snapshot so the
  * Codex session-tokens tooltip can render the effective effort
  * without importing from the EH tier. */
-export type CodexEffortOverride = "low" | "medium" | "high" | "xhigh" | null;
+export type CodexEffortOverride = CodexEffortLevel | null;
 
 /** Wait-budget surface for the in-flight bridge dispatch. Populated
  * when `channel.mjs` is blocking on a Codex reply. The Claude session-

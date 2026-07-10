@@ -8,8 +8,10 @@ import { join } from "node:path";
  *
  *   context_window * effective_context_window_percent / 100
  *
- * which for the current gpt-5.x family with `context_window = 272000`
- * and `effective_context_window_percent = 95` works out to 258,400.
+ * which for a `context_window = 272000` model at
+ * `effective_context_window_percent = 95` works out to 258,400. Window
+ * sizes vary across the gpt-5.x family (the 5.6 models carry 372000),
+ * so both values are always read per slug rather than assumed.
  * This is the "usable input budget" - the raw context window minus
  * reserved headroom for system prompts, tool schemas, and model
  * output. It is NOT the same as the literal compact trigger, which
@@ -25,6 +27,17 @@ import { join } from "node:path";
  * reported context window value from the rollout's `token_count`
  * event, which upstream already exposes as the effective window
  * (so no further math is needed on the fallback path).
+ *
+ * This is the one Codex model fact that CANNOT move onto the live
+ * `model/list` catalog in `shared/providers/codex/modelCatalog.ts`:
+ * the RPC carries no `context_window` field at all (verified against
+ * codex-cli 0.142.5, 0.144.0-alpha.4, and 0.144.1). Reading the shared
+ * cache file here is therefore deliberate, not an oversight.
+ *
+ * It degrades safely. When another codex binary overwrites that file
+ * with a catalog lacking the active slug, the lookup misses and we
+ * return the rollout's reported window, which is already the effective
+ * value. So a clobbered cache costs us nothing on this path.
  */
 
 /** Codex subtracts this baseline from both numerator and denominator

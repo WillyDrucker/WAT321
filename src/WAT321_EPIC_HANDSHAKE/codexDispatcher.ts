@@ -2,9 +2,11 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { releaseClaim, tryAcquireClaim } from "../shared/claimFile";
 import { resolveCodexCli } from "../shared/providers/codex/cliResolver";
+import { clearCodexCatalog } from "../shared/providers/codex/modelCatalog";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { workspaceHash } from "../shared/workspaceHash";
 import { AppServerClient } from "./appServerClient";
+import { syncCodexCatalog } from "./codexCatalogSync";
 import { dispatchTurn } from "./codexTurnDispatch";
 import {
   inboxClaudeDir,
@@ -134,6 +136,13 @@ export class CodexDispatcher {
    * Bridge" when the user needs the Codex process gone now (stale
    * cached config, stuck state). Idempotent. */
   forceRestart(): void {
+    // Cleared before the early return, not after. A restart requested
+    // once the idle timer already closed the child still has to drop the
+    // catalog: the user reaches for this action precisely when Codex
+    // changed underneath us (upgraded binary, stale cached config), and
+    // a catalog outliving its process would describe a binary we no
+    // longer talk to. Next ensureClient refills it.
+    clearCodexCatalog();
     if (this.client === null) return;
     this.client.forceKill();
     this.client = null;
@@ -162,6 +171,9 @@ export class CodexDispatcher {
       }
       this.client = null;
     }
+    // The tier is going away. Leaving module state behind would let a
+    // re-activated dispatcher serve the previous process's answer.
+    clearCodexCatalog();
   }
 
   private resetIdleTimer(): void {
@@ -189,6 +201,11 @@ export class CodexDispatcher {
       void this.client.shutdown();
       this.client = null;
     }
+    // Catalog deliberately survives an idle shutdown. The same binary
+    // respawns, so its answer is still true, and keeping it means a
+    // picker opened after 15 idle minutes renders from the app-server's
+    // list instead of dropping back to the shared cache file. Only
+    // `forceRestart` clears it, where the binary itself may have moved.
   }
 
   private async drainInbox(): Promise<void> {
@@ -309,7 +326,7 @@ export class CodexDispatcher {
   private async ensureClient(): Promise<AppServerClient> {
     if (this.client) return this.client;
     const spawnStart = Date.now();
-    // Resolve the codex binary with PATH-then-extension-bundled
+    // Resolve the codex binary with extension-bundled-then-PATH
     // fallback. Lets users who only installed the OpenAI Codex VS
     // Code extension (no global codex CLI) still drive the bridge.
     // Cached after first probe.
@@ -344,6 +361,10 @@ export class CodexDispatcher {
     this.logger.info(
       `[timing] app-server cold-start spawn_to_init=${initStart - spawnStart}ms initialize=${initEnd - initStart}ms total=${Date.now() - spawnStart}ms`
     );
+    // Not awaited: the catalog is a display / validation convenience and
+    // must not sit in front of the first turn. Readers fall back to the
+    // cache file until it lands. Never touches the idle timer.
+    void syncCodexCatalog(client, resolved?.command ?? "codex", this.logger);
     return client;
   }
 }

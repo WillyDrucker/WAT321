@@ -1,4 +1,6 @@
+import type { CodexEffortLevel } from "../engine/bridgeTypes";
 import {
+  defaultCodexModelSlug,
   getCodexModelInfo,
   readCodexConfigModel,
 } from "../shared/providers/codex/models";
@@ -7,7 +9,6 @@ import {
   readCodexEffortOverride,
   readCodexModelOverride,
   readCodexSandboxOverride,
-  type CodexEffortLevel,
   type CodexSandboxState,
 } from "./codexRuntimeOverrides";
 import { currentWorkspacePath } from "./statusBarState";
@@ -78,11 +79,16 @@ export function sandboxIsDefault(state: CodexSandboxState): boolean {
   return state === "read-only";
 }
 
-/** Whatever Codex's own config.toml declares. If config has no model
- * line, the picker has no `*default*` to mark. Picking the same slug
- * as the baseline is functionally identical to having no override. */
+/** Whatever Codex itself would run with no override.
+ *
+ * `config.toml` wins when it names a model, because Codex honors it. A
+ * user who pinned `model = "gpt-5.5"` genuinely has 5.5 as their
+ * default, and WAT321 marking anything else `*default*` would be a lie.
+ * Only when config is silent do we ask the app-server, which reports
+ * its own default through `model/list`'s `isDefault` flag. Null when
+ * neither can answer, and the picker then has no `*default*` to mark. */
 export function baselineModel(): string | null {
-  return readCodexConfigModel();
+  return readCodexConfigModel() ?? defaultCodexModelSlug();
 }
 
 /** Model's own default effort from the cache - falls back to
@@ -90,11 +96,12 @@ export function baselineModel(): string | null {
 export function baselineEffort(): CodexEffortLevel | null {
   const model = readCodexModelOverride(currentWsHash()) ?? baselineModel();
   if (model === null) return "medium";
+  // `defaultEffort` is the model's own `default_reasoning_level` read
+  // straight from the cache, so it is valid by construction. Guard only
+  // against an absent or empty value.
   const info = getCodexModelInfo(model);
   const cand = info?.defaultEffort;
-  if (cand === "low" || cand === "medium" || cand === "high" || cand === "xhigh") {
-    return cand;
-  }
+  if (typeof cand === "string" && cand.length > 0) return cand;
   return "medium";
 }
 

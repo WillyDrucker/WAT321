@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import type { CodexEffortLevel } from "../engine/bridgeTypes";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { listKnownCodexEffortLevels } from "../shared/providers/codex/models";
 import {
   codexEffortFlagPath,
   codexModelFlagPath,
@@ -116,18 +118,44 @@ export function writeCodexModelOverride(
 // Effort
 // -----------------------------------------------------------------
 
-export type CodexEffortLevel = "low" | "medium" | "high" | "xhigh";
 
-const VALID_EFFORTS: ReadonlySet<string> = new Set<string>([
+/** Every level Codex has shipped to date. This is a FLOOR, never a
+ * ceiling: the gate below unions it with whatever the app-server or the
+ * cache reports, so a level OpenAI adds later still flows through.
+ *
+ * It must stay a floor because the effort flag file is a persisted user
+ * preference and the catalog is empty until the app-server finishes its
+ * first `initialize`. A gate that narrowed to the live catalog would
+ * silently discard a saved `ultra` whenever a fresh window read the
+ * flag before prewarm completed, dropping the user back to the model's
+ * default effort with no visible cause. Sending a level the target
+ * model rejects surfaces a turn error the user can see. Silently
+ * downgrading their reasoning depth does not. */
+const BUILTIN_EFFORTS: ReadonlySet<string> = new Set<string>([
   "low",
   "medium",
   "high",
   "xhigh",
+  "max",
+  "ultra",
 ]);
 
-/** Read the active effort override, or null when unset. Validates
- * against the known enum so a stale flag with garbage content does
- * not flow through to `turn/start`. */
+/** Sanitize a persisted effort flag against garbage. Unions the built-in
+ * floor with the levels the running Codex advertises.
+ *
+ * This does NOT authorize a model pairing: `ultra` passes here yet is
+ * absent from 5.6 Luna. The effort picker owns that gate, narrowing its
+ * rows to the SELECTED model's own advertised levels. Module-private,
+ * because the flag reader below is its only caller. */
+function isCodexEffortLevel(value: string): boolean {
+  if (value.length === 0) return false;
+  if (BUILTIN_EFFORTS.has(value)) return true;
+  return listKnownCodexEffortLevels().has(value);
+}
+
+/** Read the active effort override, or null when unset. Validates so a
+ * stale flag with garbage content does not flow through to
+ * `turn/start`. */
 export function readCodexEffortOverride(
   wsHash: string
 ): CodexEffortLevel | null {
@@ -135,7 +163,7 @@ export function readCodexEffortOverride(
   if (!existsSync(path)) return null;
   try {
     const raw = readFileSync(path, "utf8").trim();
-    return VALID_EFFORTS.has(raw) ? (raw as CodexEffortLevel) : null;
+    return isCodexEffortLevel(raw) ? raw : null;
   } catch {
     return null;
   }

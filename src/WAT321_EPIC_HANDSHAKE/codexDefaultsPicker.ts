@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
 import {
+  baselineEffort,
+  baselineModel,
   capitalizeFirst,
   configModelLabel,
   currentWsHash,
   effortRowLabel,
   everythingAtDefault,
-  baselineEffort,
   modelRowLabel,
   sandboxIsDefault,
 } from "./codexDefaultsBaseline";
@@ -176,7 +177,13 @@ export async function showCodexDefaultsPicker(
       continue;
     }
     if (pick.row === "effort") {
-      const result = await pickEffort(effort, model);
+      // `model` is the OVERRIDE, null when the user never set one. The
+      // effort picker narrows its rows to the selected model's advertised
+      // levels, so a null here would silently drop it to the lowest
+      // common quartet and hide `max` / `ultra` from anyone running the
+      // config default. Resolve the effective model, not just the
+      // override.
+      const result = await pickEffort(effort, model ?? baselineModel());
       if (result.kind === "picked") writeCodexEffortOverride(wsHash, result.value);
       continue;
     }
