@@ -89,3 +89,21 @@ export function catalogDefaultSlug(): string | null {
   if (entries === null) return null;
   return entries.find((e) => e.isDefault)?.slug ?? null;
 }
+
+/** The `defaultReasoningEffort` of whichever model claims `isDefault`.
+ *
+ * The pair (`catalogDefaultSlug`, `catalogDefaultEffort`) is the whole
+ * of "what Codex recommends for a brand-new session" - currently
+ * `gpt-5.6-sol` at `low`. Both are read live rather than hardcoded, so
+ * the day OpenAI promotes a different model or retunes its effort, a
+ * newly created Epic Handshake session picks it up with no code change.
+ *
+ * Null when no catalog, or when the default model advertises no effort.
+ * Callers must not substitute a guess of their own: a null here means
+ * "Codex did not say", and `turn/start` accepts a null effort as
+ * "inherit", which is the honest thing to send. */
+export function catalogDefaultEffort(): string | null {
+  const entries = getCodexCatalog();
+  if (entries === null) return null;
+  return entries.find((e) => e.isDefault)?.defaultEffort ?? null;
+}
