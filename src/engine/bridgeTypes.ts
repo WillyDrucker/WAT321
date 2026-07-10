@@ -69,11 +69,11 @@ export type CodexEffortLevel =
   | "ultra"
   | (string & {});
 
-/** Codex per-turn effort override (workspace-scoped). Null means
- * "no override set" - Codex falls back to the model's own
- * `defaultReasoningEffort`. Surfaced through the snapshot so the
- * Codex session-tokens tooltip can render the effective effort
- * without importing from the EH tier. */
+/** Codex per-turn effort, session-scoped and stored on the session's
+ * `BridgeThreadRecord`. Null means "no level could be resolved" -
+ * Codex then falls back to the model's own `defaultReasoningEffort`.
+ * Surfaced through the snapshot so the Codex session-tokens tooltip
+ * can render the effective effort without importing from the EH tier. */
 export type CodexEffortOverride = CodexEffortLevel | null;
 
 /** Wait-budget surface for the in-flight bridge dispatch. Populated

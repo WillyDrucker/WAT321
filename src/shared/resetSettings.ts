@@ -3,6 +3,7 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING, WAT321_DIR } from "../engine/settingsKeys";
 import { getAllWidgetIds } from "../engine/widgetCatalog";
+import { CODEX_MODEL_CATALOG_FILENAME } from "./providers/codex/modelCatalogStore";
 import { clientStateDir } from "./wat321Paths";
 import { healStaleApplicationScopeKeys } from "./workspaceScopeHeal";
 
@@ -223,7 +224,11 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
   } catch {
     // best-effort
   }
-  for (const cacheName of ["claude-usage.cache.json", "codex-usage.cache.json"]) {
+  for (const cacheName of [
+    "claude-usage.cache.json",
+    "codex-usage.cache.json",
+    CODEX_MODEL_CATALOG_FILENAME,
+  ]) {
     try {
       const path = join(WAT321_DIR, cacheName);
       if (existsSync(path)) rmSync(path, { force: true });

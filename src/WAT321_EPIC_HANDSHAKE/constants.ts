@@ -104,23 +104,22 @@ export function codexSandboxTouchedFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-sandbox-touched.${wsHash}.flag`);
 }
 
-/** Per-workspace model override. Body is the bare slug (e.g.
- * `gpt-5.4-mini`). When present, `turnRunner` passes `model` on every
- * `turn/start` so the running thread uses the override - per-turn,
- * no thread reset. When absent, turn/start passes `model: null` and
- * Codex falls back to the thread default (which itself comes from
- * `~/.codex/config.toml`). User toggles via the Codex Session Settings
- * picker. No persistent setting backs this - the override file is the
- * source of truth and survives until Reset WAT321 wipes ~/.wat321/.
- * Workspace-scoped (same rationale as the sandbox flag). */
+/** RETIRED per-workspace model override. Body is the bare slug (e.g.
+ * `gpt-5.4-mini`).
+ *
+ * Superseded by the per-session `model` field on `BridgeThreadRecord`.
+ * A workspace-scoped pin bled across every session in a folder and
+ * outlived the session it was chosen for. Nothing writes this path any
+ * more: `migrateLegacyPin` reads it once to adopt a choice an existing
+ * user already made, then `clearLegacyCodexPinFlags` deletes it. Kept
+ * only so that migration and the Reset sweep can name the file. */
 export function codexModelFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-model.${wsHash}.flag`);
 }
 
-/** Per-workspace reasoning-effort override. Body is the bare effort
- * level (e.g. `xhigh`). Same semantics as the model override above -
- * per-turn pass-through with null fallback to Codex's thread default.
- * Workspace-scoped. */
+/** RETIRED per-workspace reasoning-effort override. Body is the bare
+ * effort level (e.g. `xhigh`). Same history and same migration path as
+ * the model flag above. */
 export function codexEffortFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-effort.${wsHash}.flag`);
 }

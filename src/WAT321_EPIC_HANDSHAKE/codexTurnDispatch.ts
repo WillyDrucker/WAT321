@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import type { AppServerClient } from "./appServerClient";
 import type { Envelope } from "./envelope";
 import { classifyFailure } from "./failureClassifier";
-import { isKnownCodexModel, readCodexConfigModel } from "../shared/providers/codex/models";
+import { isKnownCodexModel } from "../shared/providers/codex/models";
 import { tryRolloutRecovery } from "./rolloutRecovery";
 import {
   clearBridgeErrorState,
@@ -123,18 +123,11 @@ export async function dispatchTurn(
 
   let threadId = record.threadId;
   if (threadId === null) {
-    // Pre-spawn config validation. `thread/start` accepts any slug
-    // silently - Codex only validates when `turn/start` calls the
-    // upstream API. Without this check, a config.toml with a bogus
-    // model births a zombie thread that fails every turn with a
-    // cryptic API error. Catch it here before any side effect lands.
-    const configDefault = readCodexConfigModel();
-    if (configDefault !== null && !isKnownCodexModel(configDefault)) {
-      const msg = `Codex's default model "${configDefault}" isn't in the installed Codex's known set. The bridge can't start a session on a slug Codex doesn't recognize. Update Codex's config to a valid slug, or clear the model line so Codex picks its own default.`;
-      logger.warn(`[preflight] ${msg}`);
-      noteFailure(record, msg);
-      throw new Error(msg);
-    }
+    // No pre-spawn model validation. A fresh thread is born on the slug
+    // the running app-server itself marks `isDefault`, so it is valid by
+    // construction. The check this replaced validated `~/.codex/config.toml`,
+    // a file WAT321 no longer reads, and would have refused to spawn over
+    // a bogus value that has no bearing on the turn.
     const spawned = await spawnFreshThread({
       client,
       record,

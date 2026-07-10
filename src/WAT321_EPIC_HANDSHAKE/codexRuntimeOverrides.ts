@@ -10,30 +10,29 @@ import {
 } from "./constants";
 
 /**
- * Read/write helpers for the three runtime override flags that
- * `turnRunner` passes through on every `turn/start`:
+ * The sandbox override flag, plus migration readers for two flags that
+ * used to live here.
  *
- *   - sandbox        (codex-sandbox.<wsHash>.flag, presence-only)
- *   - model          (codex-model.<wsHash>.flag, body = slug)
- *   - effort         (codex-effort.<wsHash>.flag, body = level)
+ * Sandbox is workspace-scoped and stays that way: it is a safety
+ * posture for a folder, not a property of one conversation. Each VS
+ * Code workspace carries its own, so a test instance and a main dev
+ * window do not bleed into each other.
  *
- * All three are workspace-scoped: each VS Code workspace carries its
- * own preferences so two windows on the same machine (test instance
- * + main dev, project A + project B) do not bleed settings into each
- * other. The wsHash partitioning mirrors the existing in-flight /
- * processing / paused flags.
+ * Per-turn override is the entire mechanism. `thread/start` creates the
+ * thread at the maximum ceiling and the authoritative policy for any
+ * given turn is read at `turn/start` time. That is what lets a user dial
+ * down for one turn and back up for the next with no thread reset
+ * (verified via probe: turn_context records the override AND the tool
+ * router rejects out-of-policy operations).
  *
- * Per-turn override is the entire mechanism. `thread/start` passes
- * permissive defaults so the thread itself never restricts - the
- * authoritative state for any given turn comes from these flag files
- * being read at `turn/start` time. Codex enforces whatever it's told
- * per-turn (verified via probe: turn_context records the override AND
- * the tool router rejects out-of-policy operations).
+ * Model and effort MOVED. They were workspace-scoped too, which meant a
+ * pin bled across every session in a folder and outlived the session it
+ * was chosen for. They are now per-session fields on
+ * `BridgeThreadRecord`, owned by `codexSessionSettings.ts`. Only the
+ * migration readers remain below.
  *
- * No persistent settings back these. The Codex Session Settings menu
- * picker writes flags directly. All flags are best-effort I/O - missed
- * reads/writes fall back to "no override" which is safe (Codex thread
- * default).
+ * All flags are best-effort I/O. A missed read falls back to "no
+ * override", which is the safe direction.
  */
 
 // -----------------------------------------------------------------
@@ -82,12 +81,20 @@ export function sandboxHasBeenTouched(wsHash: string): boolean {
 }
 
 // -----------------------------------------------------------------
-// Model
+// Retired model + effort flags: migration readers only
+//
+// These two were per-WORKSPACE, which meant one pin bled across every
+// session in a folder and outlived the session it was chosen for. They
+// are now per-SESSION fields on `BridgeThreadRecord`. See
+// `codexSessionSettings.ts`.
+//
+// The readers survive so `migrateLegacyPin` can adopt a choice an
+// existing user already made, once, before the flags are swept. There
+// are deliberately no writers left: nothing may create these again.
 // -----------------------------------------------------------------
 
-/** Read the active model override slug, or null when no override is
- * set (Codex uses the thread / config.toml default in that case). */
-export function readCodexModelOverride(wsHash: string): string | null {
+/** Read a retired per-workspace model flag. Migration only. */
+export function readLegacyCodexModelFlag(wsHash: string): string | null {
   const path = codexModelFlagPath(wsHash);
   if (!existsSync(path)) return null;
   try {
@@ -98,36 +105,30 @@ export function readCodexModelOverride(wsHash: string): string | null {
   }
 }
 
-export function writeCodexModelOverride(
-  wsHash: string,
-  slug: string | null
-): void {
-  const path = codexModelFlagPath(wsHash);
-  try {
-    if (slug === null || slug.length === 0) {
+/** Delete both retired flags for a workspace. Called once the record
+ * has absorbed them, so a later downgrade cannot resurrect a stale
+ * pin. Best-effort: a failure here only means we migrate again next
+ * time, which is idempotent. */
+export function clearLegacyCodexPinFlags(wsHash: string): void {
+  for (const path of [codexModelFlagPath(wsHash), codexEffortFlagPath(wsHash)]) {
+    try {
       if (existsSync(path)) unlinkSync(path);
-    } else {
-      writeFileAtomic(path, slug);
+    } catch {
+      // best-effort
     }
-  } catch {
-    // best-effort
   }
 }
-
-// -----------------------------------------------------------------
-// Effort
-// -----------------------------------------------------------------
 
 
 /** Every level Codex has shipped to date. This is a FLOOR, never a
  * ceiling: the gate below unions it with whatever the app-server or the
  * cache reports, so a level OpenAI adds later still flows through.
  *
- * It must stay a floor because the effort flag file is a persisted user
+ * It must stay a floor because the session's effort is a persisted user
  * preference and the catalog is empty until the app-server finishes its
  * first `initialize`. A gate that narrowed to the live catalog would
  * silently discard a saved `ultra` whenever a fresh window read the
- * flag before prewarm completed, dropping the user back to the model's
+ * record before prewarm completed, dropping the user back to the model's
  * default effort with no visible cause. Sending a level the target
  * model rejects surfaces a turn error the user can see. Silently
  * downgrading their reasoning depth does not. */
@@ -140,23 +141,20 @@ const BUILTIN_EFFORTS: ReadonlySet<string> = new Set<string>([
   "ultra",
 ]);
 
-/** Sanitize a persisted effort flag against garbage. Unions the built-in
+/** Sanitize a persisted effort against garbage. Unions the built-in
  * floor with the levels the running Codex advertises.
  *
  * This does NOT authorize a model pairing: `ultra` passes here yet is
  * absent from 5.6 Luna. The effort picker owns that gate, narrowing its
- * rows to the SELECTED model's own advertised levels. Module-private,
- * because the flag reader below is its only caller. */
-function isCodexEffortLevel(value: string): boolean {
+ * rows to the SELECTED model's own advertised levels. */
+export function isCodexEffortLevel(value: string): boolean {
   if (value.length === 0) return false;
   if (BUILTIN_EFFORTS.has(value)) return true;
   return listKnownCodexEffortLevels().has(value);
 }
 
-/** Read the active effort override, or null when unset. Validates so a
- * stale flag with garbage content does not flow through to
- * `turn/start`. */
-export function readCodexEffortOverride(
+/** Read a retired per-workspace effort flag. Migration only. */
+export function readLegacyCodexEffortFlag(
   wsHash: string
 ): CodexEffortLevel | null {
   const path = codexEffortFlagPath(wsHash);
@@ -166,24 +164,6 @@ export function readCodexEffortOverride(
     return isCodexEffortLevel(raw) ? raw : null;
   } catch {
     return null;
-  }
-}
-
-export function writeCodexEffortOverride(
-  wsHash: string,
-  level: CodexEffortLevel | null
-): void {
-  const path = codexEffortFlagPath(wsHash);
-  try {
-    if (level === null) {
-      if (existsSync(path)) {
-        unlinkSync(path);
-      }
-    } else {
-      writeFileAtomic(path, level);
-    }
-  } catch {
-    // best-effort
   }
 }
 

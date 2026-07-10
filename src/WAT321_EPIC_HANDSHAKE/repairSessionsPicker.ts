@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
 import {
+  defaultCodexModelSlug,
   isKnownCodexModel,
   listKnownCodexSlugs,
   preferredRepairSlug,
-  readCodexConfigModel,
 } from "../shared/providers/codex/models";
+import { writeSessionModel } from "./codexSessionSettings";
 import {
   bridgeThreadDisplayName,
   findRolloutPath,
@@ -13,14 +14,22 @@ import {
   rewriteRolloutModelSlug,
   type RecoverableSession,
 } from "./threadPersistence";
+import { ensureCodexCatalog } from "./codexCatalogSync";
+import { epicHandshakeLogger } from "./outputChannel";
 
 /**
  * Repair Sessions sub-picker plus the scanning helpers it depends on.
- * Surfaces sessions whose stored `session_meta.model` is no longer in
- * the local Codex models cache (drifted across a Codex CLI upgrade
- * that renamed or retired that slug). Auto-detects repairable sessions
- * via cache lookup - falls back to a force-repair input box when the
- * cache claims everything is valid but prompts still fail.
+ * Surfaces sessions whose stored `session_meta.model` is no longer a
+ * model the installed Codex can run (drifted across a CLI upgrade that
+ * renamed or retired that slug). Validity comes from the live
+ * `model/list` catalog, never from `~/.codex/models_cache.json`, which
+ * any codex on the machine may have overwritten. Falls back to a
+ * force-repair input box when Codex claims everything is valid but
+ * prompts still fail.
+ *
+ * Repairing rewrites the rollout AND repins the live session, because
+ * `turn/start` re-sends the pinned model on every turn and would
+ * otherwise resurrect the bad slug.
  *
  * The shared submenu in `menuPickers.ts` calls `findRepairableSessions`
  * to render its conditional REPAIR row count.
@@ -71,14 +80,33 @@ function scanBridgeSessions(
   return out;
 }
 
-/** Apply a forced slug rewrite to every scanned session, bypassing
- * cache-based validation. Used when the cache wrongly claims every
- * slug is valid (e.g. `gpt-5.5` appearing in a Codex CLI cache that
- * includes speculative/unreleased model metadata). Same atomic
- * tmp+rename mechanics as the auto-repair path. */
+/** Repoint the workspace's session pin at a repaired slug.
+ *
+ * Rewriting the rollout alone is not enough. `thread/resume` reads the
+ * rollout, but every `turn/start` re-sends `readSessionPin().model`, so a
+ * session left pinned to the bad slug would 404 on its very next turn
+ * while the repair reported success. Only the CURRENTLY active thread
+ * has a pin - older sessions in the scan are rollouts on disk with no
+ * record pointing at them. */
+function repinIfCurrentSession(
+  workspacePath: string | null,
+  threadId: string,
+  target: string
+): void {
+  if (workspacePath === null) return;
+  if (loadBridgeThreadRecord(workspacePath).threadId !== threadId) return;
+  writeSessionModel(workspacePath, target);
+}
+
+/** Apply a forced slug rewrite to every scanned session, skipping
+ * validation. Used when the installed Codex wrongly claims every slug is
+ * valid (it sometimes advertises speculative model IDs the API does not
+ * serve). Same atomic tmp+rename mechanics as the auto-repair path, and
+ * it repins the live session so the next turn does not undo the fix. */
 function applyForcedRepair(
   scan: BridgeSessionScan[],
-  target: string
+  target: string,
+  workspacePath: string | null
 ): { repaired: number; failed: Array<{ counter: number; slug: string | null }> } {
   let repaired = 0;
   const failed: Array<{ counter: number; slug: string | null }> = [];
@@ -86,6 +114,7 @@ function applyForcedRepair(
     const ok = rewriteRolloutModelSlug(entry.rolloutPath, target);
     if (ok) {
       repaired++;
+      repinIfCurrentSession(workspacePath, entry.session.threadId, target);
     } else {
       failed.push({
         counter: entry.session.sessionCounter,
@@ -155,6 +184,17 @@ export async function showRepairSessionsPicker(
     return;
   }
 
+  // Repair decides whether a stored model slug is still valid, and only
+  // the running app-server can answer that. Without this the catalog may
+  // be empty and every session would report "cannot validate".
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Window,
+      title: "WAT321: reading Codex models",
+    },
+    () => ensureCodexCatalog(epicHandshakeLogger())
+  );
+
   const repairable = findRepairableSessions(workspacePath, sessions);
   if (repairable.length === 0) {
     // Distinguish the three (0) cases so the user can tell "everything
@@ -169,7 +209,7 @@ export async function showRepairSessionsPicker(
 
     if (knownSlugs.length === 0) {
       void vscode.window.showWarningMessage(
-        "Epic Handshake: Codex's local models cache is empty, so session models can't be validated yet. The cache populates whenever Codex runs; Repair will work once it's available."
+        "Epic Handshake: Codex could not be reached, so session models cannot be checked right now. Repair will work once Codex is available."
       );
       return;
     }
@@ -198,10 +238,10 @@ export async function showRepairSessionsPicker(
         ? cachePreview
         : `${cachePreview}, +${knownSlugs.length - 12} more`;
 
-    const detail = `${scan.length} bridge session${scan.length === 1 ? "" : "s"} scanned. All stored slugs match an entry in your \`~/.codex/models_cache.json\`.\n\nScanned sessions:\n${sessionsSummary}\n\nCache (${knownSlugs.length} slug${knownSlugs.length === 1 ? "" : "s"}): ${cacheSummary}\n\nIf sessions are still failing with "model does not exist" errors, the cache is lying (Codex CLI sometimes lists speculative model IDs that the API does not actually serve). Use Force Repair to rewrite every scanned session to a slug you type in manually, bypassing cache validation.`;
+    const detail = `${scan.length} bridge session${scan.length === 1 ? "" : "s"} scanned. Every stored slug is one the installed Codex says it can run.\n\nScanned sessions:\n${sessionsSummary}\n\nCodex reports ${knownSlugs.length} model${knownSlugs.length === 1 ? "" : "s"}: ${cacheSummary}\n\nIf sessions are still failing with "model does not exist" errors, Codex is advertising a model the API does not actually serve. Use Force Repair to rewrite every scanned session to a slug you type in manually, skipping validation.`;
 
     const choice = await vscode.window.showInformationMessage(
-      `Epic Handshake: all ${scan.length} bridge session${scan.length === 1 ? "" : "s"} look valid by cache check, but your prompts may still be failing.`,
+      `Epic Handshake: all ${scan.length} bridge session${scan.length === 1 ? "" : "s"} look valid, but your prompts may still be failing.`,
       "Force Repair",
       "View details",
       "Cancel"
@@ -214,11 +254,10 @@ export async function showRepairSessionsPicker(
     }
     if (choice !== "Force Repair") return;
 
-    const configDefault = readCodexConfigModel();
-    const placeholder = configDefault ?? knownSlugs[0] ?? "gpt-5-codex";
+    const placeholder = defaultCodexModelSlug() ?? knownSlugs[0] ?? "gpt-5-codex";
     const typed = await vscode.window.showInputBox({
       title: "Force Repair: target model slug",
-      prompt: "Every scanned bridge session will be rewritten to this slug. Bypasses cache validation.",
+      prompt: "Every scanned bridge session will be rewritten to this slug. Skips validation against the installed Codex.",
       value: placeholder,
       validateInput: (value) => {
         const trimmed = value.trim();
@@ -237,13 +276,13 @@ export async function showRepairSessionsPicker(
       )
       .join("\n");
     const forceConfirm = await vscode.window.showWarningMessage(
-      `Force-repair ${scan.length} Codex session${scan.length === 1 ? "" : "s"} to "${forcedTarget}"? Bypasses cache validation. Targets: ${forceSummary.replace(/\n/g, "; ")}`,
+      `Force-repair ${scan.length} Codex session${scan.length === 1 ? "" : "s"} to "${forcedTarget}"? Skips validation against the installed Codex. Targets: ${forceSummary.replace(/\n/g, "; ")}`,
       "Force Repair",
       "Cancel"
     );
     if (forceConfirm !== "Force Repair") return;
 
-    const forceResult = applyForcedRepair(scan, forcedTarget);
+    const forceResult = applyForcedRepair(scan, forcedTarget, workspacePath);
     if (forceResult.failed.length === 0) {
       void vscode.window.showInformationMessage(
         `Epic Handshake: force-repaired ${forceResult.repaired} session${
@@ -264,7 +303,7 @@ export async function showRepairSessionsPicker(
   const target = preferredRepairSlug();
   if (target === null) {
     void vscode.window.showErrorMessage(
-      "Epic Handshake: Codex's local models cache is empty, so a repair target can't be auto-picked. The cache populates whenever Codex runs."
+      "Epic Handshake: Codex could not be reached, so a repair target cannot be suggested right now."
     );
     return;
   }
@@ -290,6 +329,7 @@ export async function showRepairSessionsPicker(
     const ok = rewriteRolloutModelSlug(entry.rolloutPath, target);
     if (ok) {
       repaired++;
+      repinIfCurrentSession(workspacePath, entry.session.threadId, target);
     } else {
       failed.push({
         counter: entry.session.sessionCounter,

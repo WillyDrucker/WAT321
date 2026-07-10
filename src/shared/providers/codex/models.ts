@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  catalogDefaultEffort,
   catalogDefaultSlug,
   getCodexCatalog,
   type CodexCatalogEntry,
@@ -29,13 +30,28 @@ import {
  * running Codex fully supports ends up missing from the picker and
  * flagged invalid by `isKnownCodexModel`.
  *
- * Two rules hold everywhere below:
- *   - The picker shows the CATALOG only. It must never offer a model
- *     the dispatch binary would 404 on.
- *   - Validity FAILS OPEN. A slug is accepted when it appears in the
- *     catalog or the file, and when neither can be read we accept
- *     everything. "Cannot validate" must never mean "reject", or a
- *     failed prewarm would block every `thread/resume`.
+ * The split that governs everything below: the file is a DISPLAY hint,
+ * and only the catalog GATES.
+ *   - Display (picker rows, model info) may fall back to the file. An
+ *     approximate list beats an empty one, and a wrong row costs the
+ *     user a turn error at worst.
+ *   - Gating (`isKnownCodexModel`, `listKnownCodexSlugs`) reads the
+ *     catalog alone. A file written by some other codex must never
+ *     decide that a session is broken, nor bless a slug the running
+ *     app-server would 404 on.
+ *   - Gating FAILS OPEN with no catalog. "Cannot validate" must never
+ *     mean "reject", or a window that has not asked yet would block
+ *     every `thread/resume`.
+ *
+ * `ensureCodexCatalog` (EH tier) fills the catalog before any picker
+ * draws a row, so the fallback is rare rather than routine.
+ *
+ * `~/.codex/config.toml` is not read here, or anywhere in WAT321. It is
+ * a machine-wide Codex CLI preference that Codex's own TUI writes when a
+ * user picks a model there. Honoring it made a fresh WAT321 install
+ * behave differently on two machines for reasons our UI never showed,
+ * and it is not what "Codex's default" means. Sessions pin their own
+ * model. See `WAT321_EPIC_HANDSHAKE/codexSessionSettings.ts`.
  *
  * Note `model/list` carries no `context_window`. The auto-compact
  * ceiling therefore stays file-sourced, with its own fallback onto the
@@ -84,27 +100,15 @@ function readModelsCache(): ModelsCacheFile | null {
   }
 }
 
-/** Slugs from the cache file alone. Kept separate from the catalog so
- * `isKnownCodexModel` can union the two without conflating sources. */
-function fileSlugs(): string[] {
-  const cache = readModelsCache();
-  if (!cache?.models) return [];
-  const out: string[] = [];
-  for (const entry of cache.models) {
-    if (typeof entry.slug === "string" && entry.slug.length > 0) {
-      out.push(entry.slug);
-    }
-  }
-  return out;
-}
-
-/** Every model slug the running Codex can serve, catalog first. Used by
- * the repair picker to suggest a replacement slug, and by diagnostics.
- * Empty only when neither source is readable. */
+/** Every model slug the running Codex can serve.
+ *
+ * Catalog only. An empty array means "we could not ask the app-server",
+ * which is exactly what the repair picker reports as "validation could
+ * not run". Falling back to the cache file here would make that branch
+ * lie, because the file may enumerate a different binary's models. */
 export function listKnownCodexSlugs(): string[] {
   const catalog = getCodexCatalog();
-  if (catalog !== null) return catalog.map((entry) => entry.slug);
-  return fileSlugs();
+  return catalog === null ? [] : catalog.map((entry) => entry.slug);
 }
 
 /** Every reasoning level any known model advertises. Hidden models
@@ -139,38 +143,31 @@ export function listKnownCodexEffortLevels(): ReadonlySet<string> {
 
 /** True if the running Codex can be expected to accept this slug.
  *
- * When a catalog exists it is the ONLY authority. Never union it with
- * the cache file. The file is routinely written by a different codex
- * binary than the one we dispatch to, so a slug present only in the
- * file is precisely the case this validation exists to catch: an old
- * app-server plus a file written by a newer codex would accept
- * `gpt-5.6-sol` here and then 404 at `turn/start`, with the repair
- * picker never firing.
+ * The catalog is the ONLY authority, and the cache file gates nothing.
+ * The file is a DISPLAY hint: it is routinely written by a different
+ * codex binary than the one we dispatch to, so letting it decide
+ * validity produces both kinds of error. It rejects a model the running
+ * Codex supports, firing a bogus "repair this session" prompt. And it
+ * accepts one the running Codex has never heard of, which then 404s at
+ * `turn/start` with the repair picker never firing.
+ *
+ * No catalog means "cannot validate", which must never mean "reject".
+ * A codex too old for `model/list`, an unspawnable app-server, or a
+ * window where nothing has asked yet would otherwise block every
+ * `thread/resume` and strand existing Epic Handshake sessions. So it
+ * fails open and the badge simply stays quiet until we can ask.
  *
  * The cost is a session pinned to a hidden slug. `model/list` omits
  * hidden models (0.142.5 returns 3 where its file lists 4, the
- * difference being `codex-auto-review`), so such a session would be
- * flagged for repair. That is acceptable: the bridge only ever pins a
- * model the user chose from a visible list, and a spurious repair
- * prompt is recoverable where a 404 mid-turn is not.
- *
- * Still FAILS OPEN when nothing can be read. "Cannot validate" must
- * never mean "reject", or a failed prewarm, a missing cache, or a codex
- * too old for `model/list` would block every `thread/resume` and strand
- * existing Epic Handshake sessions.
- *
- * Returns `false` only when a source WAS readable and the slug is
- * definitely absent from it. */
+ * difference being `codex-auto-review`), so such a session is flagged
+ * for repair. Acceptable: the bridge only ever pins a model the user
+ * chose from a visible list, and a spurious repair prompt is
+ * recoverable where a 404 mid-turn is not. */
 export function isKnownCodexModel(slug: string | null): boolean {
   if (!slug) return true;
   const catalog = getCodexCatalog();
-  if (catalog !== null) {
-    return catalog.some((entry) => entry.slug === slug);
-  }
-  const fromFile = fileSlugs();
-  // Nothing could be read at all. Fail open.
-  if (fromFile.length === 0) return true;
-  return fromFile.includes(slug);
+  if (catalog === null) return true;
+  return catalog.some((entry) => entry.slug === slug);
 }
 
 /** The slug Codex itself runs when `config.toml` names no model.
@@ -187,33 +184,23 @@ export function defaultCodexModelSlug(): string | null {
   return selectable.length > 0 ? selectable[0].slug : null;
 }
 
-/** Read the `model = "..."` key from `~/.codex/config.toml`. Minimal
- * TOML scan - we only care about the top-level `model` string, which
- * is the Codex CLI's default model slug. Returns null when the file
- * is missing, the key is unset, or the value is not a string. Safe
- * for display paths. */
-export function readCodexConfigModel(): string | null {
-  const configPath = join(homedir(), ".codex", "config.toml");
-  if (!existsSync(configPath)) return null;
-  try {
-    const raw = readFileSync(configPath, "utf8");
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("#")) continue;
-      // Match `model = "slug"` or `model='slug'` at the top level.
-      // Nested `[profiles.*]` sections may also define `model`, but
-      // we scan the whole file top-down and pick the first match -
-      // the top-level one precedes any section header by convention.
-      // Stop at the first `[section]` header so a profile-scoped
-      // model doesn't shadow the top-level default.
-      if (trimmed.startsWith("[") && trimmed.endsWith("]")) break;
-      const m = /^model\s*=\s*["']([^"']+)["']\s*(?:#.*)?$/.exec(trimmed);
-      if (m) return m[1];
-    }
-    return null;
-  } catch {
-    return null;
-  }
+/** The effort Codex recommends for the model it recommends.
+ *
+ * Pairs with `defaultCodexModelSlug`. Together they answer "what would
+ * a brand-new Codex session run", which is what a brand-new Epic
+ * Handshake session is initialized to.
+ *
+ * Falls back to the default model's `defaultEffort` as read from the
+ * cache file when no app-server has answered. Null when neither source
+ * knows, and null is a legal thing to send: `turn/start` reads a null
+ * effort as "inherit", which beats inventing a level Codex never
+ * named. */
+export function defaultCodexEffortLevel(): string | null {
+  const fromCatalog = catalogDefaultEffort();
+  if (fromCatalog !== null) return fromCatalog;
+  const slug = defaultCodexModelSlug();
+  if (slug === null) return null;
+  return getCodexModelInfo(slug)?.defaultEffort ?? null;
 }
 
 /** Resolve the rich info for a model slug, catalog first. Returns null
@@ -290,17 +277,14 @@ function modelEntryToInfo(entry: ModelsCacheEntry): CodexModelInfo | null {
 }
 
 /** Pick a repair target for an invalid model slug. Priority:
- *   1. Codex CLI's configured default (from config.toml) if valid
- *   2. The slug the running app-server marks `isDefault`
- *   3. First selectable model, a model Codex definitely supports here
- *   4. null - no safe repair possible, caller falls back to Reset
+ *   1. The slug the running app-server marks `isDefault`
+ *   2. First selectable model, a model Codex definitely supports here
+ *   3. null - no safe repair possible, caller falls back to Reset
  *
- * Validating the config.toml default before picking it protects against
- * the case where config itself stores the bad slug, which is the likely
- * origin of the drift in the first place. Step 2 is Codex's own answer
- * rather than our old guess of "whatever sorted first by priority". */
+ * Repairing onto Codex's own recommendation is the only choice that is
+ * valid by construction: the app-server named it, so `turn/start` will
+ * accept it. An earlier version preferred `~/.codex/config.toml`, which
+ * could itself hold the bad slug that caused the drift. */
 export function preferredRepairSlug(): string | null {
-  const configDefault = readCodexConfigModel();
-  if (configDefault && isKnownCodexModel(configDefault)) return configDefault;
   return defaultCodexModelSlug();
 }

@@ -379,25 +379,30 @@ function resolveAskTarget(args, enabled) {
     // sidecar, then the active-instance preference, then Codex when
     // enabled. Mirrors what the widget shows so a default-aliased
     // call lands on whatever the user has been using most recently.
+    //
+    // Every candidate is gated on its target being ENABLED. A default
+    // route must never land somewhere the user has switched off: the
+    // dispatch handler would reject it with "target is not enabled",
+    // which reads as a broken bridge rather than as "you did not say
+    // where to send this". An explicit alias naming a disabled target
+    // still errors, and should - that is the user asking for something
+    // unavailable, not us guessing wrong.
+    const instanceTarget = (inst) => (inst.kind === "local" ? "local" : "opencode");
+    const usable = (inst) => inst !== undefined && enabled[instanceTarget(inst)];
+
     const lastUsed = readLastUsedInstance();
     if (lastUsed?.instanceId) {
       const inst = router.catalog.instances.find((i) => i.id === lastUsed.instanceId);
-      if (inst) {
-        return {
-          target: inst.kind === "local" ? "local" : "opencode",
-          instance_id: inst.id,
-        };
+      if (usable(inst)) {
+        return { target: instanceTarget(inst), instance_id: inst.id };
       }
     }
     if (router.catalog.activeInstanceId) {
       const inst = router.catalog.instances.find(
         (i) => i.id === router.catalog.activeInstanceId
       );
-      if (inst) {
-        return {
-          target: inst.kind === "local" ? "local" : "opencode",
-          instance_id: inst.id,
-        };
+      if (usable(inst)) {
+        return { target: instanceTarget(inst), instance_id: inst.id };
       }
     }
     if (enabled.codex) return { target: "codex" };
