@@ -1,3 +1,5 @@
+import type { CodexEffortOverride } from "../engine/bridgeTypes";
+
 /**
  * Typed bindings for the `codex app-server` JSON-RPC 2.0 protocol.
  *
@@ -14,6 +16,7 @@
  *     - thread/compact/start - in-place compact on context exceeded
  *     - turn/start          - dispatch a Bridge message as a turn
  *     - turn/interrupt      - cancel an in-flight turn
+ *     - model/list          - models THIS app-server can actually run
  *
  *   Notifications (server to client):
  *     - item/agentMessage/delta  (streamed assistant content)
@@ -162,8 +165,10 @@ export interface TurnStartParams {
   sandboxPolicy: TurnSandboxPolicy;
   /** Model override slug. Null = inherit thread / config default. */
   model: string | null;
-  /** Reasoning effort override. Null = inherit thread / config default. */
-  effort: "low" | "medium" | "high" | "xhigh" | null;
+  /** Reasoning effort override. Null = inherit thread / config default.
+   * A level is legal when the target model advertises it, so the wire
+   * type does not re-gate what the live catalog already gated. */
+  effort: CodexEffortOverride;
 }
 
 /** Supported input item types in a `turn/start`. Bridge only sends
@@ -220,4 +225,63 @@ export function isJsonRpcErrorResponse(
   response: JsonRpcResponse
 ): response is JsonRpcErrorResponse {
   return "error" in response;
+}
+
+// -----------------------------------------------------------------
+// model/list
+// -----------------------------------------------------------------
+
+/**
+ * `model/list` reports the models the app-server on the other end of
+ * this pipe can actually run. Verified against codex-cli 0.142.5,
+ * 0.144.0-alpha.4, and 0.144.1: identical shape on all three, so one
+ * binding covers every version we support.
+ *
+ * WARNING: the field names here are NOT the ones in
+ * `~/.codex/models_cache.json`. The RPC is camelCase and renames every
+ * field we care about (`slug` -> `id`, `visibility` -> `hidden`,
+ * `supported_reasoning_levels[].effort` ->
+ * `supportedReasoningEfforts[].reasoningEffort`,
+ * `default_reasoning_level` -> `defaultReasoningEffort`). Do not
+ * copy-paste shapes between the two.
+ *
+ * Two further differences that drive design decisions upstream:
+ *   - `isDefault` exists here and nowhere in the file, so we no longer
+ *     guess the default model by sorting on `priority`.
+ *   - `context_window` exists in the file and NOT here, so the
+ *     auto-compact ceiling cannot move onto this RPC.
+ *
+ * The response omits hidden models entirely (0.142.5 returns 3 where
+ * its file lists 4), so `hidden` has always been observed false.
+ */
+export interface ModelListParams {
+  /** Omit for the first page. Feed back `nextCursor` for the rest. */
+  cursor?: string;
+}
+
+export interface ModelListReasoningEffort {
+  reasoningEffort: string;
+  description?: string;
+}
+
+export interface ModelListEntry {
+  id: string;
+  model?: string;
+  displayName?: string;
+  description?: string;
+  hidden?: boolean;
+  /** Codex's own answer to "which model when config.toml names none".
+   * Tracks the binary: 0.142.5 flags gpt-5.5, 0.144.x flags
+   * gpt-5.6-sol. */
+  isDefault?: boolean;
+  defaultReasoningEffort?: string | null;
+  supportedReasoningEfforts?: ModelListReasoningEffort[];
+}
+
+/** Cursor-paginated. `nextCursor` is null on the final page. Every
+ * version observed returns the full set on page one, but the cursor is
+ * part of the contract so we honor it. */
+export interface ModelListResult {
+  data: ModelListEntry[];
+  nextCursor?: string | null;
 }

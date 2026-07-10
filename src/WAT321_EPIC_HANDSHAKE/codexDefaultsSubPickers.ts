@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
+import type { CodexEffortLevel } from "../engine/bridgeTypes";
 import {
   getCodexModelInfo,
   listSelectableCodexModels,
 } from "../shared/providers/codex/models";
 import { baselineModel, shortenForRow } from "./codexDefaultsBaseline";
-import type { CodexEffortLevel } from "./codexRuntimeOverrides";
 import {
   makeBackItem,
   makeCancelItem,
@@ -15,12 +15,20 @@ import { isPaused, setPaused } from "./statusBarState";
 
 /**
  * Sub-pickers spawned from the Codex Model Settings parent picker:
- *   - `pickModel`: any visibility=list slug from the local
- *     models_cache.json. Active row gets a ✔️ prefix - rows matching
- *     the codex config.toml baseline get a trailing `*default*` tag.
- *   - `pickEffort`: model-specific supported effort list (falls back
- *     to the standard low/medium/high/xhigh quartet when the model
- *     advertises no supported set). Same ✔️ + `*default*` conventions.
+ *   - `pickModel`: every non-hidden model the running app-server
+ *     advertises, from the live `model/list` catalog. Active row gets a
+ *     ✔️ prefix - rows matching the codex config.toml baseline get a
+ *     trailing `*default*` tag.
+ *   - `pickEffort`: the SELECTED model's own advertised effort list, so
+ *     newer levels (`max` and `ultra` on the GPT-5.6 family) surface
+ *     without a code change and stay hidden on models that reject them.
+ *     Falls back to the low/medium/high/xhigh quartet common to every
+ *     model when no model resolves or it advertises no supported set.
+ *     Same ✔️ + `*default*` conventions.
+ *
+ * Callers must pass the EFFECTIVE model to `pickEffort`, not the raw
+ * override: a null slug collapses the rows to the quartet and hides
+ * `max` / `ultra` from anyone running the config default.
  *
  * Both return a `PickResult<TValue>` discriminated union so the
  * parent can distinguish "user picked a new value" from "user
@@ -118,14 +126,15 @@ export async function pickEffort(
   modelSlug: string | null
 ): Promise<PickResult<CodexEffortLevel | null>> {
   const modelInfo = modelSlug !== null ? getCodexModelInfo(modelSlug) : null;
+  // Mirrored verbatim from the selected model's advertised levels. No
+  // whitelist stands between the cache and the rows, so a level Codex
+  // adds appears the moment its cache carries it.
   const supported: { effort: CodexEffortLevel; description: string }[] =
     modelInfo !== null && modelInfo.supportedEfforts.length > 0
-      ? modelInfo.supportedEfforts
-          .filter(
-            (e): e is { effort: CodexEffortLevel; description: string } =>
-              ["low", "medium", "high", "xhigh"].includes(e.effort)
-          )
-          .map((e) => ({ effort: e.effort, description: e.description }))
+      ? modelInfo.supportedEfforts.map((e) => ({
+          effort: e.effort,
+          description: e.description,
+        }))
       : [
           { effort: "low", description: "Fast responses with lighter reasoning." },
           { effort: "medium", description: "Balanced speed and depth." },
