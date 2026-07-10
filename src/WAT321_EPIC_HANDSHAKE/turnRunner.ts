@@ -7,11 +7,8 @@ import {
   ROLLOUT_RECOVERY_POLL_MS,
   ROLLOUT_RECOVERY_WINDOW_MS,
 } from "./rolloutRecovery";
-import {
-  readCodexEffortOverride,
-  readCodexModelOverride,
-  readCodexSandboxOverride,
-} from "./codexRuntimeOverrides";
+import { readCodexSandboxOverride } from "./codexRuntimeOverrides";
+import { readSessionPin } from "./codexSessionSettings";
 import type { Envelope } from "./envelope";
 import type { TurnInterruptParams, TurnStartParams } from "./protocol";
 import { findRolloutPath } from "./threadPersistence";
@@ -388,22 +385,29 @@ export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {
       reject,
     });
 
-    // Read all three runtime overrides on every turn so the Codex
-    // Defaults picker takes effect on the next prompt without a
-    // thread reset. Approval policy stays pinned to `never` - the
-    // bridge has no UI to relay Codex's approval prompts back
-    // mid-turn.
+    // Re-read policy on every turn so the Codex Model Settings picker
+    // takes effect on the next prompt without a thread reset. Sandbox is
+    // workspace-scoped, model and effort belong to this session. Approval
+    // policy stays pinned to `never` - the bridge has no UI to relay
+    // Codex's approval prompts back mid-turn.
+    //
+    // Sending model on every turn is what makes the pin real. Codex fixes
+    // a thread's model at `thread/start` and then forgets it: resumed
+    // cold, it reports the config.toml model instead (probed). Re-asserting
+    // per turn means a resumed S1 runs what the user last chose, not what
+    // some machine-wide Codex preference happens to say.
     const sandboxPolicy =
       readCodexSandboxOverride(wsHash) === "full-access"
         ? ({ type: "dangerFullAccess" } as const)
         : ({ type: "readOnly" } as const);
+    const pin = readSessionPin(workspacePath);
     const turnStartParams: TurnStartParams = {
       threadId,
       input: [{ type: "text", text: env.body }],
       sandboxPolicy,
       approvalPolicy: "never",
-      model: readCodexModelOverride(wsHash),
-      effort: readCodexEffortOverride(wsHash),
+      model: pin.model,
+      effort: pin.effort,
     };
     client
       .sendRequest("turn/start", turnStartParams)

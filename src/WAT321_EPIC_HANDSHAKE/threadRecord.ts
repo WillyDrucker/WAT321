@@ -47,10 +47,68 @@ export interface BridgeThreadRecord {
   /** Short description of the most recent failure for diagnostics
    * and health-command display. */
   lastError?: string | null;
+  /** Model this session runs, pinned for the session's whole life.
+   *
+   * Set once when the thread is born, from whatever Codex recommends
+   * at that moment (`model/list`'s `isDefault`). Changed only when the
+   * user picks a different model in the Codex Model Settings picker.
+   * Survives window close, machine reboot, and app-server restart,
+   * because Codex itself does NOT remember a thread's model: a cold
+   * `thread/resume` returns the `config.toml` model, not the one the
+   * thread last ran (verified via probe). We are the memory.
+   *
+   * Null on records written before this field existed, and on a record
+   * whose session was reset. Both mean "materialize Codex's current
+   * recommendation on next spawn." */
+  model?: string | null;
+  /** Reasoning effort for this session. Same lifetime and same null
+   * semantics as `model`. Kept beside it so a session is described by
+   * exactly one file, and deleting the session forgets both. */
+  effort?: string | null;
+  /** True once this record's pin has been DECIDED, whether decided onto
+   * a model or deliberately cleared.
+   *
+   * Without this, `model === null` is overloaded: it means both "this
+   * record predates the field, go recover what the thread was running"
+   * and "the user just reset, give them Codex's recommendation". Reset
+   * leaves the thread alive, so the first reading would send migration
+   * back to the old rollout and restore the very model reset had
+   * cleared. The flag disambiguates: null + resolved means "Codex's
+   * recommendation", null + unresolved means "migrate". */
+  pinResolved?: boolean;
 }
 
 export function recordPath(workspacePath: string): string {
   return join(EPIC_HANDSHAKE_DIR, `bridge-thread.${workspaceHash(workspacePath)}.json`);
+}
+
+/** Fill a parsed record's every field. Both loaders route through
+ * here so a field added to `BridgeThreadRecord` cannot be hydrated in
+ * one and silently dropped in the other. */
+function hydrate(
+  parsed: Partial<BridgeThreadRecord>,
+  workspacePath: string
+): BridgeThreadRecord {
+  return {
+    threadId: parsed.threadId ?? null,
+    sessionCounter: parsed.sessionCounter ?? 1,
+    workspacePath: parsed.workspacePath ?? workspacePath,
+    createdAt: parsed.createdAt ?? new Date().toISOString(),
+    lastResetAt: parsed.lastResetAt ?? null,
+    lastSuccessAt: parsed.lastSuccessAt ?? null,
+    consecutiveFailures: parsed.consecutiveFailures ?? 0,
+    lastError: parsed.lastError ?? null,
+    model: parsed.model ?? null,
+    effort: parsed.effort ?? null,
+    // Absent on every record written before this field existed, which is
+    // exactly the population that must migrate.
+    pinResolved: parsed.pinResolved ?? false,
+  };
+}
+
+/** A record for a workspace that has never had a session. */
+function blankRecord(workspacePath: string): BridgeThreadRecord {
+  return hydrate({}, workspacePath);
 }
 
 /** Load the record for a workspace, or return null if none exists.
@@ -62,18 +120,10 @@ export function loadBridgeThreadRecordIfExists(
   const path = recordPath(workspacePath);
   if (!existsSync(path)) return null;
   try {
-    const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw) as Partial<BridgeThreadRecord>;
-    return {
-      threadId: parsed.threadId ?? null,
-      sessionCounter: parsed.sessionCounter ?? 1,
-      workspacePath: parsed.workspacePath ?? workspacePath,
-      createdAt: parsed.createdAt ?? new Date().toISOString(),
-      lastResetAt: parsed.lastResetAt ?? null,
-      lastSuccessAt: parsed.lastSuccessAt ?? null,
-      consecutiveFailures: parsed.consecutiveFailures ?? 0,
-      lastError: parsed.lastError ?? null,
-    };
+    const parsed = JSON.parse(
+      readFileSync(path, "utf8")
+    ) as Partial<BridgeThreadRecord>;
+    return hydrate(parsed, workspacePath);
   } catch {
     return null;
   }
@@ -83,47 +133,30 @@ export function loadBridgeThreadRecordIfExists(
  * none exists yet. Never throws on missing file. */
 export function loadBridgeThreadRecord(workspacePath: string): BridgeThreadRecord {
   const path = recordPath(workspacePath);
-  if (!existsSync(path)) {
-    return {
-      threadId: null,
-      sessionCounter: 1,
-      workspacePath,
-      createdAt: new Date().toISOString(),
-      lastResetAt: null,
-    };
-  }
+  if (!existsSync(path)) return blankRecord(workspacePath);
   try {
-    const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw) as Partial<BridgeThreadRecord>;
-    return {
-      threadId: parsed.threadId ?? null,
-      sessionCounter: parsed.sessionCounter ?? 1,
-      workspacePath: parsed.workspacePath ?? workspacePath,
-      createdAt: parsed.createdAt ?? new Date().toISOString(),
-      lastResetAt: parsed.lastResetAt ?? null,
-      lastSuccessAt: parsed.lastSuccessAt ?? null,
-      consecutiveFailures: parsed.consecutiveFailures ?? 0,
-      lastError: parsed.lastError ?? null,
-    };
+    const parsed = JSON.parse(
+      readFileSync(path, "utf8")
+    ) as Partial<BridgeThreadRecord>;
+    return hydrate(parsed, workspacePath);
   } catch {
-    return {
-      threadId: null,
-      sessionCounter: 1,
-      workspacePath,
-      createdAt: new Date().toISOString(),
-      lastResetAt: null,
-    };
+    return blankRecord(workspacePath);
   }
 }
 
-/** Atomic write via tmp + rename. Returns silently on rename failure
- * (e.g. EBUSY) - caller can re-call to retry. Persists per-workspace
- * bridge thread state to `~/.wat321/epic-handshake/bridge-thread.<wsHash>.json`. */
-export function saveBridgeThreadRecord(record: BridgeThreadRecord): void {
+/** Atomic write via tmp + rename. Persists per-workspace bridge thread
+ * state to `~/.wat321/epic-handshake/bridge-thread.<wsHash>.json`.
+ *
+ * Returns false on rename failure (e.g. EBUSY) rather than throwing, so
+ * a caller can re-call to retry. Callers that are about to destroy the
+ * only other copy of some state MUST check it: the pin migration deletes
+ * the legacy flag files it just read, and doing that after a failed
+ * write would lose the user's model choice outright. */
+export function saveBridgeThreadRecord(record: BridgeThreadRecord): boolean {
   const path = recordPath(record.workspacePath);
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileAtomic(path, JSON.stringify(record, null, 2));
+  return writeFileAtomic(path, JSON.stringify(record, null, 2));
 }
 
 /** Clear the error counter and last-error message without touching
@@ -143,7 +176,13 @@ export function clearBridgeErrorState(workspacePath: string): BridgeThreadRecord
 
 /** Reset: null the thread id, bump counter, stamp reset time. The
  * stored record is kept so the counter carries forward. Next prompt
- * creates a fresh Codex thread with S<N+1>. */
+ * creates a fresh Codex thread with S<N+1>.
+ *
+ * Model and effort are dropped along with the thread. A pin belongs to
+ * the session that carried it, so S<N+1> is born on whatever Codex
+ * recommends at that moment rather than inheriting the choice its
+ * predecessor made. That is what makes "delete the session" the way a
+ * user gets back to Codex's current default. */
 export function resetBridgeThread(workspacePath: string): BridgeThreadRecord {
   const current = loadBridgeThreadRecord(workspacePath);
   const next: BridgeThreadRecord = {
@@ -151,6 +190,9 @@ export function resetBridgeThread(workspacePath: string): BridgeThreadRecord {
     threadId: null,
     sessionCounter: current.sessionCounter + 1,
     lastResetAt: new Date().toISOString(),
+    model: null,
+    effort: null,
+    pinResolved: true,
   };
   saveBridgeThreadRecord(next);
   return next;
