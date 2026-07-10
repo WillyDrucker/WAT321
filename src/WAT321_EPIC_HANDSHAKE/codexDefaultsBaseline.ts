@@ -2,32 +2,49 @@ import type { CodexEffortLevel } from "../engine/bridgeTypes";
 import {
   defaultCodexModelSlug,
   getCodexModelInfo,
-  readCodexConfigModel,
 } from "../shared/providers/codex/models";
 import { workspaceHash } from "../shared/workspaceHash";
 import {
-  readCodexEffortOverride,
-  readCodexModelOverride,
   readCodexSandboxOverride,
   type CodexSandboxState,
 } from "./codexRuntimeOverrides";
+import {
+  defaultEffortForModel,
+  pinMatchesCodexDefault,
+  readSessionPin,
+} from "./codexSessionSettings";
 import { currentWorkspacePath } from "./statusBarState";
 
 /**
- * Baseline + label helpers for the Codex Model Settings picker. The
- * three override flag files are workspace-scoped - `currentWsHash`
- * partitions reads so two VS Code windows on different projects
- * stay isolated. "Baseline" is the codex config.toml default for
- * model + model's own default-effort + read-only sandbox - the
- * `*default*` tag marks values that match it.
+ * Baseline + label helpers for the Codex Model Settings picker.
+ *
+ * "Baseline" is what CODEX recommends: `model/list`'s `isDefault` model,
+ * that model's own `defaultReasoningEffort`, and a read-only sandbox.
+ * The `*default*` tag marks rows matching it. Nothing here defines a
+ * default of WAT321's own, and `~/.codex/config.toml` is not read.
+ *
+ * The sandbox override is workspace-scoped, so `currentWsHash`
+ * partitions its reads and two windows on different projects stay
+ * isolated. Model and effort are session-scoped and come from
+ * `codexSessionSettings`.
  */
+
+/** Sentinel path for a window with no folder open. Keeps a
+ * workspace-less window from colliding with a real project's state,
+ * while still giving the session record and the sandbox flag one
+ * stable key to agree on. */
+const NO_WORKSPACE = "no-workspace";
+
+/** Current workspace path, or the sentinel. */
+export function currentWorkspacePathOrSentinel(): string {
+  return currentWorkspacePath() ?? NO_WORKSPACE;
+}
 
 /** Hash of the current workspace path for flag-file partitioning.
  * Falls back to a sentinel hash when no workspace is open so the
  * flags still partition away from real workspaces. */
 export function currentWsHash(): string {
-  const ws = currentWorkspacePath();
-  return workspaceHash(ws ?? "no-workspace");
+  return workspaceHash(currentWorkspacePathOrSentinel());
 }
 
 export function capitalizeFirst(s: string): string {
@@ -68,51 +85,41 @@ export function effortRowLabel(effort: CodexEffortLevel | null): string {
   return `EFFORT: ${effective.toUpperCase()}${isDefault ? " *default*" : ""}`;
 }
 
-export function configModelLabel(): string {
-  const cfg = readCodexConfigModel();
-  if (cfg === null) return "default";
-  const info = getCodexModelInfo(cfg);
-  return info?.displayName ?? cfg;
-}
-
 export function sandboxIsDefault(state: CodexSandboxState): boolean {
   return state === "read-only";
 }
 
-/** Whatever Codex itself would run with no override.
+/** The model Codex recommends for a brand-new session.
  *
- * `config.toml` wins when it names a model, because Codex honors it. A
- * user who pinned `model = "gpt-5.5"` genuinely has 5.5 as their
- * default, and WAT321 marking anything else `*default*` would be a lie.
- * Only when config is silent do we ask the app-server, which reports
- * its own default through `model/list`'s `isDefault` flag. Null when
- * neither can answer, and the picker then has no `*default*` to mark. */
+ * This is what `*default*` means in the picker: Codex's answer, not
+ * ours and not this machine's. It comes from `model/list`'s `isDefault`
+ * flag, read live, so it tracks the installed binary rather than a
+ * constant we would have to chase. Today `gpt-5.6-sol`.
+ *
+ * `~/.codex/config.toml` is deliberately NOT consulted. It is a machine-
+ * wide CLI preference that Codex's own TUI writes when a user picks a
+ * model there, and letting it define `*default*` meant a fresh WAT321
+ * install behaved differently on two machines for reasons our UI never
+ * showed. Null when no catalog has answered, and the picker then has no
+ * `*default*` to mark. */
 export function baselineModel(): string | null {
-  return readCodexConfigModel() ?? defaultCodexModelSlug();
+  return defaultCodexModelSlug();
 }
 
-/** Model's own default effort from the cache - falls back to
- * `"medium"` when no model context applies. */
+/** The effort that goes with the recommended model, per Codex.
+ *
+ * Scoped to the SESSION's model, not the recommended one, so the tag in
+ * the effort picker marks the default of the model actually selected.
+ * A session on 5.4-mini sees 5.4-mini's default tagged, never 5.6-sol's.
+ * Null when nothing can answer, which the row renders as "no default
+ * available" rather than inventing `medium`. */
 export function baselineEffort(): CodexEffortLevel | null {
-  const model = readCodexModelOverride(currentWsHash()) ?? baselineModel();
-  if (model === null) return "medium";
-  // `defaultEffort` is the model's own `default_reasoning_level` read
-  // straight from the cache, so it is valid by construction. Guard only
-  // against an absent or empty value.
-  const info = getCodexModelInfo(model);
-  const cand = info?.defaultEffort;
-  if (typeof cand === "string" && cand.length > 0) return cand;
-  return "medium";
+  const model = readSessionPin(currentWorkspacePathOrSentinel()).model;
+  return defaultEffortForModel(model ?? baselineModel());
 }
 
 export function everythingAtDefault(): boolean {
-  const wsHash = currentWsHash();
-  const sandbox = readCodexSandboxOverride(wsHash);
-  const modelOverride = readCodexModelOverride(wsHash);
-  const effortOverride = readCodexEffortOverride(wsHash);
+  const sandbox = readCodexSandboxOverride(currentWsHash());
   if (!sandboxIsDefault(sandbox)) return false;
-  // No override = "use the baseline" = default.
-  if (modelOverride !== null && modelOverride !== baselineModel()) return false;
-  if (effortOverride !== null && effortOverride !== baselineEffort()) return false;
-  return true;
+  return pinMatchesCodexDefault(readSessionPin(currentWorkspacePathOrSentinel()));
 }

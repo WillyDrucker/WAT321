@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
+import { getCodexModelInfo } from "../shared/providers/codex/models";
+import { ensureCodexCatalog } from "./codexCatalogSync";
 import {
   baselineEffort,
-  baselineModel,
   capitalizeFirst,
-  configModelLabel,
+  currentWorkspacePathOrSentinel,
   currentWsHash,
   effortRowLabel,
   everythingAtDefault,
@@ -11,16 +12,16 @@ import {
   sandboxIsDefault,
 } from "./codexDefaultsBaseline";
 import { pickEffort, pickModel } from "./codexDefaultsSubPickers";
-import { getCodexModelInfo } from "../shared/providers/codex/models";
 import {
-  readCodexEffortOverride,
-  readCodexModelOverride,
   readCodexSandboxOverride,
   sandboxHasBeenTouched,
-  writeCodexEffortOverride,
-  writeCodexModelOverride,
   writeCodexSandboxOverride,
 } from "./codexRuntimeOverrides";
+import {
+  readSessionPin,
+  writeSessionEffort,
+  writeSessionModel,
+} from "./codexSessionSettings";
 import {
   makeBackItem,
   makeCancelItem,
@@ -29,30 +30,34 @@ import {
   type ActionContext,
   type DispatchAction,
 } from "./menuCommon";
+import { epicHandshakeLogger } from "./outputChannel";
 import { isPaused, setPaused } from "./statusBarState";
 
 /**
  * Combined "Codex Model Settings" picker - one entry point for all
- * three per-turn overrides the bridge passes on every `turn/start`:
+ * three values the bridge passes on every `turn/start`:
  *   - sandbox  (Full-Access | Read-Only)
- *   - model    (any visibility=list slug from `models_cache.json`)
- *   - effort   (low | medium | high | xhigh)
+ *   - model    (any non-hidden slug the running app-server advertises)
+ *   - effort   (whatever the SELECTED model advertises, so `max` and
+ *              `ultra` appear on the GPT-5.6 family and nowhere else)
  *
- * Each row shows the current value. `*default*` marks rows that
- * match the platform baseline (sandbox=read-only, model=codex-config-
- * default, effort=model's own default-effort). A leading green check
- * (✔️) marks the active selection inside sub-pickers.
+ * Each row shows the current value. `*default*` marks rows matching
+ * CODEX's own recommendation: `model/list`'s `isDefault` model, that
+ * model's `defaultReasoningEffort`, and a read-only sandbox. Nothing
+ * here is a default of WAT321's, and `~/.codex/config.toml` is not
+ * read. A leading green check (✔️) marks the active selection inside
+ * sub-pickers.
  *
  * Sandbox is a direct toggle (no sub-picker) - one click flips
  * between full-access and read-only. Model and effort open sub-
  * pickers because each has multiple options.
  *
- * No persistent settings: overrides live only in flag files under
- * `~/.wat321/epic-handshake/`. Reset WAT321 wipes them, so "default"
- * is the safe fallback after a reset. The codex config.toml supplies
- * the model baseline - a user who only wants to follow their codex
- * config never has to touch this picker - the absence of an override
- * means codex uses its own config.
+ * Scope differs by row, and the difference is deliberate. Sandbox is a
+ * safety posture for a FOLDER, stored in a per-workspace flag file.
+ * Model and effort belong to the SESSION, stored on its
+ * `BridgeThreadRecord`, so S1 keeps what the user last chose across
+ * restarts and S2 starts fresh on Codex's recommendation. See
+ * `codexSessionSettings.ts`.
  *
  * Sub-pickers + baseline/label helpers live in sibling files
  * (`codexDefaultsSubPickers.ts`, `codexDefaultsBaseline.ts`).
@@ -76,20 +81,19 @@ export function codexDefaultsHeadline(): string {
  * effort with the live current values. Lets the user verify what
  * the bridge will send without opening the picker. */
 export function codexDefaultsSubline(): string {
-  const wsHash = currentWsHash();
-  const sandbox = readCodexSandboxOverride(wsHash);
-  const model = readCodexModelOverride(wsHash);
-  const effort = readCodexEffortOverride(wsHash);
+  const sandbox = readCodexSandboxOverride(currentWsHash());
+  const pin = readSessionPin(currentWorkspacePathOrSentinel());
   // Each segment uses native casing: sandbox words like "Read-Only" /
   // "Full-Access", model display name preserves its capitalization
-  // (GPT-5.5), effort starts capital (Medium). Keeps the subline
+  // (GPT-5.6 Sol), effort starts capital (Low). Keeps the subline
   // scannable without a wall of lowercase that hides boundaries.
   const sandboxLabel = sandbox === "full-access" ? "Full-Access" : "Read-Only";
   const modelLabel =
-    model === null
-      ? configModelLabel()
-      : (getCodexModelInfo(model)?.displayName ?? model);
-  const effortLabel = capitalizeFirst(effort ?? baselineEffort() ?? "Medium");
+    pin.model === null
+      ? "default"
+      : (getCodexModelInfo(pin.model)?.displayName ?? pin.model);
+  const effort = pin.effort ?? baselineEffort();
+  const effortLabel = effort === null ? "Default" : capitalizeFirst(effort);
   return `${sandboxLabel} · ${modelLabel} · ${effortLabel}`;
 }
 
@@ -97,15 +101,29 @@ export async function showCodexDefaultsPicker(
   dispatch: DispatchAction,
   ctx: ActionContext
 ): Promise<void> {
+  // Ask Codex what it can run before drawing any row. Opening this
+  // picker IS the user asking which models exist, so it is the honest
+  // place to pay for the answer. Usually free (memory or sidecar). On a
+  // first run it spawns a short-lived app-server, which is why the wait
+  // is announced rather than silent. A failure here is not fatal - the
+  // rows fall back to `~/.codex/models_cache.json` exactly as before.
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Window,
+      title: "WAT321: reading Codex models",
+    },
+    () => ensureCodexCatalog(epicHandshakeLogger())
+  );
+
   // Looped so each sub-picker (model, effort) returns to the
   // combined picker, letting the user adjust multiple defaults in
   // one session without re-clicking the bridge widget. Loop exits
   // on BACK or QuickPick dismiss. Sandbox is an inline toggle so it
   // never opens a sub-picker - the loop re-renders with the new state.
   const wsHash = currentWsHash();
+  const workspacePath = currentWorkspacePathOrSentinel();
   while (true) {
-    const model = readCodexModelOverride(wsHash);
-    const effort = readCodexEffortOverride(wsHash);
+    const { model, effort } = readSessionPin(workspacePath);
     const sandbox = readCodexSandboxOverride(wsHash);
 
     const paused = isPaused();
@@ -173,18 +191,22 @@ export async function showCodexDefaultsPicker(
 
     if (pick.row === "model") {
       const result = await pickModel(model);
-      if (result.kind === "picked") writeCodexModelOverride(wsHash, result.value);
+      // Picking a model resets effort to that model's own default, since
+      // effort levels are model-scoped. `writeSessionModel` owns that
+      // rule so every caller gets it.
+      if (result.kind === "picked" && result.value !== null) {
+        writeSessionModel(workspacePath, result.value);
+      }
       continue;
     }
     if (pick.row === "effort") {
-      // `model` is the OVERRIDE, null when the user never set one. The
-      // effort picker narrows its rows to the selected model's advertised
-      // levels, so a null here would silently drop it to the lowest
-      // common quartet and hide `max` / `ultra` from anyone running the
-      // config default. Resolve the effective model, not just the
-      // override.
-      const result = await pickEffort(effort, model ?? baselineModel());
-      if (result.kind === "picked") writeCodexEffortOverride(wsHash, result.value);
+      // `model` here is the session's effective model, never null unless
+      // no catalog has answered at all. The effort picker narrows its rows
+      // to that model's advertised levels, so passing an unresolved value
+      // would drop the rows to the lowest common quartet and hide `max`
+      // and `ultra` from a session running 5.6 Sol.
+      const result = await pickEffort(effort, model);
+      if (result.kind === "picked") writeSessionEffort(workspacePath, result.value);
       continue;
     }
     if (pick.row === "sandbox") {

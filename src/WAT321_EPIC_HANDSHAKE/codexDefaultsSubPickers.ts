@@ -17,8 +17,9 @@ import { isPaused, setPaused } from "./statusBarState";
  * Sub-pickers spawned from the Codex Model Settings parent picker:
  *   - `pickModel`: every non-hidden model the running app-server
  *     advertises, from the live `model/list` catalog. Active row gets a
- *     ✔️ prefix - rows matching the codex config.toml baseline get a
- *     trailing `*default*` tag.
+ *     ✔️ prefix - the row Codex itself marks `isDefault` gets a trailing
+ *     `*default*` tag. That tag names Codex's recommendation, never a
+ *     default of WAT321's and never this machine's `config.toml`.
  *   - `pickEffort`: the SELECTED model's own advertised effort list, so
  *     newer levels (`max` and `ultra` on the GPT-5.6 family) surface
  *     without a code change and stay hidden on models that reject them.
@@ -57,7 +58,7 @@ export async function pickModel(
   const models = listSelectableCodexModels();
   if (models.length === 0) {
     void vscode.window.showWarningMessage(
-      "Epic Handshake: Codex's local models cache is empty, so the model picker has nothing to list yet. The cache populates whenever Codex runs."
+      "Epic Handshake: no Codex models are available to list right now."
     );
     return { kind: "cancelled" };
   }

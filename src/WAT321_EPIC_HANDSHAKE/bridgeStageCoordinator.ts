@@ -19,7 +19,7 @@ import {
 } from "./bridgeStageMap";
 import { advanceLatch } from "./bridgeStageWalker";
 import { returningFlagPath } from "./constants";
-import { readCodexEffortOverride } from "./codexRuntimeOverrides";
+import { readSessionPin } from "./codexSessionSettings";
 import { isBridgeBusy, isPaused } from "./statusBarState";
 import {
   readNewestHeartbeat,
@@ -202,7 +202,7 @@ export class BridgeStageCoordinator
       this.latchState?.waitMode ??
       (rawHeartbeat?.waitMode as BridgeWaitMode | undefined) ??
       currentWaitMode(workspacePath);
-    const codexEffort = readCodexEffortOverride(wsHash);
+    const codexEffort = readSessionPin(workspacePath).effort;
     const waitInfo = readWaitStatus(wsHash);
     const now = Date.now();
 
