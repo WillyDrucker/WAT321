@@ -5,7 +5,12 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.31] - unreleased
+## [1.5.31] - 2026-07-14
+
+### Fixed
+
+- **A new usage limit from OpenAI can no longer go missing from your status bar.** The last release taught WAT321 to sort your Codex limits by how long each one actually runs for, which handles the single weekly limit you have today and the old five-hour-plus-weekly pair. What it did not handle was two limits of a similar length. If OpenAI published, say, a five hour cap alongside a daily one, you would have seen the first and the second would have quietly vanished, taking the second bar with it. Every limit Codex reports now gets a bar, whatever shape the set arrives in.
+- **The Codex hover no longer comes up blank** in the rare case where the usage service returns no limits at all. It now tells you so, the way the compact hover already did.
 
 ## [1.5.30] - 2026-07-14
 
