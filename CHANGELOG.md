@@ -5,7 +5,11 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.30] - unreleased
+## [1.5.30] - 2026-07-14
+
+### Fixed
+
+- **Your Codex usage bar tells the truth again now that OpenAI has retired the 5 hour limit.** Codex publishes a single weekly limit these days, and WAT321 was still sorting the two limits by the order they arrived in rather than by what they actually were. So your weekly usage was being poured into the bar labelled "5 hour", counted down in hours instead of days (a reset six days out read "152hr 49min"), and the real weekly bar sat next to it showing a permanently full green bar over a limit that no longer exists. WAT321 now reads each limit's own declared length, so the surviving one is labelled **5h/Weekly**, counts down properly in days, and the empty second bar takes itself off your status bar. If OpenAI ever brings the 5 hour limit back, both bars return on their own within a couple of minutes. Nothing to set, nothing to reset. Your Claude bars were never affected.
 
 ## [1.5.29] - 2026-07-14
 
