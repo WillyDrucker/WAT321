@@ -66,12 +66,37 @@ function isLong(w: RateLimitWindow): boolean {
   return w.limit_window_seconds > LONG_WINDOW_THRESHOLD_SECONDS;
 }
 
+/** Caption and heading for a window, derived from its own declared length
+ * so neither can ever contradict the window it sits on. The 5-hour and
+ * 7-day windows Codex ships today keep their familiar names. Anything else
+ * gets an honest duration rather than being forced into one of the two. */
+function nameFor(w: RateLimitWindow): { label: string; title: string } {
+  const seconds = w.limit_window_seconds;
+  if (seconds === 18_000) return { label: "5h", title: "5 hour usage limit" };
+  if (seconds === 604_800) {
+    return { label: "Weekly", title: "Weekly usage limit" };
+  }
+  if (!isLong(w)) {
+    const hours = Math.max(1, Math.round(seconds / 3_600));
+    return { label: `${hours}h`, title: `${hours} hour usage limit` };
+  }
+  const days = Math.max(1, Math.round(seconds / 86_400));
+  return { label: `${days}d`, title: `${days} day usage limit` };
+}
+
 function toRow(w: RateLimitWindow, label: string, title: string): CodexUsageRow {
   const resetAtMs = w.reset_at * 1000;
   const resetLine = isLong(w)
     ? formatWeeklyReset(resetAtMs)
     : formatFiveHourReset(resetAtMs);
   return { window: w, label, title, resetLine };
+}
+
+/** Same as `toRow` but with the caption derived from the window itself.
+ * Used everywhere except the collapsed case, which overrides the label. */
+function toNamedRow(w: RateLimitWindow): CodexUsageRow {
+  const { label, title } = nameFor(w);
+  return toRow(w, label, title);
 }
 
 export function resolveCodexWindows(
@@ -82,34 +107,49 @@ export function resolveCodexWindows(
     usage?.rate_limit?.secondary_window,
   ].filter((w): w is RateLimitWindow => w !== null && w !== undefined);
 
+  // Exactly ONE window. It takes the 5h slot so the bar stays where the
+  // user already looks, and the weekly widget stands down. A surviving
+  // long window is captioned "5h/Weekly" because it is now the only limit
+  // and has absorbed what the 5-hour cap used to measure. A surviving
+  // short window keeps its own name, since there is no weekly component
+  // to fold into it.
+  //
+  // The `length === 1` test is load-bearing and must come first. Testing
+  // "no short" or "no long" instead would treat TWO same-class windows as
+  // a collapse, silently dropping one of them and hiding the weekly bar.
+  if (published.length === 1) {
+    const only = published[0];
+    return {
+      primary: isLong(only)
+        ? toRow(only, "5h/Weekly", "5h / Weekly usage limit")
+        : toNamedRow(only),
+      secondary: null,
+      hideWeekly: true,
+    };
+  }
+
+  // Two windows, one of each class. The familiar layout, now keyed off
+  // what each window actually is rather than which slot it arrived in.
   const short = published.find((w) => !isLong(w)) ?? null;
   const long = published.find((w) => isLong(w)) ?? null;
-
-  // Both published. The familiar two-bar layout, now keyed off what each
-  // window actually is rather than which slot it arrived in.
   if (short !== null && long !== null) {
     return {
-      primary: toRow(short, "5h", "5 hour usage limit"),
-      secondary: toRow(long, "Weekly", "Weekly usage limit"),
+      primary: toNamedRow(short),
+      secondary: toNamedRow(long),
       hideWeekly: false,
     };
   }
 
-  // Exactly one published. It takes the 5h slot so the bar stays where
-  // the user already looks, and the weekly widget stands down. A
-  // surviving long window is captioned "5h/Weekly" because it is now the
-  // only limit and has absorbed what the 5-hour cap used to measure. A
-  // surviving short window keeps its own name, since in that case there
-  // is no weekly component to fold into it.
-  const only = long ?? short;
-  if (only !== null) {
+  // Two or more windows of the SAME class. Codex has never sent this, but
+  // it easily could: a 5-hour cap alongside a daily one would classify as
+  // two short windows. Render them in arrival order under their own
+  // durations and hide NOTHING. Silently dropping a limit the user is
+  // actually subject to is the one outcome worse than an odd-looking bar.
+  if (published.length >= 2) {
     return {
-      primary:
-        long !== null
-          ? toRow(only, "5h/Weekly", "5h / Weekly usage limit")
-          : toRow(only, "5h", "5 hour usage limit"),
-      secondary: null,
-      hideWeekly: true,
+      primary: toNamedRow(published[0]),
+      secondary: toNamedRow(published[1]),
+      hideWeekly: false,
     };
   }
 
