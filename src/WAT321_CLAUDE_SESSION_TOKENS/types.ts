@@ -31,9 +31,15 @@ export interface ResolvedSession {
   lastActiveAt: number; // ms - live: Date.now(), lastKnown: transcript file mtime
   /** Last transcript entry classification. Drives the active-state
    * indicator. `user` and `assistant-pending` mean a response is in
-   * flight. `assistant-done` and `unknown` are idle. Interrupts are
-   * mapped to `assistant-done` by the classifier so the widget
-   * returns to idle immediately. */
+   * flight. `assistant-done`, `interrupted`, `compact-end`, and
+   * `unknown` are idle. The classifier gives an abort and a compaction
+   * their own kinds rather than folding them into `assistant-done`, so
+   * the widget can stop animating on both while the toast notifier
+   * still fires only on a real model response.
+   *
+   * An assistant entry carrying only a thinking block classifies as
+   * `assistant-pending`, not done: the model is still mid-turn and has
+   * not said anything yet. */
   turnState: LastEntryKind;
   /** Claude Code CLI process id for live sessions. Consumed by the
    * widget's active indicator: PID alive extends animation through

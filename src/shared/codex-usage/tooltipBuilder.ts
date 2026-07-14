@@ -42,12 +42,17 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   const showUsed = style === "used";
   const pctLabel = showUsed ? "used" : "remaining";
 
-  let creditsText = "";
+  // Footer notes, in order. The empty-rows note matters: `rate_limit` can
+  // come back null, and both surfaces must then say so rather than one
+  // reading "Usage data unavailable" while the other renders a heading
+  // with nothing under it.
+  const notes: string[] = [];
+  if (rows.length === 0) notes.push("Usage data unavailable");
   if (usage.credits?.has_credits || usage.credits?.unlimited) {
     const balance = usage.credits.unlimited
       ? "Unlimited"
       : `$${usage.credits.balance ?? "0"}`;
-    creditsText = `Credits: ${balance}`;
+    notes.push(`Credits: ${balance}`);
   }
 
   if (getDisplayMode() === "minimal") {
@@ -72,8 +77,7 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
       );
       md.appendMarkdown(`\u{29D7} ${row.resetLine}\n\n`);
     }
-    if (rows.length === 0) md.appendMarkdown(`Usage data unavailable\n\n`);
-    if (creditsText) md.appendMarkdown(`${creditsText}\n\n`);
+    for (const note of notes) md.appendMarkdown(`${note}\n\n`);
     md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
     return md;
   }
@@ -93,6 +97,7 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
         resetLine: row.resetLine,
       };
     }),
-    footer: creditsText || undefined,
+    // `<br>` rather than a newline: the shell renders the footer as HTML.
+    footer: notes.length > 0 ? notes.join("<br>") : undefined,
   });
 }
