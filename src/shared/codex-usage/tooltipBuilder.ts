@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
 import { bandFromRemaining, renderCodexBar } from "../ui/heatmap";
-import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
 import { resolveUsageStyle } from "../ui/usageDisplay";
 import { buildUsageTooltipHtml } from "../ui/usageTooltipHtml";
 import { formatPlanLabel, getRemainingPct } from "./formatters";
 import type { CodexUsageResponse } from "./types";
+import { resolveCodexWindows, type CodexUsageRow } from "./windows";
 
 /** Codex full-mode bar color, derived from the same remaining bands
  * as the status-bar heatmap so hover and widget always agree. */
@@ -16,27 +16,31 @@ function codexBarColor(remainingPct: number): string {
   return "#22c55e";
 }
 
+/** Percent the row should display, honoring the user's usage style.
+ * Kept beside the row so the bar, the label, and the color all read the
+ * same window rather than each re-deriving it. */
+function shownPct(row: CodexUsageRow, showUsed: boolean): number {
+  const remaining = getRemainingPct(row.window.used_percent);
+  return showUsed ? 100 - remaining : remaining;
+}
+
 export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
-  const sPct = usage.rate_limit?.primary_window?.used_percent ?? 0;
-  const sRemaining = getRemainingPct(sPct);
-  const sReset = usage.rate_limit?.primary_window
-    ? formatFiveHourReset(usage.rate_limit.primary_window.reset_at * 1000)
-    : "Resets unknown";
-  const wPct = usage.rate_limit?.secondary_window?.used_percent ?? 0;
-  const wRemaining = getRemainingPct(wPct);
-  const wReset = usage.rate_limit?.secondary_window
-    ? formatWeeklyReset(usage.rate_limit.secondary_window.reset_at * 1000)
-    : "Resets unknown";
+  // Rows come from the resolved layout, so a window Codex no longer
+  // publishes leaves no row behind. The old builder always drew exactly
+  // two, which is why a retired window rendered as a full green bar over
+  // "Resets unknown" instead of simply not appearing.
+  const layout = resolveCodexWindows(usage);
+  const rows = [layout.primary, layout.secondary].filter(
+    (r): r is CodexUsageRow => r !== null
+  );
+
   const planLabel = formatPlanLabel(usage.plan_type);
-  // Tooltip percents, labels, and embedded bars follow the same
-  // usage style as the status bar so the hover never contradicts
-  // the widget next to it. Color ramps stay keyed to remaining
-  // percent.
+  // Tooltip percents, labels, and embedded bars follow the same usage
+  // style as the status bar so the hover never contradicts the widget
+  // next to it. Color ramps stay keyed to remaining percent.
   const style = resolveUsageStyle("codex");
   const showUsed = style === "used";
   const pctLabel = showUsed ? "used" : "remaining";
-  const sShown = showUsed ? 100 - sRemaining : sRemaining;
-  const wShown = showUsed ? 100 - wRemaining : wRemaining;
 
   let creditsText = "";
   if (usage.credits?.has_credits || usage.credits?.unlimited) {
@@ -59,12 +63,16 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     md.appendMarkdown(
       `$(openai)&nbsp;&nbsp;**Codex usage limits** ${planLabel}\n\n`
     );
-    md.appendMarkdown(`**5 hour usage limit** ${sShown}% ${pctLabel}  \n`);
-    md.appendMarkdown(`${renderCodexBar(sPct, 10, style)}  \n`);
-    md.appendMarkdown(`\u{29D7} ${sReset}\n\n`);
-    md.appendMarkdown(`**Weekly usage limit** ${wShown}% ${pctLabel}  \n`);
-    md.appendMarkdown(`${renderCodexBar(wPct, 10, style)}  \n`);
-    md.appendMarkdown(`\u{29D7} ${wReset}\n\n`);
+    for (const row of rows) {
+      md.appendMarkdown(
+        `**${row.title}** ${shownPct(row, showUsed)}% ${pctLabel}  \n`
+      );
+      md.appendMarkdown(
+        `${renderCodexBar(row.window.used_percent, 10, style)}  \n`
+      );
+      md.appendMarkdown(`\u{29D7} ${row.resetLine}\n\n`);
+    }
+    if (rows.length === 0) md.appendMarkdown(`Usage data unavailable\n\n`);
     if (creditsText) md.appendMarkdown(`${creditsText}\n\n`);
     md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
     return md;
@@ -74,22 +82,17 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
     heading: "Codex usage limits",
     headingIcon: "$(openai)",
     planLabel,
-    rows: [
-      {
-        title: "5 hour usage limit",
-        valueLabel: `${sShown}% ${pctLabel}`,
-        barFillPct: sShown,
-        barColor: codexBarColor(sRemaining),
-        resetLine: sReset,
-      },
-      {
-        title: "Weekly usage limit",
-        valueLabel: `${wShown}% ${pctLabel}`,
-        barFillPct: wShown,
-        barColor: codexBarColor(wRemaining),
-        resetLine: wReset,
-      },
-    ],
+    rows: rows.map((row) => {
+      const remaining = getRemainingPct(row.window.used_percent);
+      const shown = shownPct(row, showUsed);
+      return {
+        title: row.title,
+        valueLabel: `${shown}% ${pctLabel}`,
+        barFillPct: shown,
+        barColor: codexBarColor(remaining),
+        resetLine: row.resetLine,
+      };
+    }),
     footer: creditsText || undefined,
   });
 }

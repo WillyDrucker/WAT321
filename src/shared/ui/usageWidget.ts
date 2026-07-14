@@ -24,6 +24,16 @@ import { classifyUsageNonOk } from "./usageNonOkClassifier";
  * a bar should be. The non-ok tooltip still leads with the cached ok
  * content (reset times etc.) and closes with the error detail so hover
  * disclosure remains identical.
+ *
+ * The ONE exception to bars-always is `shouldHide`, which exists because
+ * a provider can retire a rate-limit window outright. OpenAI removed the
+ * Codex 5-hour cap and now publishes a single weekly window, and a widget
+ * for a window that no longer exists cannot show usage shape - it can only
+ * show a full green bar over nothing, which is worse than showing nothing.
+ * The escape hatch is deliberately narrow: it fires only on data the
+ * provider definitively returned, never on absence, and a widget with no
+ * cached payload always renders rather than hiding. Uncertainty keeps the
+ * bar on screen.
  */
 
 export interface UsageWidgetDescriptor<TData> {
@@ -56,8 +66,27 @@ export interface UsageWidgetDescriptor<TData> {
   getTextColor(mode: ReturnType<typeof getDisplayMode>, pct: number): string | undefined;
   /** Format the status-bar text for a given display mode. Used for
    * both ok and non-ok states. The bar widget never adds a state-
-   * label suffix - the sibling `UsageErrorWidget` owns that disclosure. */
-  formatText(mode: ReturnType<typeof getDisplayMode>, pct: number, bar5: string, bar10: string): string;
+   * label suffix - the sibling `UsageErrorWidget` owns that disclosure.
+   *
+   * `data` is the payload being rendered, or null on a non-ok state with
+   * no cached payload. It is passed so a caption can follow the data
+   * rather than being fixed at construction: Codex relabels its 5h bar
+   * "5h/Weekly" when OpenAI collapses the two windows into one. Widgets
+   * with a static caption simply omit the parameter. */
+  formatText(
+    mode: ReturnType<typeof getDisplayMode>,
+    pct: number,
+    bar5: string,
+    bar10: string,
+    data: TData | null
+  ): string;
+  /** Optional. Return true to take this widget off the status bar for
+   * this payload, because the provider no longer publishes the window it
+   * renders. Called ONLY with a payload the provider actually returned,
+   * so it can never fire on missing or unreadable data. A widget with no
+   * cached payload is always shown. Omit it and the widget is never
+   * hidden, which is the default for every widget but Codex weekly. */
+  shouldHide?(data: TData): boolean;
 }
 
 export class UsageWidget<TData> implements vscode.Disposable {
@@ -166,11 +195,16 @@ export class UsageWidget<TData> implements vscode.Disposable {
 
   private renderOk(data: TData): void {
     const d = this.descriptor;
+    // The provider told us this window no longer exists. Nothing to draw.
+    if (d.shouldHide?.(data) === true) {
+      this.item.hide();
+      return;
+    }
     const pct = d.getDisplayPct(data);
     const mode = getDisplayMode();
     const bar5 = d.renderBar(pct, 5);
     const bar10 = d.renderBar(pct, 10);
-    this.item.text = d.formatText(mode, pct, bar5, bar10);
+    this.item.text = d.formatText(mode, pct, bar5, bar10, data);
     this.item.tooltip = d.buildTooltip(data);
     this.item.color = d.getTextColor(mode, pct);
     this.item.backgroundColor = undefined;
@@ -187,6 +221,16 @@ export class UsageWidget<TData> implements vscode.Disposable {
   private renderNonOk(detail: string): void {
     const d = this.descriptor;
     const data = this.lastOkData;
+    // Carry the last-known-good hide decision through the outage rather
+    // than re-deriving one. A window the provider had definitively retired
+    // has not come back just because the network dropped, and flickering
+    // the bar on for every transient error would be worse than leaving it
+    // off. With NO cached payload we always render, so an unknown state
+    // can never hide a widget.
+    if (data !== null && d.shouldHide?.(data) === true) {
+      this.item.hide();
+      return;
+    }
     const pct = data !== null ? d.getDisplayPct(data) : 0;
     const mode = getDisplayMode();
     const bar5 = d.renderBar(pct, 5);
@@ -195,7 +239,7 @@ export class UsageWidget<TData> implements vscode.Disposable {
     // No click affordance on non-ok - the auto-kickstart on the service
     // handles recovery, no user action is required or possible.
     this.item.command = undefined;
-    this.item.text = d.formatText(mode, pct, bar5, bar10);
+    this.item.text = d.formatText(mode, pct, bar5, bar10, data);
     this.item.tooltip = this.buildNonOkTooltip(data, detail);
     this.item.color = IDLE_DIM_COLOR;
     this.item.backgroundColor = undefined;
