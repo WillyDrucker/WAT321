@@ -5,6 +5,13 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.29] - 2026-07-14
+
+### Fixed
+
+- **A second VS Code window no longer means two notifications for the same response.** WAT321 has always carried a check meant to stop exactly this, and it turns out it has never once worked. Each window went looking for the other window's claim inside a folder only it could see, so both concluded they were the only one and both fired. A window with no folder open is the worst offender, because it quietly adopts whichever project you were most recently working in and starts delivering its own copy of that project's notifications.
+- **A notification no longer shows you the text from your previous response.** When Claude thinks before answering, that thinking is written out a few seconds ahead of the answer itself. WAT321 read that as "the turn is finished", fired a notification, found no text to put in it, and reached back for the last thing Claude had said, which was the response before this one. The real answer then landed and a second notification arrived carrying the right text. One response, two notifications, and the first one wrong. A turn now counts as finished only once there is actually something to show you.
+
 ## [1.5.28] - 2026-07-10
 
 ### Changed

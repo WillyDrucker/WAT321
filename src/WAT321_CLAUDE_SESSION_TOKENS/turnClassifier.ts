@@ -93,13 +93,31 @@ export function classifyClaudeTurn(tail: string): LastEntryKind {
       const msg = entry.message as Record<string, unknown> | undefined;
       const content = msg?.content;
       if (Array.isArray(content)) {
-        const hasToolUse = content.some(
-          (p) =>
-            typeof p === "object" &&
-            p !== null &&
-            (p as Record<string, unknown>).type === "tool_use"
-        );
+        let hasToolUse = false;
+        let hasText = false;
+        for (const p of content) {
+          if (typeof p !== "object" || p === null) continue;
+          const block = p as Record<string, unknown>;
+          if (block.type === "tool_use") hasToolUse = true;
+          if (
+            block.type === "text" &&
+            typeof block.text === "string" &&
+            block.text.trim().length > 0
+          ) {
+            hasText = true;
+          }
+        }
         if (hasToolUse) return "assistant-pending";
+        // Thinking-only entry: still mid-turn. Extended thinking lands
+        // in the transcript as its own assistant entry seconds before
+        // the text it precedes (2-11s observed). It carries no tool_use,
+        // so treating "no tool_use" as done fired a toast right there -
+        // and `parseLastAssistantText` skips entries with no text, so it
+        // walked back and returned the PREVIOUS turn's response. The
+        // user got a toast announcing the last turn's message as this
+        // one's, then a second toast when the real text landed. No text
+        // and no tool call means the model has not said anything yet.
+        if (!hasText) return "assistant-pending";
       }
       return "assistant-done";
     }

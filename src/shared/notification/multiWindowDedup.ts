@@ -6,19 +6,39 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { clientStateDir } from "../wat321Paths";
+import { WAT321_ROOT } from "../wat321Paths";
 
 /**
- * Cross-window dedup for completion notifications. Each completion
- * is keyed by `<sessionId>-<bucketedCompletionMs>` - concurrent VS
- * Code windows race to create the same tag file under
- * `<clientStateDir>/fired-notifications/` and the `wx` flag picks
+ * Cross-window dedup for completion notifications. Each completion is
+ * keyed by `<sessionId>-<bucketedCompletionMs>` - concurrent VS Code
+ * windows race to create the same tag file and the `wx` flag picks
  * exactly one winner. Sweeps stale tags on each claim.
+ *
+ * The tag directory is GLOBAL (`~/.wat321/fired-notifications/`), not
+ * per-client. This is load-bearing. Keying it off `clientStateDir()`
+ * partitioned the tags by workspace hash, so two windows on different
+ * workspaces could never see each other's claim - both won, both
+ * delivered, and the user got two toasts for one completion. That is
+ * not a corner case: a folderless window (`workspaceId()` -> "default")
+ * falls back to the globally-newest transcript, so it shadows whichever
+ * project is currently active and doubles every toast that project
+ * fires. Nothing here needs workspace scoping - `sessionId` is a
+ * transcript basename, which is globally unique on its own.
+ *
+ * Whichever window wins the race delivers, and the user sees exactly
+ * one toast. Which window that is does not matter: the toast content is
+ * derived from the transcript, not from the window that read it.
  */
 
 /** Two windows firing within this window collapse to the same tag.
  * Wide enough to absorb cross-window skew, narrow enough that two
- * legitimately distinct turns on the same session never collide. */
+ * legitimately distinct turns on the same session never collide.
+ *
+ * Callers MUST pass a completion timestamp that is a property of the
+ * completion itself (the transcript mtime), not the observing window's
+ * wall clock. Windows poll on independent cadences and can observe the
+ * same completion many seconds apart - bucketing two such observations
+ * straddles the boundary often enough that this gate would leak. */
 const DEDUP_BUCKET_MS = 10_000;
 /** Tags older than this are unlinked on the next claim sweep so the
  * tag directory stays bounded under steady load. */
@@ -26,7 +46,7 @@ const DEDUP_RETENTION_MS = 60_000;
 const DEDUP_DIR_NAME = "fired-notifications";
 
 function dedupDir(): string {
-  return join(clientStateDir(), DEDUP_DIR_NAME);
+  return join(WAT321_ROOT, DEDUP_DIR_NAME);
 }
 
 function ensureDir(): void {
