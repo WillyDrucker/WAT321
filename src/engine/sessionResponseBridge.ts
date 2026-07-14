@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { basename } from "node:path";
 import type * as vscode from "vscode";
 import type { ProviderKey } from "./contracts";
@@ -65,6 +66,29 @@ export interface SessionResponseBridgeConfig {
    * are enabled). Skipping the parse saves a full tail read. */
   shouldParsePreview: () => boolean;
   events: EventHub;
+}
+
+/** The completion's OWN timestamp, read off the transcript it was
+ * written to. Every window that reads the same finished transcript
+ * gets the same number, which is what makes the cross-window dedup tag
+ * agree across windows.
+ *
+ * `Date.now()` cannot be used here, and this is the whole point of the
+ * helper. Windows poll on independent cadences and observe the same
+ * completion seconds apart, so two windows bucketing their own wall
+ * clocks land on different tags, both claim, and the user gets two
+ * toasts for one completion. The transcript has stopped growing by the
+ * time the classifier reports done, so its mtime is stable to read.
+ *
+ * Falls back to the caller's clock when the stat fails, which degrades
+ * to the old (leaky) behavior rather than dropping the notification. */
+function completionTimestamp(path: string | null, fallback: number): number {
+  if (path === null) return fallback;
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return fallback;
+  }
 }
 
 export function bridgeSessionResponse(
@@ -217,7 +241,7 @@ export function bridgeSessionResponse(
       sessionTitle: session.sessionTitle,
       responsePreview,
       sessionId,
-      completionMs: now,
+      completionMs: completionTimestamp(path, now),
     });
   };
 
@@ -243,7 +267,13 @@ function drainNonActiveCompletions(cfg: SessionResponseBridgeConfig): void {
       sessionTitle: completion.sessionTitle,
       responsePreview: preview,
       sessionId: completion.sessionId,
-      completionMs: completion.completedAtMs,
+      // Same cross-window reasoning as the active path above. The
+      // service stamps `completedAtMs` with its own `Date.now()`, so
+      // it disagrees between windows for the same completion.
+      completionMs: completionTimestamp(
+        completion.transcriptPath,
+        completion.completedAtMs
+      ),
     });
     logNotifEvent({
       at: completion.completedAtMs,
