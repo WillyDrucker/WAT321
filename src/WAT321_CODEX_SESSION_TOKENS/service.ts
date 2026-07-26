@@ -208,7 +208,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
         this.workspacePath,
         this.cachedRolloutPath
       );
-      if (result.path) this.cachedRolloutPath = result.path;
+      this.cachedRolloutPath = result.path;
       this.cachedInventory = { total: result.total, inProgress: result.inProgress };
       this.lastRolloutScan = now;
       this.nonActiveTracker.observe(result.candidates, result.path, now);

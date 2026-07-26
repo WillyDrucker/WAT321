@@ -20,6 +20,11 @@ export interface LastTokenCount {
 
 const DEFAULT_CODEX_CONTEXT_WINDOW = 258_400;
 
+export interface CodexSessionMeta {
+  cwd: string;
+  isSubagent: boolean;
+}
+
 /** Scan the tail (up to the last 200 lines) for the most recent
  * `token_count` event. Returns `last_token_usage.total_tokens` (with
  * a fallback to `input_tokens` for older rollout formats) and the
@@ -74,25 +79,41 @@ export function parseLastTokenCount(tail: string): LastTokenCount | null {
   return null;
 }
 
-/** Read `session_meta.payload.cwd` from the first line of the rollout.
- * Used both to match rollouts to a workspace and to label the widget.
+/** Read the fields needed to decide whether a rollout is a user-facing
+ * workspace session from its first `session_meta` line.
  * `readFirstLine` reads in chunks until a newline, so an oversized
  * session_meta first line (routinely 15-25KB on recent Codex CLI
  * rollouts - can grow further as Codex adds metadata) is always
  * captured intact. */
-export function parseCwd(rolloutPath: string): string | null {
+export function parseSessionMeta(
+  rolloutPath: string
+): CodexSessionMeta | null {
   const firstLine = readFirstLine(rolloutPath);
   if (!firstLine) return null;
 
   try {
     const entry = JSON.parse(firstLine);
     if (entry.type === "session_meta") {
-      return (entry.payload?.cwd as string) || null;
+      const cwd = entry.payload?.cwd;
+      if (typeof cwd !== "string" || cwd.length === 0) return null;
+      const source = entry.payload?.source;
+      const isSubagent =
+        typeof source === "object" &&
+        source !== null &&
+        Object.prototype.hasOwnProperty.call(source, "subagent");
+      return { cwd, isSubagent };
     }
   } catch {
     // ignore
   }
   return null;
+}
+
+/** Read `session_meta.payload.cwd` from the first line of the rollout.
+ * Used to label the active widget after discovery has already rejected
+ * internal Codex subagent rollouts. */
+export function parseCwd(rolloutPath: string): string | null {
+  return parseSessionMeta(rolloutPath)?.cwd ?? null;
 }
 
 /** Scan the header for the initial model slug. Checks `turn_context`
