@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { writeFileAtomic } from "../shared/fs/atomicWrite";
 import { normalizePath } from "../shared/fs/pathUtils";
 import { clientStateDir } from "../shared/wat321Paths";
-import { parseCwd } from "./parsers";
+import { parseSessionMeta } from "./parsers";
 
 /**
  * Persisted pointer to the Codex rollout this workspace was last
@@ -47,8 +47,9 @@ export function readPersistedRollout(workspacePath: string): string | null {
     const raw = readFileSync(storePath(), "utf8");
     const path = (JSON.parse(raw) as { rolloutPath?: unknown }).rolloutPath;
     if (typeof path !== "string" || !existsSync(path)) return null;
-    const cwd = parseCwd(path);
-    if (!cwd || !matchesWorkspace(workspacePath, cwd)) return null;
+    const meta = parseSessionMeta(path);
+    if (!meta || meta.isSubagent) return null;
+    if (!matchesWorkspace(workspacePath, meta.cwd)) return null;
     return path;
   } catch {
     return null;

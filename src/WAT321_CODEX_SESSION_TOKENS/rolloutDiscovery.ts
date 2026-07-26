@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { CodexSessionIndex } from "./types";
 import { readTail } from "../shared/fs/fileReaders";
 import { normalizePath } from "../shared/fs/pathUtils";
-import { parseCwd } from "./parsers";
+import { parseSessionMeta } from "./parsers";
 import { classifyCodexTurn } from "./turnClassifier";
 
 /**
@@ -130,8 +130,9 @@ function buildCandidate(
     return null;
   }
 
-  const cwd = parseCwd(fullPath);
-  if (!cwd) return null;
+  const meta = parseSessionMeta(fullPath);
+  if (!meta || meta.isSubagent) return null;
+  const { cwd } = meta;
   const cwdNorm = normalizePath(cwd);
   // Bidirectional match, symmetric with Claude's walkWorkspaceSessions:
   // also matches a native session launched from a subfolder of the open

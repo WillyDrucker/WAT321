@@ -4,7 +4,7 @@ import type { LastEntryKind } from "../shared/turnState";
  * Turn-state classification for Codex rollout tails - the single home
  * for "what is the last turn doing". Two consumers with deliberately
  * different biases: classifyCodexTurn (idle bias, drives the active
- * indicator) and isCodexTurnComplete (fire bias, drives the
+ * indicator) and isCodexTurnComplete (terminal-only bias, drives the
  * notification gate).
  */
 
@@ -12,9 +12,8 @@ import type { LastEntryKind } from "../shared/turnState";
  * one of the turn states used by the session token active indicator.
  * Walks backwards, skips bookkeeping events, returns the first
  * definitive event found:
- *   - `assistant-done` - a completed assistant response OR a turn
- *     ended normally by `task_complete`. Resolves the indicator
- *     instantly and is notification-eligible.
+ *   - `assistant-done` - a turn ended normally by `task_complete`.
+ *     Resolves the indicator instantly and is notification-eligible.
  *   - `interrupted` - a turn ended by `turn_aborted`, which Codex
  *     writes on user interrupt (Esc / Ctrl+C). Resolves the indicator
  *     to idle like done, but the notification gate suppresses it so a
@@ -23,9 +22,9 @@ import type { LastEntryKind } from "../shared/turnState";
  *   - `user` - last event was a user message (user is waiting)
  *   - `unknown` - no definitive event in the tail window
  *
- * Unlike `isCodexTurnComplete` (which biases toward true for
- * notification firing), this biases `unknown` to idle so the thinking
- * indicator does not pin itself on when we cannot tell. */
+ * Unlike `isCodexTurnComplete` (which requires an explicit terminal
+ * marker), this biases `unknown` to idle so the thinking indicator
+ * does not pin itself on when we cannot tell. */
 export function classifyCodexTurn(tail: string): LastEntryKind {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -54,21 +53,19 @@ export function classifyCodexTurn(tail: string): LastEntryKind {
     if (entry.type === "event_msg" && ptype === "turn_aborted") {
       return "interrupted";
     }
+    // Current-turn boundary. Reaching task_started while walking
+    // backwards proves there is no terminal marker in this turn.
+    // Stop here so an unrecognized event cannot fall through into
+    // the previous turn's task_complete and create a false toast.
+    if (entry.type === "event_msg" && ptype === "task_started") {
+      return "assistant-pending";
+    }
 
-    // Assistant-response events = done ONLY for the final_answer phase.
-    // Codex emits an `agent_message` with phase=commentary mid-turn
-    // ("I'll look into X first") before the phase=final_answer message
-    // at turn end. Treating commentary as turn-complete would flicker
-    // the thinking indicator idle between commentary and the next
-    // reasoning/tool event, so only final_answer (plus the explicit
-    // turn_aborted / task_complete signals) closes the turn. Commentary
-    // falls through to keep scanning so a later definitive signal
-    // (function_call, reasoning) wins.
+    // Assistant-response events are item-level progress, not turn
+    // completion. Codex emits an agent_message with phase=commentary
+    // mid-turn and phase=final_answer near the end, but more lifecycle
+    // work can still follow until task_complete is persisted.
     if (entry.type === "event_msg" && ptype === "agent_message") {
-      const phase = payload?.phase;
-      if (phase === "final_answer") return "assistant-done";
-      // phase=commentary or unphased: the assistant is mid-turn (more
-      // follows the commentary), so report pending.
       return "assistant-pending";
     }
     // `response_item/message` role=assistant has no phase tag and fires
@@ -78,7 +75,7 @@ export function classifyCodexTurn(tail: string): LastEntryKind {
     if (entry.type === "response_item" && ptype === "message" && payload?.role === "assistant") {
       return "assistant-pending";
     }
-    if (entry.type === "response.output_text.done") return "assistant-done";
+    if (entry.type === "response.output_text.done") return "assistant-pending";
     if (entry.type === "message" && payload?.role === "assistant") return "assistant-pending";
 
     // User messages = user is waiting for a response
@@ -112,14 +109,11 @@ export function classifyCodexTurn(tail: string): LastEntryKind {
  * tail represents a completed assistant turn. Thin wrapper over
  * `classifyCodexTurn` so the detection rules stay in one place.
  *
- * `user` and `assistant-pending` = mid-turn, notification gate should
- * suppress. `assistant-done` and `unknown` = complete, notification
- * gate should fire. The `unknown` -> fire bias is intentional: a
- * missing definitive event must not silently lose a notification.
- * Interrupts (`turn_aborted`) map to `interrupted` via the classifier
- * - neither `assistant-done` nor `unknown` - so the gate correctly
- * suppresses notifications on cancelled turns. */
+ * Only `assistant-done` is notification-eligible. Unknown or malformed
+ * activity fails closed because a missed notification is preferable
+ * to interrupting the user during an active turn. Interrupts
+ * (`turn_aborted`) map to `interrupted` and remain suppressed. */
 export function isCodexTurnComplete(tail: string): boolean {
   const state = classifyCodexTurn(tail);
-  return state === "assistant-done" || state === "unknown";
+  return state === "assistant-done";
 }
