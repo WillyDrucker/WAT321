@@ -1,0 +1,290 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { writeFileAtomic } from "../../engine/fs/atomicWrite";
+import { openCodeRoutesStateDir } from "../../engine/wat321Paths";
+import { resolveOpenCodeCli } from "../../shared/providers/opencode/cliResolver";
+import { buildOpenCodeJson } from "../../shared/providers/opencode/configBuilder";
+import { verifyOutputLimits } from "../../shared/providers/opencode/configVerifier";
+import { pickEphemeralPort, waitForReady } from "./openCodeServeProbe";
+
+/**
+ * Lifecycle for the WAT321-managed `opencode serve` subprocess.
+ *
+ * Each VS Code instance spawns its own server on an OS-allocated
+ * ephemeral port, written to its per-client `model-bridge/config.json`
+ * for the MCP child to read. Workdir lives at
+ * `~/.wat321/clients/<wsId>/model-bridge/opencode-workdir/` and holds
+ * a single `opencode.json` describing the providers (`llama.cpp` for
+ * local, `zen` for cloud routes). The Zen API key flows in via the
+ * `OPENCODE_ZEN_KEY` env so it never lands on disk.
+ *
+ * Spawn semantics:
+ *   - `opencode serve --hostname 127.0.0.1 --port <ephemeralPort>`
+ *   - cwd is the workdir so opencode discovers the JSON next to it
+ *
+ * `getServerUrl()` returns "" until the spawned server passes the
+ * readiness probe in `openCodeServeProbe.ts` - consumers gate
+ * visibility on that.
+ */
+
+const OPENCODE_WORKDIR = join(openCodeRoutesStateDir(), "opencode-workdir");
+const OPENCODE_CONFIG_PATH = join(OPENCODE_WORKDIR, "opencode.json");
+/** How long a fresh spawn may take to answer the readiness probe. */
+const READY_TIMEOUT_MS = 10_000;
+
+interface OpenCodeManagerStatus {
+  desired: boolean;
+  running: boolean;
+  cliResolvable: boolean;
+  url: string;
+  port: number;
+  lastError: string;
+}
+
+interface OpenCodeManagerInputs {
+  enabled: boolean;
+  localEndpoint: string;
+  zenApiKey: string;
+}
+
+interface OpenCodeServeLogger {
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
+interface OpenCodeManager {
+  /** Reconcile the running subprocess against the supplied inputs.
+   * Spawns when enabled and not yet running - restarts when the
+   * provider-affecting inputs (endpoint or zen key) changed - kills
+   * when disabled. Returns the current URL once readiness completes
+   * or "" when not yet up. */
+  reconcile(inputs: OpenCodeManagerInputs): Promise<string>;
+  /** Synchronous accessor for the current resolved URL. Empty when
+   * not running or readiness has not yet passed. */
+  getServerUrl(): string;
+  /** Lightweight status surface for health output / log lines. */
+  getStatus(): OpenCodeManagerStatus;
+  /** Subscribe to URL transitions. The listener fires every time the
+   * resolved server URL changes (post-spawn-ready, post-stop, post-
+   * crash-exit). Returns a disposable. The activate path uses this to
+   * rewrite config.json whenever the URL changes, closing a race where
+   * the activate-time `reconcile` resolved with "" but a later spawn
+   * succeeded with no observer to capture the new URL. */
+  onUrlChanged(listener: (url: string) => void): { dispose(): void };
+  /** Stop the subprocess and release any allocated port. */
+  dispose(): Promise<void>;
+}
+
+interface InputsSnapshot {
+  localEndpoint: string;
+  zenApiKey: string;
+}
+
+function inputsChanged(prev: InputsSnapshot, next: InputsSnapshot): boolean {
+  return prev.localEndpoint !== next.localEndpoint || prev.zenApiKey !== next.zenApiKey;
+}
+
+export function createOpenCodeManager(logger: OpenCodeServeLogger): OpenCodeManager {
+  let child: ChildProcess | null = null;
+  let port = 0;
+  let url = "";
+  let lastInputs: InputsSnapshot = { localEndpoint: "", zenApiKey: "" };
+  let lastError = "";
+  let cliResolvable = false;
+  let desired = false;
+  let inFlight: Promise<string> | null = null;
+  /** Latest inputs that arrived while a reconcile was already running.
+   * Holds at most ONE snapshot - newer calls overwrite older ones so
+   * only the most recent setting state ever drains. Without this a
+   * burst of settings changes during a slow spawn would all collapse
+   * onto the in-flight promise and the new state would never reach
+   * the subprocess (stale endpoint, wrong Zen key, enabled flag flipped
+   * the wrong way). */
+  let pendingInputs: OpenCodeManagerInputs | null = null;
+  const urlListeners = new Set<(url: string) => void>();
+  /** Single point of mutation for `url`. Notifies listeners only on
+   * actual change so duplicate set-to-same-value calls do not refire. */
+  const setUrl = (next: string): void => {
+    if (next === url) return;
+    url = next;
+    for (const fn of urlListeners) {
+      try { fn(url); } catch { /* listener-side errors must not affect manager */ }
+    }
+  };
+
+  const writeConfig = (localEndpoint: string): void => {
+    if (!existsSync(OPENCODE_WORKDIR)) {
+      mkdirSync(OPENCODE_WORKDIR, { recursive: true });
+    }
+    writeFileAtomic(OPENCODE_CONFIG_PATH, buildOpenCodeJson(localEndpoint), ".opencode.json.tmp");
+  };
+
+  const stop = async (): Promise<void> => {
+    if (child === null) return;
+    const handle = child;
+    child = null;
+    setUrl("");
+    port = 0;
+    // Synchronous SIGKILL up front so an extension-host teardown
+    // (VS Code window close) gets the kill in flight before its event
+    // loop dies and orphans the child. opencode serve has no on-disk
+    // state worth flushing, and a graceful SIGTERM with a timeout
+    // races the dispose() return. SIGKILL on Windows maps to
+    // TerminateProcess - on POSIX it is the unblockable signal.
+    try {
+      handle.kill("SIGKILL");
+    } catch {
+      // best-effort
+    }
+  };
+
+  const start = async (inputs: OpenCodeManagerInputs): Promise<string> => {
+    const resolved = await resolveOpenCodeCli();
+    cliResolvable = resolved !== null;
+    if (resolved === null) {
+      lastError = "opencode CLI not found on PATH";
+      logger.info(
+        "managed OpenCode requested but `opencode` CLI is not on PATH, skipping spawn"
+      );
+      return "";
+    }
+
+    writeConfig(inputs.localEndpoint);
+
+    const chosenPort = await pickEphemeralPort();
+    if (chosenPort === 0) {
+      lastError = "could not allocate a port for opencode serve";
+      logger.error(lastError);
+      return "";
+    }
+
+    const env = { ...process.env, OPENCODE_ZEN_KEY: inputs.zenApiKey };
+    const args = ["serve", "--hostname", "127.0.0.1", "--port", String(chosenPort)];
+
+    let proc: ChildProcess;
+    try {
+      proc = spawn(resolved.command, args, {
+        cwd: OPENCODE_WORKDIR,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        shell: resolved.needsShell,
+      });
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      logger.error(`opencode serve spawn failed: ${lastError}`);
+      return "";
+    }
+
+    proc.stdout?.setEncoding("utf8");
+    proc.stderr?.setEncoding("utf8");
+    proc.stdout?.on("data", (chunk: string) => {
+      logger.info(`opencode: ${chunk.trimEnd()}`);
+    });
+    proc.stderr?.on("data", (chunk: string) => {
+      logger.warn(`opencode: ${chunk.trimEnd()}`);
+    });
+    proc.on("exit", (code) => {
+      logger.info(`opencode serve exited with code ${code}`);
+      if (child === proc) {
+        child = null;
+        setUrl("");
+        port = 0;
+      }
+    });
+
+    child = proc;
+    port = chosenPort;
+
+    const ready = await waitForReady(chosenPort, READY_TIMEOUT_MS);
+    if (!ready) {
+      lastError = `opencode serve did not become ready on 127.0.0.1:${chosenPort} within ${READY_TIMEOUT_MS / 1000}s`;
+      logger.warn(lastError);
+      await stop();
+      return "";
+    }
+
+    setUrl(`http://127.0.0.1:${chosenPort}`);
+    lastError = "";
+    lastInputs = { localEndpoint: inputs.localEndpoint, zenApiKey: inputs.zenApiKey };
+    logger.info(`opencode serve ready at ${url}`);
+    void verifyOutputLimits(url, logger);
+    return url;
+  };
+
+  /** Reconcile the running subprocess against `inputs`. Concurrency
+   * model:
+   *   - If no run is in flight, start one with these inputs.
+   *   - If a run is in flight, save `inputs` as the pending snapshot
+   *     (overwriting any older pending) and return the in-flight
+   *     promise so the caller awaits the current run, not the newer
+   *     one. After the in-flight run finishes, the pending snapshot
+   *     drains via a recursive reconcile so the LAST settings state
+   *     wins. URL transitions emitted by the second run flow through
+   *     onUrlChanged the same way as the first. */
+  const reconcile = async (inputs: OpenCodeManagerInputs): Promise<string> => {
+    if (inFlight) {
+      pendingInputs = inputs;
+      return inFlight;
+    }
+    inFlight = (async () => {
+      try {
+        desired = inputs.enabled;
+        if (!inputs.enabled) {
+          if (child !== null) {
+            logger.info("managed OpenCode disabled, stopping subprocess");
+            await stop();
+          }
+          return "";
+        }
+        if (
+          child !== null &&
+          !inputsChanged(lastInputs, {
+            localEndpoint: inputs.localEndpoint,
+            zenApiKey: inputs.zenApiKey,
+          })
+        ) {
+          return url;
+        }
+        if (child !== null) {
+          logger.info("managed OpenCode inputs changed, restarting subprocess");
+          await stop();
+        }
+        return await start(inputs);
+      } finally {
+        inFlight = null;
+        // Drain any inputs that arrived during the run. Fire-and-
+        // forget: callers from the original reconcile have already
+        // resolved with the in-flight result - the second pass
+        // updates internal state and republishes URL transitions
+        // via onUrlChanged for downstream config rewrites.
+        if (pendingInputs !== null) {
+          const next = pendingInputs;
+          pendingInputs = null;
+          void reconcile(next);
+        }
+      }
+    })();
+    return inFlight;
+  };
+
+  return {
+    reconcile,
+    getServerUrl: () => url,
+    getStatus: () => ({
+      desired,
+      running: child !== null,
+      cliResolvable,
+      url,
+      port,
+      lastError,
+    }),
+    onUrlChanged(listener) {
+      urlListeners.add(listener);
+      return { dispose: () => { urlListeners.delete(listener); } };
+    },
+    dispose: stop,
+  };
+}

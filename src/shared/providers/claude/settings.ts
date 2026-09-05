@@ -49,7 +49,7 @@ const OVERRIDE_EFFECTIVE_RESERVE = 15_000;
 
 /** Default auto-compact percentage for a given context window size.
  * Display-only - Claude applies its own formula at runtime. */
-export function computeDefaultAutoCompactPct(contextWindowSize: number): number {
+function computeDefaultAutoCompactPct(contextWindowSize: number): number {
   if (contextWindowSize <= 0) return 85;
   const threshold = contextWindowSize - SYSTEM_RESERVE_CAP - COMPACT_MARGIN;
   return Math.max(1, Math.min(100, Math.round((threshold / contextWindowSize) * 100)));
@@ -73,7 +73,7 @@ function readSettingsEnv(key: string): string | null {
 /** Raw `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` as a string, or null if
  * the file is absent, unreadable, or the key is not set. Lossy - any
  * read failure collapses to null. Safe for display paths. */
-export function readAutoCompactOverrideRaw(): string | null {
+function readAutoCompactOverrideRaw(): string | null {
   return readSettingsEnv("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE");
 }
 
@@ -84,7 +84,7 @@ export function readAutoCompactOverrideRaw(): string | null {
  * the percentage pair, older Claude Code releases treated this as
  * an absolute trigger threshold. Current releases may ignore it
  * alone. The reader stays a thin env accessor either way. */
-export function readAutoCompactWindow(): number | null {
+function readAutoCompactWindow(): number | null {
   const raw = readSettingsEnv("CLAUDE_CODE_AUTO_COMPACT_WINDOW");
   if (raw === null) return null;
   const n = parseInt(raw, 10);
@@ -95,7 +95,7 @@ export function readAutoCompactWindow(): number | null {
  * Declares the context window size when Claude Code cannot infer it
  * from the model name. Preferred over the model-derived window when
  * set because the user may have 1M enabled without a `[1m]` tag. */
-export function readMaxContextTokens(): number | null {
+function readMaxContextTokens(): number | null {
   const raw = readSettingsEnv("CLAUDE_CODE_MAX_CONTEXT_TOKENS");
   if (raw === null) return null;
   const n = parseInt(raw, 10);

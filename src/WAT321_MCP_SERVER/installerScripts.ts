@@ -1,104 +1,85 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import * as vscode from "vscode";
-import { atomicCopy } from "../shared/fs/atomicCopy";
+import { atomicCopy } from "../engine/fs/atomicCopy";
 
 /**
  * On-disk layout for the unified bridge plus the script-extraction
- * step. Lives in its own file because it owns the path constants
- * (`BRIDGE_DIR`, `BIN_DIR`) that both the install orchestrator and
- * the Claude-CLI helpers depend on - keeping the constants here
- * gives the dependency direction one way (orchestrator + cli ->
- * scripts) and avoids a circular import. The MCP entry name lives
- * here too for the same reason: the CLI sweep helpers need it and
- * the orchestrator passes it to the CLI, so the cleanest home is
- * the file every caller already depends on.
+ * step. Owns the path constants (`BRIDGE_DIR`, `BIN_DIR`) that both
+ * the install orchestrator and the Claude-CLI helpers depend on, so
+ * the dependency direction stays one way (orchestrator + cli ->
+ * scripts) with no circular import. The MCP entry name lives here for
+ * the same reason.
  *
- * The bridge scripts are kept as separate .mjs files (not bundled
- * into one) so the source remains editable JavaScript with per-
- * concern boundaries (`channel.mjs` for the JSON-RPC plumbing,
- * `codex.mjs` for the Codex dispatcher, `replyDecorator.mjs` for
- * stage-aware reply text, etc). The docs subdirectory ships markdown
- * files that load on demand as MCP resources (`bridge://docs/*`),
- * keeping per-turn tool-description budget lean.
+ * The bridge runtime ships as separate .mjs files (not bundled) so
+ * the source remains editable JavaScript with per-concern boundaries:
+ * `channel.mjs` is the MCP entry, `codex/` and `opencode/` hold the
+ * per-target handlers, and `docs/` ships the markdown that loads on
+ * demand as MCP resources (`bridge://docs/*`). Extraction mirrors the
+ * whole `bin/` tree, so adding a runtime module needs no list edit
+ * here or in `package.json`.
  */
 
 export const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
 export const BIN_DIR = join(BRIDGE_DIR, "bin");
 export const UNIFIED_MCP_NAME = "wat321";
+const ENTRY_SCRIPT = "channel.mjs";
+const SHIPPED_EXTENSIONS = [".mjs", ".md"];
+/** Folders the walk never enters. `bin/node_modules` holds the MCP SDK
+ * the installer fetches separately, and its packages ship their own
+ * `.mjs` and `.md` files that the stale-file sweep must not touch. */
+const UNWALKED_DIRS = new Set(["node_modules"]);
 
-const TOP_LEVEL_SCRIPTS = [
-  "bridgeInbox.mjs",
-  "channel.mjs",
-  "codex.mjs",
-  "paths.mjs",
-  "replyDecorator.mjs",
-  "resources.mjs",
-] as const;
-const OPENCODE_SUBDIR_SCRIPTS = [
-  "common.mjs",
-  "aliases.mjs",
-  "config.mjs",
-  "heartbeat.mjs",
-  "sse.mjs",
-  "sessions.mjs",
-  "dispatch.mjs",
-  "index.mjs",
-] as const;
-const DOCS_SUBDIR_FILES = [
-  "dispatch.md",
-  "dispatch-errors.md",
-  "dispatch-routing.md",
-  "dispatch-judgement.md",
-  "inbox.md",
-] as const;
+function isShipped(name: string): boolean {
+  return SHIPPED_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
 
-/** Extract the unified bridge scripts from the extension bundle to
- * `~/.wat321/bridge/bin/`. Atomic via `atomicCopy` so a Claude Code
- * spawn racing the overwrite cannot read torn bytes. Returns the
- * absolute path of the entry script (`channel.mjs`). */
+/** Every shipped file under `root`, as paths relative to it. */
+function listShipped(root: string, dir = root, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    if (UNWALKED_DIRS.has(name)) continue;
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) listShipped(root, full, out);
+    else if (isShipped(name)) out.push(relative(root, full));
+  }
+  return out;
+}
+
+/** The bundled `bin/` tree: `out/` on an installed build, `src/` when
+ * running from source. */
+function bundledBinDir(context: vscode.ExtensionContext): string {
+  for (const subdir of ["out", "src"]) {
+    const candidate = join(context.extensionPath, subdir, "WAT321_MCP_SERVER", "bin");
+    if (existsSync(join(candidate, ENTRY_SCRIPT))) return candidate;
+  }
+  throw new Error("unified bridge scripts not found in extension bundle");
+}
+
+/** Extract the bridge runtime from the extension bundle to
+ * `~/.wat321/bridge/bin/`, mirroring subdirectories. Atomic per file
+ * via `atomicCopy` so a Claude Code spawn racing the overwrite cannot
+ * read torn bytes. Files from an earlier layout that no longer ship
+ * are removed, so a stale module can never be mistaken for a live one
+ * while debugging. Returns the absolute path of the entry script. */
 export function extractUnifiedScripts(
   context: vscode.ExtensionContext
 ): string {
-  if (!existsSync(BRIDGE_DIR)) mkdirSync(BRIDGE_DIR, { recursive: true });
-  if (!existsSync(BIN_DIR)) mkdirSync(BIN_DIR, { recursive: true });
-  const opencodeBinDir = join(BIN_DIR, "opencode");
-  if (!existsSync(opencodeBinDir)) mkdirSync(opencodeBinDir, { recursive: true });
-  const docsBinDir = join(BIN_DIR, "docs");
-  if (!existsSync(docsBinDir)) mkdirSync(docsBinDir, { recursive: true });
-
-  const subdirs = ["out", "src"] as const;
-  const copyOne = (relParts: string[], fileName: string, destDir: string) => {
-    let source: string | null = null;
-    for (const subdir of subdirs) {
-      const candidate = join(
-        context.extensionPath,
-        subdir,
-        "WAT321_MCP_SERVER",
-        "bin",
-        ...relParts,
-        fileName
-      );
-      if (existsSync(candidate)) {
-        source = candidate;
-        break;
-      }
-    }
-    if (source === null) {
-      throw new Error(
-        `unified bridge script ${[...relParts, fileName].join("/")} not found in extension bundle`
-      );
-    }
-    atomicCopy(source, join(destDir, fileName));
-  };
-
-  for (const fileName of TOP_LEVEL_SCRIPTS) copyOne([], fileName, BIN_DIR);
-  for (const fileName of OPENCODE_SUBDIR_SCRIPTS) {
-    copyOne(["opencode"], fileName, opencodeBinDir);
+  const source = bundledBinDir(context);
+  const shipped = listShipped(source);
+  for (const rel of shipped) {
+    const dest = join(BIN_DIR, rel);
+    mkdirSync(dirname(dest), { recursive: true });
+    atomicCopy(join(source, rel), dest);
   }
-  for (const fileName of DOCS_SUBDIR_FILES) {
-    copyOne(["docs"], fileName, docsBinDir);
+  const keep = new Set(shipped);
+  for (const rel of listShipped(BIN_DIR)) {
+    if (keep.has(rel)) continue;
+    try {
+      unlinkSync(join(BIN_DIR, rel));
+    } catch {
+      // best-effort
+    }
   }
-  return join(BIN_DIR, "channel.mjs");
+  return join(BIN_DIR, ENTRY_SCRIPT);
 }

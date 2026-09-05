@@ -1,4 +1,5 @@
-import { logSse } from "./common.mjs";
+import { log } from "../channelLog.mjs";
+import { fetchLatestMessage } from "./serveApi.mjs";
 
 /**
  * Tap OpenCode's `/event` SSE stream during a session-attached dispatch
@@ -19,12 +20,48 @@ import { logSse } from "./common.mjs";
  * friends) that return the assistant reply as one chunk after the
  * model finishes. Polling /session/{id}/message every 2s reads
  * in-progress text length even when SSE never streams. Streaming
- * providers still win in latency because pushProgress is monotonic -
+ * providers still win in latency because pushProgress is monotonic:
  * whichever source reports higher first sticks.
  */
 
 const SSE_HANDSHAKE_TIMEOUT_MS = 5_000;
 const POLL_INTERVAL_MS = 2_000;
+
+function logSse(message) {
+  log("sse", message);
+}
+
+/** Split off complete SSE event blocks (blank-line framed, LF or
+ * CRLF) from the front of `buffer`. Returns the blocks and the
+ * unconsumed remainder. */
+function takeEventBlocks(buffer) {
+  const blocks = [];
+  let rest = buffer;
+  for (;;) {
+    const lfIdx = rest.indexOf("\n\n");
+    const crlfIdx = rest.indexOf("\r\n\r\n");
+    if (lfIdx < 0 && crlfIdx < 0) break;
+    const useCrlf = lfIdx < 0 || (crlfIdx >= 0 && crlfIdx < lfIdx);
+    const boundary = useCrlf ? crlfIdx : lfIdx;
+    const advance = useCrlf ? 4 : 2;
+    blocks.push(rest.slice(0, boundary));
+    rest = rest.slice(boundary + advance);
+  }
+  return { blocks, rest };
+}
+
+function parseEventBlock(block) {
+  const dataLines = block
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith("data:"))
+    .map((l) => l.slice(5).replace(/^ /, ""));
+  if (dataLines.length === 0) return null;
+  try {
+    return JSON.parse(dataLines.join("\n"));
+  } catch {
+    return null;
+  }
+}
 
 export async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
   const ac = new AbortController();
@@ -48,7 +85,7 @@ export async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
       onProgress(total);
       counters.progressCalls++;
     } catch {
-      // best-effort - heartbeat write failure is non-fatal
+      // best-effort, a heartbeat write failure is non-fatal
     }
   };
   logSse(`tap.open base=${base} session=${expectedSessionId}`);
@@ -59,7 +96,7 @@ export async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
   // posting. Without a timeout the caller's `timeout_sec` would not
   // apply to the handshake stage at all and the widget could stick on
   // "Calling..." until the user manually cancels. On timeout we proceed
-  // with a no-op tap so the dispatch still runs; the heartbeat falls
+  // with a no-op tap so the dispatch still runs, and the heartbeat falls
   // back to elapsed-seconds for that turn.
   let res;
   try {
@@ -93,30 +130,50 @@ export async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
 
   const pollSessionMessages = async () => {
     if (!expectedSessionId) return;
-    try {
-      const r = await fetch(`${base}/session/${expectedSessionId}/message`);
-      if (!r.ok) return;
-      const messages = await r.json();
-      if (!Array.isArray(messages) || messages.length === 0) return;
-      const latest = messages[messages.length - 1];
-      const role = latest?.info?.role;
-      if (role !== "assistant") return;
-      const parts = Array.isArray(latest?.parts) ? latest.parts : [];
-      let total = 0;
-      for (const p of parts) {
-        if (p?.type === "text" && typeof p.text === "string") {
-          total += p.text.length;
-        }
-      }
-      if (total > 0) {
-        counters.pollUpdates++;
-        pushProgress(total);
-      }
-    } catch {
-      // best-effort - polling errors don't block the dispatch
+    const latest = await fetchLatestMessage(base, expectedSessionId);
+    if (!latest.ok || latest.message === null) return;
+    if (latest.message?.info?.role !== "assistant") return;
+    const parts = Array.isArray(latest.message?.parts) ? latest.message.parts : [];
+    let total = 0;
+    for (const p of parts) {
+      if (p?.type === "text" && typeof p.text === "string") total += p.text.length;
+    }
+    if (total > 0) {
+      counters.pollUpdates++;
+      pushProgress(total);
     }
   };
   const pollInterval = setInterval(pollSessionMessages, POLL_INTERVAL_MS);
+
+  const handleEvent = (evt) => {
+    counters.events++;
+    if (counters.events <= 3) {
+      logSse(`tap.event#${counters.events} type=${evt?.type} sid=${evt?.properties?.sessionID}`);
+    }
+    const sid = evt?.properties?.sessionID;
+    if (expectedSessionId && sid !== expectedSessionId) return;
+    counters.sessionMatches++;
+    if (evt.type === "message.updated") {
+      const info = evt.properties?.info;
+      if (info?.role === "assistant" && info?.id) assistantMsgIds.add(info.id);
+    } else if (evt.type === "message.part.updated") {
+      counters.partUpdates++;
+      const part = evt.properties?.part;
+      // Race-tolerant: text part-updates arrive before message.updated
+      // registers the messageID as assistant. opencode serve only emits
+      // text part-updates for assistant messages, so any text part
+      // with a messageID is safe to count without gating on prior
+      // assistant registration.
+      if (part?.type === "text" && part?.messageID && part?.id) {
+        partTexts.set(part.id, typeof part.text === "string" ? part.text : "");
+        let total = 0;
+        for (const t of partTexts.values()) total += t.length;
+        pushProgress(total);
+      } else if (counters.partUpdates <= 2) {
+        logSse(`tap.partSkip type=${part?.type} hasMsgId=${Boolean(part?.messageID)}`);
+      }
+    }
+  };
 
   const reader = res.body.getReader();
   (async () => {
@@ -127,72 +184,15 @@ export async function tapOpenCodeEvents(base, expectedSessionId, onProgress) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        // SSE event boundary: blank line, LF or CRLF framing.
-        for (;;) {
-          const lfIdx = buffer.indexOf("\n\n");
-          const crlfIdx = buffer.indexOf("\r\n\r\n");
-          let boundary;
-          let advance;
-          if (lfIdx < 0 && crlfIdx < 0) break;
-          else if (lfIdx < 0) {
-            boundary = crlfIdx;
-            advance = 4;
-          } else if (crlfIdx < 0 || lfIdx < crlfIdx) {
-            boundary = lfIdx;
-            advance = 2;
-          } else {
-            boundary = crlfIdx;
-            advance = 4;
-          }
-          const block = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + advance);
-          const dataLines = block
-            .split(/\r?\n/)
-            .filter((l) => l.startsWith("data:"))
-            .map((l) => l.slice(5).replace(/^ /, ""));
-          if (dataLines.length === 0) continue;
-          let evt;
-          try {
-            evt = JSON.parse(dataLines.join("\n"));
-          } catch {
-            continue;
-          }
-          counters.events++;
-          if (counters.events <= 3) {
-            logSse(`tap.event#${counters.events} type=${evt?.type} sid=${evt?.properties?.sessionID}`);
-          }
-          const sid = evt?.properties?.sessionID;
-          if (expectedSessionId && sid !== expectedSessionId) continue;
-          counters.sessionMatches++;
-          if (evt.type === "message.updated") {
-            const info = evt.properties?.info;
-            if (info?.role === "assistant" && info?.id) {
-              assistantMsgIds.add(info.id);
-            }
-          } else if (evt.type === "message.part.updated") {
-            counters.partUpdates++;
-            const part = evt.properties?.part;
-            // Race-tolerant: text part-updates arrive before
-            // message.updated registers the messageID as assistant.
-            // opencode serve only emits text part-updates for assistant
-            // messages, so any text part with a messageID is safe to
-            // count without gating on prior assistant registration.
-            if (part?.type === "text" && part?.messageID && part?.id) {
-              const text = typeof part.text === "string" ? part.text : "";
-              partTexts.set(part.id, text);
-              let total = 0;
-              for (const t of partTexts.values()) total += t.length;
-              pushProgress(total);
-            } else if (counters.partUpdates <= 2) {
-              logSse(
-                `tap.partSkip type=${part?.type} hasMsgId=${Boolean(part?.messageID)}`
-              );
-            }
-          }
+        const taken = takeEventBlocks(buffer);
+        buffer = taken.rest;
+        for (const block of taken.blocks) {
+          const evt = parseEventBlock(block);
+          if (evt) handleEvent(evt);
         }
       }
     } catch {
-      // stream ended or aborted - dispatch still completes
+      // stream ended or aborted, the dispatch still completes
     }
   })();
 

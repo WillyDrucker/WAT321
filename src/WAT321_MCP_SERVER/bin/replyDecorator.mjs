@@ -51,7 +51,7 @@ export function decorateAskResult(result, args, target) {
 }
 
 /** Resolve the user-facing alias label for the prefix line. Prefer
- * what Claude actually said in the call; fall back to a sensible
+ * what Claude actually said in the call, and fall back to a sensible
  * default tied to the resolved target. */
 function friendlyAskAlias(args, target) {
   const raw = typeof args?.alias === "string" ? args.alias.trim() : "";

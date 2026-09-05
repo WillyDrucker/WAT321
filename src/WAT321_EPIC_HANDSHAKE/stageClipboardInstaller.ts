@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type * as vscode from "vscode";
-import { atomicCopy } from "../shared/fs/atomicCopy";
-import { BIN_DIR, EPIC_HANDSHAKE_DIR } from "./constants";
+import { atomicCopy } from "../engine/fs/atomicCopy";
+import { BIN_DIR, EPIC_HANDSHAKE_DIR } from "./epicHandshakePaths";
 
 /**
  * Extracts `stage-clipboard.mjs` into `~/.wat321/epic-handshake/bin/`

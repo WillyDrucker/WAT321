@@ -12,11 +12,18 @@
  * get flagged as unknown. The app-server answers for itself, so it is
  * the only source that always matches the process running the turn.
  *
+ * An answer is tied to a MOMENT as well as a binary. The backend decides
+ * per account which models a binary may list, and can switch one on
+ * with no upgrade at all (GPT-6 Astra arrived as a staged rollout under
+ * an unchanged codex). `fetchedAt` records when the app-server answered
+ * so a picker can decide the answer is old enough to ask again.
+ *
  * Populated opportunistically by `codexDispatcher.ensureClient()` right
  * after `initialize`, on an app-server that was already being spawned.
  * The catalog NEVER spawns a process of its own and never touches the
  * dispatcher's idle timer, so warm / cold behavior is unchanged and no
- * picker or tooltip hover can trigger a cold start.
+ * tooltip hover can trigger a cold start. The one deliberate spawn is
+ * the picker's, owned by `codexCatalogSync.ts`.
  *
  * Lifetime is owned by the dispatcher, which clears the catalog on force
  * restart and on stop so an answer cannot outlive the process that gave
@@ -33,6 +40,15 @@
  * file-sourced. See `WAT321_CODEX_SESSION_TOKENS/autoCompactLimit.ts`.
  */
 
+/** A model OpenAI is retiring, and what Codex recommends in its place.
+ * Both `model/list` (`upgradeInfo`) and the cache file (`upgrade`) carry
+ * it. `retirementAtMs` is null when a source names a successor without a
+ * date. */
+export interface CodexModelUpgrade {
+  model: string;
+  retirementAtMs: number | null;
+}
+
 /** Shape the model and effort pickers render from. Mirrors what both
  * the `model/list` RPC and the cache file can supply, so either source
  * can populate it. */
@@ -42,6 +58,7 @@ export interface CodexModelInfo {
   description: string;
   defaultEffort: string | null;
   supportedEfforts: { effort: string; description: string }[];
+  upgrade: CodexModelUpgrade | null;
 }
 
 /** A catalog row. Adds the two facts only `model/list` carries:
@@ -54,6 +71,7 @@ export interface CodexCatalogEntry extends CodexModelInfo {
 }
 
 let catalog: readonly CodexCatalogEntry[] | null = null;
+let fetchedAtMs = 0;
 
 /** Replace the catalog with an app-server's answer.
  *
@@ -62,9 +80,17 @@ let catalog: readonly CodexCatalogEntry[] | null = null;
  * Storing it would make `isKnownCodexModel` reject every slug, since the
  * catalog is authoritative once non-null. Callers rely on `null` meaning
  * "fall back to the file and fail open", so this invariant is
- * load-bearing: `getCodexCatalog()` never returns an empty array. */
-export function setCodexCatalog(next: readonly CodexCatalogEntry[]): void {
+ * load-bearing: `getCodexCatalog()` never returns an empty array.
+ *
+ * `fetchedAt` is when the app-server answered. Pass the sidecar's stamp
+ * when rehydrating so the age stays honest across windows, and 0 for an
+ * answer of unknown age, which reads as "ask again at the next chance". */
+export function setCodexCatalog(
+  next: readonly CodexCatalogEntry[],
+  fetchedAt: number = Date.now()
+): void {
   catalog = next.length > 0 ? next : null;
+  fetchedAtMs = catalog === null ? 0 : fetchedAt;
 }
 
 /** The live catalog, or null when no app-server has answered yet.
@@ -73,17 +99,27 @@ export function getCodexCatalog(): readonly CodexCatalogEntry[] | null {
   return catalog;
 }
 
+/** Milliseconds since the app-server gave the current answer. Infinity
+ * when there is no catalog or the answer's age is unknown, so any "older
+ * than X" test says ask again. */
+export function codexCatalogAgeMs(now: number = Date.now()): number {
+  if (catalog === null || fetchedAtMs <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, now - fetchedAtMs);
+}
+
 /** Drop the catalog. Called when the app-server is force-restarted or
  * the dispatcher stops, so a stale answer cannot outlive the process
  * that gave it. */
 export function clearCodexCatalog(): void {
   catalog = null;
+  fetchedAtMs = 0;
 }
 
 /** The slug the app-server marks `isDefault`. This is Codex's own
  * answer to "which model runs when config.toml names none", and it
- * tracks the binary: 0.142.5 reports `gpt-5.5`, 0.144.x reports
- * `gpt-5.6-sol`. Null when no catalog or no entry claims the flag. */
+ * tracks the binary: 0.142.5 reports `gpt-5.5`, 0.144.x and 0.153.x
+ * report `gpt-5.6-sol`. Null when no catalog or no entry claims the
+ * flag. */
 export function catalogDefaultSlug(): string | null {
   const entries = getCodexCatalog();
   if (entries === null) return null;

@@ -13,14 +13,14 @@ import { httpGetJson } from "./polling/httpClient";
  * - Read-only, unauthenticated, zero user data leaves the machine.
  */
 
-export type StatusIndicator =
+type StatusIndicator =
   | "none"
   | "minor"
   | "major"
   | "critical"
   | "maintenance";
 
-export interface StatusSummary {
+interface StatusSummary {
   indicator: StatusIndicator;
   description: string;
 }

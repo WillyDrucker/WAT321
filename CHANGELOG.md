@@ -5,6 +5,22 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.32] - 2026-09-04
+
+### Added
+
+- **GPT-6 Astra is ready to pick the moment your account can run it, no WAT321 update needed.** OpenAI is rolling Astra out account by account. WAT321 asks your installed Codex for its full model list, including any model it enables for the account but hides from its own picker, and shows those under an **Unlisted by Codex** heading. A **Pin a Model by Slug** row covers a model your account can run before Codex lists it at all, and the pin drops on its own once Codex does. The picker asks Codex again whenever its last answer is more than ten minutes old, and a **Refresh Models** row asks on the spot. Astra's effort levels, including the new `ultra`, come along in the same answer, so the effort picker offers exactly what the selected model supports. Keep your Codex CLI current, since Astra needs Codex 0.153.1 or newer.
+- **Models Codex is retiring are marked in the picker, along with the replacement Codex recommends.** OpenAI has put retirement dates on GPT-5.4 and GPT-5.4 Mini and points at GPT-5.6 Terra and GPT-5.6 Luna in their place. Those rows now carry a warning naming the successor, the Codex Model Settings row and the session token hover say so too, and Repair Sessions moves a session off a retired model onto the successor Codex names for it rather than onto whatever the default happens to be that week.
+
+### Fixed
+
+- **The Codex model picker opens even when Codex has listed nothing yet, so Refresh Models and Pin a Model by Slug are always reachable.** Before, an empty answer closed the picker with a warning and hid the two rows that fix an empty answer. Force Repair now pins the slug you type the same way the picker does, so the next prompt reaches the API instead of being refused before it leaves.
+- **Claude session tokens now measure Claude 5 models against their real 1M context window.** Fable 5.1, Fable 5, Opus 5 and Sonnet 5 were being measured against 200K, so the bar filled five times too fast and the auto-compact estimate in the hover was wrong from the first prompt. The hover also names the model the way you would, "Fable 5.1" or "Opus 5" instead of the raw id, and no longer tacks a date stamp onto Haiku.
+
+### Changed
+
+- **The bridge server WAT321 installs under `~/.wat321` is now a set of small files instead of a few large ones, and upgrading clears out the old ones on its own.** Nothing changes in how you call it. Every source file in the extension now stays under 300 lines, the Epic Handshake and OpenCode Routes code is grouped by what it does, and an audit script keeps it that way.
+
 ## [1.5.31] - 2026-07-14
 
 ### Fixed

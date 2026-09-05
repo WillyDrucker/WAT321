@@ -7,8 +7,8 @@ import { peekResolvedClaudeCli } from "../shared/providers/claude/cliResolver";
 import { peekResolvedCodexCli } from "../shared/providers/codex/cliResolver";
 import { peekResolvedOpenCodeCli } from "../shared/providers/opencode/cliResolver";
 import type { ResolvedCli } from "../shared/providers/cliResolver";
-import { EPIC_HANDSHAKE_DIR } from "./constants";
-import type { BridgeThreadRecord } from "./threadPersistence";
+import { EPIC_HANDSHAKE_DIR } from "./epicHandshakePaths";
+import type { BridgeThreadRecord } from "./codexTurn/threadRecord";
 
 /**
  * Health command surface for the Epic Handshake tier. Renders enabled

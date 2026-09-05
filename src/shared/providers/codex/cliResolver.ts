@@ -47,7 +47,7 @@ function parseCodexVersion(raw: string): CodexVersion | null {
  * >0 when `a` is newer. A release outranks any prerelease of the same
  * version, and prerelease identifiers compare numerically when both are
  * numeric so `alpha.10` correctly outranks `alpha.2`. */
-export function compareCodexVersions(a: string, b: string): number {
+function compareCodexVersions(a: string, b: string): number {
   const va = parseCodexVersion(a);
   const vb = parseCodexVersion(b);
   if (va === null && vb === null) return 0;

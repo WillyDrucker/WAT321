@@ -22,32 +22,55 @@ interface ModelContextWindow {
   displayName: (modelId: string) => string;
 }
 
+/** Family and version digits of a Claude model id, ignoring a dated
+ * snapshot suffix and the `[1m]` context marker Claude Code appends:
+ * `claude-fable-5-1` and `claude-sonnet-4-5-20250929[1m]` both parse.
+ * Null for ids that do not lead with a family name (legacy `claude-3-*`
+ * ids fall through to the 200K default with their raw id). */
+function claudeIdParts(
+  id: string
+): { family: string; version: number[] } | null {
+  const m = /^claude-([a-z]+)((?:-\d+)+)/.exec(id);
+  if (m === null) return null;
+  const version = m[2]
+    .split("-")
+    .filter((p) => p.length > 0)
+    .map(Number)
+    .filter((n) => n < 1000);
+  return { family: m[1], version };
+}
+
+function claudeDisplayName(id: string): string {
+  const parts = claudeIdParts(id);
+  if (parts === null || parts.version.length === 0) return id;
+  const family = parts.family.charAt(0).toUpperCase() + parts.family.slice(1);
+  return `${family} ${parts.version.join(".")}`;
+}
+
+/** Claude models with a 1M-token context: every Fable and Mythos, and
+ * Opus / Sonnet from the 4 generation on. Haiku and older families stay
+ * at 200K. The transcript names the model but never its window, so this
+ * table is the only source and a miss under-reports by five times. */
+function isMillionContextClaude(id: string): boolean {
+  const parts = claudeIdParts(id);
+  if (parts === null) return false;
+  if (parts.family === "fable" || parts.family === "mythos") return true;
+  const major = parts.version[0] ?? 0;
+  return (parts.family === "opus" || parts.family === "sonnet") && major >= 4;
+}
+
 /** Registry of known model context windows. Checked in order -
  * first match wins. A third provider adds entries here. */
-export const MODEL_CONTEXT_WINDOWS: readonly ModelContextWindow[] = [
+const MODEL_CONTEXT_WINDOWS: readonly ModelContextWindow[] = [
   {
-    match: (id) => id.includes("claude-opus-4") || id.includes("claude-sonnet-4"),
+    match: isMillionContextClaude,
     contextWindowSize: 1_000_000,
-    displayName: (id) => {
-      const parts = id.replace(/^claude-/, "").split("-");
-      if (parts.length >= 3) {
-        const family = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-        return `${family} ${parts[1]}.${parts.slice(2).join(".")}`;
-      }
-      return id;
-    },
+    displayName: claudeDisplayName,
   },
   {
     match: (id) => id.startsWith("claude-"),
     contextWindowSize: 200_000,
-    displayName: (id) => {
-      const parts = id.replace(/^claude-/, "").split("-");
-      if (parts.length >= 2) {
-        const family = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-        return `${family} ${parts.slice(1).join(".")}`;
-      }
-      return id;
-    },
+    displayName: claudeDisplayName,
   },
   {
     match: (id) => id.startsWith("gpt-"),
@@ -119,7 +142,7 @@ export interface UsageServiceDiagnostics {
  * activity-driven kickstart and escalation reset. Session token
  * services do NOT implement these - they are the activity signal
  * source, not the consumer. */
-export interface UsageService<TState> extends Subscribable<TState> {
+interface UsageService<TState> extends Subscribable<TState> {
   start(): void;
   setActivityProbe(probe: () => number | null): void;
   resetKickstartEscalation(): void;
@@ -128,7 +151,7 @@ export interface UsageService<TState> extends Subscribable<TState> {
 
 /** Contract for session token services that expose the activity
  * signal consumed by usage services via `setActivityProbe`. */
-export interface SessionTokenService<TState> extends Subscribable<TState> {
+interface SessionTokenService<TState> extends Subscribable<TState> {
   start(): void;
   getLastActivityMs(): number | null;
   /** Current transcript / rollout path, or null if no session has

@@ -1,7 +1,7 @@
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 import { getRemainingPct } from "../shared/codex-usage/formatters";
 import { buildTooltip } from "../shared/codex-usage/tooltipBuilder";
-import type { CodexUsageResponse } from "../shared/codex-usage/types";
+import type { CodexUsageResponse } from "../shared/codex-usage/codexUsageTypes";
 import { resolveCodexWindows } from "../shared/codex-usage/windows";
 import { renderCodexBar } from "../shared/ui/heatmap";
 import { getCodexTextColor } from "../shared/ui/textColors";
@@ -18,7 +18,7 @@ import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidge
  * moving to the weekly slot, so it does not wander across the status bar
  * when the shape changes underneath it. Its caption follows the data:
  * "5h" normally, "5h/Weekly" once the two windows collapse into one, so
- * the single bar reads as covering what the pair used to.
+ * the single bar reads as covering both limits.
  */
 
 /** The percent this widget draws, always taken from the resolved primary

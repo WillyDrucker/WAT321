@@ -5,7 +5,7 @@ import {
   type SessionTokenWidgetDescriptor,
 } from "../shared/ui/sessionTokens/sessionTokenWidget";
 import { CODEX_BASELINE_TOKENS } from "./autoCompactLimit";
-import type { CodexTokenWidgetState } from "./types";
+import type { CodexTokenWidgetState } from "./codexSessionTokenTypes";
 
 const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
   id: "wat321.codexSessionTokens",

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, normalize } from "node:path";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
+import { writeFileAtomic } from "../engine/fs/atomicWrite";
 import { resolveClaudeCli } from "../shared/providers/claude/cliResolver";
 import { BIN_DIR, UNIFIED_MCP_NAME } from "./installerScripts";
 
@@ -18,7 +18,7 @@ import { BIN_DIR, UNIFIED_MCP_NAME } from "./installerScripts";
  * re-register.
  */
 
-export interface CliResult {
+interface CliResult {
   code: number;
   stdout: string;
   stderr: string;

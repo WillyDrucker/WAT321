@@ -1,37 +1,35 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as bridgeInbox from "./bridgeInbox.mjs";
-import * as codex from "./codex.mjs";
-import * as opencode from "./opencode/index.mjs";
+import { readEnabledTargets } from "./bridgeConfig.mjs";
+import { listInboxResource } from "./codex/mailbox.mjs";
+import { listNonCodexInboxResource } from "./nonCodexMailbox.mjs";
+import { listSessionsResource } from "./opencode/sessions.mjs";
+import { readCatalog, readLastUsedInstance } from "./routesConfig.mjs";
 
 /**
  * MCP resource surface for the unified `wat321` bridge. Resources are
- * read-only state Claude fetches on demand - catalog, sessions, inbox,
- * status, plus the bridge://docs/* reference markdown. Each resource
+ * read-only state Claude fetches on demand: catalog, sessions, inbox,
+ * status, plus the `bridge://docs/*` reference markdown. Each resource
  * costs ~30-50 tokens in resources/list (URI + name + short
- * description); bodies stay out of Claude's context until Claude reads
- * them. The docs resources are how the lean wat321_ask / wat321_bridge
- * tool descriptions stay under ~300 tokens combined while still giving
- * Claude full guidance on first use - the tool descriptions point at
- * the doc URIs, Claude reads them once per session when it needs them,
- * and turns that never touch the bridge pay only the lean tool surface.
+ * description) and bodies stay out of Claude's context until read.
+ * The docs resources are how the lean tool descriptions stay under
+ * ~300 tokens combined while still giving Claude full guidance on
+ * first use: the descriptions point at the doc URIs, Claude reads
+ * them once per session when it needs them, and turns that never
+ * touch the bridge pay only the lean tool surface.
  *
- * Implementation is pure: caller threads catalog reads, last-used
- * sidecar lookup, and the enabled-target snapshot in via `deps` so
- * this file doesn't reach into channel.mjs's local state. Docs are
- * loaded once at module init from `bin/docs/*.md` colocated with this
- * file; the installer copies them into `~/.wat321/bridge/bin/docs/`
+ * Docs load once at module init from `bin/docs/*.md` colocated with
+ * this file. The installer copies them into `~/.wat321/bridge/bin/docs/`
  * alongside the .mjs files.
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = join(__dirname, "docs");
 
-/** Read a doc file at module init. Failures fall back to a short
- * placeholder so a missing doc doesn't break the resource handler -
- * the agent still sees the URI in resources/list, the read just
- * returns the fallback. */
+/** A missing doc falls back to a short placeholder so the resource
+ * handler keeps working. The agent still sees the URI in
+ * resources/list, the read just returns the fallback. */
 function loadDoc(fileName) {
   try {
     return readFileSync(join(DOCS_DIR, fileName), "utf8");
@@ -46,7 +44,7 @@ const DISPATCH_ERRORS_DOC = loadDoc("dispatch-errors.md");
 const DISPATCH_JUDGEMENT_DOC = loadDoc("dispatch-judgement.md");
 const INBOX_DOC = loadDoc("inbox.md");
 
-export const RESOURCE_DEFS = [
+const RESOURCE_DEFS = [
   {
     uri: "bridge://instances",
     name: "Bridge instances",
@@ -123,21 +121,15 @@ export const RESOURCE_DEFS = [
 
 /** Filter the resource list by enabled target so Claude does not see
  * resources for backends the user has turned off. Zero-surface-when-
- * disabled is the contract `buildTools` enforces; this function mirrors
- * it for the resource catalog so a user with every target disabled
- * pays nothing in either surface.
+ * disabled is the contract `buildTools` enforces, mirrored here so a
+ * user with every target disabled pays nothing in either surface.
  *
  * Gating rules:
- *   - `bridge://docs/dispatch` / `bridge://docs/inbox` - shown when any
- *     backend is enabled. Both docs cover all targets now that FF
- *     works for opencode/local in addition to Codex.
- *   - `bridge://instances` / `bridge://status` - shown when any backend
- *     is enabled. With all targets off the catalog is empty and the
- *     status payload only repeats the `enabled` flags, so the resource
- *     adds no signal.
- *   - Per-target resources stay gated on their own target's enable
- *     flag exactly as before.
- */
+ *   - `bridge://docs/*`, `bridge://instances`, `bridge://status` show
+ *     when any backend is enabled. Both docs cover every target, and
+ *     with all targets off the catalog is empty and the status
+ *     payload only repeats the `enabled` flags.
+ *   - Per-target resources gate on their own target's enable flag. */
 export function filterEnabledResources(enabled) {
   const anyEnabled =
     enabled.codex === true ||
@@ -155,25 +147,23 @@ export function filterEnabledResources(enabled) {
   });
 }
 
-/** Look up the declared mimeType for a given resource URI. Falls back
- * to `application/json` so existing callers without an entry continue
- * to read as JSON. The markdown docs declare `text/markdown` in their
- * RESOURCE_DEFS entries and rely on this lookup. */
+/** Declared mimeType for a resource URI. Falls back to
+ * `application/json` so a caller without an entry still reads as
+ * JSON. The markdown docs declare `text/markdown` in RESOURCE_DEFS. */
 export function resourceMimeType(uri) {
   const def = RESOURCE_DEFS.find((r) => r.uri === uri);
   return def?.mimeType ?? "application/json";
 }
 
-/** Resolve a `bridge://...` URI to its content body Claude reads.
- * JSON resources return stringified JSON; markdown docs return raw
- * markdown. Throws `Unknown resource URI` for any URI not in
- * `RESOURCE_DEFS`. */
-export async function readResourceContent(uri, deps) {
+/** Resolve a `bridge://...` URI to the body Claude reads. JSON
+ * resources return stringified JSON, markdown docs return raw
+ * markdown. Throws `Unknown resource URI` for anything else. */
+export async function readResourceContent(uri) {
   if (uri === "bridge://instances") {
-    const router = deps.makeRouter();
+    const catalog = readCatalog();
     return JSON.stringify(
       {
-        instances: router.catalog.instances.map((i) => ({
+        instances: catalog.instances.map((i) => ({
           id: i.id,
           alias: i.alias,
           kind: i.kind,
@@ -181,7 +171,7 @@ export async function readResourceContent(uri, deps) {
           dataRetention: i.dataRetention,
           ready: i.apiKeyMissing !== true,
         })),
-        activeInstanceId: router.catalog.activeInstanceId,
+        activeInstanceId: catalog.activeInstanceId,
       },
       null,
       2
@@ -189,27 +179,20 @@ export async function readResourceContent(uri, deps) {
   }
   if (uri === "bridge://sessions/opencode" || uri === "bridge://sessions/local") {
     const target = uri.endsWith("/local") ? "local" : "opencode";
-    if (typeof opencode.listSessionsResource === "function") {
-      return JSON.stringify(await opencode.listSessionsResource(target), null, 2);
-    }
-    return JSON.stringify({ sessions: [] }, null, 2);
+    return JSON.stringify(await listSessionsResource(target), null, 2);
   }
   if (uri === "bridge://inbox/codex") {
-    if (typeof codex.listInboxResource === "function") {
-      return JSON.stringify(await codex.listInboxResource(), null, 2);
-    }
-    return JSON.stringify({ inbox: [] }, null, 2);
+    return JSON.stringify(await listInboxResource(), null, 2);
   }
   if (uri === "bridge://inbox/opencode" || uri === "bridge://inbox/local") {
     const target = uri.endsWith("/local") ? "local" : "opencode";
-    return JSON.stringify(bridgeInbox.listNonCodexInboxResource(target), null, 2);
+    return JSON.stringify(listNonCodexInboxResource(target), null, 2);
   }
   if (uri === "bridge://status") {
-    const lastUsed = deps.readLastUsedInstance();
-    const enabled = deps.readEnabledTargets();
+    const lastUsed = readLastUsedInstance();
     return JSON.stringify(
       {
-        enabled,
+        enabled: readEnabledTargets(),
         lastUsed: lastUsed
           ? {
               instanceId: lastUsed.instanceId,

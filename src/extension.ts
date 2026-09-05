@@ -12,12 +12,10 @@ import {
   setHostAppName,
 } from "./engine/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
-import { workspaceId } from "./shared/wat321Paths";
-import {
-  registerAutoCreateOpenCodeS1,
-  registerBridgeConfigWriter,
-  registerUnifiedBridgeCommands,
-} from "./WAT321_MCP_SERVER";
+import { workspaceId } from "./engine/wat321Paths";
+import { registerBridgeConfigWriter } from "./WAT321_MCP_SERVER";
+import { registerAutoCreateOpenCodeS1 } from "./WAT321_MCP_SERVER/autoCreateSession";
+import { registerUnifiedBridgeCommands } from "./WAT321_MCP_SERVER/installer";
 import { activateEpicHandshake } from "./WAT321_EPIC_HANDSHAKE";
 import { activateOpenCodeRoutes } from "./WAT321_OPENCODE_ROUTES";
 

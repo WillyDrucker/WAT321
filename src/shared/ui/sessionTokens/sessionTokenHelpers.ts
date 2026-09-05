@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../../../engine/settingsKeys";
-import { openCodeRoutesStateDir } from "../../wat321Paths";
+import { openCodeRoutesStateDir } from "../../../engine/wat321Paths";
 
 /**
  * Small helpers and constants the SessionTokenWidget composes from.
@@ -66,20 +66,6 @@ export function tpsSuffix(
   if (typeof tps !== "number" || tps <= 0) return "";
   const formatted = tps >= 10 ? `${Math.round(tps)}` : tps.toFixed(1);
   return ` ${formatted}tps`;
-}
-
-/** `process.kill(pid, 0)` is the portable Node liveness check - signal
- * 0 is test-only, never delivered. ESRCH means the process is gone,
- * EPERM means alive but we lack permission to signal (still alive
- * for our purposes). */
-export function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    return err.code === "EPERM";
-  }
 }
 
 /** Cache-banner flash window. 2000ms total - the LOAD/MISS text persists

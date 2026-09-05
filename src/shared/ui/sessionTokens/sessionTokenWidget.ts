@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
+import { isPidAlive } from "../../../engine/pidLiveness";
 import type { BridgeStageReader } from "../../../engine/bridgeTypes";
 import { getSessionTokenDisplayMode } from "../../../engine/displayMode";
 import { getWidgetPriority } from "../../../engine/widgetCatalog";
-import { SQUARE_ORANGE_COMPACT } from "../heatmap";
+import { SQUARE_ORANGE_COMPACT } from "../heatmapPalette";
 import {
   createCacheBannerLatch,
   type CacheBannerLatch,
@@ -10,7 +11,6 @@ import {
 import {
   COMPACT_PROGRESS_COLOR,
   isOpenCodeDispatchActive,
-  isPidAlive,
   TICK_MS,
   tpsSuffix,
 } from "./sessionTokenHelpers";

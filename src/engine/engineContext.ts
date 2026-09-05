@@ -7,9 +7,9 @@ import { validateCatalog } from "./widgetCatalog";
  * functions so they can access the registry and event hub without
  * importing singletons. Created once in `extension.ts activate()`.
  *
- * Single-tool coordinators (`bridgeStageCoordinator`,
- * `lateReplyInboxCoordinator`) live inside their owning tool tier
- * and are constructed during that tier's activation, not here.
+ * Coordinators (`bridgeStageCoordinator`, the engine's
+ * `InboxCoordinator`) are constructed during the Epic Handshake
+ * tier's activation, not here.
  */
 export interface EngineContext {
   providers: ProviderRegistry;

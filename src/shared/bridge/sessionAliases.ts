@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { writeFileAtomic } from "../fs/atomicWrite";
+import { dirname, join } from "node:path";
+import { bridgeStateDir } from "../../engine/wat321Paths";
+import { writeFileAtomic } from "../../engine/fs/atomicWrite";
 
 /**
  * Session alias storage shared by the unified bridge MCP server, the
@@ -11,7 +12,7 @@ import { writeFileAtomic } from "../fs/atomicWrite";
  *     to `{sessionId, instanceId}`
  *   - `activeAliases` per target - the alias the bridge consumer
  *     resolves to when a wat321_ask call omits `session`. The EH menu's
- *     CURRENT row writes this - bin/opencode.mjs reads it.
+ *     CURRENT row writes this - `WAT321_MCP_SERVER/bin/opencode/dispatch.mjs` reads it.
  *
  * `instanceId` on each entry is the catalog id the session was bound to
  * at create time. Persisting it lets the heartbeat layer render the
@@ -27,9 +28,12 @@ import { writeFileAtomic } from "../fs/atomicWrite";
  * absent or pointing at an alias the bucket no longer contains.
  */
 
+/** The one alias map every tier reads and the MCP runtime writes. */
+export const SESSION_ALIASES_PATH = join(bridgeStateDir(), "session-aliases.json");
+
 export type SessionTarget = "opencode" | "local";
 
-export interface AliasEntry {
+interface AliasEntry {
   sessionId: string;
   /** Catalog id the session was bound to at create time. Null for
    * legacy alias entries written before the instanceId was tracked. */
@@ -115,3 +119,19 @@ export function writeAliases(path: string, map: AliasMap): void {
   writeFileAtomic(path, JSON.stringify(map, null, 2));
 }
 
+/** Highest S<n> alias by numeric suffix, or null when the bucket is
+ * empty. Menus show the working session as "S<n>", not a count. */
+export function latestAlias(bucket: Record<string, AliasEntry>): string | null {
+  let bestNum = -1;
+  let bestAlias: string | null = null;
+  for (const alias of Object.keys(bucket)) {
+    const m = /^S(\d+)$/.exec(alias);
+    if (!m) continue;
+    const n = parseInt(m[1], 10);
+    if (n > bestNum) {
+      bestNum = n;
+      bestAlias = alias;
+    }
+  }
+  return bestAlias;
+}

@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { readFirstLine, readHead } from "../shared/fs/fileReaders";
+import { readFirstLine, readHead } from "../engine/fs/fileReaders";
 
 /**
  * Field extraction from Codex rollout `.jsonl` transcripts. Rollouts
@@ -9,7 +9,7 @@ import { readFirstLine, readHead } from "../shared/fs/fileReaders";
  * Turn-state classification lives in `turnClassifier.ts`.
  */
 
-export interface LastTokenCount {
+interface LastTokenCount {
   /** Tokens currently in the context window for the last completed
    * turn. Sourced from `last_token_usage.total_tokens` in the Codex
    * rollout's `token_count` event, matching what Codex's own TUI

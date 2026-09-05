@@ -7,7 +7,7 @@ import {
   logNotifEvent,
   sessionIdFromPath,
   type BridgeDecisionReason,
-} from "../shared/diag/notifEventLog";
+} from "./notifEventLog";
 
 /**
  * Generic bridge that watches a session-token service for contextUsed
@@ -46,7 +46,7 @@ export interface NonActiveCompletion {
   completedAtMs: number;
 }
 
-export interface SessionResponseBridgeConfig {
+interface SessionResponseBridgeConfig {
   provider: ProviderKey;
   displayName: string;
   tokenService: {

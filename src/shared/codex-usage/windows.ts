@@ -1,21 +1,19 @@
 import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
-import type { CodexUsageResponse, RateLimitWindow } from "./types";
+import type { CodexUsageResponse, RateLimitWindow } from "./codexUsageTypes";
 
 /**
  * Decides which Codex rate-limit window feeds which usage widget, by
  * reading each window's OWN declared duration rather than the slot it
  * arrived in.
  *
- * Why this exists. WAT321 used to map `primary_window` onto the 5-hour
- * widget and `secondary_window` onto the weekly one, purely by position.
- * That assumption broke the day OpenAI retired the 5-hour cap. The API
- * now returns a single `primary_window` whose `limit_window_seconds` is
- * 604800 (seven days), with `secondary_window` null. The 7-day window
- * landed in the 5-hour slot and rendered through the 5-hour formatter,
- * so a reset six days out read "Resets 12:13AM (152hr 49min)". Meanwhile
- * the weekly widget drew a full green bar over a window that no longer
- * existed, because an absent window reports 0% used, which floors to
- * 100% remaining.
+ * Why this exists. Slot position is not a contract. The API can publish
+ * a single `primary_window` whose `limit_window_seconds` is 604800
+ * (seven days) with `secondary_window` null. Mapping windows by slot
+ * would push that 7-day window through the 5-hour formatter, so a reset
+ * six days out reads "Resets 12:13AM (152hr 49min)", while the weekly
+ * widget draws a full green bar over a window that does not exist,
+ * because an absent window reports 0% used, which floors to 100%
+ * remaining.
  *
  * `limit_window_seconds` is self-describing, so it is the only honest
  * key. A window of a day or less is the short (5-hour-class) limit and
@@ -47,7 +45,7 @@ export interface CodexUsageRow {
   resetLine: string;
 }
 
-export interface CodexWindowLayout {
+interface CodexWindowLayout {
   /** What the 5h-slot widget renders. Null only when the payload carried
    * no usable window at all. */
   primary: CodexUsageRow | null;
@@ -109,10 +107,10 @@ export function resolveCodexWindows(
 
   // Exactly ONE window. It takes the 5h slot so the bar stays where the
   // user already looks, and the weekly widget stands down. A surviving
-  // long window is captioned "5h/Weekly" because it is now the only limit
-  // and has absorbed what the 5-hour cap used to measure. A surviving
-  // short window keeps its own name, since there is no weekly component
-  // to fold into it.
+  // long window is captioned "5h/Weekly" because it is the only limit in
+  // force and covers what a 5-hour cap would. A surviving short window
+  // keeps its own name, since there is no weekly component to fold into
+  // it.
   //
   // The `length === 1` test is load-bearing and must come first. Testing
   // "no short" or "no long" instead would treat TWO same-class windows as

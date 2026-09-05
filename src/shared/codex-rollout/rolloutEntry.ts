@@ -1,4 +1,5 @@
-import type { BridgeStage, PlanState, PlanStep } from "./types";
+import type { PlanState, PlanStep } from "./turnStageTypes";
+import { BRIDGE_STAGE_ORDER, type BridgeStage } from "../../engine/bridgeTypes";
 
 /**
  * Internal helpers for Codex rollout JSONL parsing. Entry-shape
@@ -10,7 +11,7 @@ import type { BridgeStage, PlanState, PlanStep } from "./types";
  * to null / 0 / "" so the parsers never throw on a partial rollout.
  */
 
-export interface RolloutEntry {
+interface RolloutEntry {
   timestamp: string;
   type: string;
   payload?: Record<string, unknown>;
@@ -71,15 +72,8 @@ export function advanceStage(
   current: BridgeStage,
   candidate: BridgeStage
 ): BridgeStage {
-  const order: BridgeStage[] = [
-    "dispatched",
-    "received",
-    "working",
-    "writing",
-    "complete",
-  ];
-  const currentIdx = order.indexOf(current);
-  const candidateIdx = order.indexOf(candidate);
+  const currentIdx = BRIDGE_STAGE_ORDER.indexOf(current);
+  const candidateIdx = BRIDGE_STAGE_ORDER.indexOf(candidate);
   return candidateIdx > currentIdx ? candidate : current;
 }
 

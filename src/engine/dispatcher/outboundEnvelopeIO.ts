@@ -7,8 +7,8 @@ import {
   unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { writeFileAtomic } from "../../shared/fs/atomicWrite";
-import { workspaceHash } from "../../shared/workspaceHash";
+import { writeFileAtomic } from "../fs/atomicWrite";
+import { workspaceHash } from "../workspaceHash";
 import {
   buildInboundEnvelope,
   readEnvelope,

@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { bridgeStateDir } from "../../shared/wat321Paths";
-import { workspaceHash } from "../../shared/workspaceHash";
+import { bridgeStateDir } from "../wat321Paths";
+import { workspaceHash } from "../workspaceHash";
 import type { EnvelopeTarget } from "./envelope";
 
 /**
@@ -53,7 +53,7 @@ function ehSentClaudeDir(wsHash: string): string {
   return join(SENT_CLAUDE_ROOT, wsHash);
 }
 
-export function outboundDir(
+function outboundDir(
   target: EnvelopeTarget,
   workspacePath: string | null
 ): string {

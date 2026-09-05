@@ -1,23 +1,20 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { clearFlag, setFlag } from "../shared/fs/flagFile";
-import { OPENCODE_ROUTES_DIR } from "./constants";
+import { clearFlag, setFlag } from "../engine/fs/flagFile";
+import { OPENCODE_ROUTES_DIR } from "./openCodeRoutesPaths";
 
 /**
- * Flag files the click menu writes for `channel.mjs` to observe:
+ * Flag files the OpenCode Routes click menu writes under the per-client
+ * routes state dir:
  *
- *   paused        - present means refuse new tool calls. The drain
- *                   tools (`model_bridge_inbox`, `model_bridge_list`)
- *                   stay live so a paused user can still see what is
- *                   queued. Cleared by Resume.
+ *   paused        - present while the menu shows Resume instead of
+ *                   Pause. `isPaused` drives that row state.
+ *   cancel.flag   - dropped by the Cancel row.
  *
- *   cancel.flag   - present means the in-flight call should abort.
- *                   `channel.mjs` checks at handler entry and inside
- *                   the streaming loop. Self-clears once observed so
- *                   the next call is not cancelled spuriously.
- *
- * Mirrors the Epic Handshake `writeCancelFlag` / paused-toggle shape
- * so muscle memory carries over between the two click menus.
+ * The unified MCP runtime gates dispatch on the Epic Handshake paused
+ * flag only and observes neither of these files, so they carry menu
+ * state, not dispatch policy. Same `setFlag` / `clearFlag` shape as
+ * the Epic Handshake toggles so both click menus read alike.
  */
 
 const PAUSED_FLAG_PATH = join(OPENCODE_ROUTES_DIR, "paused");

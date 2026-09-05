@@ -1,23 +1,19 @@
 import { existsSync } from "node:fs";
+import type { UsageServiceDiagnostics } from "../../engine/contracts";
 import type { ServiceState, StateListener } from "../../engine/serviceTypes";
+import type { TransitionReason, TransitionStatus } from "../../engine/usageTransitionLog";
 import { Coordinator } from "../cacheCoordinator";
-import { CACHE_FRESHNESS_OK_MS, CLAIM_TTL_MS, POLL_INTERVAL_MS } from "./constants";
 import { CountdownTicker } from "./countdownTicker";
-import { DiscoveryPoller } from "./discovery";
-import { parseRetryAfterMs } from "./errorClassification";
-import { httpGetJson } from "./httpClient";
-import { HttpError } from "./httpError";
 import { KickstartGate } from "./kickstartGate";
+import { CACHE_FRESHNESS_OK_MS, CLAIM_TTL_MS, POLL_INTERVAL_MS } from "./pollingTimings";
 import { computeStartupDelay } from "./startupDelay";
 import { resolveStateFreshness, statesEqual } from "./stateMachine";
-import type { TransitionReason, TransitionStatus } from "./transitionLog";
 import { UsageServiceErrorState } from "./usageServiceErrorState";
-import { startRecoveryWatchdog, type RecoveryWatchdog } from "./usageServiceRecoveryWatchdog";
+import { UsageFetchCycle } from "./usageServiceFetchCycle";
+import { UsagePollSchedule } from "./usageServicePollSchedule";
 import { TransitionLogger, type TransitionSnapshot } from "./usageServiceTransitionLogger";
 
-const NO_CACHE_RETRY_MS = 10_000;
-
-export interface UsageServiceConfig {
+interface UsageServiceConfig {
   authDir: string;
   cacheFile: string;
   claimFile: string;
@@ -31,40 +27,30 @@ export interface UsageServiceConfig {
 }
 
 /**
- * Shared state machine for usage polling services. Owns discovery,
- * startup delay, cache-first refresh, claim coordination, rate-limit
- * parking, activity-driven kickstart, dispose cleanup. Provider-
- * specific `getAuth()` and `validateResponse()` are abstract.
+ * Shared state machine for usage polling services. Owns the state,
+ * the listeners, discovery hand-off, rate-limit parking, and the
+ * activity-driven kickstart. Provider-specific `getAuth()` and
+ * `validateResponse()` are abstract.
  *
  * Sibling helpers composed at construction:
  *   - usageServiceTransitionLogger: per-window transition log writer
  *   - usageServiceErrorState: fetch-error decision tree + counters
- *   - usageServiceRecoveryWatchdog: forces a fetch on the 15-min gap
+ *   - usageServiceFetchCycle: cache adoption, claim, fetch, validate
+ *   - usageServicePollSchedule: every timer, including discovery and
+ *     the recovery watchdog that forces a fetch on the 15-min gap
  */
 export abstract class UsageServiceBase<TResponse> {
   private state: ServiceState<TResponse>;
   private listeners = new Set<StateListener<ServiceState<TResponse>>>();
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private recoveryWatchdog: RecoveryWatchdog | null = null;
-  private pendingTimers = new Set<ReturnType<typeof setTimeout>>();
-  private discoveryPoller: DiscoveryPoller | null = null;
-  private abortController: AbortController | null = null;
-  private inFlight = false;
   private disposed = false;
-  /** Last real HTTPS attempt time. Updated only in `doFetch`, never
-   * on cache adoption, so the recovery watchdog measures genuine
-   * network activity. Seeded so the watchdog does not fire at boot. */
-  private lastFetchAttemptMs = Date.now();
-  /** Active poll cadence in ms. Stamped onto transition records so a
-   * reader can tell the normal cadence apart from a rate-limit
-   * backoff stretch. */
-  private currentPollIntervalMs = POLL_INTERVAL_MS;
 
   private readonly kickstart = new KickstartGate();
+  private readonly schedule = new UsagePollSchedule(() => void this.refresh());
   private readonly coordinator: Coordinator<ServiceState<TResponse>>;
   private readonly countdown: CountdownTicker;
   private readonly transitionLogger: TransitionLogger;
   private readonly errorState: UsageServiceErrorState;
+  private readonly fetchCycle: UsageFetchCycle<TResponse>;
 
   constructor(private readonly config: UsageServiceConfig) {
     this.state = existsSync(config.authDir)
@@ -88,7 +74,7 @@ export abstract class UsageServiceBase<TResponse> {
     this.errorState = new UsageServiceErrorState({
       getCurrentState: () => this.state,
       setState: (s, r) => this.setState(s as ServiceState<TResponse>, r),
-      setPollInterval: (ms) => this.setPollInterval(ms),
+      setPollInterval: (ms) => this.schedule.setPollInterval(ms),
       writeCache: (s) =>
         this.coordinator.writeCache(s as ServiceState<TResponse>),
       startCountdown: () => this.countdown.start(),
@@ -101,6 +87,20 @@ export abstract class UsageServiceBase<TResponse> {
       () => this.onCountdownTick(),
       () => this.state.status === "rate-limited"
     );
+
+    this.fetchCycle = new UsageFetchCycle<TResponse>({
+      endpointUrl: config.endpointUrl,
+      coordinator: this.coordinator,
+      countdown: this.countdown,
+      errorState: this.errorState,
+      transitionLogger: this.transitionLogger,
+      getState: () => this.state,
+      setState: (s, r, cacheAgeMs) => this.setState(s, r, cacheAgeMs),
+      buildSnapshot: () => this.buildTransitionSnapshot(),
+      scheduleRetry: (ms) => this.schedule.schedule(() => void this.refresh(), ms),
+      getAuth: () => this.getAuth(),
+      validateResponse: (data): data is TResponse => this.validateResponse(data),
+    });
   }
 
   /** 60s callback during rate-limited state. Lets kickstart fire
@@ -156,7 +156,7 @@ export abstract class UsageServiceBase<TResponse> {
   }
 
   /** Diagnostic snapshot for the health command. */
-  getDiagnostics(): import("../../engine/contracts").UsageServiceDiagnostics {
+  getDiagnostics(): UsageServiceDiagnostics {
     const kick = this.kickstart.getDiagnostics();
     const rl = this.state.status === "rate-limited" ? this.state : null;
     return {
@@ -176,22 +176,15 @@ export abstract class UsageServiceBase<TResponse> {
     if (this.disposed) return;
     this.kickstart.reset();
     if (this.state.status === "rate-limited") {
-      this.setPollInterval(POLL_INTERVAL_MS);
+      this.schedule.setPollInterval(POLL_INTERVAL_MS);
     }
   }
 
   dispose(): void {
     this.disposed = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-    this.recoveryWatchdog?.dispose();
-    this.recoveryWatchdog = null;
-    for (const handle of this.pendingTimers) clearTimeout(handle);
-    this.pendingTimers.clear();
-    this.discoveryPoller?.dispose();
-    this.discoveryPoller = null;
+    this.schedule.dispose();
     this.countdown.stop();
-    this.abortController?.abort();
+    this.fetchCycle.abort();
     this.listeners.clear();
   }
 
@@ -201,37 +194,22 @@ export abstract class UsageServiceBase<TResponse> {
     this.kickstart.onWake();
     this.countdown.stop();
     this.setState({ status: "loading" }, "wake-from-park");
-    this.setPollInterval(POLL_INTERVAL_MS);
+    this.schedule.setPollInterval(POLL_INTERVAL_MS);
   }
 
   private startDiscovery(): void {
-    this.discoveryPoller?.dispose();
-    this.discoveryPoller = new DiscoveryPoller(this.config.authDir, () => {
+    this.schedule.startDiscovery(this.config.authDir, () => {
       this.setState({ status: "loading" }, "discovery-recovered");
       this.startPolling();
     });
-    this.discoveryPoller.start();
   }
 
   private startPolling(): void {
-    this.discoveryPoller?.stop();
-    const delay = computeStartupDelay(this.coordinator);
-    const handle = setTimeout(() => {
-      this.pendingTimers.delete(handle);
-      if (this.disposed) return;
-      this.refresh();
-      this.timer = setInterval(() => this.refresh(), POLL_INTERVAL_MS);
-    }, delay);
-    this.pendingTimers.add(handle);
-    // Recovery watchdog runs alongside the poll loop so the
-    // discovery-recovered path (auth dir appeared post-startup)
-    // also gets the 15-min ceiling. Idempotent.
-    this.recoveryWatchdog?.dispose();
-    this.recoveryWatchdog = startRecoveryWatchdog({
+    this.schedule.startPolling(computeStartupDelay(this.coordinator), {
       getCurrentStatus: () => this.state.status as TransitionStatus,
-      getLastFetchAttemptMs: () => this.lastFetchAttemptMs,
+      getLastFetchAttemptMs: () => this.fetchCycle.getLastFetchAttemptMs(),
       isDisposed: () => this.disposed,
-      isInFlight: () => this.inFlight,
+      isInFlight: () => this.fetchCycle.isInFlight(),
       forceRefresh: () => void this.refresh(true),
       buildSnapshot: () => this.buildTransitionSnapshot(),
       transitionLogger: this.transitionLogger,
@@ -268,22 +246,15 @@ export abstract class UsageServiceBase<TResponse> {
       consecutiveColdStartAbsorbs: this.errorState.getColdStartAbsorbs(),
       idleForMs:
         activityMs === null ? null : Math.max(0, Date.now() - activityMs),
-      pollIntervalMs: this.currentPollIntervalMs,
+      pollIntervalMs: this.schedule.getPollIntervalMs(),
     };
   }
 
-  private setPollInterval(ms: number): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => this.refresh(), ms);
-    this.currentPollIntervalMs = ms;
-  }
-
   private async refresh(force: boolean = false): Promise<void> {
-    if (this.disposed || this.inFlight) return;
+    if (this.disposed || this.fetchCycle.isInFlight()) return;
 
     if (!existsSync(this.config.authDir)) {
-      if (this.timer) clearInterval(this.timer);
-      this.timer = null;
+      this.schedule.stopPolling();
       this.countdown.stop();
       this.setState({ status: "not-connected" }, "auth-dir-vanished");
       this.startDiscovery();
@@ -297,103 +268,6 @@ export abstract class UsageServiceBase<TResponse> {
       this.wake();
     }
 
-    if (!force && this.tryAdoptFreshCache()) return;
-    if (!this.tryClaimOrFallback()) return;
-
-    const auth = this.getAuth();
-    if (!auth) {
-      const ns: ServiceState<TResponse> = { status: "no-auth" };
-      if (this.state.status !== "no-auth") this.setState(ns, "auth-missing");
-      this.coordinator.writeCache(ns);
-      this.coordinator.releaseClaim();
-      return;
-    }
-
-    this.inFlight = true;
-    // lastFetchAttemptMs marks real HTTPS activity so the recovery
-    // watchdog ignores poll-loop ticks that exited early.
-    this.lastFetchAttemptMs = Date.now();
-    this.transitionLogger.recordHeartbeat({
-      status: this.state.status as TransitionStatus,
-      reason: "fetch-attempted",
-      snapshot: this.buildTransitionSnapshot(),
-    });
-    try {
-      const usage = await this.doFetch(auth);
-      if (!this.validateResponse(usage)) {
-        this.setState(
-          { status: "error", message: "Unexpected API response format" },
-          "fetch-other-error"
-        );
-        return;
-      }
-      const okState: ServiceState<TResponse> = {
-        status: "ok",
-        data: usage,
-        fetchedAt: Date.now(),
-      };
-      this.setState(okState, "fetch-ok");
-      this.coordinator.writeCache(okState);
-      this.countdown.stop();
-      this.errorState.recordSuccess();
-    } catch (error: unknown) {
-      this.errorState.handleFetchError(error);
-    } finally {
-      this.inFlight = false;
-      this.coordinator.releaseClaim();
-    }
-  }
-
-  /** Adopt a cross-window fresh cache without an HTTPS call.
-   * Returns true when adopted (caller short-circuits). Recovery
-   * watchdog forces bypass this via force=true upstream. */
-  private tryAdoptFreshCache(): boolean {
-    const cache = this.coordinator.readCache();
-    if (!cache || !this.coordinator.isFresh(cache)) return false;
-    const cacheAgeMs = Date.now() - cache.timestamp;
-    this.setState(cache.state, "cache-adopted", cacheAgeMs);
-    if (cache.state.status === "rate-limited") {
-      this.countdown.start();
-    } else {
-      this.countdown.stop();
-    }
-    return true;
-  }
-
-  /** Claim the shared cache lock. On contention, adopt the
-   * existing cache or schedule a retry. Returns true when the
-   * claim succeeded (caller may proceed). */
-  private tryClaimOrFallback(): boolean {
-    if (this.coordinator.tryClaim()) return true;
-    const fallbackCache = this.coordinator.readCache();
-    if (fallbackCache) {
-      const cacheAgeMs = Date.now() - fallbackCache.timestamp;
-      this.setState(fallbackCache.state, "cache-adopted", cacheAgeMs);
-    } else {
-      const handle = setTimeout(() => {
-        this.pendingTimers.delete(handle);
-        if (this.disposed) return;
-        this.refresh();
-      }, NO_CACHE_RETRY_MS);
-      this.pendingTimers.add(handle);
-    }
-    return false;
-  }
-
-  private doFetch(auth: {
-    token: string;
-    headers: Record<string, string>;
-  }): Promise<TResponse> {
-    this.abortController = new AbortController();
-    return httpGetJson<TResponse>({
-      url: this.config.endpointUrl,
-      headers: auth.headers,
-      abortController: this.abortController,
-      onNon200: (statusCode, body, responseHeaders) => {
-        const ra = responseHeaders["retry-after"];
-        const raValue = Array.isArray(ra) ? ra[0] : ra;
-        return new HttpError(statusCode, body, parseRetryAfterMs(raValue));
-      },
-    });
+    await this.fetchCycle.run(force);
   }
 }

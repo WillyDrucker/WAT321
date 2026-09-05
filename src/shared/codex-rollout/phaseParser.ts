@@ -19,14 +19,9 @@ import {
  * core from rendering keeps the one-pass walk cohesive and lets
  * the tooltip layer evolve without touching parsing.
  *
- * Codex rollout event shapes captured empirically from real session
- * runs - see `WDDOCS/EPIC_HANDSHAKE/WAT321_EPIC_HANDSHAKE_PLAN.md`
- * section 7.1 for the inventory.
+ * Codex rollout event shapes were captured empirically from real
+ * session runs.
  */
-
-/** Re-export so callers can still import `parseStageInfo` from
- * this module path. */
-export { parseStageInfo } from "./stageInfoParser";
 
 /** Slice a rollout tail to the lines belonging to the most recent
  * turn. A turn begins at an `event_msg > task_started` entry - every

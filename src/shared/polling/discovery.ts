@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { DISCOVERY_BACKOFF } from "./constants";
+import { DISCOVERY_BACKOFF } from "./pollingTimings";
 
 /**
  * Polls for the existence of a provider CLI directory using the exponential

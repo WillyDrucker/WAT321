@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { parseEnvelope, type Envelope, type EnvelopeTarget } from "./envelope";
-import { allInboundDirs, inboundDir, sentDir } from "./inboxPaths";
+import { allInboundDirs, sentDir } from "./inboxPaths";
 
 /**
  * Unified reader for inbound (reply) envelopes across every backend.
@@ -22,7 +22,7 @@ import { allInboundDirs, inboundDir, sentDir } from "./inboxPaths";
  * is noticeable after Codex finishes its stage walk - any shorter
  * narrows the safety margin against a slow sync poll). */
 
-export const LATE_REPLY_THRESHOLD_MS = 1_000;
+const LATE_REPLY_THRESHOLD_MS = 1_000;
 
 export interface DrainedReply {
   target: EnvelopeTarget;
@@ -141,67 +141,4 @@ export function listLateReplies(workspacePath: string | null): DrainedReply[] {
     }
   }
   return out;
-}
-
-/** Drain pending replies (move to sent/, return bodies). Used by the
- * MCP `wat321_bridge()` consumer. Pass `replyId` to drain a single
- * envelope by id-prefix match - omit to drain everything pending.
- *
- * Returns the drained reply list AFTER moving the files. Move failure
- * is non-fatal - the reply text is still surfaced even if the rename
- * to sent/ couldn't happen. */
-export function drainPendingReplies(
-  workspacePath: string | null,
-  replyId: string | null
-): DrainedReply[] {
-  const all = listLateReplies(workspacePath);
-  const matching =
-    replyId === null
-      ? all
-      : all.filter(
-          (r) =>
-            r.filename === `${replyId}.md` ||
-            r.filename.startsWith(`${replyId}.`) ||
-            r.envelope.id === replyId ||
-            r.envelope.chainId === replyId ||
-            r.envelope.replyToId === replyId
-        );
-
-  for (const r of matching) {
-    try {
-      const parent = dirname(r.sentDestPath);
-      if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
-      renameSync(r.fullPath, r.sentDestPath);
-    } catch {
-      // best-effort
-    }
-  }
-  return matching;
-}
-
-/** Peek the inbound dir for a single target without consuming. Used
- * by the `bridge://inbox/<target>` MCP resource so Claude can see
- * what's pending without claiming it. */
-export function peekInbox(
-  target: EnvelopeTarget,
-  workspacePath: string | null
-): { id: string; createdAt: string }[] {
-  const dir = inboundDir(target, workspacePath);
-  if (!existsSync(dir)) return [];
-  try {
-    return readdirSync(dir)
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => {
-        const fullPath = join(dir, f);
-        let createdAt = new Date(0).toISOString();
-        try {
-          createdAt = new Date(statSync(fullPath).mtimeMs).toISOString();
-        } catch {
-          // best-effort
-        }
-        return { id: f.replace(/\.md$/, ""), createdAt };
-      });
-  } catch {
-    return [];
-  }
 }

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { releaseClaim, tryAcquireClaim } from "./claimFile";
-import { writeFileAtomic } from "./fs/atomicWrite";
+import { writeFileAtomic } from "../engine/fs/atomicWrite";
 
 /**
  * Cross-instance coordinator for shared API state.

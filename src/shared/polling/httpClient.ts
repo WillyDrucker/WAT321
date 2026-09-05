@@ -1,9 +1,9 @@
 import https from "node:https";
 
-import { REQUEST_TIMEOUT_MS } from "./constants";
+import { REQUEST_TIMEOUT_MS } from "./pollingTimings";
 import { HttpError } from "./httpError";
 
-export interface HttpGetJsonOptions {
+interface HttpGetJsonOptions {
   url: string;
   headers: Record<string, string>;
   /** Override the default REQUEST_TIMEOUT_MS. */

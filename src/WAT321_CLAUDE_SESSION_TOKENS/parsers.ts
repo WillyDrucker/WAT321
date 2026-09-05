@@ -1,4 +1,4 @@
-import { readHead } from "../shared/fs/fileReaders";
+import { readHead } from "../engine/fs/fileReaders";
 import type {
   CacheEvent,
   CacheEventKind,
@@ -44,7 +44,7 @@ function extractTextContent(content: unknown): string | null {
   return null;
 }
 
-export interface LastUsage {
+interface LastUsage {
   inputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;

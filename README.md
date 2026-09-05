@@ -136,7 +136,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - **Claude Usage / Codex Usage** poll each provider's stats endpoint on a safe interval (~2 minutes) with rate-limit protection.
 - **Session Tokens** read local CLI files only - no API calls, no network. Yellow `LOAD` flashes during deliberate cache rebuilds (`/compact` or reload). Red `MISS` is reserved for unexpected eviction.
 - Everything WAT321 writes is a disposable cache inside `~/.wat321/`. Settings changes take effect immediately with no reload.
-- **Epic Handshake** adds a widget between the Claude and Codex session token bars. With it on, Claude understands plain-language asks like *"ask Codex..."*, *"ask Big Pickle..."*, or *"ask the local LLM..."* - the bridge picks the right backend for you, sends the prompt over, and the reply lands right in your Claude conversation. Click the Epic Handshake widget anytime to open the dropdown menu. Manage sessions, models and effort as needed.
+- **Epic Handshake** adds a widget between the Claude and Codex session token bars. With it on, Claude understands plain-language asks like *"ask Codex..."*, *"ask Big Pickle..."*, or *"ask the local LLM..."* - the bridge picks the right backend for you, sends the prompt over, and the reply lands right in your Claude conversation. Click the Epic Handshake widget anytime to open the dropdown menu. Manage sessions, models and effort as needed. The model and effort lists come straight from your installed Codex, so a new model like GPT-6 Astra shows up in the picker as soon as OpenAI enables it for your account.
 
 ## What It Doesn't Do
 

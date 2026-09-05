@@ -86,7 +86,7 @@ function fail(message) {
 
 function stageWindows(outPath) {
   // PowerShell + System.Windows.Forms.Clipboard.GetImage. Returns null
-  // when the clipboard has no image flavor; we surface that as a
+  // when the clipboard has no image flavor, and we surface that as a
   // user-friendly stderr line rather than a stack trace.
   const script = `
 Add-Type -AssemblyName System.Windows.Forms
@@ -128,7 +128,7 @@ end run
 }
 
 function stageLinux(outPath) {
-  // wl-paste covers Wayland; xclip covers X11. Prefer wl-paste because
+  // wl-paste covers Wayland and xclip covers X11. Prefer wl-paste because
   // most modern distros ship Wayland by default.
   const which = (cmd) => {
     const res = spawnSync("sh", ["-c", `command -v ${cmd}`]);

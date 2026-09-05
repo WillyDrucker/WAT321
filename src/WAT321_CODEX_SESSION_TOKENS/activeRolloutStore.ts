@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { normalizePath } from "../shared/fs/pathUtils";
-import { clientStateDir } from "../shared/wat321Paths";
+import { writeFileAtomic } from "../engine/fs/atomicWrite";
+import { normalizePath } from "../engine/fs/pathIdentity";
+import { clientStateDir } from "../engine/wat321Paths";
 import { parseCwd } from "./parsers";
 
 /**

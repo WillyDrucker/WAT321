@@ -1,15 +1,12 @@
 import * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
-import {
-  CLAUDE_RED_THRESHOLD,
-  CLAUDE_YELLOW_THRESHOLD,
-  renderClaudeBar,
-} from "../ui/heatmap";
+import { CLAUDE_RED_THRESHOLD, CLAUDE_YELLOW_THRESHOLD } from "../ui/claudeHeatmapBar";
+import { renderClaudeBar } from "../ui/heatmap";
 import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
 import { resolveUsageStyle } from "../ui/usageDisplay";
 import { buildUsageTooltipHtml } from "../ui/usageTooltipHtml";
 import { getMaxLabel } from "./formatters";
-import type { UsageResponse } from "./types";
+import type { UsageResponse } from "./claudeUsageTypes";
 
 /** Claude full-mode bar color, keyed to the same used-percent gates
  * as the status-bar heatmap so hover and widget always agree. */

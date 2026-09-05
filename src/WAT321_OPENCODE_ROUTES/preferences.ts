@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { OPENCODE_ROUTES_DIR, PREFERENCES_PATH } from "./constants";
+import { writeFileAtomic } from "../engine/fs/atomicWrite";
+import { OPENCODE_ROUTES_DIR, PREFERENCES_PATH } from "./openCodeRoutesPaths";
 
 /**
  * Runtime preferences for OpenCode Routes. Persists `activeInstanceId`
@@ -17,14 +17,14 @@ import { OPENCODE_ROUTES_DIR, PREFERENCES_PATH } from "./constants";
  * torn JSON parse.
  */
 
-export interface OpenCodeRoutesPreferences {
+interface OpenCodeRoutesPreferences {
   /** Active instance id. Empty means "use the local instance" - a
    * sensible default when the user hasn't picked one yet. Driven by
    * the click-menu's Active Instance picker. */
   activeInstanceId: string;
 }
 
-export const DEFAULT_PREFERENCES: OpenCodeRoutesPreferences = {
+const DEFAULT_PREFERENCES: OpenCodeRoutesPreferences = {
   activeInstanceId: "",
 };
 
@@ -54,7 +54,7 @@ export function readPreferences(): OpenCodeRoutesPreferences {
 }
 
 /** Atomically write the entire preferences object. */
-export function writePreferences(prefs: OpenCodeRoutesPreferences): boolean {
+function writePreferences(prefs: OpenCodeRoutesPreferences): boolean {
   ensureDir();
   return writeFileAtomic(PREFERENCES_PATH, `${JSON.stringify(prefs, null, 2)}\n`);
 }

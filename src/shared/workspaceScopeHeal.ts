@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
-import { writeFileAtomic } from "./fs/atomicWrite";
+import { writeFileAtomic } from "../engine/fs/atomicWrite";
 
 /**
  * Heal stale workspace-scoped values for `wat321.*` settings whose

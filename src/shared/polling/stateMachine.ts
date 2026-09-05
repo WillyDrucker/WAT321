@@ -1,5 +1,5 @@
 import type { ServiceState } from "../../engine/serviceTypes";
-import { CACHE_FRESHNESS_ERROR_MS, CACHE_FRESHNESS_OK_MS } from "./constants";
+import { CACHE_FRESHNESS_ERROR_MS, CACHE_FRESHNESS_OK_MS } from "./pollingTimings";
 
 /**
  * States that are worth writing to a shared cache. Transient/init states

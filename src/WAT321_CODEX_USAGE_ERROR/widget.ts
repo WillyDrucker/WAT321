@@ -1,4 +1,4 @@
-import type { CodexUsageResponse } from "../shared/codex-usage/types";
+import type { CodexUsageResponse } from "../shared/codex-usage/codexUsageTypes";
 import {
   UsageErrorWidget,
   type UsageErrorWidgetDescriptor,

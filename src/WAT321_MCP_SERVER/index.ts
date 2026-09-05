@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { BRIDGE_CONFIG_PATH } from "../shared/bridge/bridgeConfig";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { bridgeStateDir } from "../shared/wat321Paths";
+import { writeFileAtomic } from "../engine/fs/atomicWrite";
+import { bridgeStateDir } from "../engine/wat321Paths";
 
 /**
  * WAT321 Bridge - extension-side ownership of the unified MCP server.
@@ -23,11 +23,7 @@ import { bridgeStateDir } from "../shared/wat321Paths";
  * Disabling EH sweeps the unified MCP entry - enabling installs it.
  */
 
-export { installUnifiedBridge, registerUnifiedBridgeCommands } from "./installer";
-export { registerAutoCreateOpenCodeS1 } from "./autoCreateSession";
-
-export const BRIDGE_DIR = bridgeStateDir();
-export const BRIDGE_CONFIG_PATH = join(BRIDGE_DIR, "config.json");
+const BRIDGE_DIR = bridgeStateDir();
 
 interface BridgeConfig {
   enabled: {
@@ -86,7 +82,7 @@ function snapshotConfig(): BridgeConfig {
  * and from the settings-change watcher. Failure is logged but never
  * thrown - the unified channel.mjs treats a missing config as
  * "all-disabled" so a write failure degrades gracefully. */
-export function writeBridgeConfig(): void {
+function writeBridgeConfig(): void {
   try {
     if (!existsSync(BRIDGE_DIR)) {
       mkdirSync(BRIDGE_DIR, { recursive: true });
@@ -102,7 +98,7 @@ export function writeBridgeConfig(): void {
  * is enabled. Idempotent: `claude mcp add` is a no-op when the entry
  * already exists with the same arguments. The activate-time call
  * ensures a user who upgrades the .vsix gets fresh script extracts
- * (channel.mjs, codex.mjs, opencode.mjs) without manually toggling
+ * (channel.mjs and its codex/ and opencode/ handlers) without manually toggling
  * EH off and back on. EH-disabled state skips - the unified server
  * has nothing useful to expose without a dispatcher. */
 async function autoInstallIfEnabled(

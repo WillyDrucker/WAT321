@@ -9,12 +9,8 @@ import {
   parsePlanArguments,
   splitLines,
 } from "./rolloutEntry";
-import type {
-  BridgeStage,
-  PlanState,
-  StageInfo,
-  ToolCall,
-} from "./types";
+import type { PlanState, StageInfo, ToolCall } from "./turnStageTypes";
+import type { BridgeStage } from "../../engine/bridgeTypes";
 
 /**
  * Single-pass state machine over a Codex rollout tail that composes

@@ -20,7 +20,7 @@ import { existsSync, watch } from "node:fs";
  * rename event so the next `sync()` call rebuilds it against the
  * new file.
  */
-export interface PathWatcherOptions {
+interface PathWatcherOptions {
   debounceMs?: number;
   recursive?: boolean;
   resetOnRename?: boolean;

@@ -1,4 +1,5 @@
 import type { EnvelopeTarget, EnvelopeWaitMode } from "../inbox/envelope";
+import type { BridgeStage } from "../bridgeTypes";
 
 /**
  * Unified heartbeat shape every backend dispatcher writes during a
@@ -18,13 +19,6 @@ import type { EnvelopeTarget, EnvelopeWaitMode } from "../inbox/envelope";
  *     model.
  */
 
-export type HeartbeatStage =
-  | "dispatched"
-  | "received"
-  | "working"
-  | "writing"
-  | "complete";
-
 export interface Heartbeat {
   /** Outbound envelope id this heartbeat belongs to. Filename is
    * `turn-heartbeat.<dispatchId>.json`. */
@@ -38,7 +32,7 @@ export interface Heartbeat {
   workspaceHash: string;
   /** Coarse stage label. Codex walks all 5 - non-Codex backends pin to
    * `working` for the duration. */
-  stage: HeartbeatStage;
+  stage: BridgeStage;
   /** Codex: name of the tool the current stage is executing. Null
    * otherwise (between stages, or non-Codex). */
   activeTool: string | null;
@@ -55,7 +49,7 @@ export interface Heartbeat {
   turnStartedAt?: number;
   /** Per-stage first-entered timestamps. Codex populates each as the
    * dispatcher walks stages - missing keys = stage not yet reached. */
-  stageEnteredAt?: Partial<Record<HeartbeatStage, number>>;
+  stageEnteredAt?: Partial<Record<BridgeStage, number>>;
   /** Wait mode this dispatch is running under. Surfaced on the
    * heartbeat so widget gates and MCP-side adaptive logic see the
    * same value the dispatcher resolved. Absent = fall back to the
