@@ -1,10 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readBridgeProjectName } from "../../shared/bridge/bridgeConfig";
 import * as vscode from "vscode";
-import { SETTING } from "../engine/settingsKeys";
-import { bridgeStateDir } from "../shared/wat321Paths";
-import { formatPct, formatTokens, makeTokenBar } from "../shared/ui/tokenFormatters";
-import { wrapAndTruncateTitle } from "../shared/ui/sessionTokens/sessionTokenTooltip";
+import { SETTING } from "../../engine/settingsKeys";
+import { formatPct, formatTokens, makeTokenBar } from "../../shared/ui/tokenFormatters";
+import { wrapAndTruncateTitle } from "../../shared/ui/sessionTokens/sessionTitleWrap";
 import type { BridgeSessionTokens } from "./sessionTokensPoller";
 import type { Heartbeat } from "./statusBarItem";
 
@@ -18,26 +16,6 @@ import type { Heartbeat } from "./statusBarItem";
 
 const FOLDER_ICON = "\u{1F4C1}";
 const CLAMP_ICON = "\u{1F5DC}\u{FE0F}";
-const BRIDGE_CONFIG_PATH = join(bridgeStateDir(), "config.json");
-
-/** Bridge config's `projectName` for the wrapped session title and the
- * 📁-line label. "Workspace" fallback when the bridge config is
- * absent (Epic Handshake never activated) or unreadable. */
-function readBridgeProjectName(): string {
-  try {
-    if (!existsSync(BRIDGE_CONFIG_PATH)) return "Workspace";
-    const parsed = JSON.parse(readFileSync(BRIDGE_CONFIG_PATH, "utf8")) as {
-      projectName?: unknown;
-    };
-    if (typeof parsed.projectName === "string" && parsed.projectName.trim().length > 0) {
-      return parsed.projectName.trim();
-    }
-    return "Workspace";
-  } catch {
-    return "Workspace";
-  }
-}
-
 /** Provider header label that matches the Claude / Codex tooltip
  * vocabulary. Big Pickle and GPT 5 Nano both render "OpenCode session
  * token context" so users see one consistent header per service

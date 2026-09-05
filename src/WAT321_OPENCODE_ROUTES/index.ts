@@ -1,17 +1,17 @@
 import * as vscode from "vscode";
-import { OutboundWatcher } from "../engine/dispatcher";
+import { OutboundWatcher } from "../engine/dispatcher/outboundWatcher";
 import { SETTING } from "../engine/settingsKeys";
 import {
   readConfigFromSettings,
   writeConfigFile,
-} from "./config";
-import { OPENCODE_ROUTES_DIR } from "./constants";
-import { createOpenCodeManager } from "./harness";
-import { createOpenCodeDispatcher } from "./openCodeDispatcher";
-import { createOpenCodeRoutesLogger } from "./outputChannel";
-import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./secrets";
-import { createOpenCodeRoutesStatusBarItem } from "./statusBarItem";
-import { pickActiveInstance } from "./statusBarMenu";
+} from "./openCodeRoutesConfig";
+import { OPENCODE_ROUTES_DIR } from "./openCodeRoutesPaths";
+import { createOpenCodeManager } from "./serve/openCodeServeManager";
+import { createOpenCodeDispatcher } from "./dispatch/openCodeDispatcher";
+import { createOpenCodeRoutesLogger } from "./openCodeRoutesLogger";
+import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./serve/secrets";
+import { createOpenCodeRoutesStatusBarItem } from "./statusBar/statusBarItem";
+import { pickActiveInstance } from "./statusBar/statusBarMenu";
 
 /**
  * OpenCode Routes tier entry. Lifecycle:
@@ -32,7 +32,7 @@ import { pickActiveInstance } from "./statusBarMenu";
  *                 calls `resetCleanup` to fully tear down.
  */
 
-export interface OpenCodeRoutesHandle {
+interface OpenCodeRoutesHandle {
   resetCleanup(): Promise<void>;
   dispose(): void;
 }

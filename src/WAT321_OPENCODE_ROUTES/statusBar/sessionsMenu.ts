@@ -1,17 +1,16 @@
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { SESSIONS_DIR } from "./constants";
-import { makeBackItem, makeSeparator } from "./menuCommon";
+import { SESSIONS_DIR } from "../openCodeRoutesPaths";
+import { makeBackItem, makeSeparator } from "../../shared/ui/menuRows";
 
 /**
  * "Manage Sessions" submenu for the OpenCode Routes widget. Lists
  * harness rollout directories under
  * `clients/<wsId>/model-bridge/sessions/`, summarizing turns +
  * compacts + last-turn timestamp per thread, with row-level erase
- * or bulk "Erase all". The unified MCP server writes through other
- * paths - this surface exists to clean up rollouts that still land
- * on the harness path.
+ * or bulk "Erase all". Nothing in the unified MCP runtime writes
+ * there, so the rows only erase leftovers from earlier installs.
  */
 
 interface ThreadSummary {
@@ -157,5 +156,3 @@ async function manageThreadsMenu(): Promise<void> {
 export async function showOpenCodeRoutesSessions(): Promise<void> {
   await manageThreadsMenu();
 }
-
-export { manageThreadsMenu };

@@ -1,6 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { bridgeStateDir } from "../shared/wat321Paths";
+import {
+  readAliases,
+  SESSION_ALIASES_PATH,
+  type AliasMap,
+  type SessionTarget,
+} from "../../shared/bridge/sessionAliases";
+import { fetchWithTimeout } from "../serve/fetchWithTimeout";
+import { EMPTY_LOCAL_PROPS, probeLocalProps, type LocalProps } from "../serve/localModelProbe";
 
 /**
  * Background poller that reads OpenCode session token data for the
@@ -18,19 +23,20 @@ import { bridgeStateDir } from "../shared/wat321Paths";
  *
  * Cache shape: keyed by sessionId. Cleared when the alias map's
  * active entry rotates, so a freshly-created session never inherits
- * the prior session's snapshot.
+ * the prior session's snapshot. The llama-server probe lives in
+ * `localModelProbe.ts`.
  *
  * Lives in the OpenCode Routes tier because both the data source
- * (OpenCode harness) and the consumer (OpenCode Routes widget) belong
- * here. Engine never imports from this file - cross-tier consumers
- * subscribe via engine events rather than importing directly.
+ * (the managed `opencode serve`) and the consumer (OpenCode Routes
+ * widget) belong here. Engine never imports from this file -
+ * cross-tier consumers subscribe via engine events rather than
+ * importing directly.
  */
 
-const BRIDGE_ALIAS_PATH = join(bridgeStateDir(), "session-aliases.json");
 const POLL_INTERVAL_MS = 3_000;
 const FETCH_TIMEOUT_MS = 2_000;
 /** OpenCode's `COMPACTION_BUFFER` constant from
- * `packages/opencode/src/session/overflow.ts`. The default reserved
+ * upstream `packages/opencode/src/session/overflow.ts`. The default reserved
  * window the auto-compact logic subtracts when the model has no
  * separate input limit. We replicate it here so the displayed
  * "Auto-Compact at ~X" matches OpenCode's actual trigger. */
@@ -40,8 +46,11 @@ const COMPACTION_BUFFER = 20_000;
  * assistant turn with output > 0 is always within the last few
  * positions, so a small page keeps the read cheap. */
 const MESSAGE_PAGE_LIMIT = 10;
+/** How long one llama-server `/props` answer is reused. */
+const LOCAL_PROPS_TTL_MS = 30_000;
+const TARGETS: readonly SessionTarget[] = ["opencode", "local"];
 
-export type BridgeTarget = "opencode" | "local";
+export type BridgeTarget = SessionTarget;
 
 export interface BridgeSessionTokens {
   sessionId: string;
@@ -69,12 +78,6 @@ export interface BridgeSessionTokens {
   lastFetchedAtMs: number;
 }
 
-interface AliasMap {
-  opencode?: Record<string, { sessionId?: string; instanceId?: string | null } | null>;
-  local?: Record<string, { sessionId?: string; instanceId?: string | null } | null>;
-  activeAliases?: { opencode?: string | null; local?: string | null };
-}
-
 interface OpenCodeMessage {
   info?: {
     role?: string;
@@ -88,13 +91,12 @@ interface OpenCodeMessage {
   };
 }
 
-function readAliasMap(): AliasMap | null {
-  if (!existsSync(BRIDGE_ALIAS_PATH)) return null;
-  try {
-    return JSON.parse(readFileSync(BRIDGE_ALIAS_PATH, "utf8")) as AliasMap;
-  } catch {
-    return null;
-  }
+/** The session id behind a target's active alias, or null when the
+ * target has no active session. */
+function activeSessionId(aliases: AliasMap, target: SessionTarget): string | null {
+  const activeAlias = aliases.activeAliases[target];
+  if (activeAlias === null) return null;
+  return aliases[target][activeAlias]?.sessionId ?? null;
 }
 
 /** Mirror OpenCode TUI's display formula. Picks the latest assistant
@@ -121,76 +123,6 @@ function computeContextUsed(messages: OpenCodeMessage[]): number {
   return 0;
 }
 
-async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { signal: controller.signal });
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-interface LocalProps {
-  /** Runtime context window from llama-server. */
-  nCtx: number | null;
-  /** `model_alias` from llama-server, cleaned for display: `.gguf`
-   * suffix and quantization tag stripped (`Qwen3-8B-Q5_K_M.gguf` ->
-   * `Qwen3-8B`). Null when llama-server reports no alias. */
-  modelDisplayName: string | null;
-}
-
-/** Strip the `.gguf` suffix and trailing quantization tag (`-Q5_K_M`,
- * `-Q4_0`, `-IQ3_XXS`, etc.) from a llama-server `model_alias` so the
- * tooltip reads as a clean model name instead of a filename. */
-function cleanLocalModelName(raw: string): string {
-  let name = raw.replace(/\.gguf$/i, "");
-  // Quantization tags follow a -Q[0-9] / -IQ[0-9] / -F[0-9] pattern at
-  // the very end of the filename. Strip a single trailing tag if
-  // present - leave the model identifier intact otherwise.
-  name = name.replace(/-(Q|IQ|F)\d+(_[A-Z0-9]+)*$/i, "");
-  return name;
-}
-
-/** Probe llama-server's `/props` for the runtime context window AND
- * the loaded model alias. Local LLM's catalog `contextWindow` is just
- * a fallback - the loaded model decides the actual limit. Result is
- * cached for 30s on the caller side - this just performs the raw
- * fetch. */
-async function probeLocalProps(endpoint: string): Promise<LocalProps> {
-  const empty: LocalProps = { nCtx: null, modelDisplayName: null };
-  if (!endpoint) return empty;
-  const res = await fetchWithTimeout(
-    `${endpoint.replace(/\/+$/, "")}/props`,
-    FETCH_TIMEOUT_MS
-  );
-  if (!res?.ok) return empty;
-  try {
-    const j = (await res.json()) as {
-      default_generation_settings?: { n_ctx?: number; n_ctx_train?: number };
-      n_ctx?: number;
-      model_alias?: string;
-    };
-    const n =
-      j?.default_generation_settings?.n_ctx ??
-      j?.default_generation_settings?.n_ctx_train ??
-      j?.n_ctx ??
-      null;
-    const alias =
-      typeof j?.model_alias === "string" && j.model_alias.length > 0
-        ? cleanLocalModelName(j.model_alias)
-        : null;
-    return {
-      nCtx: typeof n === "number" && n > 0 ? n : null,
-      modelDisplayName: alias,
-    };
-  } catch {
-    return empty;
-  }
-}
-
 interface PollerInputs {
   /** Live OpenCode serve URL. Empty when the manager has not
    * spawned the subprocess yet. The poller no-ops while empty and
@@ -198,13 +130,11 @@ interface PollerInputs {
   serveUrl: () => string;
   /** Local LLM endpoint for the `/props` probe. */
   localEndpoint: () => string;
-  /** Catalog context window per target. The OpenCode Routes widget reads from
-   * the merged config - this getter abstracts that lookup so the
-   * poller does not need to import `config.ts`. */
-  catalogContextWindow: (target: BridgeTarget) => number | null;
+  /** Catalog context window per target. The OpenCode Routes widget
+   * reads from the merged config - this getter abstracts that lookup
+   * so the poller does not need to import the config module. */
+  catalogContextWindow: (target: SessionTarget) => number | null;
 }
-
-const LOCAL_NCTX_TTL_MS = 30_000;
 
 export class BridgeSessionTokensPoller {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -229,17 +159,13 @@ export class BridgeSessionTokensPoller {
     this.cache.clear();
   }
 
-  snapshot(target: BridgeTarget): BridgeSessionTokens | null {
-    const aliases = readAliasMap();
-    const activeAlias = aliases?.activeAliases?.[target];
-    if (!activeAlias) return null;
-    const entry = aliases?.[target]?.[activeAlias];
-    const sessionId = entry?.sessionId;
-    if (!sessionId) return null;
+  snapshot(target: SessionTarget): BridgeSessionTokens | null {
+    const sessionId = activeSessionId(readAliases(SESSION_ALIASES_PATH), target);
+    if (sessionId === null) return null;
     return this.cache.get(this.cacheKey(target, sessionId)) ?? null;
   }
 
-  private cacheKey(target: BridgeTarget, sessionId: string): string {
+  private cacheKey(target: SessionTarget, sessionId: string): string {
     return `${target}:${sessionId}`;
   }
 
@@ -247,36 +173,26 @@ export class BridgeSessionTokensPoller {
     if (this.disposed) return;
     const serveUrl = this.inputs.serveUrl();
     if (!serveUrl) return;
-    const aliases = readAliasMap();
-    if (!aliases) return;
+    const aliases = readAliases(SESSION_ALIASES_PATH);
 
-    const targets: BridgeTarget[] = ["opencode", "local"];
-    for (const target of targets) {
-      const activeAlias = aliases.activeAliases?.[target];
-      if (!activeAlias) continue;
-      const entry = aliases[target]?.[activeAlias];
-      const sessionId = entry?.sessionId;
-      if (!sessionId) continue;
+    const liveKeys = new Set<string>();
+    for (const target of TARGETS) {
+      const sessionId = activeSessionId(aliases, target);
+      if (sessionId === null) continue;
+      liveKeys.add(this.cacheKey(target, sessionId));
       await this.refreshSession(target, sessionId, serveUrl);
     }
 
     // Drop cache entries whose sessions are no longer active under
     // any alias. Without this, the cache grows unbounded as the user
     // creates new sessions.
-    const liveKeys = new Set<string>();
-    for (const target of targets) {
-      const alias = aliases.activeAliases?.[target];
-      if (!alias) continue;
-      const sid = aliases[target]?.[alias]?.sessionId;
-      if (sid) liveKeys.add(this.cacheKey(target, sid));
-    }
     for (const key of this.cache.keys()) {
       if (!liveKeys.has(key)) this.cache.delete(key);
     }
   }
 
   private async refreshSession(
-    target: BridgeTarget,
+    target: SessionTarget,
     sessionId: string,
     serveUrl: string
   ): Promise<void> {
@@ -292,10 +208,10 @@ export class BridgeSessionTokensPoller {
     }
     // Cache even when contextUsed is 0. Brand-new sessions (no prior
     // assistant turn) and mid-stream dispatches (assistant output still
-    // 0) are legitimate zero-states - bailing here stranded the widget
-    // in the liveTokens-only fallback for the entire first dispatch.
-    // Caching with the resolved contextWindow lets the widget render
-    // projected tokens + percent from the first heartbeat.
+    // 0) are legitimate zero-states - bailing here would strand the
+    // widget in the liveTokens-only fallback for the entire first
+    // dispatch. Caching with the resolved contextWindow lets the widget
+    // render projected tokens + percent from the first heartbeat.
     const contextUsed = computeContextUsed(messages);
 
     const { contextWindow, modelDisplayName } = await this.resolveTargetProps(target);
@@ -320,7 +236,7 @@ export class BridgeSessionTokensPoller {
    * catalog window and leave `modelDisplayName` null - the widget
    * resolves the display string from the instance catalog. */
   private async resolveTargetProps(
-    target: BridgeTarget
+    target: SessionTarget
   ): Promise<{ contextWindow: number | null; modelDisplayName: string | null }> {
     const catalog = this.inputs.catalogContextWindow(target);
     if (target !== "local") {
@@ -328,20 +244,14 @@ export class BridgeSessionTokensPoller {
     }
     const now = Date.now();
     if (
-      this.localPropsCache &&
-      now - this.localPropsCache.at < LOCAL_NCTX_TTL_MS
+      this.localPropsCache === null ||
+      now - this.localPropsCache.at >= LOCAL_PROPS_TTL_MS
     ) {
-      const props = this.localPropsCache.props;
-      return {
-        contextWindow: props.nCtx ?? catalog,
-        modelDisplayName: props.modelDisplayName,
-      };
+      const endpoint = this.inputs.localEndpoint();
+      const props = endpoint ? await probeLocalProps(endpoint) : EMPTY_LOCAL_PROPS;
+      this.localPropsCache = { at: now, props };
     }
-    const endpoint = this.inputs.localEndpoint();
-    const props = endpoint
-      ? await probeLocalProps(endpoint)
-      : { nCtx: null, modelDisplayName: null };
-    this.localPropsCache = { at: now, props };
+    const props = this.localPropsCache.props;
     return {
       contextWindow: props.nCtx ?? catalog,
       modelDisplayName: props.modelDisplayName,

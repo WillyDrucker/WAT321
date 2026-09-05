@@ -1,12 +1,12 @@
 import * as vscode from "vscode";
-import { getWidgetPriority, WIDGET_SLOT } from "../engine/widgetCatalog";
-import { TpsThrottle } from "../shared/ui/tpsThrottle";
+import { getWidgetPriority, WIDGET_SLOT } from "../../engine/widgetCatalog";
+import { TpsThrottle } from "../../shared/ui/tpsThrottle";
 import { readConfigSnapshot } from "./openCodeStatusBarSources";
 import {
   refreshStatusBarItem,
   type RefreshContext,
 } from "./openCodeStatusBarRefresh";
-import type { OpenCodeRoutesLogger } from "./outputChannel";
+import type { OpenCodeRoutesLogger } from "../openCodeRoutesLogger";
 import {
   BridgeSessionTokensPoller,
   type BridgeTarget,

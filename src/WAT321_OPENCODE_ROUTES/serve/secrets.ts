@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { ZEN_API_KEY_SECRET } from "../shared/providers/opencode/constants";
+import { ZEN_API_KEY_SECRET } from "../../shared/providers/opencode/zenApiKeySecret";
 
 /**
  * SecretStorage wrapper for OpenCode-Zen API keys.
@@ -17,7 +17,7 @@ import { ZEN_API_KEY_SECRET } from "../shared/providers/opencode/constants";
  * keeps its own credentials under `~/.codex/`.
  *
  * All Zen instances share one secret ref. The constant lives in
- * `shared/providers/opencode/constants.ts` so the pure catalog can
+ * `shared/providers/opencode/zenApiKeySecret.ts` so the pure catalog can
  * reference it without an upward import into this VS Code-coupled file.
  */
 

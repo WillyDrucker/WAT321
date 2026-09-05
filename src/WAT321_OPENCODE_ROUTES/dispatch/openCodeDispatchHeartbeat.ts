@@ -1,19 +1,19 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { LAST_USED_PATH, OPENCODE_ROUTES_DIR } from "./constants";
+import { writeFileAtomic } from "../../engine/fs/atomicWrite";
+import { LAST_USED_PATH, OPENCODE_ROUTES_DIR } from "../openCodeRoutesPaths";
 
 /**
  * OpenCode widget heartbeat + last-used sidecar writers for the FF
  * dispatcher. Cross-tier contract: shares the
  * `<OPENCODE_ROUTES_DIR>/heartbeat.json` + `<LAST_USED_PATH>` shape
- * with the MCP-runtime writer in `bin/opencode/heartbeat.mjs`.
+ * with the MCP-runtime writer in `WAT321_MCP_SERVER/bin/opencode/heartbeat.mjs`.
  * Atomic tmp+rename so the widget reader never sees a torn write.
  */
 
 const OPENCODE_HEARTBEAT_PATH = join(OPENCODE_ROUTES_DIR, "heartbeat.json");
 
-export interface OpenCodeWidgetHeartbeatPayload {
+interface OpenCodeWidgetHeartbeatPayload {
   startedAt: string;
   requestId: string;
   alias: string;
@@ -54,7 +54,7 @@ export function clearOpenCodeWidgetHeartbeat(): void {
   }
 }
 
-export interface OpenCodeLastUsedMeta {
+interface OpenCodeLastUsedMeta {
   instanceId: string | null;
   alias: string;
   dataRetention: "local" | "retained" | null;

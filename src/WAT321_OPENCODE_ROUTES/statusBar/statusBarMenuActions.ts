@@ -1,16 +1,12 @@
 import { existsSync, unlinkSync } from "node:fs";
 import * as vscode from "vscode";
-import { readConfigFromSettings } from "./config";
-import { USAGE_PATH } from "./constants";
-import {
-  makeBackItem,
-  makeCancelItem,
-  makePauseResumeItem,
-  makeSeparator,
-} from "./menuCommon";
-import type { OpenCodeRoutesLogger } from "./outputChannel";
-import { isPaused, setPaused, writeCancelFlag } from "./runtimeFlags";
-import { promptAndStoreZenApiKey } from "./secrets";
+import { readConfigFromSettings } from "../openCodeRoutesConfig";
+import { USAGE_PATH } from "../openCodeRoutesPaths";
+import { makeBackItem, makeCancelItem, makePauseResumeItem, makeSeparator } from "../../shared/ui/menuRows";
+import { OPENCODE_ROUTES_MENU_TEXT } from "./openCodeRoutesMenuText";
+import type { OpenCodeRoutesLogger } from "../openCodeRoutesLogger";
+import { isPaused, setPaused, writeCancelFlag } from "../runtimeFlags";
+import { promptAndStoreZenApiKey } from "../serve/secrets";
 
 /**
  * Action handlers spawned from `showOpenCodeRoutesMenu`:
@@ -25,7 +21,7 @@ import { promptAndStoreZenApiKey } from "./secrets";
  *
  * Lives in its own file so the main menu file (`statusBarMenu.ts`)
  * stays focused on row construction + the orchestrator. Symmetric
- * with `WAT321_EPIC_HANDSHAKE/statusBarMenuActions.ts` so a reader
+ * with `WAT321_EPIC_HANDSHAKE/statusBar/statusBarMenuActions.ts` so a reader
  * who learns one tier's action layout carries it to the other.
  */
 
@@ -45,8 +41,8 @@ export async function pickActiveInstance(
     : config.instances;
 
   const paused = isPaused();
-  const pauseItem = makePauseResumeItem(paused);
-  const cancelItem = makeCancelItem();
+  const pauseItem = makePauseResumeItem(paused, OPENCODE_ROUTES_MENU_TEXT);
+  const cancelItem = makeCancelItem(OPENCODE_ROUTES_MENU_TEXT);
   const items: vscode.QuickPickItem[] = [
     makeBackItem(),
     makeSeparator(),
@@ -83,7 +79,7 @@ export async function pickActiveInstance(
   const found = config.instances.find((i) => i.alias === stripped);
   if (!found) return;
 
-  const { updatePreference } = await import("./preferences");
+  const { updatePreference } = await import("../preferences");
   updatePreference("activeInstanceId", found.id);
 
   if (found.kind === "remote" && found.apiKeyMissing) {

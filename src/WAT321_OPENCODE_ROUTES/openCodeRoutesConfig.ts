@@ -2,11 +2,12 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { CONFIG_PATH, OPENCODE_ROUTES_DIR } from "./constants";
+import { writeFileAtomic } from "../engine/fs/atomicWrite";
+import { OPENCODE_ROUTES_CONFIG_PATH } from "../shared/bridge/openCodeRoutesConfigSnapshot";
+import { OPENCODE_ROUTES_DIR } from "./openCodeRoutesPaths";
 import { CATALOG, LOCAL_INSTANCE_ID } from "../shared/providers/opencode/catalog";
 import { readPreferences } from "./preferences";
-import { resolveApiKeys } from "./secrets";
+import { resolveApiKeys } from "./serve/secrets";
 
 /**
  * Read VS Code settings + runtime preferences + SecretStorage and
@@ -53,7 +54,7 @@ export interface OpenCodeRouteInstance {
   contextWindow?: number;
 }
 
-export interface OpenCodeRoutesConfig {
+interface OpenCodeRoutesConfig {
   /** Master switch from settings. When false the MCP entry is
    * uninstalled and channel.mjs rejects every tool call. */
   enabled: boolean;
@@ -79,7 +80,7 @@ export interface OpenCodeRoutesConfig {
  * `opencode serve` process when the bridge is enabled and the
  * manager has a live process. Empty otherwise. The caller
  * (`WAT321_OPENCODE_ROUTES/index.ts`) owns the manager and passes
- * the URL in, keeping `config.ts` free of subprocess lifecycle
+ * the URL in, keeping `openCodeRoutesConfig.ts` free of subprocess lifecycle
  * concerns. */
 export async function readConfigFromSettings(
   context: vscode.ExtensionContext,
@@ -182,13 +183,13 @@ export function writeConfigFile(config: OpenCodeRoutesConfig): boolean {
       return false;
     }
   }
-  if (!existsSync(dirname(CONFIG_PATH))) {
+  if (!existsSync(dirname(OPENCODE_ROUTES_CONFIG_PATH))) {
     try {
-      mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+      mkdirSync(dirname(OPENCODE_ROUTES_CONFIG_PATH), { recursive: true });
     } catch {
       return false;
     }
   }
-  return writeFileAtomic(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
+  return writeFileAtomic(OPENCODE_ROUTES_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
 }
 

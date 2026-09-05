@@ -1,30 +1,23 @@
 import type * as vscode from "vscode";
-import type {
-  BackendDispatcher,
-  DispatchRequest,
-  DispatchResult,
-} from "../engine/dispatcher";
-import {
-  deleteHeartbeat,
-  writeHeartbeat,
-  type HeartbeatStage,
-} from "../engine/heartbeat";
-import { workspaceHash } from "../shared/workspaceHash";
+import type { BackendDispatcher, DispatchRequest, DispatchResult } from "../../engine/dispatcher/dispatcherTypes";
+import { deleteHeartbeat, writeHeartbeat } from "../../engine/heartbeat/heartbeatWriter";
+import { workspaceHash } from "../../engine/workspaceHash";
 import {
   clearOpenCodeWidgetHeartbeat,
   writeOpenCodeLastUsed,
   writeOpenCodeWidgetHeartbeat,
 } from "./openCodeDispatchHeartbeat";
+import { readAliases, SESSION_ALIASES_PATH } from "../../shared/bridge/sessionAliases";
 import {
   findInstance,
   readActiveAlias,
-  readAliasMap,
   readRoutesConfig,
 } from "./openCodeDispatchConfig";
 import {
   runSessionAttached,
   runZenOneShot,
 } from "./openCodeDispatchPaths";
+import type { BridgeStage } from "../../engine/bridgeTypes";
 
 /**
  * Extension-side dispatcher for OpenCode (and OpenCode-aliased models
@@ -62,7 +55,7 @@ type HttpHandle = {
   heartbeatTimer: ReturnType<typeof setInterval>;
 };
 
-export class OpenCodeDispatcher implements BackendDispatcher {
+class OpenCodeDispatcher implements BackendDispatcher {
   readonly target: "opencode" | "local";
   private accepting = true;
   private inFlight = new Set<HttpHandle>();
@@ -85,7 +78,7 @@ export class OpenCodeDispatcher implements BackendDispatcher {
     // heartbeat + post-dispatch last-used sidecar all see consistent
     // metadata. Session-attached: alias map's instanceId wins. One-
     // shot: kind-matched active instance.
-    const aliasMap = readAliasMap();
+    const aliasMap = readAliases(SESSION_ALIASES_PATH);
     const aliasEntry =
       sessionAlias !== null
         ? aliasMap[this.target]?.[sessionAlias]
@@ -112,7 +105,7 @@ export class OpenCodeDispatcher implements BackendDispatcher {
     const startedAtIso = new Date(startedAt).toISOString();
     const workspacePath = request.workspacePath ?? env.workspacePath ?? "";
     const wsHash = workspacePath ? workspaceHash(workspacePath) : "default";
-    let currentStage: HeartbeatStage = "dispatched";
+    let currentStage: BridgeStage = "dispatched";
     const beat = (): void => {
       try {
         writeHeartbeat({
@@ -143,7 +136,7 @@ export class OpenCodeDispatcher implements BackendDispatcher {
         timeoutMs: WIDGET_HEARTBEAT_TIMEOUT_MS,
       });
     };
-    const setStage = (s: HeartbeatStage): void => {
+    const setStage = (s: BridgeStage): void => {
       currentStage = s;
       beat();
     };

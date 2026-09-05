@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { openCodeRoutesStateDir } from "../shared/wat321Paths";
+import { openCodeRoutesStateDir } from "../engine/wat321Paths";
 
 /**
  * Filesystem layout for the OpenCode Routes tier. State files are
@@ -15,16 +15,10 @@ import { openCodeRoutesStateDir } from "../shared/wat321Paths";
 
 export const OPENCODE_ROUTES_DIR = openCodeRoutesStateDir();
 
-/** Atomic config file the extension writes on every settings change.
- * `channel.mjs` reads this per call - the MCP server is a separate
- * process spawned by Claude Code and cannot reach the extension host
- * directly, so the file is the bridge between settings and runtime. */
-export const CONFIG_PATH = join(OPENCODE_ROUTES_DIR, "config.json");
-
 /** Heartbeat lives at `<OPENCODE_ROUTES_DIR>/heartbeat.json`. The dir
  * itself is per-client (`clients/<wsId>/model-bridge/`) so the file
  * needs no per-workspace filename suffix. Writer is the dispatch path
- * in `bin/opencode/heartbeat.mjs` - reader is the widget. */
+ * in `WAT321_MCP_SERVER/bin/opencode/heartbeat.mjs` - reader is the widget. */
 
 /** Sidecar the unified bridge writes after every successful dispatch
  * with the instance that just ran. The widget consults this file
@@ -39,11 +33,11 @@ export const LAST_USED_PATH = join(OPENCODE_ROUTES_DIR, "last-used.json");
  * carries the master `enabled` flag plus the local endpoint URL. */
 export const PREFERENCES_PATH = join(OPENCODE_ROUTES_DIR, "preferences.json");
 
-/** Per-instance cumulative token-usage counters. channel.mjs appends
- * after each successful chat completion with the prompt + completion
- * tokens reported by the server. Widget tooltip surfaces per-instance
- * totals - click menu resets via "Reset session totals". Cleared on
- * Reset WAT321 along with everything else. */
+/** Per-instance cumulative token-usage counters. The widget tooltip
+ * reads them and the click menu resets them via "Reset session
+ * totals". The unified bridge runtime does not write this file, so
+ * the counters stay empty until a writer lands. Cleared on Reset
+ * WAT321 along with everything else. */
 export const USAGE_PATH = join(OPENCODE_ROUTES_DIR, "usage.json");
 
 /** Per-thread rollout directory used by the legacy harness Manage

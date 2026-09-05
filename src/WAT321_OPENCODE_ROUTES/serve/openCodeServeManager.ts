@@ -1,17 +1,17 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { createServer } from "node:net";
 import { join } from "node:path";
-import { writeFileAtomic } from "../shared/fs/atomicWrite";
-import { resolveOpenCodeCli } from "../shared/providers/opencode/cliResolver";
-import { buildOpenCodeJson } from "../shared/providers/opencode/configBuilder";
-import { verifyOutputLimits } from "../shared/providers/opencode/configVerifier";
-import { openCodeRoutesStateDir } from "../shared/wat321Paths";
+import { writeFileAtomic } from "../../engine/fs/atomicWrite";
+import { openCodeRoutesStateDir } from "../../engine/wat321Paths";
+import { resolveOpenCodeCli } from "../../shared/providers/opencode/cliResolver";
+import { buildOpenCodeJson } from "../../shared/providers/opencode/configBuilder";
+import { verifyOutputLimits } from "../../shared/providers/opencode/configVerifier";
+import { pickEphemeralPort, waitForReady } from "./openCodeServeProbe";
 
 /**
  * Lifecycle for the WAT321-managed `opencode serve` subprocess.
  *
- * Each VS Code instance spawns its own harness on an OS-allocated
+ * Each VS Code instance spawns its own server on an OS-allocated
  * ephemeral port, written to its per-client `model-bridge/config.json`
  * for the MCP child to read. Workdir lives at
  * `~/.wat321/clients/<wsId>/model-bridge/opencode-workdir/` and holds
@@ -24,13 +24,16 @@ import { openCodeRoutesStateDir } from "../shared/wat321Paths";
  *   - cwd is the workdir so opencode discovers the JSON next to it
  *
  * `getServerUrl()` returns "" until the spawned server passes the
- * readiness probe - consumers gate visibility on that.
+ * readiness probe in `openCodeServeProbe.ts` - consumers gate
+ * visibility on that.
  */
 
-export const OPENCODE_WORKDIR = join(openCodeRoutesStateDir(), "opencode-workdir");
-export const OPENCODE_CONFIG_PATH = join(OPENCODE_WORKDIR, "opencode.json");
+const OPENCODE_WORKDIR = join(openCodeRoutesStateDir(), "opencode-workdir");
+const OPENCODE_CONFIG_PATH = join(OPENCODE_WORKDIR, "opencode.json");
+/** How long a fresh spawn may take to answer the readiness probe. */
+const READY_TIMEOUT_MS = 10_000;
 
-export interface OpenCodeManagerStatus {
+interface OpenCodeManagerStatus {
   desired: boolean;
   running: boolean;
   cliResolvable: boolean;
@@ -39,19 +42,19 @@ export interface OpenCodeManagerStatus {
   lastError: string;
 }
 
-export interface OpenCodeManagerInputs {
+interface OpenCodeManagerInputs {
   enabled: boolean;
   localEndpoint: string;
   zenApiKey: string;
 }
 
-export interface HarnessLogger {
+interface OpenCodeServeLogger {
   info(message: string): void;
   warn(message: string): void;
   error(message: string): void;
 }
 
-export interface OpenCodeManager {
+interface OpenCodeManager {
   /** Reconcile the running subprocess against the supplied inputs.
    * Spawns when enabled and not yet running - restarts when the
    * provider-affecting inputs (endpoint or zen key) changed - kills
@@ -74,55 +77,6 @@ export interface OpenCodeManager {
   dispose(): Promise<void>;
 }
 
-/** Ask the OS for an ephemeral port. Returns 0 on failure (caller
- * surfaces the error). */
-async function pickEphemeralPort(): Promise<number> {
-  return new Promise((resolve) => {
-    const server = createServer();
-    server.once("error", () => resolve(0));
-    server.once("listening", () => {
-      const addr = server.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
-      server.close(() => resolve(port));
-    });
-    try {
-      server.listen(0, "127.0.0.1");
-    } catch {
-      resolve(0);
-    }
-  });
-}
-
-/** Probe `http://127.0.0.1:<port>/app` until it answers or times out.
- * OpenCode's serve mode exposes `/app` for the embedded UI - even
- * without HTML it returns a non-network-error response once bound.
- *
- * Each probe runs under its own AbortController so a stalled fetch
- * (TCP accept + no response) cannot pin the await past the outer
- * deadline. Without per-probe abort, a hung connection during spawn
- * would freeze `reconcile()` and block the pendingInputs drain. */
-async function waitForReady(port: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  const PROBE_TIMEOUT_MS = 1500;
-  while (Date.now() < deadline) {
-    const controller = new AbortController();
-    const probeTimer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/app`, {
-        method: "GET",
-        signal: controller.signal,
-      });
-      if (res.status < 500) return true;
-    } catch {
-      // not yet listening or probe aborted - keep polling
-    } finally {
-      clearTimeout(probeTimer);
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return false;
-}
-
 interface InputsSnapshot {
   localEndpoint: string;
   zenApiKey: string;
@@ -132,7 +86,7 @@ function inputsChanged(prev: InputsSnapshot, next: InputsSnapshot): boolean {
   return prev.localEndpoint !== next.localEndpoint || prev.zenApiKey !== next.zenApiKey;
 }
 
-export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
+export function createOpenCodeManager(logger: OpenCodeServeLogger): OpenCodeManager {
   let child: ChildProcess | null = null;
   let port = 0;
   let url = "";
@@ -160,14 +114,10 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     }
   };
 
-  const ensureWorkdir = (): void => {
+  const writeConfig = (localEndpoint: string): void => {
     if (!existsSync(OPENCODE_WORKDIR)) {
       mkdirSync(OPENCODE_WORKDIR, { recursive: true });
     }
-  };
-
-  const writeConfig = (localEndpoint: string): void => {
-    ensureWorkdir();
     writeFileAtomic(OPENCODE_CONFIG_PATH, buildOpenCodeJson(localEndpoint), ".opencode.json.tmp");
   };
 
@@ -180,8 +130,8 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     // Synchronous SIGKILL up front so an extension-host teardown
     // (VS Code window close) gets the kill in flight before its event
     // loop dies and orphans the child. opencode serve has no on-disk
-    // state worth flushing - graceful SIGTERM with a 2s timeout was
-    // racing dispose() returns. SIGKILL on Windows maps to
+    // state worth flushing, and a graceful SIGTERM with a timeout
+    // races the dispose() return. SIGKILL on Windows maps to
     // TerminateProcess - on POSIX it is the unblockable signal.
     try {
       handle.kill("SIGKILL");
@@ -196,17 +146,13 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     if (resolved === null) {
       lastError = "opencode CLI not found on PATH";
       logger.info(
-        "managed OpenCode requested but `opencode` CLI is not on PATH; skipping spawn"
+        "managed OpenCode requested but `opencode` CLI is not on PATH, skipping spawn"
       );
       return "";
     }
 
     writeConfig(inputs.localEndpoint);
 
-    // OS-allocated ephemeral port. Static defaults race when two VS
-    // Code instances activate simultaneously - both see the port free,
-    // both try to bind, second crashes. Ephemeral allocation lets the
-    // kernel hand out unique ports per process, removing the race.
     const chosenPort = await pickEphemeralPort();
     if (chosenPort === 0) {
       lastError = "could not allocate a port for opencode serve";
@@ -252,9 +198,9 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
     child = proc;
     port = chosenPort;
 
-    const ready = await waitForReady(chosenPort, 10_000);
+    const ready = await waitForReady(chosenPort, READY_TIMEOUT_MS);
     if (!ready) {
-      lastError = `opencode serve did not become ready on 127.0.0.1:${chosenPort} within 10s`;
+      lastError = `opencode serve did not become ready on 127.0.0.1:${chosenPort} within ${READY_TIMEOUT_MS / 1000}s`;
       logger.warn(lastError);
       await stop();
       return "";
@@ -288,7 +234,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
         desired = inputs.enabled;
         if (!inputs.enabled) {
           if (child !== null) {
-            logger.info("managed OpenCode disabled; stopping subprocess");
+            logger.info("managed OpenCode disabled, stopping subprocess");
             await stop();
           }
           return "";
@@ -303,7 +249,7 @@ export function createOpenCodeManager(logger: HarnessLogger): OpenCodeManager {
           return url;
         }
         if (child !== null) {
-          logger.info("managed OpenCode inputs changed; restarting subprocess");
+          logger.info("managed OpenCode inputs changed, restarting subprocess");
           await stop();
         }
         return await start(inputs);

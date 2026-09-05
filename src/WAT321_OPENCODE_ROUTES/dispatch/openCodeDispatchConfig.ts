@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { bridgeStateDir } from "../shared/wat321Paths";
-import { CONFIG_PATH as OPENCODE_ROUTES_CONFIG_PATH } from "./constants";
+import { OPENCODE_ROUTES_CONFIG_PATH } from "../../shared/bridge/openCodeRoutesConfigSnapshot";
+import { readAliases, SESSION_ALIASES_PATH } from "../../shared/bridge/sessionAliases";
 
 /**
  * Config + alias readers for the OpenCode / Local LLM dispatcher.
@@ -9,11 +8,11 @@ import { CONFIG_PATH as OPENCODE_ROUTES_CONFIG_PATH } from "./constants";
  *
  *   - `<openCodeRoutesStateDir()>/config.json` (this file's
  *     OPENCODE_ROUTES_CONFIG_PATH): the live opencode serve URL +
- *     instance catalog the extension's `config.ts` writes. Same file
- *     the MCP-side `opencode/config.mjs` reads, so extension-side
+ *     instance catalog `openCodeRoutesConfig.ts` writes. Same file
+ *     the MCP-side `routesConfig.mjs` reads, so extension-side
  *     dispatcher and MCP-side sync handler stay in sync.
  *   - `<bridgeStateDir()>/session-aliases.json`: alias map the MCP
- *     runtime's `opencode/aliases.mjs` writes. Reading anywhere else
+ *     runtime's `WAT321_MCP_SERVER/bin/opencode/sessionAliases.mjs` writes. Reading anywhere else
  *     means the dispatcher won't see sessions just created via
  *     `wat321_session`.
  *
@@ -22,7 +21,7 @@ import { CONFIG_PATH as OPENCODE_ROUTES_CONFIG_PATH } from "./constants";
  * caused real bugs when read in place of the routes config.
  */
 
-/** Subset of the OpenCode Routes config the extension's `config.ts`
+/** Subset of the OpenCode Routes config the extension's `openCodeRoutesConfig.ts`
  * writes. Only the fields this dispatcher reads are typed - the rest
  * of the file (API keys, data retention, etc.) is irrelevant here. */
 export interface OpenCodeRoutesConfigSlice {
@@ -40,19 +39,7 @@ export interface OpenCodeRoutesConfigSlice {
   activeInstanceId?: string | null;
 }
 
-export interface AliasMap {
-  opencode?: Record<
-    string,
-    { sessionId: string; instanceId?: string | null }
-  >;
-  local?: Record<
-    string,
-    { sessionId: string; instanceId?: string | null }
-  >;
-  activeAliases?: { opencode?: string | null; local?: string | null };
-}
-
-export type RoutesInstance = NonNullable<
+type RoutesInstance = NonNullable<
   OpenCodeRoutesConfigSlice["instances"]
 >[number];
 
@@ -67,23 +54,9 @@ export function readRoutesConfig(): OpenCodeRoutesConfigSlice | null {
   }
 }
 
-function aliasMapPath(): string {
-  return join(bridgeStateDir(), "session-aliases.json");
-}
-
-export function readAliasMap(): AliasMap {
-  const path = aliasMapPath();
-  try {
-    if (!existsSync(path)) return {};
-    return JSON.parse(readFileSync(path, "utf8")) as AliasMap;
-  } catch {
-    return {};
-  }
-}
-
 /** Resolve a catalog instance. Explicit id wins - falling back to the
  * kind-filtered active instance - final fallback to any kind-matching
- * entry. Mirrors the MCP-side `opencode/config.mjs:findInstance`
+ * entry. Mirrors the MCP-side `routesConfig.mjs:findInstance`
  * fallback chain so dispatchers behave identically across processes. */
 export function findInstance(
   cfg: OpenCodeRoutesConfigSlice | null,
@@ -117,7 +90,7 @@ export function readActiveAlias(
   if (typeof env.sessionAlias === "string" && env.sessionAlias.length > 0) {
     return env.sessionAlias;
   }
-  const map = readAliasMap();
+  const map = readAliases(SESSION_ALIASES_PATH);
   const active = map.activeAliases?.[target];
   if (typeof active === "string" && active.length > 0) return active;
   return null;

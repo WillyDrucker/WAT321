@@ -1,12 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bridgeStateDir } from "../shared/wat321Paths";
+import { OPENCODE_ROUTES_CONFIG_PATH } from "../../shared/bridge/openCodeRoutesConfigSnapshot";
+import { readAliases, SESSION_ALIASES_PATH, type SessionTarget } from "../../shared/bridge/sessionAliases";
 import {
-  CONFIG_PATH,
   LAST_USED_PATH,
   OPENCODE_ROUTES_DIR,
   USAGE_PATH,
-} from "./constants";
+} from "../openCodeRoutesPaths";
 
 /**
  * Data sources for the OpenCode Routes status-bar item: the four
@@ -43,7 +43,7 @@ export interface Heartbeat {
   phaseTrace?: PhaseEntry[];
 }
 
-export interface ConfigSnapshot {
+interface ConfigSnapshot {
   enabled: boolean;
   activeInstanceId: string;
   /** Managed OpenCode subprocess URL. Empty when the bridge is
@@ -66,7 +66,7 @@ export interface ConfigSnapshot {
   }>;
 }
 
-export interface UsageSnapshot {
+interface UsageSnapshot {
   sinceMs: number;
   instances: Record<
     string,
@@ -74,26 +74,10 @@ export interface UsageSnapshot {
   >;
 }
 
-const BRIDGE_ALIAS_PATH = join(bridgeStateDir(), "session-aliases.json");
-
-/** Active S<n> alias for the given bridge target. The map persists
- * `S1` / `S2` / etc. keyed by target ("opencode" / "local") and
- * tracks which one is currently active. The Routes widget surfaces
- * this S# so its tooltip reads parallel to Claude / Codex session
- * tokens. */
-export function readActiveBridgeAlias(
-  target: "opencode" | "local"
-): string | null {
-  if (!existsSync(BRIDGE_ALIAS_PATH)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(BRIDGE_ALIAS_PATH, "utf8")) as {
-      activeAliases?: { opencode?: string | null; local?: string | null };
-    };
-    const active = parsed.activeAliases?.[target];
-    return typeof active === "string" && active.length > 0 ? active : null;
-  } catch {
-    return null;
-  }
+/** Active S<n> alias for the given bridge target, so the Routes
+ * tooltip reads parallel to Claude / Codex session tokens. */
+export function readActiveBridgeAlias(target: SessionTarget): string | null {
+  return readAliases(SESSION_ALIASES_PATH).activeAliases[target];
 }
 
 /** Heartbeat path. Per-client state dir already partitions per
@@ -117,9 +101,9 @@ export function readHeartbeat(): Heartbeat | null {
 }
 
 export function readConfigSnapshot(): ConfigSnapshot | null {
-  if (!existsSync(CONFIG_PATH)) return null;
+  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return null;
   try {
-    const raw = readFileSync(CONFIG_PATH, "utf8");
+    const raw = readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw) as Partial<ConfigSnapshot>;
     // Defensive defaults for legacy flat-config.json files. Without
     // these, reading a stale config from a prior install throws on
@@ -154,7 +138,7 @@ export function readUsageSnapshot(): UsageSnapshot | null {
 /** Last instance id with a successful dispatch this session. Null
  * otherwise. Drives display priority (the widget shows the most
  * recently used route, not necessarily the configured default). */
-export function readLastUsedInstanceId(): string | null {
+function readLastUsedInstanceId(): string | null {
   try {
     if (!existsSync(LAST_USED_PATH)) return null;
     const raw = readFileSync(LAST_USED_PATH, "utf8");

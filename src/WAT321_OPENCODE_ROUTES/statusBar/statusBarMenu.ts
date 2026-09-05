@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import * as vscode from "vscode";
-import { readConfigFromSettings, type OpenCodeRouteInstance } from "./config";
-import { USAGE_PATH } from "./constants";
-import { makeCancelItem, makePauseResumeItem, makeSeparator } from "./menuCommon";
-import type { OpenCodeRoutesLogger } from "./outputChannel";
-import { isPaused, setPaused, writeCancelFlag } from "./runtimeFlags";
+import { readConfigFromSettings, type OpenCodeRouteInstance } from "../openCodeRoutesConfig";
+import { USAGE_PATH } from "../openCodeRoutesPaths";
+import { makeCancelItem, makePauseResumeItem, makeSeparator } from "../../shared/ui/menuRows";
+import { OPENCODE_ROUTES_MENU_TEXT } from "./openCodeRoutesMenuText";
+import type { OpenCodeRoutesLogger } from "../openCodeRoutesLogger";
+import { isPaused, setPaused, writeCancelFlag } from "../runtimeFlags";
 import { showOpenCodeRoutesSessions } from "./sessionsMenu";
 import {
   pickActiveInstance,
@@ -177,8 +178,8 @@ export async function showOpenCodeRoutesMenu(
       description: "Set / update / clear the shared Zen secret",
     },
     makeSeparator(),
-    makePauseResumeItem(paused),
-    makeCancelItem(),
+    makePauseResumeItem(paused, OPENCODE_ROUTES_MENU_TEXT),
+    makeCancelItem(OPENCODE_ROUTES_MENU_TEXT),
   ];
 
   const pick = await vscode.window.showQuickPick(items, {

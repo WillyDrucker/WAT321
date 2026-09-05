@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
-import { makeBackItem, makeSeparator } from "./menuCommon";
+import { makeBackItem, makeSeparator } from "../../shared/ui/menuRows";
 import {
   clearZenApiKey,
   promptAndStoreZenApiKey,
   readSecret,
   ZEN_API_KEY_SECRET,
-} from "./secrets";
+} from "../serve/secrets";
 
 /**
  * Zen API key sub-menu for the OpenCode Routes widget. Set / update /

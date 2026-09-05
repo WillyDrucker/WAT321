@@ -1,11 +1,11 @@
-import type { DispatchResult } from "../engine/dispatcher";
-import type { HeartbeatStage } from "../engine/heartbeat";
-import { WAT321_RESEARCH_AGENT } from "../shared/providers/opencode/configBuilder";
+import type { DispatchResult } from "../../engine/dispatcher/dispatcherTypes";
+import { WAT321_RESEARCH_AGENT } from "../../shared/providers/opencode/configBuilder";
+import { readAliases, SESSION_ALIASES_PATH } from "../../shared/bridge/sessionAliases";
 import {
   findInstance,
-  readAliasMap,
   type OpenCodeRoutesConfigSlice,
 } from "./openCodeDispatchConfig";
+import type { BridgeStage } from "../../engine/bridgeTypes";
 
 /**
  * HTTP dispatch implementations for OpenCode / Local LLM:
@@ -35,12 +35,12 @@ import {
 const ANON_BASE_URL = "https://opencode.ai/zen/v1";
 const DISPATCH_TIMEOUT_MS = 10 * 60_000;
 
-export interface DispatchPathArgs {
+interface DispatchPathArgs {
   target: "opencode" | "local";
   prompt: string;
   cfg: OpenCodeRoutesConfigSlice | null;
   signal: AbortSignal;
-  setStage: (s: HeartbeatStage) => void;
+  setStage: (s: BridgeStage) => void;
 }
 
 /** Anonymous one-shot via opencode.ai/zen. Used when no session
@@ -140,7 +140,7 @@ export async function runSessionAttached(
   args: DispatchPathArgs & { sessionAlias: string }
 ): Promise<DispatchResult> {
   const { target, prompt, cfg, signal, setStage, sessionAlias } = args;
-  const aliasMap = readAliasMap();
+  const aliasMap = readAliases(SESSION_ALIASES_PATH);
   const entry = aliasMap[target]?.[sessionAlias];
   if (!entry) {
     return {
