@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { getProjectKey } from "../shared/fs/pathUtils";
+import { getProjectKey } from "../engine/fs/pathIdentity";
 import { parseCwd } from "./parsers";
 
 /**

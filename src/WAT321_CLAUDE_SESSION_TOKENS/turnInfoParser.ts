@@ -33,7 +33,7 @@ import { parseMostRecentCacheEvent } from "./cacheEventParser";
  *     }
  *   }
  */
-export interface CompactBoundary {
+interface CompactBoundary {
   /** ms since epoch parsed from the entry's `timestamp` field. */
   at: number;
   trigger: string;

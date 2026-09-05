@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readTail } from "../shared/fs/fileReaders";
-import { getProjectKey, normalizePath } from "../shared/fs/pathUtils";
+import { readTail } from "../engine/fs/fileReaders";
+import { getProjectKey, normalizePath } from "../engine/fs/pathIdentity";
 import type { LastEntryKind } from "../shared/turnState";
 import { classifyClaudeTurn } from "./turnClassifier";
-import type { SessionEntry } from "./types";
+import type { SessionEntry } from "./claudeSessionTokenTypes";
 
 /**
  * Live-session discovery for Claude. `walkWorkspaceSessions` does the

@@ -1,4 +1,4 @@
-import type { StageInfo } from "../shared/codex-rollout/types";
+import type { StageInfo } from "../shared/codex-rollout/turnStageTypes";
 import type { CompactFlashSnapshot } from "../shared/polling/compactFlashMachine";
 import type { LastEntryKind } from "../shared/turnState";
 

@@ -10,8 +10,11 @@ import { join } from "node:path";
  *
  * which for a `context_window = 272000` model at
  * `effective_context_window_percent = 95` works out to 258,400. Window
- * sizes vary across the gpt-5.x family (the 5.6 models carry 372000),
- * so both values are always read per slug rather than assumed.
+ * sizes are OpenAI's to change per model and over time (one 5.6 slug
+ * has reported both 372000 and 272000 across releases), so both values
+ * are always read per slug rather than assumed. The cache's newer
+ * `max_context_window` is a different ceiling and is not what Codex's
+ * own hover measures against.
  * This is the "usable input budget" - the raw context window minus
  * reserved headroom for system prompts, tool schemas, and model
  * output. It is NOT the same as the literal compact trigger, which
@@ -31,8 +34,8 @@ import { join } from "node:path";
  * This is the one Codex model fact that CANNOT move onto the live
  * `model/list` catalog in `shared/providers/codex/modelCatalog.ts`:
  * the RPC carries no `context_window` field at all (verified against
- * codex-cli 0.142.5, 0.144.0-alpha.4, and 0.144.1). Reading the shared
- * cache file here is therefore deliberate, not an oversight.
+ * codex-cli 0.142.5, 0.144.x, and 0.153.x). Reading the shared cache
+ * file here is therefore deliberate, not an oversight.
  *
  * It degrades safely. When another codex binary overwrites that file
  * with a catalog lacking the active slug, the lookup misses and we

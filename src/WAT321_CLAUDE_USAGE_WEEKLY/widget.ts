@@ -1,5 +1,5 @@
 import { buildTooltip } from "../shared/claude-usage/tooltipBuilder";
-import type { UsageResponse } from "../shared/claude-usage/types";
+import type { UsageResponse } from "../shared/claude-usage/claudeUsageTypes";
 import { renderClaudeBar } from "../shared/ui/heatmap";
 import { getClaudeTextColor } from "../shared/ui/textColors";
 import { resolveUsageStyle } from "../shared/ui/usageDisplay";

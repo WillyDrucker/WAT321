@@ -1,50 +1,42 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { ResolvedSession, WidgetState } from "./types";
-import { readTail } from "../shared/fs/fileReaders";
-import { getProjectKey } from "../shared/fs/pathUtils";
+import { resolveContextWindow } from "../engine/contracts";
+import { readTail } from "../engine/fs/fileReaders";
+import { logNotifEvent } from "../engine/notifEventLog";
+import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
+import { PathWatcher } from "../shared/polling/pathWatcher";
+import { SESSION_TOKEN_POLL_MS } from "../shared/polling/pollingTimings";
+import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
 import {
   readAutoCompactEffectiveTriggerTokens,
-  readAutoCompactPct,
   SETTINGS_PATH,
 } from "../shared/providers/claude/settings";
-import { resolveContextWindow } from "../engine/contracts";
-import { PathWatcher } from "../shared/polling/pathWatcher";
-import {
-  SESSION_TOKEN_POLL_MS,
-  SESSION_TOKEN_RESCAN_MS,
-} from "../shared/polling/constants";
-import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
-import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
-import { classifyClaudeTurn } from "./turnClassifier";
-import { logNotifEvent } from "../shared/diag/notifEventLog";
-import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
 import { NonActiveCompletionTracker } from "../shared/sessionTokens/nonActiveCompletionTracker";
+import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
+import { ActiveTranscriptResolver } from "./activeTranscriptResolver";
+import type { ResolvedSession, WidgetState } from "./claudeSessionTokenTypes";
 import { CompactStateMachine } from "./compactStateMachine";
 import { parseFirstUserMessage, parseLastUsage } from "./parsers";
-import { parseTurnInfo } from "./turnInfoParser";
 import {
-  findLastKnownTranscript,
-  rankActiveSession,
   tallyWorkspaceSessions,
   walkWorkspaceSessions,
-  type LastKnownTranscript,
   type SessionCandidate,
 } from "./transcriptDiscovery";
+import { TranscriptFactsCache } from "./transcriptFactsCache";
+import { classifyClaudeTurn } from "./turnClassifier";
+import { parseTurnInfo } from "./turnInfoParser";
 
 /** fs.watch in the base class handles instant transcript-change
  * detection. The shared `SESSION_TOKEN_POLL_MS` cadence is a safety
- * net for session discovery and any missed watcher events.
- * `SESSION_TOKEN_RESCAN_MS` gates the more expensive full rescan. */
+ * net for session discovery and any missed watcher events. Which
+ * transcript to follow is decided in `activeTranscriptResolver.ts`,
+ * and the title plus auto-compact facts about it are cached in
+ * `transcriptFactsCache.ts`. */
 
 export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetState> {
-  private cachedLastKnown: LastKnownTranscript | null = null;
-  private lastFallbackScan = 0;
-  private cachedSessionTitle: string | null = null;
-  private cachedSessionTitlePath = "";
-  private cachedAutoCompactPct: number | null = null;
-  private cachedAutoCompactTime = 0;
+  private readonly transcripts: ActiveTranscriptResolver;
+  private readonly facts = new TranscriptFactsCache();
   /** Smoothed tokens-per-second tracker. Time axis is transcript mtime
    * (not Date.now()) so idle stretches between writes contribute zero
    * seconds to the denominator. See `shared/sessionTokens/tpsTracker.ts`
@@ -58,18 +50,11 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
    * activity-recovery exit path. */
   private readonly compactStateMachine = new CompactStateMachine();
 
-  /** Diagnostic snapshot for the health command. Forwards the state
-   * machine's internal view (current state, started-at, estimate, and
-   * rolling history) without exposing the machine instance itself. */
-  getCompactDiagnostics(): ReturnType<CompactStateMachine["getDiagnostics"]> {
-    return this.compactStateMachine.getDiagnostics();
-  }
-
   /** Watches ~/.claude/sessions/ for new/removed CLI process files.
    * Triggers an immediate poll so new sessions are detected instantly
    * instead of waiting for the 51s fallback scan. */
   private readonly sessionsWatcher = new PathWatcher(() => {
-    this.lastFallbackScan = 0;
+    this.transcripts.invalidate();
     this.triggerPoll();
   });
 
@@ -77,7 +62,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
    * changes. Invalidates the cached threshold so the tooltip
    * updates immediately. */
   private readonly settingsWatcher = new PathWatcher(() => {
-    this.cachedAutoCompactPct = null;
+    this.facts.invalidateAutoCompact();
     this.triggerPoll();
   });
 
@@ -107,20 +92,24 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
         : { status: "not-installed" },
       SESSION_TOKEN_POLL_MS
     );
+    this.transcripts = new ActiveTranscriptResolver(workspacePath);
+  }
+
+  /** Diagnostic snapshot for the health command. Forwards the state
+   * machine's internal view (current state, started-at, estimate, and
+   * rolling history) without exposing the machine instance itself. */
+  getCompactDiagnostics(): ReturnType<CompactStateMachine["getDiagnostics"]> {
+    return this.compactStateMachine.getDiagnostics();
   }
 
   rebroadcast(): void {
-    this.cachedAutoCompactPct = null;
+    this.facts.invalidateAutoCompact();
     super.rebroadcast();
   }
 
   reset(): void {
-    this.cachedLastKnown = null;
-    this.lastFallbackScan = 0;
-    this.cachedSessionTitle = null;
-    this.cachedSessionTitlePath = "";
-    this.cachedAutoCompactPct = null;
-    this.cachedAutoCompactTime = 0;
+    this.transcripts.reset();
+    this.facts.reset();
     this.compactStateMachine.reset();
     this.sessionsWatcher.close();
     this.settingsWatcher.close();
@@ -145,56 +134,6 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
 
   private emitOk(session: ResolvedSession): void {
     this.setOkStateIfChanged(session, (s) => ({ status: "ok" as const, session: s }));
-  }
-
-  private resolveTranscript(
-    home: string,
-    candidates: readonly SessionCandidate[],
-    now: number
-  ): {
-    transcriptPath: string;
-    sessionId: string;
-    cwdForLabel: string;
-    source: "live" | "lastKnown";
-    pid?: number;
-  } | null {
-    const live = rankActiveSession(candidates);
-    if (live) {
-      const projectKey = getProjectKey(live.cwd);
-      const transcriptPath = join(
-        home,
-        ".claude",
-        "projects",
-        projectKey,
-        `${live.sessionId}.jsonl`
-      );
-      if (existsSync(transcriptPath)) {
-        return {
-          transcriptPath,
-          sessionId: live.sessionId,
-          cwdForLabel: live.cwd,
-          source: "live",
-          pid: live.pid,
-        };
-      }
-    }
-
-    if (
-      now - this.lastFallbackScan >= SESSION_TOKEN_RESCAN_MS ||
-      !this.cachedLastKnown
-    ) {
-      this.cachedLastKnown = findLastKnownTranscript(this.workspacePath);
-      this.lastFallbackScan = now;
-    }
-    if (!this.cachedLastKnown) return null;
-    const cwdForLabel =
-      this.cachedLastKnown.cwd || this.workspacePath;
-    return {
-      transcriptPath: this.cachedLastKnown.path,
-      sessionId: this.cachedLastKnown.sessionId,
-      cwdForLabel,
-      source: "lastKnown",
-    };
   }
 
   protected poll(): void {
@@ -223,7 +162,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     // result, so the walk + per-session tail read does not happen
     // twice.
     const candidates = walkWorkspaceSessions(sessionsDir, this.workspacePath);
-    const resolved = this.resolveTranscript(home, candidates, now);
+    const resolved = this.transcripts.resolve(home, candidates, now);
     if (!resolved) {
       if (this.hasGoodData) return;
       this.setState({ status: "no-session" });
@@ -242,7 +181,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       const prevPath = this.cachedTranscriptPath;
       this.cachedTranscriptSize = 0;
       this.cachedTranscriptPath = transcriptPath;
-      this.cachedSessionTitle = null;
+      this.facts.forgetTitle();
       // Log session-switches so a missing-notification post-mortem
       // can see exactly when the widget moved between transcripts.
       // The next emission's stat read carries the new path's mtime
@@ -297,23 +236,8 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       return;
     }
 
-    if (
-      this.cachedSessionTitle === null ||
-      this.cachedSessionTitlePath !== transcriptPath
-    ) {
-      this.cachedSessionTitle = parseFirstUserMessage(transcriptPath);
-      this.cachedSessionTitlePath = transcriptPath;
-    }
-
     const contextWindowSize = resolveContextWindow(usage.modelId);
-
-    if (
-      this.cachedAutoCompactPct === null ||
-      now - this.cachedAutoCompactTime >= SESSION_TOKEN_RESCAN_MS
-    ) {
-      this.cachedAutoCompactPct = readAutoCompactPct(contextWindowSize);
-      this.cachedAutoCompactTime = now;
-    }
+    const facts = this.facts.read(transcriptPath, contextWindowSize, now);
 
     const contextUsed =
       usage.inputTokens +
@@ -339,11 +263,11 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.emitOk({
       sessionId,
       label: basename(cwdForLabel),
-      sessionTitle: this.cachedSessionTitle,
+      sessionTitle: facts.sessionTitle,
       modelId: usage.modelId,
       contextUsed,
       contextWindowSize,
-      autoCompactPct: this.cachedAutoCompactPct,
+      autoCompactPct: facts.autoCompactPct,
       autoCompactEffectiveTokens:
         readAutoCompactEffectiveTriggerTokens(contextWindowSize),
       source,
@@ -356,5 +280,4 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       workspaceSessionInventory,
     });
   }
-
 }

@@ -4,7 +4,7 @@ import {
   SessionTokenWidget,
   type SessionTokenWidgetDescriptor,
 } from "../shared/ui/sessionTokens/sessionTokenWidget";
-import type { WidgetState } from "./types";
+import type { WidgetState } from "./claudeSessionTokenTypes";
 
 const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
   id: "wat321.sessionTokens",
