@@ -1,20 +1,12 @@
-import { existsSync } from "node:fs";
 import * as vscode from "vscode";
 import type { EventHub } from "../engine/eventHub";
 import { registerHealthSection } from "../engine/healthCommand";
-import {
-  setBridgeActiveProbe,
-  setRecentCodexCompletionConsumer,
-} from "../engine/toastNotifier";
-import { workspaceHash } from "../shared/workspaceHash";
-import { BridgeStageCoordinator } from "./bridgeStageCoordinator";
-import { CodexDispatcher } from "./codexDispatcher";
+import { InboxCoordinator } from "../engine/inbox/inboxCoordinator";
+import { healLegacyAllowlistEntries } from "../shared/providers/claude/mcpAllowlist";
+import { BridgeStageCoordinator } from "./bridgeStage/bridgeStageCoordinator";
+import { wireBridgeToastProbes } from "./statusBar/bridgeToastProbes";
+import { CodexDispatcher } from "./codexTurn/codexDispatcher";
 import { registerEpicHandshakeCommands } from "./commandRegistration";
-import {
-  inFlightFlagPath,
-  processingFlagPath,
-  returningFlagPath,
-} from "./constants";
 import {
   epicHandshakeProvidersPresent,
   isEpicHandshakeEnabled,
@@ -23,26 +15,20 @@ import {
   watchEnableSetting,
 } from "./epicHandshakeEnableFlow";
 import { appendEpicHandshakeHealth } from "./epicHandshakeHealth";
+import { createOutputChannelLogger } from "./epicHandshakeLogger";
 import {
   clearStaleRuntimeFiles,
   migrateLegacyEnvelopes,
-} from "./legacyMigration";
-import { LateReplyInboxCoordinator } from "./lateReplyInboxCoordinator";
-import { registerSessionPickerCommands } from "./openCodeSessionsPicker";
-import { createOutputChannelLogger } from "./outputChannel";
-import { wipeWorkspaceEpicHandshakeState } from "./resetWipe";
-import { healLegacyAllowlistEntries } from "../shared/providers/claude/mcpAllowlist";
+} from "./repair/legacyMigration";
+import { registerSessionPickerCommands } from "./openCodeSessions/openCodeSessionsPicker";
+import { wipeWorkspaceEpicHandshakeState } from "./repair/resetWipe";
 import {
   clearClipboardStaging,
   sweepStaleClipboardStages,
 } from "./stageClipboardImage";
 import { extractStageClipboardScript } from "./stageClipboardInstaller";
-import { createEpicHandshakeStatusBarItem } from "./statusBarItem";
-import {
-  clearBridgeRuntimeFlags,
-  consumeRecentCodexCompletion,
-  writeCancelFlag,
-} from "./turnFlags";
+import { createEpicHandshakeStatusBarItem } from "./statusBar/statusBarItem";
+import { clearBridgeRuntimeFlags, writeCancelFlag } from "./codexTurn/turnFlags";
 
 /**
  * Epic Handshake tier entry point. Sync MCP architecture:
@@ -60,7 +46,8 @@ import {
  *     the caller used fire-and-forget.
  *
  * Enable / disable flow + setting watcher + provider checks live in
- * `epicHandshakeEnableFlow.ts`. This file owns the tier class + its
+ * `epicHandshakeEnableFlow.ts`, the toast notifier probes in
+ * `bridgeToastProbes.ts`. This file owns the tier class + its
  * activation lifecycle + the runtime orchestration (restart, reset,
  * dispatcher start/stop).
  */
@@ -71,6 +58,9 @@ import {
  * its "cancelled by user" reply - short enough that recovery feels
  * snappy. */
 const RESTART_CANCEL_GRACE_MS = 500;
+/** Delay before the post-restart prewarm, so the force-kill has
+ * settled before a fresh child spawns. */
+const RESTART_PREWARM_DELAY_MS = 500;
 const STATUS_BAR_REFRESH_MS = 1000;
 
 class EpicHandshakeTier {
@@ -81,14 +71,14 @@ class EpicHandshakeTier {
   private statusBar: ReturnType<typeof createEpicHandshakeStatusBarItem> | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   readonly bridgeStage: BridgeStageCoordinator;
-  readonly lateReplyInbox: LateReplyInboxCoordinator;
+  readonly lateReplyInbox: InboxCoordinator;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly events: EventHub
   ) {
     this.bridgeStage = new BridgeStageCoordinator(events);
-    this.lateReplyInbox = new LateReplyInboxCoordinator(events);
+    this.lateReplyInbox = new InboxCoordinator(events);
   }
 
   activate(): void {
@@ -102,7 +92,7 @@ class EpicHandshakeTier {
     migrateLegacyEnvelopes(this.logger);
     clearStaleRuntimeFiles();
     sweepStaleClipboardStages(this.logger);
-    this.wireToastProbes();
+    this.disposables.push(wireBridgeToastProbes());
     this.disposables.push(registerHealthSection(appendEpicHandshakeHealth));
     this.statusBar = createEpicHandshakeStatusBarItem(
       this.context,
@@ -164,39 +154,12 @@ class EpicHandshakeTier {
     seedDefaultWaitMode();
   }
 
-  /** Wire the engine-side toast notifier probes so the notifier can
-   * ask "is this workspace's bridge active?" without importing from
-   * this tier. Preserves the engine-depends-on-nothing rule. */
-  private wireToastProbes(): void {
-    setBridgeActiveProbe(() => {
-      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!ws) return false;
-      const hash = workspaceHash(ws);
-      return (
-        existsSync(inFlightFlagPath(hash)) ||
-        existsSync(processingFlagPath(hash)) ||
-        existsSync(returningFlagPath(hash))
-      );
-    });
-    // Consume-on-read complement: the dispatcher writes a one-shot
-    // suppress sentinel on successful turn complete - the notifier
-    // drains it when Codex's transcript responseComplete fires
-    // (which can land >5s after the returning flag clears).
-    setRecentCodexCompletionConsumer(() => {
-      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!ws) return false;
-      return consumeRecentCodexCompletion(ws);
-    });
-  }
-
   deactivate(): void {
     if (this.refreshTimer !== null) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
     void this.stopBridge();
-    setBridgeActiveProbe(null);
-    setRecentCodexCompletionConsumer(null);
     this.statusBar?.dispose();
     this.statusBar = null;
     this.loggerHandle.dispose();
@@ -228,7 +191,7 @@ class EpicHandshakeTier {
     this.logger.info("bridge restarted via main-menu action");
     const prewarmTimer = setTimeout(() => {
       void this.dispatcher?.prewarm();
-    }, 500);
+    }, RESTART_PREWARM_DELAY_MS);
     prewarmTimer.unref?.();
   }
 
@@ -281,11 +244,11 @@ class EpicHandshakeTier {
     if (this.dispatcher !== null) return;
     this.dispatcher = new CodexDispatcher(ws, this.logger);
     this.dispatcher.start();
-    // No activate-time codex daemon spawn. ensureClient() inside
-    // runTurnOnce spawns the app-server lazily on the first bridge
-    // envelope - first dispatch pays ~20s cold-start, subsequent
-    // dispatches are warm. Restart Codex Bridge pre-warms because
-    // that user action's point is to leave the bridge ready.
+    // No activate-time codex daemon spawn. The app-server spawns
+    // lazily on the first bridge envelope - first dispatch pays the
+    // cold-start, subsequent dispatches are warm. Restart Codex
+    // Bridge pre-warms because that user action's point is to leave
+    // the bridge ready.
   }
 
   private async stopBridge(): Promise<void> {
@@ -295,14 +258,14 @@ class EpicHandshakeTier {
   }
 }
 
-export interface EpicHandshakeHandle extends vscode.Disposable {
+interface EpicHandshakeHandle extends vscode.Disposable {
   resetCleanup: () => Promise<void>;
   /** Concrete coordinator the EH tier owns. Re-exposed so the
    * activator (`extension.ts`) can pass it to bootstrap, where the
    * Claude/Codex session-token widgets need a `BridgeStageReader`
    * to render the bridge-driven prefix animations. */
   bridgeStage: BridgeStageCoordinator;
-  lateReplyInbox: LateReplyInboxCoordinator;
+  lateReplyInbox: InboxCoordinator;
 }
 
 export function activateEpicHandshake(

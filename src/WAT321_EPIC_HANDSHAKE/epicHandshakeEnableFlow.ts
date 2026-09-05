@@ -1,6 +1,6 @@
 import { existsSync, unlinkSync } from "node:fs";
 import * as vscode from "vscode";
-import { workspaceHash } from "../shared/workspaceHash";
+import { workspaceHash } from "../engine/workspaceHash";
 import { SETTING } from "../engine/settingsKeys";
 import { resetCliResolverCache } from "../shared/providers/cliResolver";
 import {
@@ -8,8 +8,8 @@ import {
   isCodexAvailable,
   isOpenCodeAvailable,
 } from "./cliAvailability";
-import { pausedFlagPath } from "./constants";
-import { applyDefaultWaitMode, currentWaitMode } from "./statusBarItem";
+import { pausedFlagPath } from "./epicHandshakePaths";
+import { applyDefaultWaitMode, currentWaitMode } from "./statusBar/statusBarItem";
 
 /**
  * Settings-driven enable / disable flow for the Epic Handshake tier.
@@ -20,7 +20,7 @@ import { applyDefaultWaitMode, currentWaitMode } from "./statusBarItem";
  * settings-watch wiring.
  */
 
-export interface EnableFlowDeps {
+interface EnableFlowDeps {
   /** Logger forwarded to bridge install/uninstall commands. */
   logger: { info: (msg: string) => void; warn: (msg: string) => void };
   /** Start the dispatcher + activate the bridge. Called after the
@@ -62,7 +62,7 @@ export async function unflipForMissingProvider(): Promise<void> {
 
 /** Flip the checkbox off on enable-flow failure so the user is not
  * stuck looking at a setting that lies about actual state. */
-export async function unflipAndWarn(message: string): Promise<void> {
+async function unflipAndWarn(message: string): Promise<void> {
   void vscode.window.showWarningMessage(message);
   try {
     await vscode.workspace
@@ -81,7 +81,7 @@ export async function unflipAndWarn(message: string): Promise<void> {
  * preflight on every backend, bridge channel registration, dispatcher
  * start. Self-unflips with a friendly warning on any failure so the
  * setting never lies about actual state. */
-export async function runEnableFlow(deps: EnableFlowDeps): Promise<void> {
+async function runEnableFlow(deps: EnableFlowDeps): Promise<void> {
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -147,7 +147,7 @@ export async function runEnableFlow(deps: EnableFlowDeps): Promise<void> {
 /** Run the "EH checkbox just flipped off" flow: stop dispatcher,
  * uninstall the unified bridge MCP entry, clear the per-workspace
  * paused sentinel so a later re-enable starts active. */
-export async function runDisableFlow(deps: EnableFlowDeps): Promise<void> {
+async function runDisableFlow(deps: EnableFlowDeps): Promise<void> {
   await deps.stopBridge();
   // EH is the single switch now. uninstallUnifiedBridge sweeps both
   // user and project scope on its own. Idempotent.

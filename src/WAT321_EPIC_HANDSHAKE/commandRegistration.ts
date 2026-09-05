@@ -3,13 +3,10 @@ import { SETTING } from "../engine/settingsKeys";
 import {
   deleteAllCodexSessions,
   deleteCurrentCodexSession,
-} from "./deleteCommand";
+} from "./repair/deleteCommand";
 import { stageClipboardImageCommand } from "./stageClipboardImage";
-import {
-  loadBridgeThreadRecord,
-  resetBridgeThread,
-} from "./threadPersistence";
-import type { EpicHandshakeLogger } from "./types";
+import { loadBridgeThreadRecord, resetBridgeThread } from "./codexTurn/threadRecord";
+import type { EpicHandshakeLogger } from "./epicHandshakeLogger";
 
 /**
  * Command palette registration. Each command is a thin shim over a
@@ -22,7 +19,7 @@ import type { EpicHandshakeLogger } from "./types";
  * directional.
  */
 
-export interface CommandRegistrationDeps {
+interface CommandRegistrationDeps {
   logger: EpicHandshakeLogger;
   refreshStatusBar: () => void;
   /** Cancel any in-flight bridge turn, force-kill the dispatcher's

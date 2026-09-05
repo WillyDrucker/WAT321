@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { EPIC_HANDSHAKE_DIR } from "./constants";
-import type { EpicHandshakeLogger } from "./types";
+import { EPIC_HANDSHAKE_DIR } from "./epicHandshakePaths";
+import type { EpicHandshakeLogger } from "./epicHandshakeLogger";
 
 /**
  * Stage whatever image is on the OS clipboard into a file under
