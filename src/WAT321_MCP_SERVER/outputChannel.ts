@@ -8,7 +8,7 @@ import * as vscode from "vscode";
  * MCP server's install / dispatch behavior.
  */
 
-export interface BridgeLogger {
+interface BridgeLogger {
   info(message: string): void;
   warn(message: string): void;
   error(message: string): void;

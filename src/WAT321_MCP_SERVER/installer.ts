@@ -5,7 +5,7 @@ import {
   preAllowMcpTools,
   unAllowMcpTools,
 } from "../shared/providers/claude/mcpAllowlist";
-import { workspaceId } from "../shared/wat321Paths";
+import { workspaceId } from "../engine/wat321Paths";
 import {
   consoleLogger,
   runClaudeCli,

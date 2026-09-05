@@ -1,13 +1,12 @@
-import {
-  existsSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
-import { ALIAS_PATH, ensureDir } from "./common.mjs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { writeFileAtomic } from "../atomicWrite.mjs";
+import { bridgeStateDir } from "../wat321Paths.mjs";
 
 /**
  * Per-target alias bookkeeping for OpenCode and Local LLM sessions.
+ * MJS counterpart to `src/shared/bridge/sessionAliases.ts`, which the
+ * extension's menus read and write.
  *
  * On-disk shape: `{opencode: {S1: {sessionId, instanceId}, ...},
  * local: {...}, activeAliases: {opencode: 'S1' | null, local: ...}}`.
@@ -22,6 +21,8 @@ import { ALIAS_PATH, ensureDir } from "./common.mjs";
  * them to `{sessionId, instanceId: null}` so an upgrade does not
  * orphan a user's existing sessions.
  */
+
+export const SESSION_ALIASES_PATH = join(bridgeStateDir(), "session-aliases.json");
 
 function normalizeAliasBucket(raw) {
   if (!raw || typeof raw !== "object") return {};
@@ -58,10 +59,9 @@ function normalizeActiveAlias(raw, bucket) {
 }
 
 export function readAliases() {
-  ensureDir();
-  if (!existsSync(ALIAS_PATH)) return emptyAliasMap();
+  if (!existsSync(SESSION_ALIASES_PATH)) return emptyAliasMap();
   try {
-    const parsed = JSON.parse(readFileSync(ALIAS_PATH, "utf8"));
+    const parsed = JSON.parse(readFileSync(SESSION_ALIASES_PATH, "utf8"));
     const opencode = normalizeAliasBucket(parsed?.opencode);
     const local = normalizeAliasBucket(parsed?.local);
     return {
@@ -77,20 +77,32 @@ export function readAliases() {
   }
 }
 
-/** Atomic tmp+rename so a crash mid-write cannot leave the alias
- * file half-formed. Single-writer (only this MCP server process). */
+/** Atomic so a crash mid-write cannot leave the alias file half-
+ * formed. */
 export function writeAliases(map) {
-  ensureDir();
-  const tmp = `${ALIAS_PATH}.tmp`;
-  writeFileSync(tmp, JSON.stringify(map, null, 2));
-  renameSync(tmp, ALIAS_PATH);
+  writeFileAtomic(SESSION_ALIASES_PATH, JSON.stringify(map, null, 2));
 }
 
-/** Pick the next free `S<n>` alias for a target. */
-export function nextAlias(target) {
-  const map = readAliases();
+/** The next free `S<n>` alias in a target's bucket. */
+function nextAlias(map, target) {
   const taken = Object.keys(map[target] || {});
   let n = 1;
   while (taken.includes(`S${n}`)) n++;
   return `S${n}`;
+}
+
+/** Bind a freshly created OpenCode session to the next free alias and
+ * make it the active one, so the EH menu's CURRENT row reflects the
+ * new session without a manual switch. Reads the map fresh here, after
+ * the caller's async create, so a concurrent dispatch's write is not
+ * clobbered by a stale snapshot. */
+export function bindNewSession(target, sessionId, instanceId) {
+  const map = readAliases();
+  map[target] = map[target] || {};
+  const alias = nextAlias(map, target);
+  map[target][alias] = { sessionId, instanceId: instanceId ?? null };
+  map.activeAliases = map.activeAliases || { opencode: null, local: null };
+  map.activeAliases[target] = alias;
+  writeAliases(map);
+  return alias;
 }

@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import * as vscode from "vscode";
-import { readAliases, writeAliases } from "../shared/bridge/sessionAliases";
+import {
+  readOpenCodeRoutesConfigSnapshot,
+  type OpenCodeRoutesConfigSnapshot,
+  type OpenCodeRoutesInstance,
+} from "../shared/bridge/openCodeRoutesConfigSnapshot";
+import { readAliases, SESSION_ALIASES_PATH, writeAliases } from "../shared/bridge/sessionAliases";
 import { SETTING } from "../engine/settingsKeys";
-import { bridgeStateDir, openCodeRoutesStateDir } from "../shared/wat321Paths";
 
 // Resolve paths via `wat321Paths` rather than `./index` - this module
 // is re-exported from index.ts, so a `from "./index"` import returns
@@ -27,34 +29,9 @@ import { bridgeStateDir, openCodeRoutesStateDir } from "../shared/wat321Paths";
  *     for the first time after install)
  */
 
-const ALIAS_PATH = join(bridgeStateDir(), "session-aliases.json");
-const OPENCODE_ROUTES_CONFIG_PATH = join(openCodeRoutesStateDir(), "config.json");
 
 const RETRY_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 8_000;
-
-interface OpenCodeRoutesInstance {
-  id: string;
-  alias: string;
-  kind: "local" | "remote";
-  model: string;
-  harnessProviderID: "llama.cpp" | "zen";
-}
-
-interface OpenCodeRoutesConfigSnapshot {
-  openCodeServerUrl?: string;
-  activeInstanceId?: string;
-  instances?: OpenCodeRoutesInstance[];
-}
-
-function readOpenCodeRoutesConfigSnapshot(): OpenCodeRoutesConfigSnapshot | null {
-  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return null;
-  try {
-    return JSON.parse(readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8")) as OpenCodeRoutesConfigSnapshot;
-  } catch {
-    return null;
-  }
-}
 
 function pickInstance(cfg: OpenCodeRoutesConfigSnapshot): OpenCodeRoutesInstance | null {
   const instances = Array.isArray(cfg.instances) ? cfg.instances : [];
@@ -108,12 +85,12 @@ async function waitForOpencodeServe(): Promise<OpenCodeRoutesConfigSnapshot | nu
 }
 
 /** Run the auto-create flow. Idempotent. Best-effort. */
-export async function ensureOpenCodeS1(): Promise<void> {
+async function ensureOpenCodeS1(): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
   const mbEnabled = config.get<boolean>(SETTING.enableOpenCode, false);
   if (!mbEnabled) return;
 
-  const aliases = readAliases(ALIAS_PATH);
+  const aliases = readAliases(SESSION_ALIASES_PATH);
   if (Object.keys(aliases.opencode).length > 0) {
     // S1 (or later) already exists - nothing to do.
     return;
@@ -132,7 +109,7 @@ export async function ensureOpenCodeS1(): Promise<void> {
   // Mark as active so the EH menu's CURRENT row reflects this session
   // and bridge dispatches that omit `session` resolve to it.
   aliases.activeAliases.opencode = "S1";
-  writeAliases(ALIAS_PATH, aliases);
+  writeAliases(SESSION_ALIASES_PATH, aliases);
 }
 
 /** Wire activate-time auto-create + the settings-change watcher.
