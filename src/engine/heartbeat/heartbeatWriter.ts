@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { writeFileAtomic } from "../../shared/fs/atomicWrite";
+import { writeFileAtomic } from "../fs/atomicWrite";
 import { EH_ROOT_DIR } from "../inbox/inboxPaths";
 import type { Heartbeat } from "./heartbeatTypes";
 

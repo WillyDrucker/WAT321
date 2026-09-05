@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { SETTING } from "./settingsKeys";
 
 export type DisplayMode = "full" | "compact" | "minimal";
-export type RawDisplayMode = DisplayMode | "auto" | "full+compact";
+type RawDisplayMode = DisplayMode | "auto" | "full+compact";
 
 /** Read raw setting value. May return "auto" (display-mode resolution
  * driven by active provider count) or "full+compact" (usage widgets
@@ -10,7 +10,7 @@ export type RawDisplayMode = DisplayMode | "auto" | "full+compact";
  * collapse into one of the three concrete modes via `resolveDisplayMode`
  * for usage widgets, and via `getSessionTokenDisplayMode` for session
  * tokens. */
-export function getRawDisplayMode(): RawDisplayMode {
+function getRawDisplayMode(): RawDisplayMode {
   const config = vscode.workspace.getConfiguration("wat321");
   const mode = config.get<string>(SETTING.displayMode, "Auto").toLowerCase();
   if (mode === "auto" || mode === "compact" || mode === "minimal") return mode;
@@ -22,7 +22,7 @@ export function getRawDisplayMode(): RawDisplayMode {
 /** Resolve "auto" to a concrete mode given an active provider count.
  * Exported so bootstrap's display-mode tracker can call it without
  * needing the full getDisplayMode + registry dependency. */
-export function resolveDisplayMode(activeProviderCount: number): DisplayMode {
+function resolveDisplayMode(activeProviderCount: number): DisplayMode {
   const raw = getRawDisplayMode();
   // "full+compact" is a split mode: usage widgets stay Full while
   // session-token widgets render Compact. From the usage widget's

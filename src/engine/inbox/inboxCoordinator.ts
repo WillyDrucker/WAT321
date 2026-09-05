@@ -30,7 +30,7 @@ import {
 const TICK_INTERVAL_MS = 5000;
 const WATCH_DEBOUNCE_MS = 50;
 
-export interface InboxSnapshot {
+interface InboxSnapshot {
   workspacePath: string | null;
   /** Pending envelope count across all enabled targets' inbound dirs.
    * Excludes envelopes younger than the late-reply threshold (3s)

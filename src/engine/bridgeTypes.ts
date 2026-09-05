@@ -1,5 +1,6 @@
 /**
- * Type-only definitions for the Epic Handshake bridge state surface.
+ * The Epic Handshake bridge state vocabulary: turn stage, phase, wait
+ * mode, and the snapshot the coordinator publishes.
  * Lives in the engine layer so eventHub's `bridge.*` event payloads can
  * reference these names without importing from the EH tool tier (which
  * would invert the dependency graph).
@@ -16,12 +17,40 @@ export type BridgePhase =
   | "ceremony"
   | "stage";
 
+/** Canonical Epic Handshake turn stage. Monotonic: a turn never
+ * regresses to an earlier stage. Drives the numbered glyph walk, the
+ * heartbeat files, and the adaptive dispatcher's budget windows. */
 export type BridgeStage =
+  /** Envelope written to the Codex inbox, dispatcher has not yet acked. */
   | "dispatched"
+  /** `task_started` seen in rollout OR `turn/started` RPC notification. */
   | "received"
+  /** Any `function_call` OR `reasoning` event observed in rollout. */
   | "working"
+  /** `agent_message phase=final_answer` observed in rollout. */
   | "writing"
+  /** `task_complete` in rollout OR `turn/completed` RPC notification. */
   | "complete";
+
+/** The five stages in walk order. Every stage comparison, walker
+ * step, and heartbeat validation indexes into this one list. */
+export const BRIDGE_STAGE_ORDER: readonly BridgeStage[] = [
+  "dispatched",
+  "received",
+  "working",
+  "writing",
+  "complete",
+];
+
+/** Guard for stage values read back from disk (heartbeat files,
+ * rollout tails). An unknown value from a newer or hand-edited
+ * writer must not reach `indexOf` and poison downstream lookups. */
+export function isBridgeStage(value: unknown): value is BridgeStage {
+  return (
+    typeof value === "string" &&
+    (BRIDGE_STAGE_ORDER as readonly string[]).includes(value)
+  );
+}
 
 /** Minimal heartbeat info the snapshot exposes. The full `TurnHeartbeat`
  * type lives inside the EH tier - status-bar widgets only need
@@ -29,7 +58,7 @@ export type BridgeStage =
  * `target` to suppress their debug ceremony on off-target dispatches,
  * so the structural subset stays in engine and the wider type stays
  * where its fields are produced. */
-export interface BridgeHeartbeatInfo {
+interface BridgeHeartbeatInfo {
   turnStartedAt?: number;
   /** Backend producing this heartbeat. Lets a session-tokens widget
    * filter ceremony / stage-driven animations to its own provider so
@@ -83,7 +112,7 @@ export type CodexEffortOverride = CodexEffortLevel | null;
  * distinguishes sync (fixed budget) from adaptive (extends while the
  * dispatcher heartbeat stays fresh) so the tooltip can render the
  * right wait shape. Null when no wait is in flight. */
-export interface BridgeWaitInfo {
+interface BridgeWaitInfo {
   target: "codex";
   timeoutSec: number;
   startedAt: number;

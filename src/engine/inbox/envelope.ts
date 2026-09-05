@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { writeFileAtomic } from "../../shared/fs/atomicWrite";
+import { writeFileAtomic } from "../fs/atomicWrite";
 
 /**
  * Unified envelope format for the WAT321 bridge mailbox.
@@ -24,10 +24,10 @@ import { writeFileAtomic } from "../../shared/fs/atomicWrite";
  * rolled serializer keeps this module dependency-free.
  */
 
-export type EnvelopeKind = "outbound" | "inbound";
+type EnvelopeKind = "outbound" | "inbound";
 export type EnvelopeTarget = "codex" | "opencode" | "local";
 export type EnvelopeWaitMode = "standard" | "adaptive" | "fire-and-forget";
-export type EnvelopePriority = "low" | "normal" | "high";
+type EnvelopePriority = "low" | "normal" | "high";
 
 /** Codex-only: the conversational agent labels Epic Handshake uses.
  * Kept on the unified envelope for back-compat with existing Codex
@@ -105,15 +105,6 @@ export function newEnvelopeId(): string {
 function esc(v: string): string {
   if (/[:#\n]/.test(v)) return JSON.stringify(v);
   return v;
-}
-
-/** Truncate + flatten newlines for the prompt-preview frontmatter
- * field. Caller passes the full prompt - serializer takes the first
- * 200 chars and adds an ellipsis if truncation happened. */
-function buildPreview(prompt: string | undefined): string | undefined {
-  if (!prompt) return undefined;
-  if (prompt.length <= 200) return prompt.replace(/\n/g, " ");
-  return `${prompt.slice(0, 200).replace(/\n/g, " ")}...`;
 }
 
 export function serializeEnvelope(env: Envelope): string {
@@ -247,53 +238,6 @@ export function readEnvelope(path: string): Envelope | null {
   } catch {
     return null;
   }
-}
-
-/** Convenience: build the in-memory shape for a brand-new outbound
- * envelope without forcing every caller to assemble all the optional
- * fields by hand. Codex callers pass the EH-specific fields via
- * `codexExtras` - non-Codex callers omit those. */
-export function buildOutboundEnvelope(input: {
-  target: EnvelopeTarget;
-  prompt: string;
-  workspacePath?: string;
-  alias?: string;
-  waitMode?: EnvelopeWaitMode;
-  sessionAlias?: string;
-  codexExtras?: {
-    chainId: string;
-    iteration: number;
-    source: EnvelopeAgent;
-    codexTarget: EnvelopeAgent;
-    sourceSessionFp: string;
-    priority?: EnvelopePriority;
-    intent?: string;
-    title?: string;
-    replyTo?: string | null;
-  };
-}): Envelope {
-  const id = newEnvelopeId();
-  return {
-    id,
-    kind: "outbound",
-    target: input.target,
-    createdAt: new Date().toISOString(),
-    body: input.prompt,
-    workspacePath: input.workspacePath,
-    alias: input.alias,
-    waitMode: input.waitMode,
-    sessionAlias: input.sessionAlias,
-    promptPreview: buildPreview(input.prompt),
-    chainId: input.codexExtras?.chainId,
-    iteration: input.codexExtras?.iteration,
-    source: input.codexExtras?.source,
-    codexTarget: input.codexExtras?.codexTarget,
-    sourceSessionFp: input.codexExtras?.sourceSessionFp,
-    priority: input.codexExtras?.priority,
-    intent: input.codexExtras?.intent,
-    title: input.codexExtras?.title,
-    replyTo: input.codexExtras?.replyTo,
-  };
 }
 
 /** Build the in-memory shape for an inbound reply. `replyToId` is the

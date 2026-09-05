@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { logNotifEvent } from "../shared/diag/notifEventLog";
-import { tryClaimNotification } from "../shared/notification/multiWindowDedup";
+import { logNotifEvent } from "./notifEventLog";
+import { tryClaimNotification } from "./multiWindowDedup";
 import type { ProviderKey } from "./contracts";
 import type { AppEvents, EventHub } from "./eventHub";
 import {
@@ -99,7 +99,7 @@ function cooldownKey(provider: string, sessionId: string): string {
   return `${provider}::${sessionId}`;
 }
 
-export type NotificationOutcome =
+type NotificationOutcome =
   | "system"
   | "in-app"
   | "system-failed"
@@ -110,7 +110,7 @@ export type NotificationOutcome =
   | "suppressed-epic-handshake"
   | "suppressed-multi-window";
 
-export interface NotificationDiagnostic {
+interface NotificationDiagnostic {
   at: number;
   provider: ProviderKey;
   mode: string;

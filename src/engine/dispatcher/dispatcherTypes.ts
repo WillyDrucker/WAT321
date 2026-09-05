@@ -39,14 +39,6 @@ export interface DispatchResult {
   alias?: string;
 }
 
-/** A tier's run-turn implementation. Signature is intentionally small
- * so future backends only need one entry point. Long-running work
- * inside should respect `request.signal` so graceful shutdown can
- * abort cleanly. */
-export type DispatchHandler = (
-  request: DispatchRequest
-) => Promise<DispatchResult>;
-
 /** Minimum surface a tier dispatcher exposes to the engine. Adding a
  * new backend means implementing one of these and registering it. */
 export interface BackendDispatcher {
