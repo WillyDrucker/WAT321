@@ -1,7 +1,8 @@
 import type { DisplayMode } from "../../engine/displayMode";
 import { isProviderActive } from "../../engine/displayMode";
 import { getRemainingPct } from "../codex-usage/formatters";
-import { bandFromRemaining, isHeatmapEnabled } from "./heatmap";
+import { bandFromRemaining } from "./codexHeatmapBar";
+import { isHeatmapEnabled } from "./heatmap";
 
 /**
  * Text color resolvers for WAT321 widgets. Separated from heatmap.ts

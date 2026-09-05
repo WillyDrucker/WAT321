@@ -1,6 +1,6 @@
 import type { ServiceState } from "../../engine/serviceTypes";
 import type { Coordinator } from "../cacheCoordinator";
-import { FETCH_COOLDOWN_MS, STARTUP_JITTER_MS } from "./constants";
+import { FETCH_COOLDOWN_MS, STARTUP_JITTER_MS } from "./pollingTimings";
 import { resolveStateFreshness } from "./stateMachine";
 
 /**

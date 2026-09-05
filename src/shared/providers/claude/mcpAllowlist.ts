@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { writeFileAtomic } from "../../fs/atomicWrite";
+import { writeFileAtomic } from "../../../engine/fs/atomicWrite";
 
 /**
  * Pre-allow / un-allow MCP tool names in Claude Code's user-level

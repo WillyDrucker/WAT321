@@ -7,7 +7,7 @@ import {
   NETWORK_ERROR_RETRY_MS,
   POLL_INTERVAL_MS,
   RATE_LIMIT_BACKOFF_MS,
-} from "./constants";
+} from "./pollingTimings";
 import {
   extractServerMessage,
   isNetworkError,
@@ -19,7 +19,7 @@ import type {
   TransitionLogger,
   TransitionSnapshot,
 } from "./usageServiceTransitionLogger";
-import type { TransitionReason } from "./transitionLog";
+import type { TransitionReason } from "../../engine/usageTransitionLog";
 
 /**
  * Error-side state machine for `UsageServiceBase`. Owns the three
@@ -36,7 +36,7 @@ import type { TransitionReason } from "./transitionLog";
  * once instead of touching three private fields itself.
  */
 
-export interface ErrorStateDeps {
+interface ErrorStateDeps {
   /** Read the current service state (needed for cold-start
    * absorption and error-during-loading branches). */
   getCurrentState(): ServiceState<unknown>;

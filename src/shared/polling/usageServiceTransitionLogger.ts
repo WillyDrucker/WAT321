@@ -4,7 +4,7 @@ import {
   logTransition,
   type TransitionReason,
   type TransitionStatus,
-} from "./transitionLog";
+} from "../../engine/usageTransitionLog";
 
 /**
  * Dedicated writer for the per-workspace transition log. Wraps the

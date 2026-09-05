@@ -1,4 +1,4 @@
-import type { StageInfo } from "../../codex-rollout/types";
+import type { StageInfo } from "../../codex-rollout/turnStageTypes";
 import type { LastEntryKind } from "../../turnState";
 
 /**

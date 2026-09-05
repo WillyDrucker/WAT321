@@ -13,9 +13,9 @@
  * instances share a single API key in SecretStorage.
  */
 
-import { ZEN_API_KEY_SECRET } from "./constants";
+import { ZEN_API_KEY_SECRET } from "./zenApiKeySecret";
 
-export interface CatalogEntry {
+interface CatalogEntry {
   id: string;
   alias: string;
   /** For local instances, this is overridden at config-build time
@@ -57,7 +57,7 @@ export interface CatalogEntry {
   contextWindow?: number;
 }
 
-export const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
+const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
 
 export const LOCAL_INSTANCE_ID = "local-llm";
 

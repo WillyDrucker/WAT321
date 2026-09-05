@@ -1,8 +1,8 @@
-import { RECOVERY_CEILING_MS, RECOVERY_TICK_MS } from "./constants";
+import { RECOVERY_CEILING_MS, RECOVERY_TICK_MS } from "./pollingTimings";
 import type {
   TransitionReason,
   TransitionStatus,
-} from "./transitionLog";
+} from "../../engine/usageTransitionLog";
 import type {
   TransitionLogger,
   TransitionSnapshot,

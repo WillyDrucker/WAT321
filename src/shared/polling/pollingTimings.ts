@@ -56,7 +56,7 @@ export const RECOVERY_TICK_MS = 60_000;
  * second so the kickstart never fires inside the first natural
  * retry window. Subsequent failed rounds escalate through
  * `KICKSTART_ESCALATION_MS` below. */
-export const KICKSTART_MIN_PARK_MS = POLL_INTERVAL_MS + 1_000;
+const KICKSTART_MIN_PARK_MS = POLL_INTERVAL_MS + 1_000;
 
 /** Freshness window for the session-token activity signal that
  * gates kickstart. If the active transcript was last written more

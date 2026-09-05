@@ -28,7 +28,7 @@ export const COMPACT_BAR_CELL_COUNT = 5;
 /** Normalized, provider-agnostic view of compact state derived from a
  * transcript / rollout tail. Provider parsers produce this - the shared
  * machine consumes it. */
-export interface CompactObservation {
+interface CompactObservation {
   /** Timestamp (ms) of the newest compact boundary in the tail, or
    * null when none is present. */
   newestBoundaryAt: number | null;

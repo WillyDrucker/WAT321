@@ -22,7 +22,7 @@ interface TrackedState {
   reportedAsDone: boolean;
 }
 
-export interface NonActiveCompletionTrackerConfig<C> {
+interface NonActiveCompletionTrackerConfig<C> {
   /** Done-transition only counts when the candidate's mtime is within
    * this window, so a session that was already done before this process
    * started does not fire on first observation. Exceeds the rescan

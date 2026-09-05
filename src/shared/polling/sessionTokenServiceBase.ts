@@ -1,5 +1,5 @@
 import type { StateListener } from "../../engine/serviceTypes";
-import { normalizePath } from "../fs/pathUtils";
+import { normalizePath } from "../../engine/fs/pathIdentity";
 import { PathWatcher } from "./pathWatcher";
 
 /**

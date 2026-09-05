@@ -1,14 +1,9 @@
-import type {
-  BridgeStage,
-  PlanState,
-  StageDisplay,
-  StageInfo,
-  ToolCall,
-} from "./types";
+import type { PlanState, StageDisplay, StageInfo, ToolCall } from "./turnStageTypes";
+import type { BridgeStage } from "../../engine/bridgeTypes";
 
 /**
  * Display-string builders for the canonical 5-stage bridge model.
- * Pure functions over `StageInfo` produced by `phaseParser`. No fs,
+ * Pure functions over `StageInfo` produced by `stageInfoParser`. No fs,
  * no state. Sits in its own file so the parser can stay a single
  * one-pass walk and the tooltip layer can swap renderers without
  * dragging the parser along.

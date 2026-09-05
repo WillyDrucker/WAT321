@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { WAT321_DIR } from "../../engine/settingsKeys";
+import { WAT321_ROOT } from "../../engine/wat321Paths";
 import { UsageServiceBase } from "../polling/usageServiceBase";
-import { clientStateDir } from "../wat321Paths";
-import type { CodexUsageResponse } from "./types";
+import { clientStateDir } from "../../engine/wat321Paths";
+import type { CodexUsageResponse } from "./codexUsageTypes";
 
 const AUTH_DIR = join(homedir(), ".codex");
 const AUTH_FILE = join(AUTH_DIR, "auth.json");
@@ -21,8 +21,8 @@ export class CodexUsageSharedService extends UsageServiceBase<CodexUsageResponse
   constructor() {
     super({
       authDir: AUTH_DIR,
-      cacheFile: join(WAT321_DIR, "codex-usage.cache.json"),
-      claimFile: join(WAT321_DIR, "codex-usage.claim"),
+      cacheFile: join(WAT321_ROOT, "codex-usage.cache.json"),
+      claimFile: join(WAT321_ROOT, "codex-usage.claim"),
       endpointUrl: "https://chatgpt.com/backend-api/wham/usage",
       providerKey: "codex",
       transitionLogPath: join(clientStateDir(), "codex-usage-transitions.jsonl"),

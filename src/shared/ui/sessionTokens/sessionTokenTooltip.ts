@@ -1,13 +1,13 @@
 import * as vscode from "vscode";
-import { getCodexModelInfo, isKnownCodexModel } from "../../providers/codex/models";
 import type { CodexEffortOverride } from "../../../engine/bridgeTypes";
-import { formatModelDisplayName } from "../../../engine/contracts";
+import { formatRelativeTime } from "../../../engine/durationFormat";
 import { renderStageDisplay } from "../../codex-rollout/phaseRender";
-import type { StageInfo } from "../../codex-rollout/types";
+import type { StageInfo } from "../../codex-rollout/turnStageTypes";
 import type { LastEntryKind } from "../../turnState";
-import type { ClaudeTurnInfo } from "./sessionTokenWidget";
 import { formatPct, formatTokens, makeTokenBar } from "../tokenFormatters";
-import { formatRelativeTime } from "../relativeTime";
+import { wrapAndTruncateTitle } from "./sessionTitleWrap";
+import { appendModelLines } from "./sessionTokenModelLine";
+import type { ClaudeTurnInfo } from "./sessionTokenWidget";
 
 /**
  * Shared tooltip builder for the Claude and Codex session token
@@ -15,19 +15,14 @@ import { formatRelativeTime } from "../relativeTime";
  * optional session title, workspace label, current / ceiling token
  * count, progress bar, auto-compact threshold) - only the provider
  * name differs. Factoring the markdown build keeps the two widgets
- * thin and guarantees they stay visually consistent.
+ * thin and guarantees they stay visually consistent. The model line
+ * and its advisories render in `sessionTokenModelLine.ts`.
  */
 
 const FOLDER = "\u{1F4C1}";
 const CLAMP = "\u{1F5DC}\u{FE0F}";
-/** Per-line cap for the session title. VS Code's MarkdownString
- * tooltip wraps at the rendered line, but we need a soft per-line
- * limit to prevent very long titles from creating an unreadably
- * wide tooltip. The wrap helper allows up to two visual lines before
- * ellipsis-truncating - line two ends at the same per-line cap. */
-const MAX_TITLE_LINE_LEN = 38;
 
-export interface SessionTokenTooltipInput {
+interface SessionTokenTooltipInput {
   provider: "Claude" | "Codex";
   sessionTitle: string;
   label: string;
@@ -134,12 +129,6 @@ export function buildSessionTokenTooltip(
       ? Math.min(100, Math.round((effectiveUsed / effectiveCeiling) * 100))
       : 0;
   const bar = makeTokenBar(pctUsed);
-
-  // Soft-wrap the title at MAX_TITLE_LINE_LEN by injecting a single
-  // line break, then ellipsis-truncate only if the title would still
-  // exceed two visual lines. Lets readable titles like 60-char
-  // "Refactoring the WAT321 status bar item to be smaller" wrap
-  // naturally instead of getting cut off mid-word.
   const title = wrapAndTruncateTitle(sessionTitle);
 
   const md = new vscode.MarkdownString();
@@ -153,34 +142,7 @@ export function buildSessionTokenTooltip(
     md.appendMarkdown(`"${title.replace(/\n/g, '"  \n"')}"  \n`);
   }
   if (modelId) {
-    const modelName = formatModelDisplayName(modelId);
-    const windowLabel = contextWindowSize
-      ? ` (${formatTokens(contextWindowSize)} context)`
-      : "";
-    // Codex-only: flag a stored model slug the running app-server does
-    // not advertise (from its `model/list` catalog, falling back to
-    // `~/.codex/models_cache.json` before the bridge has answered).
-    // Every `thread/resume` ships the stored slug to the API, so an
-    // unknown slug guarantees a 404 on the next prompt. Prefixing a
-    // warning badge lets the user spot config drift before dispatching.
-    // Claude model IDs aren't validated this way - Claude's slugs come
-    // from WAT321's own MODEL_CONTEXT_WINDOWS table, not a user cache.
-    const codexModelInvalid =
-      provider === "Codex" && !isKnownCodexModel(modelId);
-    const prefix = codexModelInvalid ? "⚠ " : "";
-    // Effort tag dot-separated between model and context window.
-    // Codex: per-turn override > model's default_reasoning_level.
-    // Claude: the persistent equivalent is whether extended thinking
-    // is firing in recent turns (Claude has no UI knob like Codex's
-    // effort, but the thinking-block presence is its closest analog).
-    const effortLabel = resolveEffortLabel(provider, modelId, codexEffort, claudeTurnInfo);
-    const effortSegment = effortLabel ? ` · ${effortLabel}` : "";
-    md.appendMarkdown(`${prefix}Model: ${modelName}${effortSegment}${windowLabel}  \n`);
-    if (codexModelInvalid) {
-      md.appendMarkdown(
-        `_Model not in your installed Codex's known set. The next prompt will fail - repair via the bridge menu._  \n`
-      );
-    }
+    appendModelLines(md, { provider, modelId, contextWindowSize, codexEffort, claudeTurnInfo });
   }
   if (typeof lastActiveAt === "number") {
     md.appendMarkdown(`Last active: ${formatRelativeTime(lastActiveAt)}  \n`);
@@ -231,9 +193,7 @@ export function buildSessionTokenTooltip(
   // flight, and (3) we have structured rollout state. Standalone Codex
   // sessions show the same info in the Codex CLI itself, so duplicating
   // it in the tooltip just clutters the hover. The block carries
-  // stage / plan / tool / token-split lines - the legacy "% cached"
-  // line is intentionally dropped because its semantics weren't clear
-  // from the rendered string.
+  // stage / plan / tool / token-split lines.
   if (
     provider === "Codex" &&
     stageInfo &&
@@ -289,28 +249,6 @@ export function buildSessionTokenTooltip(
   return md;
 }
 
-/** Wrap a long session title across up to two lines, breaking on a
- * word boundary inside the first line's character budget. Titles
- * that fit on one line are returned unchanged - titles that exceed
- * two lines are ellipsis-truncated. Exported so the OpenCode Routes
- * widget can reuse the same wrap logic for OpenCode / Local LLM
- * session titles. */
-export function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
-  if (!sessionTitle) return "";
-  if (sessionTitle.length <= MAX_TITLE_LINE_LEN) return sessionTitle;
-  // Find the last space at or before MAX_TITLE_LINE_LEN so the wrap
-  // happens between words. Falls back to a hard break if no space is
-  // present in that window (e.g. a single very long token).
-  const lastSpace = sessionTitle.lastIndexOf(" ", MAX_TITLE_LINE_LEN);
-  const breakAt = lastSpace > 0 ? lastSpace : MAX_TITLE_LINE_LEN;
-  const firstLine = sessionTitle.slice(0, breakAt).trimEnd();
-  const remainder = sessionTitle.slice(breakAt).trimStart();
-  if (remainder.length <= MAX_TITLE_LINE_LEN) {
-    return `${firstLine}\n${remainder}`;
-  }
-  return `${firstLine}\n${remainder.slice(0, MAX_TITLE_LINE_LEN - 3)}...`;
-}
-
 /** True while the session is mid-turn - stage-info tooltip lines
  * only make sense during an in-flight response. Only `user` (waiting
  * on the model) and `assistant-pending` (model actively working)
@@ -318,37 +256,4 @@ export function wrapAndTruncateTitle(sessionTitle: string | undefined): string {
  * `unknown` all read as idle. */
 function isTurnActive(turnState: LastEntryKind | undefined): boolean {
   return turnState === "user" || turnState === "assistant-pending";
-}
-
-/** Effort label that goes after the model name in the tooltip header.
- *
- * Codex: explicit reasoning level. The bridge per-turn override wins
- * when set - otherwise fall back to the model's
- * `default_reasoning_level` from `~/.codex/models_cache.json` so the
- * user always sees what Codex will actually run, not just what was
- * overridden.
- *
- * Claude: there is no UI-level effort knob like Codex's. The closest
- * persistent analog is whether the most recent assistant turns
- * actually used extended thinking (the model emitting `thinking`
- * content blocks). Read this from `claudeTurnInfo.hasThinkingRecent`
- * rather than from a setting - on/off is the only signal we have.
- *
- * Returns null when there is nothing useful to display (Codex with no
- * effort and no model default, Claude not currently using thinking). */
-function resolveEffortLabel(
-  provider: "Claude" | "Codex",
-  modelId: string,
-  codexEffort: CodexEffortOverride | undefined,
-  claudeTurnInfo: ClaudeTurnInfo | undefined
-): string | null {
-  if (provider === "Codex") {
-    const effective =
-      codexEffort ?? (getCodexModelInfo(modelId)?.defaultEffort ?? null);
-    if (effective === null) return null;
-    return effective.charAt(0).toUpperCase() + effective.slice(1);
-  }
-  // Claude
-  if (claudeTurnInfo?.hasThinkingRecent === true) return "Thinking";
-  return null;
 }

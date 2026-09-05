@@ -1,10 +1,12 @@
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { SETTING, WAT321_DIR } from "../engine/settingsKeys";
+import { SETTING } from "../engine/settingsKeys";
+import { WAT321_ROOT } from "../engine/wat321Paths";
 import { getAllWidgetIds } from "../engine/widgetCatalog";
 import { CODEX_MODEL_CATALOG_FILENAME } from "./providers/codex/modelCatalogStore";
-import { clientStateDir } from "./wat321Paths";
+import { CODEX_UNLISTED_PINS_FILENAME } from "./providers/codex/unlistedModelPins";
+import { clientStateDir } from "../engine/wat321Paths";
 import { healStaleApplicationScopeKeys } from "./workspaceScopeHeal";
 
 /** Update a single wat321.* setting at every applicable configuration
@@ -47,7 +49,7 @@ async function updateSettingAllScopes(
  * forces a repaint and shows the correct unchecked state. The
  * config value itself is always correct - we cannot fix the stale
  * paint from an extension. */
-export async function clearCheckboxSetting(key: string): Promise<void> {
+async function clearCheckboxSetting(key: string): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
   const inspect = config.inspect<boolean>(key);
 
@@ -228,9 +230,10 @@ async function performClear(onReset?: OnResetCallback): Promise<void> {
     "claude-usage.cache.json",
     "codex-usage.cache.json",
     CODEX_MODEL_CATALOG_FILENAME,
+    CODEX_UNLISTED_PINS_FILENAME,
   ]) {
     try {
-      const path = join(WAT321_DIR, cacheName);
+      const path = join(WAT321_ROOT, cacheName);
       if (existsSync(path)) rmSync(path, { force: true });
     } catch {
       // best-effort

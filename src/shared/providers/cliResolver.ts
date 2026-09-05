@@ -41,7 +41,7 @@ export interface ResolvedCli {
   version: string;
 }
 
-export interface CliSpec {
+interface CliSpec {
   pathCommand: string;
   /** Extension id whose bundled binary serves as the fallback when
    * PATH probing fails. `null` opts out of extension probing entirely

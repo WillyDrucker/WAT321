@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ProviderKey } from "../../engine/contracts";
-import { writeFileAtomic } from "../fs/atomicWrite";
-import { clientStateDir } from "../wat321Paths";
+import { writeFileAtomic } from "../../engine/fs/atomicWrite";
+import { clientStateDir } from "../../engine/wat321Paths";
 
 /**
  * Persistent last-known-good store for the usage widgets at

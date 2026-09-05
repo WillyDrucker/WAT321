@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
-import { bandFromRemaining, renderCodexBar } from "../ui/heatmap";
+import { bandFromRemaining } from "../ui/codexHeatmapBar";
+import { renderCodexBar } from "../ui/heatmap";
 import { resolveUsageStyle } from "../ui/usageDisplay";
 import { buildUsageTooltipHtml } from "../ui/usageTooltipHtml";
 import { formatPlanLabel, getRemainingPct } from "./formatters";
-import type { CodexUsageResponse } from "./types";
+import type { CodexUsageResponse } from "./codexUsageTypes";
 import { resolveCodexWindows, type CodexUsageRow } from "./windows";
 
 /** Codex full-mode bar color, derived from the same remaining bands
@@ -26,9 +27,9 @@ function shownPct(row: CodexUsageRow, showUsed: boolean): number {
 
 export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   // Rows come from the resolved layout, so a window Codex no longer
-  // publishes leaves no row behind. The old builder always drew exactly
-  // two, which is why a retired window rendered as a full green bar over
-  // "Resets unknown" instead of simply not appearing.
+  // publishes leaves no row behind. A fixed two-row layout would draw a
+  // retired window as a full green bar over "Resets unknown" instead of
+  // leaving it out.
   const layout = resolveCodexWindows(usage);
   const rows = [layout.primary, layout.secondary].filter(
     (r): r is CodexUsageRow => r !== null

@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { WAT321_DIR } from "../../engine/settingsKeys";
+import { WAT321_ROOT } from "../../engine/wat321Paths";
 import { UsageServiceBase } from "../polling/usageServiceBase";
-import { clientStateDir } from "../wat321Paths";
-import type { UsageResponse } from "./types";
+import { clientStateDir } from "../../engine/wat321Paths";
+import type { UsageResponse } from "./claudeUsageTypes";
 
 const AUTH_DIR = join(homedir(), ".claude");
 const CREDENTIALS_FILE = join(AUTH_DIR, ".credentials.json");
@@ -14,8 +14,8 @@ export class ClaudeUsageSharedService extends UsageServiceBase<UsageResponse> {
   constructor() {
     super({
       authDir: AUTH_DIR,
-      cacheFile: join(WAT321_DIR, "claude-usage.cache.json"),
-      claimFile: join(WAT321_DIR, "claude-usage.claim"),
+      cacheFile: join(WAT321_ROOT, "claude-usage.cache.json"),
+      claimFile: join(WAT321_ROOT, "claude-usage.claim"),
       endpointUrl: "https://api.anthropic.com/api/oauth/usage",
       providerKey: "claude",
       transitionLogPath: join(clientStateDir(), "claude-usage-transitions.jsonl"),

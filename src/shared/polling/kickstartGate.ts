@@ -1,7 +1,7 @@
 import {
   KICKSTART_ACTIVITY_WINDOW_MS,
   KICKSTART_ESCALATION_MS,
-} from "./constants";
+} from "./pollingTimings";
 
 /**
  * Activity-driven kickstart gate for the usage polling service.

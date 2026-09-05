@@ -1,5 +1,6 @@
 import type { BridgeStageSnapshot } from "../../../engine/bridgeTypes";
-import { isOpenCodeDispatchActive, isPidAlive } from "./sessionTokenHelpers";
+import { isPidAlive } from "../../../engine/pidLiveness";
+import { isOpenCodeDispatchActive } from "./sessionTokenHelpers";
 import type {
   SessionTokenRenderData,
   SessionTokenWidgetDescriptor,
@@ -33,7 +34,7 @@ import type {
  *     Pickle FF call).
  *
  * Bridge ceremony / phase / stage definitions live in
- * `WAT321_EPIC_HANDSHAKE/bridgeStageMap.ts`. Both session-token
+ * `WAT321_EPIC_HANDSHAKE/bridgeStage/bridgeStageMap.ts`. Both session-token
  * widgets and the bridge widget read the same snapshot, so they
  * always observe the same phase + stage at the same instant.
  */
@@ -87,7 +88,7 @@ export function isTurnFresh<TState extends { status: string }>(
   );
 }
 
-export interface PickPrefixArgs<TState extends { status: string }> {
+interface PickPrefixArgs<TState extends { status: string }> {
   descriptor: SessionTokenWidgetDescriptor<TState>;
   data: SessionTokenRenderData;
   snapshot: BridgeStageSnapshot;

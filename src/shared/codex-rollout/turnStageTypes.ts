@@ -1,31 +1,15 @@
+import type { BridgeStage } from "../../engine/bridgeTypes";
+
 /**
  * Shared types for Codex rollout phase parsing. Used by:
  *   - `CodexSessionTokenService` for tooltip richness (current tool,
  *     plan progress, reasoning/output split)
  *   - `CodexDispatcher` + `TurnMonitor` for bridge adaptive timeout
  *
- * The `parseStageInfo` parser lives in `stageInfoParser.ts` (re-exported
- * via `phaseParser.ts`) as pure string -> struct logic - no watchers,
- * no state. Both consumers read their own rollout file and call the
+ * The `parseStageInfo` parser lives in `stageInfoParser.ts` as pure
+ * string -> struct logic - no watchers, no state. Both consumers read their own rollout file and call the
  * parser on the tail buffer they already have.
- *
- * Canonical 5-stage sequence. Monotonically advances - a turn cannot
- * regress to an earlier stage. Drives both the progress fraction in
- * the status bar and the Adaptive dispatcher's budget windows.
  */
-
-/** Canonical Epic Handshake turn stage. */
-export type BridgeStage =
-  /** Envelope written to `inbox/codex/`, dispatcher has not yet acked. */
-  | "dispatched"
-  /** `task_started` seen in rollout OR `turn/started` RPC notification. */
-  | "received"
-  /** Any `function_call` OR `reasoning` event observed in rollout. */
-  | "working"
-  /** `agent_message phase=final_answer` observed in rollout. */
-  | "writing"
-  /** `task_complete` in rollout OR `turn/completed` RPC notification. */
-  | "complete";
 
 /** Single step in Codex's native `update_plan` function call. */
 export interface PlanStep {

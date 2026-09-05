@@ -11,7 +11,7 @@ import * as vscode from "vscode";
  * array.
  */
 
-export interface UsageTooltipRow {
+interface UsageTooltipRow {
   title: string;
   valueLabel: string;
   /** 0-100, fills the `<div>` bar width. */
@@ -21,7 +21,7 @@ export interface UsageTooltipRow {
   resetLine: string;
 }
 
-export interface UsageTooltipInput {
+interface UsageTooltipInput {
   /** Heading text, e.g. "Claude usage limits". */
   heading: string;
   /** Codicon token rendered to the left of the heading, e.g.

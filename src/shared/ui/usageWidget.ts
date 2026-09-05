@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { ProviderKey } from "../../engine/contracts";
 import { getDisplayMode } from "../../engine/displayMode";
 import type { ServiceState as GenericServiceState } from "../../engine/serviceTypes";
+import { formatDuration } from "../../engine/durationFormat";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
 import { refreshIfStale } from "../incidentStatusPoller";
 import {
@@ -270,7 +271,7 @@ export class UsageWidget<TData> implements vscode.Disposable {
       tip.appendMarkdown(base.value);
       const age =
         this.lastOkFetchedAt !== null
-          ? formatAge(Date.now() - this.lastOkFetchedAt)
+          ? `${formatDuration(Date.now() - this.lastOkFetchedAt)} ago`
           : "earlier";
       tip.appendMarkdown(`\n\n---\n\n${detail} Last updated ${age}.`);
     } else {
@@ -284,17 +285,3 @@ export class UsageWidget<TData> implements vscode.Disposable {
   }
 }
 
-/** Format an elapsed-ms duration as a short human label for the non-ok
- * tooltip ("12s ago", "3m ago", "1h 22m ago"). No decimals, single-unit
- * sub-minute, two-unit for hours. Negative inputs (clock skew on cached
- * `fetchedAt`) clamp to "just now." */
-function formatAge(ms: number): string {
-  if (ms < 0 || ms < 1000) return "just now";
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  const remM = m % 60;
-  return remM > 0 ? `${h}h ${remM}m ago` : `${h}h ago`;
-}
