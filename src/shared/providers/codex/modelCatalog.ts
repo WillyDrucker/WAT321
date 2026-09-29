@@ -117,9 +117,8 @@ export function clearCodexCatalog(): void {
 
 /** The slug the app-server marks `isDefault`. This is Codex's own
  * answer to "which model runs when config.toml names none", and it
- * tracks the binary: 0.142.5 reports `gpt-5.5`, 0.144.x and 0.153.x
- * report `gpt-5.6-sol`. Null when no catalog or no entry claims the
- * flag. */
+ * tracks the binary, so upgrading codex can move it. Null when no
+ * catalog or no entry claims the flag. */
 export function catalogDefaultSlug(): string | null {
   const entries = getCodexCatalog();
   if (entries === null) return null;
@@ -129,10 +128,10 @@ export function catalogDefaultSlug(): string | null {
 /** The `defaultReasoningEffort` of whichever model claims `isDefault`.
  *
  * The pair (`catalogDefaultSlug`, `catalogDefaultEffort`) is the whole
- * of "what Codex recommends for a brand-new session" - currently
- * `gpt-5.6-sol` at `low`. Both are read live rather than hardcoded, so
- * the day OpenAI promotes a different model or retunes its effort, a
- * newly created Epic Handshake session picks it up with no code change.
+ * of "what Codex recommends for a brand-new session". Both are read
+ * live rather than hardcoded, so the day OpenAI promotes a different
+ * model or retunes its effort, a newly created Epic Handshake session
+ * picks it up with no code change.
  *
  * Null when no catalog, or when the default model advertises no effort.
  * Callers must not substitute a guess of their own: a null here means
