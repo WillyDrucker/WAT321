@@ -1,4 +1,7 @@
-import { resolveCodexCli } from "../../shared/providers/codex/cliResolver";
+import {
+  forgetResolvedCodexCli,
+  resolveCodexCli,
+} from "../../shared/providers/codex/cliResolver";
 import {
   codexCatalogAgeMs,
   setCodexCatalog,
@@ -104,6 +107,11 @@ export async function ensureCodexCatalog(
 
   let client: AppServerClient | null = null;
   try {
+    // Probe the binaries again rather than trust the window's cached
+    // pick. A Codex upgraded since activation lists models the older
+    // binary cannot, and this is the moment the user asked what exists.
+    // The dispatcher follows the new pick at its next turn start.
+    forgetResolvedCodexCli();
     const resolved = await resolveCodexCli();
     if (resolved === null) return;
     logger.info(

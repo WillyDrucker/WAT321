@@ -117,3 +117,19 @@ export async function resolveCodexCli(): Promise<ResolvedCli | null> {
 export function peekResolvedCodexCli(): ResolvedCli | null | undefined {
   return cache;
 }
+
+/** Drop the cached answer so the next `resolveCodexCli` probes both
+ * tiers again. The cache otherwise lives for the whole window, and a
+ * Codex upgraded while VS Code stays open is exactly when the answer
+ * changes: the newer binary is the one that lists the newer models.
+ * Called wherever the user has asked about Codex itself (a direct
+ * model-list probe, Restart Codex Bridge), never on a hot path. */
+export function forgetResolvedCodexCli(): void {
+  cache = undefined;
+}
+
+/** Identity of a resolution: which binary, at which version. Two
+ * resolutions with the same identity spawn the same program. */
+export function codexCliIdentity(resolved: ResolvedCli | null): string {
+  return resolved === null ? "codex" : `${resolved.command}@${resolved.version}`;
+}
