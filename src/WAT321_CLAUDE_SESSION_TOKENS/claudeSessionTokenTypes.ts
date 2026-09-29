@@ -16,6 +16,7 @@ export interface ResolvedSession {
   label: string; // folder name
   sessionTitle: string; // first user message, truncated
   modelId: string; // e.g. "claude-opus-4-6"
+  effort: string | null; // e.g. "xhigh", null when the transcript records none
   contextUsed: number; // tokens currently in context
   contextWindowSize: number; // 200k or 1M
   autoCompactPct: number; // e.g. 70

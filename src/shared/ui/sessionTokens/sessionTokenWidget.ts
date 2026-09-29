@@ -259,6 +259,7 @@ export class SessionTokenWidget<TState extends { status: string }>
           sessionTitle: data.sessionTitle,
           label: data.label,
           modelId: data.modelId,
+          effort: data.effort,
           contextUsed: data.contextUsed,
           contextWindowSize: data.contextWindowSize,
           ceiling: data.ceiling,

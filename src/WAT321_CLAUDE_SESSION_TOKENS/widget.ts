@@ -30,6 +30,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
       sessionTitle: session.sessionTitle,
       label: session.label,
       modelId: session.modelId,
+      effort: session.effort,
       contextUsed: session.contextUsed,
       contextWindowSize: session.contextWindowSize,
       ceiling: session.autoCompactEffectiveTokens,

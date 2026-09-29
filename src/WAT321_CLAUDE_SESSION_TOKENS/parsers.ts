@@ -50,6 +50,21 @@ interface LastUsage {
   cacheReadTokens: number;
   outputTokens: number;
   modelId: string;
+  /** Reasoning effort the same entry ran at, or null when Claude Code
+   * wrote none (a model without effort levels, an older release). */
+  effort: string | null;
+}
+
+/** Claude Code stamps each assistant entry with the effort the request
+ * was sent at (`effort`), and with `perTurnEffort` when the effort
+ * rides inside the conversation instead. The first is the level that
+ * actually ran, so it wins. */
+function entryEffort(entry: Record<string, unknown>): string | null {
+  for (const key of ["effort", "perTurnEffort"]) {
+    const value = entry[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
 }
 
 /** Walk backwards through the tail to find the most recent
@@ -89,6 +104,7 @@ export function parseLastUsage(tail: string): LastUsage | null {
       outputTokens:
         typeof usage.output_tokens === "number" ? usage.output_tokens : 0,
       modelId: (msg.model as string) || (entry.model as string) || "",
+      effort: entryEffort(entry),
     };
   }
   return null;

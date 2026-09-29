@@ -3,23 +3,24 @@ import { resolveAutoCompactTokens } from "./autoCompactLimit";
 import {
   extractFirstUserMessage,
   parseCwd,
-  parseLatestModelSlug,
-  parseModelSlug,
+  parseFirstTurnContext,
+  parseLatestTurnContext,
 } from "./parsers";
 import { getSessionTitle } from "./rolloutDiscovery";
 
 /**
  * The slow-changing facts about the tracked rollout: session title,
- * cwd, model slug, and the auto-compact ceiling that depends on the
- * model. Each is re-derived only when its key changes (session, path,
- * or model), so a growth poll pays for the tail parse and nothing
- * else. `forget()` runs when the service switches rollouts.
+ * cwd, model slug and effort, and the auto-compact ceiling that
+ * depends on the model. Each is re-derived only when its key changes
+ * (session, path, or model), so a growth poll pays for the tail parse
+ * and nothing else. `forget()` runs when the service switches rollouts.
  */
 
 interface RolloutFacts {
   sessionTitle: string;
   cwd: string | null;
   modelSlug: string | null;
+  effort: string | null;
   autoCompactTokens: number;
 }
 
@@ -37,6 +38,7 @@ export class RolloutFactsCache {
   private cwd: string | null = null;
   private cwdPath = "";
   private modelSlug: string | null = null;
+  private effort: string | null = null;
   private autoCompactTokens: number | null = null;
   private autoCompactModel = "";
 
@@ -45,6 +47,7 @@ export class RolloutFactsCache {
     this.title = null;
     this.cwd = null;
     this.modelSlug = null;
+    this.effort = null;
     this.autoCompactTokens = null;
   }
 
@@ -71,13 +74,19 @@ export class RolloutFactsCache {
       this.cwdPath = input.rolloutPath;
     }
 
-    // Resolve model from the tail on every file-growth poll so a
-    // mid-session /model switch is picked up immediately. Fall back
-    // to the header parser for fresh sessions that don't yet have a
-    // turn_context in the tail window.
-    const latestModel = parseLatestModelSlug(input.tail);
-    const resolvedModel =
-      latestModel ?? this.modelSlug ?? parseModelSlug(input.rolloutPath);
+    // Resolve model and effort from the tail on every file-growth poll
+    // so a mid-session /model or effort switch is picked up at once.
+    // Both come from one turn_context so they always describe the same
+    // turn: the newest in the tail, else the last one seen, else the
+    // header's first. A long turn pushes its turn_context out of the
+    // tail window, and a fresh session has none there yet.
+    const turn =
+      parseLatestTurnContext(input.tail) ??
+      (this.modelSlug !== null
+        ? { model: this.modelSlug, effort: this.effort }
+        : parseFirstTurnContext(input.rolloutPath));
+    this.effort = turn?.effort ?? null;
+    const resolvedModel = turn?.model ?? null;
     if (resolvedModel !== this.modelSlug) {
       this.modelSlug = resolvedModel;
       // Model changed - invalidate ceiling cache so it recomputes.
@@ -99,6 +108,7 @@ export class RolloutFactsCache {
       sessionTitle: this.title,
       cwd: this.cwd,
       modelSlug: this.modelSlug,
+      effort: this.effort,
       autoCompactTokens: this.autoCompactTokens,
     };
   }

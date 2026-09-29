@@ -265,6 +265,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       label: basename(cwdForLabel),
       sessionTitle: facts.sessionTitle,
       modelId: usage.modelId,
+      effort: usage.effort,
       contextUsed,
       contextWindowSize,
       autoCompactPct: facts.autoCompactPct,

@@ -15,6 +15,7 @@ export interface CodexResolvedSession {
   label: string; // folder name from cwd
   sessionTitle: string; // thread_name or first user message
   modelSlug: string; // e.g. "gpt-5.1-mini"
+  effort: string | null; // effort of the latest turn_context, null before the first turn
   contextUsed: number; // last_token_usage.total_tokens (matches Codex native hover)
   contextWindowSize: number; // effective model context window from token_count
   autoCompactTokens: number; // effective context window ceiling (matches Codex native hover) - actual compact trigger is ~90/95 of this
