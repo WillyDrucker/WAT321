@@ -5,6 +5,17 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.33] - 2026-09-29
+
+### Added
+
+- **GPT-6.1 Sol is in the Codex model picker with all six effort levels, from Low to Ultra.** It is OpenAI's newest workhorse model and what Codex now recommends for a new session, so it carries the *default* tag. Its effort picker offers Low, Medium, High, Xhigh, Max, and Ultra. Only a recent Codex lists it, so update your Codex CLI if it does not appear.
+- **The session token hover shows the effort your last turn actually ran at, for Claude and Codex alike.** It reads "Opus 5.5 · Xhigh" or "gpt-6.1-sol · Ultra" straight from the session itself, so it stays right when you change effort mid-session or work in your own Codex terminal instead of through the bridge. Before, Claude only ever showed "Thinking", and Codex showed the bridge's setting even for sessions the bridge was not running.
+
+### Fixed
+
+- **Upgrading Codex while VS Code is open now brings its new models along without a reload.** WAT321 chose a Codex binary once per window and kept it. If the ChatGPT extension's built-in Codex was newer than yours when the window opened, updating your CLI afterwards changed nothing: Refresh Models kept asking the older binary and GPT-6.1 Sol never showed up. Refresh Models and Restart Codex Bridge now look again, and the bridge moves onto the newer Codex at the start of your next prompt.
+
 ## [1.5.32] - 2026-09-04
 
 ### Added

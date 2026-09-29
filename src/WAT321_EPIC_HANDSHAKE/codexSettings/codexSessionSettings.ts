@@ -34,9 +34,9 @@ import {
  *
  *   - A session is BORN on whatever Codex recommends right then, read
  *     live from `model/list` (`isDefault` plus that model's
- *     `defaultReasoningEffort`). Today `gpt-5.6-sol` at `low`. Nothing
- *     is hardcoded, so the day OpenAI promotes a successor a newly
- *     created session picks it up on its own.
+ *     `defaultReasoningEffort`). Nothing is hardcoded, so the day
+ *     OpenAI promotes a successor a newly created session picks it up
+ *     on its own.
  *   - A session KEEPS what it was last set to. Pick 5.5 at `high` and
  *     S1 stays 5.5 / `high` across restarts until you change it again.
  *   - A session FORGETS on reset. Deleting it is how a user returns to

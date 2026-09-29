@@ -60,11 +60,13 @@ interface SessionTokenTooltipInput {
    * signal approximate, matching the Codex pattern. Falls back to
    * `ceiling` when absent (older callers, Codex path). */
   autoCompactEffectiveTokens?: number;
-  /** Codex-only: per-turn effort override (low / medium / high /
-   * xhigh, plus max and ultra on the models that advertise them).
-   * Sourced from the bridge snapshot. Null means no override is set,
-   * and the tooltip falls back to the model's `default_reasoning_level`
-   * so the user always sees what Codex will actually run. */
+  /** Effort the session's latest turn ran at, read from its own
+   * transcript or rollout. Wins over every other effort source because
+   * it is the one fact about THIS session rather than a setting. */
+  effort?: string | null;
+  /** Codex-only: the bridge session's pinned effort, sourced from the
+   * bridge snapshot. Fills in before the session file records a turn,
+   * and the model's `default_reasoning_level` fills in after that. */
   codexEffort?: CodexEffortOverride;
   /** Codex-only gate for the mid-turn richness block (Codex: X/5,
    * plan / tool / token-split lines). True when the Epic Handshake
@@ -115,6 +117,7 @@ export function buildSessionTokenTooltip(
     claudeTurnInfo,
     turnState,
     autoCompactEffectiveTokens,
+    effort = null,
     codexEffort,
     bridgeActive = false,
     bridgeWaitTimeoutSec = null,
@@ -142,7 +145,14 @@ export function buildSessionTokenTooltip(
     md.appendMarkdown(`"${title.replace(/\n/g, '"  \n"')}"  \n`);
   }
   if (modelId) {
-    appendModelLines(md, { provider, modelId, contextWindowSize, codexEffort, claudeTurnInfo });
+    appendModelLines(md, {
+      provider,
+      modelId,
+      contextWindowSize,
+      effort,
+      codexEffort,
+      claudeTurnInfo,
+    });
   }
   if (typeof lastActiveAt === "number") {
     md.appendMarkdown(`Last active: ${formatRelativeTime(lastActiveAt)}  \n`);

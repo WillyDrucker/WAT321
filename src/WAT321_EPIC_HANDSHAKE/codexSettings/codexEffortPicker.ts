@@ -13,13 +13,13 @@ import { isPaused, setPaused } from "../statusBar/statusBarState";
  * The Codex effort picker, opened from the Codex Model Settings picker.
  *
  * Rows mirror the SELECTED model's own advertised effort list, so newer
- * levels (`max` and `ultra` on Astra and the 5.6 family) surface without a
- * code change and stay hidden on models that reject them. A model no
- * source describes yet (a slug pinned by hand before Codex lists it)
- * gets every level any known model advertises, marked unverified,
- * because refusing to offer `max` to GPT-6 Astra on its first day would
- * be the wrong kind of caution. With nothing known at all, the quartet
- * every model has ever shared.
+ * levels (`max` and `ultra`) surface without a code change on the
+ * models that advertise them and stay hidden on models that reject
+ * them. A model no source describes yet (a slug pinned by hand before
+ * Codex lists it) gets every level any known model advertises, marked
+ * unverified, because refusing to offer `max` to a model on its first
+ * day would be the wrong kind of caution. With nothing known at all,
+ * the quartet every model has ever shared.
  *
  * Callers must pass the EFFECTIVE model, not the raw override: a null
  * slug collapses the rows to the fallback and hides `max` / `ultra`

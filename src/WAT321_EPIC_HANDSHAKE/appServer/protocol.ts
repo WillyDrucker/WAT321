@@ -147,9 +147,9 @@ export interface TurnInterruptParams {
 
 /**
  * `model/list` reports the models the app-server on the other end of
- * this pipe can actually run. Verified against codex-cli 0.142.5,
- * 0.144.x, and 0.153.x: the fields bound below are identical on all of
- * them, and 0.153 adds the retirement pointers.
+ * this pipe can actually run. The fields bound below have held steady
+ * on every codex-cli release probed so far. The retirement pointers
+ * are optional because older releases never send them.
  *
  * WARNING: the field names here are NOT the ones in
  * `~/.codex/models_cache.json`. The RPC is camelCase and renames every
@@ -163,13 +163,17 @@ export interface TurnInterruptParams {
  * Two further differences that drive design decisions upstream:
  *   - `isDefault` exists here and nowhere in the file, so we no longer
  *     guess the default model by sorting on `priority`.
- *   - `context_window` exists in the file and NOT here (still absent on
- *     0.153.x), so the auto-compact ceiling cannot move onto this RPC.
+ *   - `context_window` exists in the file and NOT here, so the
+ *     auto-compact ceiling cannot move onto this RPC.
  *
- * The list is decided server-side per ACCOUNT, not per binary: 0.153.1
- * added GPT-6 Astra as a staged rollout, so two machines on the same
- * codex can get different answers and one machine's answer can change
- * with no upgrade. That is why the catalog records when it was fetched.
+ * The list is decided server-side for the account AND the binary. A
+ * staged rollout lists a model for some accounts first (GPT-6 Astra),
+ * and a model can list only from a given codex release onward (GPT-6.1
+ * Sol lists on a newer codex and not on an older one, same account,
+ * same minute). So two machines can get different answers, and one
+ * machine's answer can change with no upgrade or change on one. That
+ * is why the catalog records when it was fetched and which binary
+ * answered.
  *
  * The response omits hidden models entirely (0.142.5 returns 3 where
  * its file lists 4), so `hidden` has always been observed false.
@@ -177,7 +181,8 @@ export interface TurnInterruptParams {
  * Also on the wire and deliberately unbound until something consumes
  * them: `serviceTiers` / `additionalSpeedTiers` / `defaultServiceTier`
  * (the Fast tier), `inputModalities`, `supportsPersonality`,
- * `multiAgentVersion`, `modelSpecialty`, `availabilityNux`.
+ * `multiAgentVersion`, `modelSpecialty`, `availabilityNux`,
+ * `availableAccessPrograms`.
  */
 export interface ModelListParams {
   /** Omit for the first page. Feed back `nextCursor` for the rest. */
@@ -209,8 +214,8 @@ export interface ModelListEntry {
   description?: string;
   hidden?: boolean;
   /** Codex's own answer to "which model when config.toml names none".
-   * Tracks the binary: 0.142.5 flags gpt-5.5, 0.144.x and 0.153.x flag
-   * gpt-5.6-sol. */
+   * Tracks the binary and the account, so a newer codex can flag a
+   * newer model. Never hardcode it. */
   isDefault?: boolean;
   defaultReasoningEffort?: string | null;
   supportedReasoningEfforts?: ModelListReasoningEffort[];

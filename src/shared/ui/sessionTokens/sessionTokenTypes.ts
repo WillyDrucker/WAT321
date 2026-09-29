@@ -74,6 +74,10 @@ export interface SessionTokenRenderData {
   sessionTitle: string;
   label: string;
   modelId: string;
+  /** Reasoning effort the session's latest turn ran at, as the session
+   * file records it: the Claude assistant entry's `effort`, or the
+   * Codex rollout's `turn_context.effort`. Null when it records none. */
+  effort: string | null;
   contextUsed: number;
   contextWindowSize: number;
   ceiling: number;

@@ -95,12 +95,28 @@ export function parseCwd(rolloutPath: string): string | null {
   return null;
 }
 
-/** Scan the header for the initial model slug. Checks `turn_context`
- * first (set on every turn after the first) and falls back to
- * `session_meta.payload.model` for freshly started sessions. Used
- * only as a fallback when `parseLatestModelSlug` finds nothing in
- * the tail. */
-export function parseModelSlug(rolloutPath: string): string | null {
+/** Model and effort of one turn, both from a single `turn_context` so
+ * they always describe the same turn. `effort` is null when the entry
+ * carries none. */
+interface TurnContextFacts {
+  model: string;
+  effort: string | null;
+}
+
+function turnContextFacts(payload: Record<string, unknown>): TurnContextFacts {
+  const effort = payload.effort;
+  return {
+    model: payload.model as string,
+    effort: typeof effort === "string" && effort.length > 0 ? effort : null,
+  };
+}
+
+/** Scan the header for the first turn's model and effort. Checks
+ * `turn_context` first and falls back to `session_meta.payload.model`
+ * (no effort) for freshly started sessions. Used only when
+ * `parseLatestTurnContext` finds nothing in the tail, which a long
+ * turn causes by pushing its `turn_context` out of the tail window. */
+export function parseFirstTurnContext(rolloutPath: string): TurnContextFacts | null {
   const head = readHead(rolloutPath, 65_536);
   if (!head) return null;
 
@@ -115,13 +131,13 @@ export function parseModelSlug(rolloutPath: string): string | null {
         entry.type === "turn_context" &&
         typeof entry.payload?.model === "string"
       ) {
-        return entry.payload.model;
+        return turnContextFacts(entry.payload);
       }
       if (
         entry.type === "session_meta" &&
         typeof entry.payload?.model === "string"
       ) {
-        return entry.payload.model;
+        return { model: entry.payload.model, effort: null };
       }
     } catch {
       continue;
@@ -130,11 +146,11 @@ export function parseModelSlug(rolloutPath: string): string | null {
   return null;
 }
 
-/** Scan the tail backwards for the most recent `turn_context` model
- * slug. Catches mid-session `/model` switches that the header-only
- * `parseModelSlug` would miss. Returns null if no `turn_context`
- * is found in the tail window. */
-export function parseLatestModelSlug(tail: string): string | null {
+/** Scan the tail backwards for the most recent `turn_context`.
+ * Catches mid-session `/model` and effort switches that the
+ * header-only `parseFirstTurnContext` would miss. Returns null if no
+ * `turn_context` is found in the tail window. */
+export function parseLatestTurnContext(tail: string): TurnContextFacts | null {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
@@ -146,7 +162,7 @@ export function parseLatestModelSlug(tail: string): string | null {
         entry.type === "turn_context" &&
         typeof entry.payload?.model === "string"
       ) {
-        return entry.payload.model;
+        return turnContextFacts(entry.payload);
       }
     } catch {
       continue;

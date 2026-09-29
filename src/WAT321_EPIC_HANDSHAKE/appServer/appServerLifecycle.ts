@@ -1,4 +1,9 @@
-import { resolveCodexCli } from "../../shared/providers/codex/cliResolver";
+import {
+  codexCliIdentity,
+  forgetResolvedCodexCli,
+  peekResolvedCodexCli,
+  resolveCodexCli,
+} from "../../shared/providers/codex/cliResolver";
 import { clearCodexCatalog } from "../../shared/providers/codex/modelCatalog";
 import { spawnInitializedAppServer } from "./appServerBootstrap";
 import type { AppServerClient } from "./appServerClient";
@@ -10,6 +15,12 @@ import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
  * use, a 15-minute idle shutdown that never fires mid-turn, prewarm
  * for bridge restart, force-kill for a binary that changed underneath
  * us, and the model-catalog side effect each of those carries.
+ *
+ * The client follows the Codex resolver. When a model-list probe
+ * re-resolves onto a different binary (a Codex upgraded while the
+ * window stayed open), the next turn start retires the warm child and
+ * spawns on the new one, so the picker never offers a model the
+ * dispatching binary cannot run.
  */
 
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
@@ -18,6 +29,8 @@ const IDLE_RECHECK_MS = 60_000;
 
 export class AppServerLifecycle {
   private client: AppServerClient | null = null;
+  /** `codexCliIdentity` of the resolution the warm client spawned on. */
+  private clientBinary: string | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -27,12 +40,26 @@ export class AppServerLifecycle {
     private readonly isProcessing: () => boolean
   ) {}
 
-  /** The warm client, spawning and initializing one when absent. */
+  /** The warm client, spawning and initializing one when absent.
+   * Called once at the start of each turn, before any request rides the
+   * client, which is what makes retiring a stale child here safe. */
   async ensureClient(): Promise<AppServerClient> {
-    if (this.client) return this.client;
+    if (this.client) {
+      const current = peekResolvedCodexCli();
+      // Undefined means a re-probe is in flight and null means no binary
+      // answered it. Either way the warm child still runs, so keep it.
+      if (current === undefined || current === null) return this.client;
+      if (codexCliIdentity(current) === this.clientBinary) return this.client;
+      this.logger.info(
+        `codex binary changed (${this.clientBinary} -> ${codexCliIdentity(current)}), respawning app-server`
+      );
+      void this.client.shutdown();
+      this.client = null;
+    }
     const resolved = await resolveCodexCli();
     const client = await spawnInitializedAppServer(this.logger, "codexDispatcher", resolved);
     this.client = client;
+    this.clientBinary = codexCliIdentity(resolved);
     // Not awaited: the catalog is a display / validation convenience and
     // must not sit in front of the first turn. Readers fall back to the
     // cache file until it lands. Never touches the idle timer. Also
@@ -77,8 +104,11 @@ export class AppServerLifecycle {
     // catalog: the user reaches for this action precisely when Codex
     // changed underneath us (upgraded binary, stale cached config), and
     // a catalog outliving its process would describe a binary we no
-    // longer talk to. Next ensureClient refills it.
+    // longer talk to. Next ensureClient refills it. The resolver is
+    // dropped for the same reason: without it the respawn would land on
+    // the binary this window picked at activation.
     clearCodexCatalog();
+    forgetResolvedCodexCli();
     if (this.client === null) return;
     this.client.forceKill();
     this.client = null;

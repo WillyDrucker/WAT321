@@ -203,6 +203,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       label: facts.cwd ? basename(facts.cwd) : "Codex",
       sessionTitle: facts.sessionTitle,
       modelSlug: facts.modelSlug ?? "",
+      effort: facts.effort,
       contextUsed: usage.tokens,
       contextWindowSize: usage.contextWindowSize,
       autoCompactTokens: facts.autoCompactTokens,

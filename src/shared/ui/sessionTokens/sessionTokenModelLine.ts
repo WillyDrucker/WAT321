@@ -21,12 +21,13 @@ interface ModelLineInput {
   provider: "Claude" | "Codex";
   modelId: string;
   contextWindowSize?: number;
+  effort: string | null;
   codexEffort?: CodexEffortOverride;
   claudeTurnInfo?: ClaudeTurnInfo;
 }
 
 export function appendModelLines(md: vscode.MarkdownString, input: ModelLineInput): void {
-  const { provider, modelId, contextWindowSize, codexEffort, claudeTurnInfo } = input;
+  const { provider, modelId, contextWindowSize, effort, codexEffort, claudeTurnInfo } = input;
   const modelName = formatModelDisplayName(modelId);
   const windowLabel = contextWindowSize
     ? ` (${formatTokens(contextWindowSize)} context)`
@@ -41,7 +42,7 @@ export function appendModelLines(md: vscode.MarkdownString, input: ModelLineInpu
   // from WAT321's own MODEL_CONTEXT_WINDOWS table, not a user cache.
   const codexModelInvalid = provider === "Codex" && !isKnownCodexModel(modelId);
   const prefix = codexModelInvalid ? "⚠ " : "";
-  const effortLabel = resolveEffortLabel(provider, modelId, codexEffort, claudeTurnInfo);
+  const effortLabel = resolveEffortLabel(provider, modelId, effort, codexEffort, claudeTurnInfo);
   const effortSegment = effortLabel ? ` · ${effortLabel}` : "";
   md.appendMarkdown(`${prefix}Model: ${modelName}${effortSegment}${windowLabel}  \n`);
   if (codexModelInvalid) {
@@ -71,32 +72,36 @@ export function appendModelLines(md: vscode.MarkdownString, input: ModelLineInpu
 /** Effort label that goes after the model name, dot-separated between
  * the model and the context window.
  *
- * Codex: explicit reasoning level. The bridge per-turn override wins
- * when set - otherwise fall back to the model's
- * `default_reasoning_level` from `~/.codex/models_cache.json` so the
- * user always sees what Codex will actually run, not just what was
- * overridden.
+ * Both providers record the effort each turn ran at in the session
+ * file itself, and that recorded level always wins: it describes THIS
+ * session, where every other source describes a setting.
  *
- * Claude: there is no UI-level effort knob like Codex's. The closest
- * persistent analog is whether the most recent assistant turns
- * actually used extended thinking (the model emitting `thinking`
- * content blocks). Read this from `claudeTurnInfo.hasThinkingRecent`
- * rather than from a setting - on/off is the only signal we have.
+ * Codex before its first turn: the bridge session's pinned effort, then
+ * the model's own default from the catalog, so the user sees what
+ * Codex will actually run.
  *
- * Returns null when there is nothing useful to display (Codex with no
- * effort and no model default, Claude not currently using thinking). */
+ * Claude with no recorded effort (a model without effort levels, an
+ * older Claude Code): "Thinking" when the recent turns emitted
+ * `thinking` blocks, since on/off is the only signal left.
+ *
+ * Returns null when there is nothing useful to display. */
 function resolveEffortLabel(
   provider: "Claude" | "Codex",
   modelId: string,
+  effort: string | null,
   codexEffort: CodexEffortOverride | undefined,
   claudeTurnInfo: ClaudeTurnInfo | undefined
 ): string | null {
-  if (provider === "Codex") {
-    const effective =
-      codexEffort ?? (getCodexModelInfo(modelId)?.defaultEffort ?? null);
-    if (effective === null) return null;
+  const effective =
+    effort ??
+    (provider === "Codex"
+      ? codexEffort ?? getCodexModelInfo(modelId)?.defaultEffort ?? null
+      : null);
+  if (effective !== null) {
     return effective.charAt(0).toUpperCase() + effective.slice(1);
   }
-  if (claudeTurnInfo?.hasThinkingRecent === true) return "Thinking";
+  if (provider === "Claude" && claudeTurnInfo?.hasThinkingRecent === true) {
+    return "Thinking";
+  }
   return null;
 }

@@ -32,6 +32,7 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
       sessionTitle: session.sessionTitle,
       label: session.label,
       modelId: session.modelSlug,
+      effort: session.effort,
       contextUsed: session.contextUsed,
       contextWindowSize: session.contextWindowSize,
       ceiling: session.autoCompactTokens,

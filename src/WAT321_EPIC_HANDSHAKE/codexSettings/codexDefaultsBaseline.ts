@@ -123,7 +123,7 @@ export function sandboxIsDefault(state: CodexSandboxState): boolean {
  * This is what `*default*` means in the picker: Codex's answer, not
  * ours and not this machine's. It comes from `model/list`'s `isDefault`
  * flag, read live, so it tracks the installed binary rather than a
- * constant we would have to chase. Today `gpt-5.6-sol`.
+ * constant we would have to chase.
  *
  * `~/.codex/config.toml` is deliberately NOT consulted. It is a machine-
  * wide CLI preference that Codex's own TUI writes when a user picks a
