@@ -79,6 +79,11 @@ export interface ThreadStartParams {
   sandbox?: CodexSandbox | string;
   /** Source tag echoed into session metadata. Bridge uses `"startup"`. */
   sessionStartSource?: string;
+  /** Speed tier the thread is born on. Always sent: omitted, Codex
+   * inherits `config.toml`'s `service_tier`. An id no model offers is
+   * dropped silently rather than rejected (probed), so callers send only
+   * `default` or an id the catalog lists. */
+  serviceTier?: string;
 }
 
 /** Sandbox policy object shape accepted by `turn/start`. Casing here
@@ -126,6 +131,10 @@ export interface TurnStartParams {
    * A level is legal when the target model advertises it, so the wire
    * type does not re-gate what the live catalog already gated. */
   effort: CodexEffortOverride;
+  /** Speed tier for this turn and the ones after it. `default` is
+   * standard. Sent on every turn so the session's choice, not the
+   * thread's birth value or `config.toml`, decides each turn. */
+  serviceTier: string;
 }
 
 /** Supported input item types in a `turn/start`. Bridge only sends
@@ -178,9 +187,11 @@ export interface TurnInterruptParams {
  * The response omits hidden models entirely (0.142.5 returns 3 where
  * its file lists 4), so `hidden` has always been observed false.
  *
+ * `serviceTiers` drives the Speed row. Its deprecated twin
+ * `additionalSpeedTiers` is ignored.
+ *
  * Also on the wire and deliberately unbound until something consumes
- * them: `serviceTiers` / `additionalSpeedTiers` / `defaultServiceTier`
- * (the Fast tier), `inputModalities`, `supportsPersonality`,
+ * them: `defaultServiceTier`, `inputModalities`, `supportsPersonality`,
  * `multiAgentVersion`, `modelSpecialty`, `availabilityNux`,
  * `availableAccessPrograms`.
  */
@@ -195,6 +206,14 @@ export interface ModelListParams {
 
 interface ModelListReasoningEffort {
   reasoningEffort: string;
+  description?: string;
+}
+
+/** A speed tier beyond standard. Observed: every model offers one, id
+ * `priority`, named Fast, "2x speed, increased usage". */
+interface ModelListServiceTier {
+  id: string;
+  name?: string;
   description?: string;
 }
 
@@ -223,6 +242,7 @@ export interface ModelListEntry {
    * `upgradeInfo` repeats it with the date. */
   upgrade?: string | null;
   upgradeInfo?: ModelListUpgradeInfo | null;
+  serviceTiers?: ModelListServiceTier[];
 }
 
 /** Cursor-paginated. `nextCursor` is null on the final page. Every

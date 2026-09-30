@@ -1,5 +1,6 @@
 import type { AppServerClient } from "../appServer/appServerClient";
 import { codexRecommendedPin, type CodexSessionPin } from "../codexSettings/codexSessionSettings";
+import { serviceTierFor } from "../codexSettings/codexSessionSpeed";
 import type { ThreadStartParams } from "../appServer/protocol";
 import { bridgeThreadDisplayName, nextCollisionFreeCounter } from "./threadNaming";
 import { type BridgeThreadRecord, saveBridgeThreadRecord } from "./threadRecord";
@@ -66,14 +67,20 @@ export async function spawnFreshThread(opts: {
       ? { model: opts.record.model, effort: opts.record.effort ?? null }
       : codexRecommendedPin();
 
+  // The speed tier is always named, standard included. Omitted, Codex
+  // would take `config.toml`'s `service_tier`, and every turn re-sends
+  // it anyway so the session's choice stays authoritative.
+  const serviceTier = serviceTierFor(pinned.model, opts.record.serviceTier);
+
   opts.logger.info(
-    `[thread] starting S${counter} sandbox=${sandbox} approvalPolicy=${approvalPolicy} model=${pinned.model ?? "(codex default)"} effort=${pinned.effort ?? "(inherit)"}`
+    `[thread] starting S${counter} sandbox=${sandbox} approvalPolicy=${approvalPolicy} model=${pinned.model ?? "(codex default)"} effort=${pinned.effort ?? "(inherit)"} tier=${serviceTier}`
   );
   const threadStartParams: ThreadStartParams = {
     cwd: opts.workspacePath,
     approvalPolicy,
     sandbox,
     sessionStartSource: "startup",
+    serviceTier,
     ...(pinned.model !== null ? { model: pinned.model } : {}),
   };
   const started = (await opts.client.sendRequest(

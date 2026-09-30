@@ -65,6 +65,11 @@ export interface BridgeThreadRecord {
    * semantics as `model`. Kept beside it so a session is described by
    * exactly one file, and deleting the session forgets both. */
   effort?: string | null;
+  /** Speed tier this session runs, the id `turn/start` takes as
+   * `serviceTier` (`priority` is Fast). Same lifetime as `model`.
+   * Null means standard, which the bridge sends as `default` rather
+   * than omitting, since an omitted tier inherits `config.toml`. */
+  serviceTier?: string | null;
   /** True once this record's pin has been DECIDED, whether decided onto
    * a model or deliberately cleared.
    *
@@ -100,6 +105,7 @@ function hydrate(
     lastError: parsed.lastError ?? null,
     model: parsed.model ?? null,
     effort: parsed.effort ?? null,
+    serviceTier: parsed.serviceTier ?? null,
     // Absent on every record written before this field existed, which is
     // exactly the population that must migrate.
     pinResolved: parsed.pinResolved ?? false,
@@ -178,7 +184,7 @@ export function clearBridgeErrorState(workspacePath: string): BridgeThreadRecord
  * stored record is kept so the counter carries forward. Next prompt
  * creates a fresh Codex thread with S<N+1>.
  *
- * Model and effort are dropped along with the thread. A pin belongs to
+ * Model, effort, and speed are dropped along with the thread. A pin belongs to
  * the session that carried it, so S<N+1> is born on whatever Codex
  * recommends at that moment rather than inheriting the choice its
  * predecessor made. That is what makes "delete the session" the way a
@@ -192,6 +198,7 @@ export function resetBridgeThread(workspacePath: string): BridgeThreadRecord {
     lastResetAt: new Date().toISOString(),
     model: null,
     effort: null,
+    serviceTier: null,
     pinResolved: true,
   };
   saveBridgeThreadRecord(next);

@@ -80,6 +80,7 @@ export function wipeWorkspaceEpicHandshakeState(workspacePath: string): void {
         ...record,
         model: null,
         effort: null,
+        serviceTier: null,
         pinResolved: true,
       });
     }

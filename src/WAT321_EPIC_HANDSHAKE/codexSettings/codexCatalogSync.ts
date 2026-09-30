@@ -3,6 +3,7 @@ import {
   setCodexCatalog,
   type CodexCatalogEntry,
   type CodexModelUpgrade,
+  type CodexServiceTier,
 } from "../../shared/providers/codex/modelCatalog";
 import { writePersistedCatalog } from "../../shared/providers/codex/modelCatalogStore";
 import {
@@ -90,6 +91,16 @@ function toCatalogEntry(entry: ModelListEntry): CodexCatalogEntry | null {
     }
   }
 
+  const tiers: CodexServiceTier[] = [];
+  if (Array.isArray(entry.serviceTiers)) {
+    for (const tier of entry.serviceTiers) {
+      if (typeof tier !== "object" || tier === null) continue;
+      const id = asString(tier.id);
+      if (id === null) continue;
+      tiers.push({ id, name: asString(tier.name) ?? id, description: asString(tier.description) ?? "" });
+    }
+  }
+
   return {
     slug,
     displayName: asString(entry.displayName) ?? slug,
@@ -97,6 +108,7 @@ function toCatalogEntry(entry: ModelListEntry): CodexCatalogEntry | null {
     defaultEffort: asString(entry.defaultReasoningEffort),
     supportedEfforts: efforts,
     upgrade: upgradeFromRpc(entry),
+    serviceTiers: tiers,
     hidden: entry.hidden === true,
     isDefault: entry.isDefault === true,
   };

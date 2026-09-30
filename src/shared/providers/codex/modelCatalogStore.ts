@@ -97,7 +97,12 @@ export function readPersistedCatalog(
     // truncated sidecar must not reach the picker as a row with no slug.
     const entries = parsed.entries
       .filter((e) => typeof e?.slug === "string" && e.slug.length > 0)
-      .map((e) => ({ ...e, upgrade: normalizeUpgrade(e.upgrade) }));
+      .map((e) => ({
+        ...e,
+        upgrade: normalizeUpgrade(e.upgrade),
+        // A sidecar written before tiers were bound has no such key.
+        serviceTiers: Array.isArray(e.serviceTiers) ? e.serviceTiers : [],
+      }));
     if (entries.length === 0) return null;
     const fetchedAt =
       typeof parsed.fetchedAt === "number" &&

@@ -144,6 +144,7 @@ export function clearBridgeThreadRecord(
     lastSuccessAt: null,
     model: null,
     effort: null,
+    serviceTier: null,
     pinResolved: true,
   };
   if (!writeFileAtomic(recordPath, JSON.stringify(next, null, 2))) {

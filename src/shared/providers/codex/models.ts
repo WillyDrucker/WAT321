@@ -5,6 +5,7 @@ import {
   type CodexCatalogEntry,
   type CodexModelInfo,
   type CodexModelUpgrade,
+  type CodexServiceTier,
 } from "./modelCatalog";
 import {
   cacheFileEffortLevels,
@@ -158,6 +159,21 @@ export function getCodexModelInfo(slug: string): CodexModelInfo | null {
   return cacheFileModelInfo(slug);
 }
 
+/** The first speed tier beyond standard the model offers, which is Fast
+ * on every model today. Null when it offers none or no source describes
+ * the model, so the Speed row only appears where Fast can really run. */
+export function codexFastTier(slug: string | null): CodexServiceTier | null {
+  if (slug === null) return null;
+  return getCodexModelInfo(slug)?.serviceTiers[0] ?? null;
+}
+
+/** True when the model offers this tier. False for a model no source
+ * describes: Codex drops an unknown tier without an error, so a tier we
+ * cannot confirm must fall back to standard rather than be trusted. */
+export function codexModelOffersServiceTier(slug: string, tier: string): boolean {
+  return getCodexModelInfo(slug)?.serviceTiers.some((t) => t.id === tier) ?? false;
+}
+
 /** The models the picker offers by default: what Codex itself shows.
  * `model/list` returns them in Codex's own recommended order, so no
  * sort is needed on that path. The file path filters and sorts. */
@@ -194,6 +210,7 @@ function toPlainInfo(entry: CodexCatalogEntry): CodexModelInfo {
     defaultEffort: entry.defaultEffort,
     supportedEfforts: entry.supportedEfforts,
     upgrade: entry.upgrade,
+    serviceTiers: entry.serviceTiers,
   };
 }
 
@@ -205,6 +222,7 @@ function slugOnlyInfo(slug: string): CodexModelInfo {
     defaultEffort: null,
     supportedEfforts: [],
     upgrade: null,
+    serviceTiers: [],
   };
 }
 

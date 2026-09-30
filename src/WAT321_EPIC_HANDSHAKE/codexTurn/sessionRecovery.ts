@@ -211,6 +211,9 @@ export function recoverBridgeThread(
     // advertise.
     model: recoveredModelSlug(session.threadId),
     effort: null,
+    // A recovered session is a different thread, so it starts at
+    // standard speed like any session the user did not tune.
+    serviceTier: null,
     // Decided here, from the recovered session's own rollout. Leaving it
     // unresolved would send `readSessionPin` back through legacy-flag
     // migration, where a surviving flag outranks the rollout and could
