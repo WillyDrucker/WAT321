@@ -47,16 +47,34 @@ function claudeDisplayName(id: string): string {
   return `${family} ${parts.version.join(".")}`;
 }
 
-/** Claude models with a 1M-token context: every Fable and Mythos, and
- * Opus / Sonnet from the 4 generation on. Haiku and older families stay
- * at 200K. The transcript names the model but never its window, so this
- * table is the only source and a miss under-reports by five times. */
+/** Claude models that run at 1M in Claude Code with no variant to pick:
+ * every Fable and Mythos, Opus from 4.7, and Sonnet from 5. Everything
+ * else runs at 200K: Opus 4 through 4.5, Sonnet 4 and 4.5 (their 1M
+ * beta is retired), every Haiku, and Opus 4.6 and Sonnet 4.6 unless the
+ * user picked their `[1m]` variant. An id carrying the `[1m]` marker is
+ * 1M whatever its family. The transcript names the model but never its
+ * window, so this table is the main source and a miss misreports by
+ * five times. */
 function isMillionContextClaude(id: string): boolean {
+  if (id.toLowerCase().endsWith("[1m]")) return true;
   const parts = claudeIdParts(id);
   if (parts === null) return false;
   if (parts.family === "fable" || parts.family === "mythos") return true;
-  const major = parts.version[0] ?? 0;
-  return (parts.family === "opus" || parts.family === "sonnet") && major >= 4;
+  const [major = 0, minor = 0] = parts.version;
+  if (parts.family === "opus") return major > 4 || (major === 4 && minor >= 7);
+  if (parts.family === "sonnet") return major >= 5;
+  return false;
+}
+
+/** Opus 4.6 and Sonnet 4.6: 200K in Claude Code by default, 1M only on
+ * their `[1m]` variant, and the transcript names both the same way. The
+ * session token service settles which one a session runs from signals
+ * outside the id. */
+export function claudeReachesMillionOnVariant(id: string): boolean {
+  const parts = claudeIdParts(id);
+  if (parts === null) return false;
+  const [major, minor] = parts.version;
+  return (parts.family === "opus" || parts.family === "sonnet") && major === 4 && minor === 6;
 }
 
 /** Registry of known model context windows. Checked in order -

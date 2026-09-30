@@ -1,7 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { resolveContextWindow } from "../engine/contracts";
 import { readTail } from "../engine/fs/fileReaders";
 import { logNotifEvent } from "../engine/notifEventLog";
 import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
@@ -23,6 +22,7 @@ import {
   walkWorkspaceSessions,
   type SessionCandidate,
 } from "./transcriptDiscovery";
+import { SessionContextWindow } from "./sessionContextWindow";
 import { TranscriptFactsCache } from "./transcriptFactsCache";
 import { classifyClaudeTurn } from "./turnClassifier";
 import { parseTurnInfo } from "./turnInfoParser";
@@ -37,6 +37,7 @@ import { parseTurnInfo } from "./turnInfoParser";
 export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetState> {
   private readonly transcripts: ActiveTranscriptResolver;
   private readonly facts = new TranscriptFactsCache();
+  private readonly windows = new SessionContextWindow();
   /** Smoothed tokens-per-second tracker. Time axis is transcript mtime
    * (not Date.now()) so idle stretches between writes contribute zero
    * seconds to the denominator. See `shared/sessionTokens/tpsTracker.ts`
@@ -110,6 +111,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
   reset(): void {
     this.transcripts.reset();
     this.facts.reset();
+    this.windows.reset();
     this.compactStateMachine.reset();
     this.sessionsWatcher.close();
     this.settingsWatcher.close();
@@ -236,14 +238,14 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       return;
     }
 
-    const contextWindowSize = resolveContextWindow(usage.modelId);
-    const facts = this.facts.read(transcriptPath, contextWindowSize, now);
-
     const contextUsed =
       usage.inputTokens +
       usage.cacheCreationTokens +
       usage.cacheReadTokens +
       usage.outputTokens;
+
+    const contextWindowSize = this.windows.windowFor(sessionId, usage.modelId, contextUsed);
+    const facts = this.facts.read(transcriptPath, contextWindowSize, now);
 
     const tokensPerSecond = this.tpsTracker.add(sessionId, mtime, contextUsed);
     const turnState = classifyClaudeTurn(tail);
