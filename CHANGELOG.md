@@ -5,7 +5,15 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.34] - unreleased
+## [1.5.34] - 2026-09-29
+
+### Added
+
+- **Codex Model Settings has a Speed row, so you can switch Codex to its Fast tier with one click.** OpenAI's Fast tier runs about twice as fast and uses more of your Codex limit. The row sits under Effort, reads Standard until you click it, and appears only on models that offer Fast, which today is all of them. Your choice belongs to the session like model and effort: it survives restarts, follows you to another model that offers it, and goes back to Standard when you reset or delete the session. The bridge always tells Codex which speed to use, so a Fast setting in your own Codex app never quietly speeds up bridge prompts.
+
+### Fixed
+
+- **Older Claude models are measured against their real 200K context window.** Claude Code runs Opus 4 through 4.6 and Sonnet 4 through 4.6 at 200K, but WAT321 counted all of them as 1M, so the bar filled five times too slowly and auto-compact arrived long before the hover said it would. If you picked the 1M variant of Opus 4.6 or Sonnet 4.6, WAT321 notices from your Claude Code model setting, or as soon as the session grows past 200K. Opus 4.7 and later, Sonnet 5 and later, Fable, and Mythos stay at 1M.
 
 ## [1.5.33] - 2026-09-29
 
