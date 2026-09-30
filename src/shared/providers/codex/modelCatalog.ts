@@ -49,6 +49,14 @@ export interface CodexModelUpgrade {
   retirementAtMs: number | null;
 }
 
+/** A speed tier a model offers beyond standard, such as Fast. `id` is
+ * what `turn/start` takes as `serviceTier`, `name` what the user sees. */
+export interface CodexServiceTier {
+  id: string;
+  name: string;
+  description: string;
+}
+
 /** Shape the model and effort pickers render from. Mirrors what both
  * the `model/list` RPC and the cache file can supply, so either source
  * can populate it. */
@@ -59,6 +67,9 @@ export interface CodexModelInfo {
   defaultEffort: string | null;
   supportedEfforts: { effort: string; description: string }[];
   upgrade: CodexModelUpgrade | null;
+  /** Empty when the model offers only standard speed, or when the
+   * source that described it predates tiers. */
+  serviceTiers: CodexServiceTier[];
 }
 
 /** A catalog row. Adds the two facts only `model/list` carries:

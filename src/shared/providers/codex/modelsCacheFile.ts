@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { CodexModelInfo, CodexModelUpgrade } from "./modelCatalog";
+import type { CodexModelInfo, CodexModelUpgrade, CodexServiceTier } from "./modelCatalog";
 
 /**
  * Reader for `~/.codex/models_cache.json`, the DISPLAY fallback behind
@@ -41,6 +41,7 @@ interface ModelsCacheEntry {
   visibility?: string;
   priority?: number;
   upgrade?: ModelsCacheUpgrade | null;
+  service_tiers?: { id?: string; name?: string; description?: string }[];
 }
 
 interface ModelsCacheFile {
@@ -87,6 +88,15 @@ function toModelInfo(entry: ModelsCacheEntry): CodexModelInfo | null {
       )
       .map((e) => ({ effort: e.effort, description: e.description ?? "" })),
     upgrade: upgradeFromCache(entry.upgrade),
+    serviceTiers: (entry.service_tiers ?? [])
+      .filter((t): t is { id: string; name?: string; description?: string } =>
+        typeof t?.id === "string" && t.id.length > 0
+      )
+      .map((t): CodexServiceTier => ({
+        id: t.id,
+        name: t.name ?? t.id,
+        description: t.description ?? "",
+      })),
   };
 }
 

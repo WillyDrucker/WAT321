@@ -1,13 +1,14 @@
 import { readCodexSandboxOverride } from "../codexSettings/codexRuntimeOverrides";
 import { readSessionPin } from "../codexSettings/codexSessionSettings";
+import { readSessionServiceTier } from "../codexSettings/codexSessionSpeed";
 import type { Envelope } from "./envelope";
 import type { TurnStartParams } from "../appServer/protocol";
 
 /**
  * The `turn/start` request body, rebuilt on every turn so the Codex
  * Model Settings picker takes effect on the next prompt without a
- * thread reset. Sandbox is workspace-scoped, model and effort belong
- * to the session. Approval policy stays pinned to `never` because the
+ * thread reset. Sandbox is workspace-scoped, model, effort, and speed
+ * belong to the session. Approval policy stays pinned to `never` because the
  * bridge has no UI to relay Codex's approval prompts back mid-turn.
  *
  * Sending model on every turn is what makes the pin real. Codex fixes
@@ -34,5 +35,6 @@ export function buildTurnStartParams(
     approvalPolicy: "never",
     model: pin.model,
     effort: pin.effort,
+    serviceTier: readSessionServiceTier(workspacePath),
   };
 }

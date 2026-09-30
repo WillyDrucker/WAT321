@@ -1,5 +1,7 @@
 import type { CodexEffortLevel } from "../../engine/bridgeTypes";
+import type { CodexServiceTier } from "../../shared/providers/codex/modelCatalog";
 import {
+  codexFastTier,
   defaultCodexModelSlug,
   getCodexModelInfo,
   isUnlistedCodexModel,
@@ -15,13 +17,15 @@ import {
   pinMatchesCodexDefault,
   readSessionPin,
 } from "./codexSessionSettings";
+import { readSessionServiceTier, STANDARD_SERVICE_TIER } from "./codexSessionSpeed";
 import { currentWorkspacePath } from "../statusBar/statusBarState";
 
 /**
  * Baseline + label helpers for the Codex Model Settings picker.
  *
  * "Baseline" is what CODEX recommends: `model/list`'s `isDefault` model,
- * that model's own `defaultReasoningEffort`, and a read-only sandbox.
+ * that model's own `defaultReasoningEffort`, standard speed, and a
+ * read-only sandbox.
  * The `*default*` tag marks rows matching it. Nothing here defines a
  * default of WAT321's own, and `~/.codex/config.toml` is not read.
  *
@@ -114,6 +118,35 @@ export function effortRowLabel(effort: CodexEffortLevel | null): string {
   return `EFFORT: ${effective.toUpperCase()}${isDefault ? " *default*" : ""}`;
 }
 
+/** The Speed row's state: the faster tier the session's model offers and
+ * whether the session runs it. Null when the model offers nothing beyond
+ * standard, and the row stays hidden. */
+interface SpeedState {
+  fast: CodexServiceTier;
+  on: boolean;
+}
+
+export function sessionSpeedState(): SpeedState | null {
+  const workspacePath = currentWorkspacePathOrSentinel();
+  const fast = codexFastTier(readSessionPin(workspacePath).model ?? baselineModel());
+  if (fast === null) return null;
+  return { fast, on: readSessionServiceTier(workspacePath) === fast.id };
+}
+
+/** Standard is Codex's own default on every model (`defaultServiceTier`
+ * is null), so it carries the `*default*` tag. */
+export function speedRowLabel(state: SpeedState): string {
+  return state.on
+    ? `SPEED: ${state.fast.name.toUpperCase()}`
+    : "SPEED: STANDARD *default*";
+}
+
+export function speedRowDescription(state: SpeedState): string {
+  if (state.on) return "Click to switch to STANDARD.";
+  const detail = state.fast.description.length > 0 ? `: ${state.fast.description}` : "";
+  return `Click to switch to ${state.fast.name.toUpperCase()}${detail}.`;
+}
+
 export function sandboxIsDefault(state: CodexSandboxState): boolean {
   return state === "read-only";
 }
@@ -150,5 +183,8 @@ export function baselineEffort(): CodexEffortLevel | null {
 export function everythingAtDefault(): boolean {
   const sandbox = readCodexSandboxOverride(currentWsHash());
   if (!sandboxIsDefault(sandbox)) return false;
+  if (readSessionServiceTier(currentWorkspacePathOrSentinel()) !== STANDARD_SERVICE_TIER) {
+    return false;
+  }
   return pinMatchesCodexDefault(readSessionPin(currentWorkspacePathOrSentinel()));
 }

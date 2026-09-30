@@ -12,6 +12,9 @@ import {
   modelRowLabel,
   retirementNote,
   sandboxIsDefault,
+  sessionSpeedState,
+  speedRowDescription,
+  speedRowLabel,
 } from "./codexDefaultsBaseline";
 import { pickEffort } from "./codexEffortPicker";
 import { pickModel } from "./codexModelPicker";
@@ -25,6 +28,7 @@ import {
   writeSessionEffort,
   writeSessionModel,
 } from "./codexSessionSettings";
+import { writeSessionServiceTier } from "./codexSessionSpeed";
 import { EPIC_HANDSHAKE_MENU_TEXT, type ActionContext, type DispatchAction } from "../statusBar/menuActions";
 import { makeBackItem, makeCancelItem, makePauseResumeItem } from "../../shared/ui/menuRows";
 import { epicHandshakeLogger } from "../epicHandshakeLogger";
@@ -32,13 +36,15 @@ import { isPaused, setPaused } from "../statusBar/statusBarState";
 
 /**
  * Combined "Codex Model Settings" picker - one entry point for all
- * three values the bridge passes on every `turn/start`:
+ * four values the bridge passes on every `turn/start`:
  *   - sandbox  (Full-Access | Read-Only)
  *   - model    (any non-hidden slug the running app-server advertises,
  *              re-asked when the answer is old or on the REFRESH row,
  *              with a retirement notice on models OpenAI is winding down)
  *   - effort   (whatever the SELECTED model advertises, so `max` and
  *              `ultra` appear only on the models that advertise them)
+ *   - speed    (Standard | Fast, a toggle shown only when the selected
+ *              model offers a tier beyond standard)
  *
  * Each row shows the current value. `*default*` marks rows matching
  * CODEX's own recommendation: `model/list`'s `isDefault` model, that
@@ -53,7 +59,7 @@ import { isPaused, setPaused } from "../statusBar/statusBarState";
  *
  * Scope differs by row, and the difference is deliberate. Sandbox is a
  * safety posture for a FOLDER, stored in a per-workspace flag file.
- * Model and effort belong to the SESSION, stored on its
+ * Model, effort, and speed belong to the SESSION, stored on its
  * `BridgeThreadRecord`, so S1 keeps what the user last chose across
  * restarts and S2 starts fresh on Codex's recommendation. See
  * `codexSessionSettings.ts`.
@@ -64,7 +70,7 @@ import { isPaused, setPaused } from "../statusBar/statusBarState";
  */
 
 type DefaultsRow = vscode.QuickPickItem & {
-  row: "model" | "effort" | "sandbox" | "back" | "pause" | "resume" | "cancel";
+  row: "model" | "effort" | "speed" | "sandbox" | "back" | "pause" | "resume" | "cancel";
 };
 
 /** Headline for the "CODEX MODEL SETTINGS" row in the sessions
@@ -94,7 +100,11 @@ export function codexDefaultsSubline(): string {
   const modelMark = retirementNote(modelInfo) !== null ? "⚠ " : "";
   const effort = pin.effort ?? baselineEffort();
   const effortLabel = effort === null ? "Default" : capitalizeFirst(effort);
-  return `${sandboxLabel} · ${modelMark}${modelLabel} · ${effortLabel}`;
+  // Speed shows only when it departs from standard, so the common case
+  // keeps the three-part subline.
+  const speed = sessionSpeedState();
+  const speedSegment = speed?.on === true ? ` · ${speed.fast.name}` : "";
+  return `${sandboxLabel} · ${modelMark}${modelLabel} · ${effortLabel}${speedSegment}`;
 }
 
 export async function showCodexDefaultsPicker(
@@ -127,6 +137,7 @@ export async function showCodexDefaultsPicker(
   while (true) {
     const { model, effort } = readSessionPin(workspacePath);
     const sandbox = readCodexSandboxOverride(wsHash);
+    const speed = sessionSpeedState();
 
     const paused = isPaused();
     const pauseItem = makePauseResumeItem(paused, EPIC_HANDSHAKE_MENU_TEXT);
@@ -163,6 +174,16 @@ export async function showCodexDefaultsPicker(
         iconPath: new vscode.ThemeIcon("dashboard"),
         row: "effort",
       },
+      ...(speed !== null
+        ? [
+            {
+              label: speedRowLabel(speed),
+              description: speedRowDescription(speed),
+              iconPath: new vscode.ThemeIcon("zap"),
+              row: "speed" as const,
+            },
+          ]
+        : []),
       {
         label: `SANDBOX PERMISSION: ${sandboxLabel}${sandboxDefaultTag}`,
         description: `Click to switch to ${sandboxNext}.`,
@@ -207,6 +228,10 @@ export async function showCodexDefaultsPicker(
       // and `ultra` from a session running 5.6 Sol.
       const result = await pickEffort(effort, model);
       if (result.kind === "picked") writeSessionEffort(workspacePath, result.value);
+      continue;
+    }
+    if (pick.row === "speed" && speed !== null) {
+      writeSessionServiceTier(workspacePath, speed.on ? null : speed.fast.id);
       continue;
     }
     if (pick.row === "sandbox") {

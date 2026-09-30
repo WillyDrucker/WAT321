@@ -1,5 +1,6 @@
 import type { CodexEffortLevel } from "../../engine/bridgeTypes";
 import {
+  codexModelOffersServiceTier,
   defaultCodexEffortLevel,
   defaultCodexModelSlug,
   getCodexModelInfo,
@@ -223,6 +224,9 @@ function modelSupportsEffort(slug: string, effort: CodexEffortLevel): boolean {
  * exists on 5.6 Sol and not on 5.6 Luna, and carrying it across would
  * produce a pairing Codex rejects mid-turn.
  *
+ * The speed tier follows the same rule: kept when the incoming model
+ * offers it, dropped to standard when it does not.
+ *
  * Writing before any session exists is legal and useful: the record is
  * created with a null `threadId`, and `spawnFreshThread` honors the pin
  * instead of overwriting it. */
@@ -233,10 +237,13 @@ export function writeSessionModel(workspacePath: string, slug: string): void {
     typeof current === "string" &&
     isCodexEffortLevel(current) &&
     modelSupportsEffort(slug, current);
+  const tier = record.serviceTier ?? null;
+  const keepTier = tier !== null && codexModelOffersServiceTier(slug, tier);
   saveBridgeThreadRecord({
     ...record,
     model: slug,
     effort: keepCurrent ? current : defaultEffortForModel(slug),
+    serviceTier: keepTier ? tier : null,
     pinResolved: true,
   });
 }

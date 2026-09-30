@@ -70,6 +70,21 @@ function readSettingsEnv(key: string): string | null {
   }
 }
 
+/** True when Claude Code's `model` setting names a `[1m]` variant, such
+ * as `sonnet[1m]` or `claude-opus-4-6[1m]`. `/model` stores the pick
+ * there, and the transcript never records the suffix. Lossy, false on
+ * any read or parse failure. */
+export function modelSettingSelectsMillionVariant(): boolean {
+  if (!existsSync(SETTINGS_PATH)) return false;
+  try {
+    const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
+    const model = settings.model;
+    return typeof model === "string" && model.trim().toLowerCase().endsWith("[1m]");
+  } catch {
+    return false;
+  }
+}
+
 /** Raw `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` as a string, or null if
  * the file is absent, unreadable, or the key is not set. Lossy - any
  * read failure collapses to null. Safe for display paths. */
