@@ -6,24 +6,24 @@ import type { EngineContext } from "./engine/engineContext";
 import { bridgeSessionResponse } from "./engine/sessionResponseBridge";
 import { SETTING } from "./engine/settingsKeys";
 import { isNotificationsEnabled, subscribeToNotifications } from "./engine/toastNotifier";
-import { ClaudeUsageSharedService } from "./shared/claude-usage/claudeUsageService";
-import { CodexUsageSharedService } from "./shared/codex-usage/codexUsageService";
+import { ClaudeUsageSharedService } from "./shared/claudeUsage/claudeUsageService";
+import { CodexUsageSharedService } from "./shared/codexUsage/codexUsageService";
 import { readTail } from "./engine/fs/fileReaders";
 import { activateWidget } from "./shared/usageWidgetActivation";
-import { parseLastAssistantText as parseCodexAssistantText } from "./shared/codex-rollout/assistantTextParser";
-import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/parsers";
+import { parseLastAssistantText as parseCodexAssistantText } from "./shared/codexRollout/assistantTextParser";
+import { parseLastAssistantText as parseClaudeAssistantText } from "./WAT321_CLAUDE_SESSION_TOKENS/transcriptParsers";
 import { ClaudeSessionTokenService } from "./WAT321_CLAUDE_SESSION_TOKENS/claudeSessionTokenService";
-import { isClaudeTurnComplete } from "./WAT321_CLAUDE_SESSION_TOKENS/turnClassifier";
-import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/widget";
-import { ClaudeUsageErrorWidget } from "./WAT321_CLAUDE_USAGE_ERROR/widget";
-import { ClaudeUsage5hrWidget } from "./WAT321_CLAUDE_USAGE_5H/widget";
-import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/widget";
-import { isCodexTurnComplete } from "./WAT321_CODEX_SESSION_TOKENS/turnClassifier";
+import { isClaudeTurnComplete } from "./WAT321_CLAUDE_SESSION_TOKENS/claudeTurnClassifier";
+import { ClaudeSessionTokensWidget } from "./WAT321_CLAUDE_SESSION_TOKENS/claudeSessionTokensWidget";
+import { ClaudeUsageErrorWidget } from "./WAT321_CLAUDE_USAGE_ERROR/claudeUsageErrorWidget";
+import { ClaudeUsage5hWidget } from "./WAT321_CLAUDE_USAGE_5H/claudeUsage5hWidget";
+import { ClaudeUsageWeeklyWidget } from "./WAT321_CLAUDE_USAGE_WEEKLY/claudeUsageWeeklyWidget";
+import { isCodexTurnComplete } from "./WAT321_CODEX_SESSION_TOKENS/codexTurnClassifier";
 import { CodexSessionTokenService } from "./WAT321_CODEX_SESSION_TOKENS/codexSessionTokenService";
-import { CodexSessionTokensWidget } from "./WAT321_CODEX_SESSION_TOKENS/widget";
-import { CodexUsageErrorWidget } from "./WAT321_CODEX_USAGE_ERROR/widget";
-import { CodexUsage5hrWidget } from "./WAT321_CODEX_USAGE_5H/widget";
-import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/widget";
+import { CodexSessionTokensWidget } from "./WAT321_CODEX_SESSION_TOKENS/codexSessionTokensWidget";
+import { CodexUsageErrorWidget } from "./WAT321_CODEX_USAGE_ERROR/codexUsageErrorWidget";
+import { CodexUsage5hWidget } from "./WAT321_CODEX_USAGE_5H/codexUsage5hWidget";
+import { CodexUsageWeeklyWidget } from "./WAT321_CODEX_USAGE_WEEKLY/codexUsageWeeklyWidget";
 
 /**
  * Provider registration and activation factories. Each provider
@@ -101,7 +101,7 @@ function buildClaudeGroup(
   usageService.setActivityProbe(() => tokenService.getLastActivityMs());
 
   const disposables: vscode.Disposable[] = [
-    ...activateWidget(usageService, new ClaudeUsage5hrWidget()),
+    ...activateWidget(usageService, new ClaudeUsage5hWidget()),
     ...activateWidget(usageService, new ClaudeUsageErrorWidget()),
     ...activateWidget(usageService, new ClaudeUsageWeeklyWidget()),
     ...activateWidget(tokenService, new ClaudeSessionTokensWidget(bridgeStage)),
@@ -136,7 +136,7 @@ function buildCodexGroup(
   usageService.setActivityProbe(() => tokenService.getLastActivityMs());
 
   const disposables: vscode.Disposable[] = [
-    ...activateWidget(usageService, new CodexUsage5hrWidget()),
+    ...activateWidget(usageService, new CodexUsage5hWidget()),
     ...activateWidget(usageService, new CodexUsageErrorWidget()),
     ...activateWidget(usageService, new CodexUsageWeeklyWidget()),
     ...activateWidget(tokenService, new CodexSessionTokensWidget(bridgeStage)),
