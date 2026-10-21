@@ -1,8 +1,8 @@
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
-import { getRemainingPct } from "../shared/codex-usage/formatters";
-import { buildTooltip } from "../shared/codex-usage/tooltipBuilder";
-import type { CodexUsageResponse } from "../shared/codex-usage/codexUsageTypes";
-import { resolveCodexWindows } from "../shared/codex-usage/windows";
+import { getRemainingPct } from "../shared/codexUsage/codexUsageFormatters";
+import { buildTooltip } from "../shared/codexUsage/codexUsageTooltip";
+import type { CodexUsageResponse } from "../shared/codexUsage/codexUsageTypes";
+import { resolveCodexWindows } from "../shared/codexUsage/codexUsageWindows";
 import { renderCodexBar } from "../shared/ui/heatmap";
 import { getCodexTextColor } from "../shared/ui/textColors";
 import { resolveUsageStyle } from "../shared/ui/usageDisplay";
@@ -11,8 +11,8 @@ import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidge
 /**
  * The leading Codex usage bar. It renders the 5-hour window when Codex
  * publishes one, and the sole surviving window when Codex publishes only
- * one - which is the case today, since OpenAI retired the 5-hour cap and
- * now returns a single weekly limit.
+ * one, as it does on payloads where OpenAI dropped the 5-hour cap in
+ * favor of a single weekly limit.
  *
  * The bar deliberately stays in this slot in both layouts rather than
  * moving to the weekly slot, so it does not wander across the status bar
@@ -64,7 +64,7 @@ const descriptor: UsageWidgetDescriptor<CodexUsageResponse> = {
   },
 };
 
-export class CodexUsage5hrWidget extends UsageWidget<CodexUsageResponse> {
+export class CodexUsage5hWidget extends UsageWidget<CodexUsageResponse> {
   constructor() {
     super(descriptor);
   }

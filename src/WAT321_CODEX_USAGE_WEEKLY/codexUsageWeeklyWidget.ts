@@ -1,8 +1,8 @@
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
-import { getRemainingPct } from "../shared/codex-usage/formatters";
-import { buildTooltip } from "../shared/codex-usage/tooltipBuilder";
-import type { CodexUsageResponse } from "../shared/codex-usage/codexUsageTypes";
-import { resolveCodexWindows } from "../shared/codex-usage/windows";
+import { getRemainingPct } from "../shared/codexUsage/codexUsageFormatters";
+import { buildTooltip } from "../shared/codexUsage/codexUsageTooltip";
+import type { CodexUsageResponse } from "../shared/codexUsage/codexUsageTypes";
+import { resolveCodexWindows } from "../shared/codexUsage/codexUsageWindows";
 import { renderCodexBar } from "../shared/ui/heatmap";
 import { getCodexTextColor } from "../shared/ui/textColors";
 import { resolveUsageStyle } from "../shared/ui/usageDisplay";
@@ -10,18 +10,18 @@ import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidge
 
 /**
  * The trailing Codex usage bar, shown only while Codex publishes two
- * rate-limit windows. OpenAI has retired the 5-hour cap and now returns a
- * single weekly window, so on that payload this widget takes itself off
- * the status bar and the sibling 5h widget carries the surviving limit
+ * rate-limit windows. On payloads where OpenAI drops the 5-hour cap in
+ * favor of a single weekly window, this widget takes itself off the
+ * status bar and the sibling 5h widget carries the surviving limit
  * under a "5h/Weekly" caption.
  *
- * It hid nothing before, which is why the retired window rendered as a
- * permanently full green bar: an absent window reports 0% used, and 0%
- * used floors to 100% remaining.
+ * Hiding matters because an absent window reports 0% used, and 0% used
+ * floors to 100% remaining, so a missing window would otherwise render
+ * as a permanently full green bar.
  *
  * Hiding is driven entirely by the payload in hand, so if OpenAI restores
  * the second window this widget reappears on the next poll. Nothing is
- * remembered and nothing needs resetting. See `shared/codex-usage/windows.ts`.
+ * remembered and nothing needs resetting. See `shared/codexUsage/codexUsageWindows.ts`.
  */
 
 function weeklyUsedPct(data: CodexUsageResponse): number {

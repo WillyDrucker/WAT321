@@ -9,7 +9,7 @@ import {
   persistRollout,
   readPersistedRollout,
 } from "./activeRolloutStore";
-import { extractSessionId } from "./parsers";
+import { sessionIdFromPath } from "../engine/transcriptSessionId";
 import { findLatestRollout } from "./rolloutDiscovery";
 import type { RolloutCandidate } from "./rolloutRanking";
 
@@ -107,8 +107,8 @@ export class ActiveRolloutTracker {
       provider: "codex",
       fromPath: prevPath,
       toPath: path,
-      fromSessionId: prevPath ? extractSessionId(prevPath) : null,
-      toSessionId: extractSessionId(path),
+      fromSessionId: prevPath ? sessionIdFromPath("codex", prevPath) : null,
+      toSessionId: sessionIdFromPath("codex", path),
       source: "rollout-scan",
     });
     persistRollout(path);

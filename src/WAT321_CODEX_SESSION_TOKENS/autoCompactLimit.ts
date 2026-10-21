@@ -1,46 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { CODEX_MODELS_CACHE_PATH } from "../shared/providers/codex/codexHome";
 
 /**
- * Resolves the Codex session token ceiling that matches Codex's own
- * native hover display. Upstream Codex computes this as
+ * The Codex session token ceiling, matching Codex's own hover:
+ * `context_window * effective_context_window_percent / 100`, both read
+ * per slug from `~/.codex/models_cache.json` because the `model/list`
+ * RPC carries no context window at all. Window sizes are OpenAI's to
+ * change per model and per release, so neither value is assumed, and
+ * the cache's `max_context_window` is a different ceiling. When the
+ * cache lacks the active slug (another codex binary overwrote it), the
+ * rollout's reported `model_context_window` stands in, which upstream
+ * already computes as the effective window.
  *
- *   context_window * effective_context_window_percent / 100
- *
- * which for a `context_window = 272000` model at
- * `effective_context_window_percent = 95` works out to 258,400. Window
- * sizes are OpenAI's to change per model and over time (one 5.6 slug
- * has reported both 372000 and 272000 across releases), so both values
- * are always read per slug rather than assumed. The cache's newer
- * `max_context_window` is a different ceiling and is not what Codex's
- * own hover measures against.
- * This is the "usable input budget" - the raw context window minus
- * reserved headroom for system prompts, tool schemas, and model
- * output. It is NOT the same as the literal compact trigger, which
- * upstream fires at `context_window * 0.9 = 244,800`. The session
- * token widget warns near the compact trigger via its own 80 / 85
- * threshold rule in `getSessionTokenColor`, so the ceiling we return
- * here is purely the display denominator and should match Codex
- * native byte-for-byte.
- *
- * Preferred source is `~/.codex/models_cache.json` for the active
- * model slug, which carries the authoritative `context_window` and
- * `effective_context_window_percent` fields. Falls back to the
- * reported context window value from the rollout's `token_count`
- * event, which upstream already exposes as the effective window
- * (so no further math is needed on the fallback path).
- *
- * This is the one Codex model fact that CANNOT move onto the live
- * `model/list` catalog in `shared/providers/codex/modelCatalog.ts`:
- * the RPC carries no `context_window` field at all (verified against
- * codex-cli 0.142.5, 0.144.x, and 0.153.x). Reading the shared cache
- * file here is therefore deliberate, not an oversight.
- *
- * It degrades safely. When another codex binary overwrites that file
- * with a catalog lacking the active slug, the lookup misses and we
- * return the rollout's reported window, which is already the effective
- * value. So a clobbered cache costs us nothing on this path.
+ * This ceiling is the display denominator, the usable input budget
+ * after reserved headroom. The compact trigger itself fires earlier,
+ * at `context_window * 0.9`, and `getSessionTokenColor` warns ahead of
+ * it with its own thresholds.
  */
 
 /** Codex subtracts this baseline from both numerator and denominator
@@ -68,11 +43,10 @@ export function resolveAutoCompactTokens(
 }
 
 function readEffectiveFromModelsCache(modelSlug: string): number | null {
-  const modelsCachePath = join(homedir(), ".codex", "models_cache.json");
-  if (!existsSync(modelsCachePath)) return null;
+  if (!existsSync(CODEX_MODELS_CACHE_PATH)) return null;
 
   try {
-    const raw = readFileSync(modelsCachePath, "utf8");
+    const raw = readFileSync(CODEX_MODELS_CACHE_PATH, "utf8");
     const parsed = JSON.parse(raw) as {
       models?: Array<{
         slug?: string;

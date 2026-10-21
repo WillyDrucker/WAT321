@@ -1,29 +1,13 @@
 import { readHead } from "../engine/fs/fileReaders";
-import type {
-  CacheEvent,
-  CacheEventKind,
-  ClaudeTurnInfo,
-} from "../shared/ui/sessionTokens/sessionTokenWidget";
 
 /**
  * Small extractors for Claude Code's `.jsonl` transcripts. Each
  * function walks the tail / head looking for a specific field
  * (last usage, last assistant text, cwd, first user message) and
- * returns it - no aggregation, no classification.
- *
- * Bigger concerns live in sibling files:
- *   - `turnInfoParser.ts` - per-turn aggregation (parseTurnInfo,
- *     parseRecentCompactBoundaries)
- *   - `cacheEventParser.ts` - LOAD/MISS classification
- *     (parseMostRecentCacheEvent)
- *
- * The shared display types (`ClaudeTurnInfo`, `CacheEvent`,
- * `CacheEventKind`) are re-exported here so callers in this tool
- * can import them from `./parsers` without knowing about the
- * shared-ui module.
+ * returns it - no aggregation, no classification. Per-turn
+ * aggregation lives in `turnInfoParser.ts` and LOAD/MISS
+ * classification in `cacheEventParser.ts`.
  */
-
-export type { CacheEvent, CacheEventKind, ClaudeTurnInfo };
 
 /** Extract text from a Claude message content field. Handles both
  * `content: "string"` and `content: [{type: "text", text: "..."}]`. */
@@ -140,7 +124,7 @@ export function parseLastAssistantText(tail: string): string {
  * Claude transcripts include a `cwd` field on every entry, so the
  * first parseable line is enough. Returns null when the file cannot
  * be read or no `cwd` is found. Symmetric with Codex's `parseCwd`
- * (see `WAT321_CODEX_SESSION_TOKENS/parsers.ts`) so callers using both
+ * (see `WAT321_CODEX_SESSION_TOKENS/rolloutParsers.ts`) so callers using both
  * providers handle the miss case the same way.
  *
  * Used by the cross-project "last known" fallback so the widget can

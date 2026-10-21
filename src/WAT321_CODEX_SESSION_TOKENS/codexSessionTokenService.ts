@@ -1,25 +1,22 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { readTail } from "../engine/fs/fileReaders";
+import { sessionIdFromPath } from "../engine/transcriptSessionId";
 import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
-import { parseStageInfo } from "../shared/codex-rollout/stageInfoParser";
+import { parseStageInfo } from "../shared/codexRollout/stageInfoParser";
 import { CompactFlashMachine } from "../shared/polling/compactFlashMachine";
 import { SESSION_TOKEN_POLL_MS } from "../shared/polling/pollingTimings";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
+import { CODEX_HOME_DIR } from "../shared/providers/codex/codexHome";
 import { NonActiveCompletionTracker } from "../shared/sessionTokens/nonActiveCompletionTracker";
 import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
 import { ActiveRolloutTracker } from "./activeRolloutTracker";
 import type { CodexResolvedSession, CodexTokenWidgetState } from "./codexSessionTokenTypes";
-import {
-  extractSessionId,
-  parseLastCompactTimestamp,
-  parseLastTokenCount,
-} from "./parsers";
+import { parseLastCompactTimestamp, parseLastTokenCount } from "./rolloutParsers";
 import { getSessionTitle } from "./rolloutDiscovery";
 import type { RolloutCandidate } from "./rolloutRanking";
 import { RolloutFactsCache } from "./rolloutFactsCache";
-import { classifyCodexTurn } from "./turnClassifier";
+import { classifyCodexTurn } from "./codexTurnClassifier";
 
 /** The shared `SESSION_TOKEN_POLL_MS` cadence is a safety net for
  * session discovery and missed watcher events. Which rollout is
@@ -45,11 +42,11 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       turnStateOf: (c) => c.turnState,
       mtimeOf: (c) => c.mtime,
       buildCompletion: (c, now) => ({
-        sessionId: extractSessionId(c.path),
+        sessionId: sessionIdFromPath("codex", c.path),
         transcriptPath: c.path,
         label: c.cwd ? basename(c.cwd) : "Codex",
         sessionTitle:
-          getSessionTitle(join(homedir(), ".codex"), extractSessionId(c.path)) ?? "",
+          getSessionTitle(CODEX_HOME_DIR, sessionIdFromPath("codex", c.path)) ?? "",
         completedAtMs: now,
       }),
     });
@@ -77,7 +74,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
   constructor(workspacePath: string) {
     super(
       workspacePath,
-      existsSync(join(homedir(), ".codex"))
+      existsSync(CODEX_HOME_DIR)
         ? { status: "no-session" }
         : { status: "not-installed" },
       SESSION_TOKEN_POLL_MS
@@ -121,7 +118,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     if (this.disposed) return;
 
     const now = Date.now();
-    const codexDir = join(homedir(), ".codex");
+    const codexDir = CODEX_HOME_DIR;
 
     if (!existsSync(codexDir)) {
       this.rollout.close();
@@ -164,7 +161,7 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       return;
     }
 
-    const sessionId = extractSessionId(rolloutPath);
+    const sessionId = sessionIdFromPath("codex", rolloutPath);
     const facts = this.facts.read({
       codexDir,
       rolloutPath,

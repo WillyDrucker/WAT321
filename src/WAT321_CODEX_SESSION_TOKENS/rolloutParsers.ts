@@ -1,4 +1,3 @@
-import { basename } from "node:path";
 import { readFirstLine, readHead } from "../engine/fs/fileReaders";
 
 /**
@@ -6,7 +5,7 @@ import { readFirstLine, readHead } from "../engine/fs/fileReaders";
  * live under `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` with one
  * entry per line, each `{ type, payload }` where payload.type names the
  * event kind (session_meta, turn_context, token_count, user_message).
- * Turn-state classification lives in `turnClassifier.ts`.
+ * Turn-state classification lives in `codexTurnClassifier.ts`.
  */
 
 interface LastTokenCount {
@@ -197,35 +196,19 @@ export function extractFirstUserMessage(headContent: string): string {
   return "";
 }
 
-/** Codex rollout filenames are `rollout-YYYY-MM-DDTHH-MM-SS-<uuid>.jsonl`.
- * The session ID is everything after the 7th `-`-separated field. */
-export function extractSessionId(rolloutPath: string): string {
-  const filename = basename(rolloutPath, ".jsonl");
-  const parts = filename.split("-");
-  if (parts.length > 6) return parts.slice(6).join("-");
-  return filename;
-}
 
-/** Walk the tail backwards looking for the most recent compact event.
- * Codex emits two paired entries on every compact (auto-compact at the
- * threshold or `/compact` user invocation):
- *
- *   - `type: "compacted"` (carries the replacement_history payload)
- *   - `type: "event_msg"`, `payload.type: "context_compacted"` (signal-only)
- *
- * Either qualifies. We accept the first match and return its timestamp
- * in ms (epoch). Drives two consumers: the yellow LOAD banner on the
- * trailing render (deliberate context rebuild, not a silent resume) and
+/** Walk the tail backwards for the most recent compact event. Codex
+ * emits two paired entries on every compact (auto or `/compact`):
+ * `type: "compacted"` with the replacement_history payload, and
+ * `type: "event_msg"` with `payload.type: "context_compacted"`, signal
+ * only. Either qualifies and the first match returns its timestamp in
+ * epoch ms. Drives the yellow LOAD banner on the trailing render and
  * the compact-completion flash (`CompactFlashMachine` boundary input).
- * Matching BOTH markers is deliberate for the flash: `compacted` can
- * be a very large line (it carries `replacement_history`) and may be
- * truncated out of the tail window, but the paired `context_compacted`
- * is tiny, always written immediately after, and walked first here -
- * so the flash still fires even when `compacted` is unreadable.
- *
- * Marker-only detection here. Codex doesn't surface cache_creation /
- * cache_read tokens the way Claude does, so the qualifying rule is
- * "a new compact event has been observed" - no numeric ratio gate. */
+ * Matching both markers matters for the flash: `compacted` can be a
+ * very large line that falls outside the tail window, while the paired
+ * `context_compacted` is tiny, written right after, and walked first.
+ * Marker-only: Codex surfaces no cache_creation / cache_read tokens,
+ * so there is no numeric ratio gate. */
 export function parseLastCompactTimestamp(tail: string): number | null {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {

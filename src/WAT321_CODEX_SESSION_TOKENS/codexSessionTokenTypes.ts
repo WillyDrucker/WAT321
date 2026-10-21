@@ -1,4 +1,4 @@
-import type { StageInfo } from "../shared/codex-rollout/turnStageTypes";
+import type { StageInfo } from "../shared/codexRollout/turnStageTypes";
 import type { CompactFlashSnapshot } from "../shared/polling/compactFlashMachine";
 import type { LastEntryKind } from "../shared/turnState";
 
@@ -55,7 +55,7 @@ export interface CodexResolvedSession {
    * `TpsTracker` over cumulative `usage.tokens` (which Codex updates on
    * every mid-turn `token_count` event) against rollout mtime as the
    * time axis. Null when no recent positive sample is available (idle,
-   * no turn yet, file not advancing). Decays after ~30s of no growth so
+   * no turn yet, file not advancing). Decays after 10s of no growth so
    * a pause does not keep showing a stale reading. */
   tokensPerSecond: number | null;
   /** Compact-completion flash snapshot. When `state` is

@@ -110,13 +110,11 @@ export function classifyClaudeTurn(tail: string): LastEntryKind {
         if (hasToolUse) return "assistant-pending";
         // Thinking-only entry: still mid-turn. Extended thinking lands
         // in the transcript as its own assistant entry seconds before
-        // the text it precedes (2-11s observed). It carries no tool_use,
-        // so treating "no tool_use" as done fired a toast right there -
-        // and `parseLastAssistantText` skips entries with no text, so it
-        // walked back and returned the PREVIOUS turn's response. The
-        // user got a toast announcing the last turn's message as this
-        // one's, then a second toast when the real text landed. No text
-        // and no tool call means the model has not said anything yet.
+        // the text it precedes (2-11s observed), with no tool_use and
+        // no text. Treating it as done would fire a toast early, and
+        // `parseLastAssistantText` would skip it and announce the
+        // PREVIOUS turn's text as this one's. No text and no tool call
+        // means the model has not said anything yet.
         if (!hasText) return "assistant-pending";
       }
       return "assistant-done";

@@ -5,7 +5,7 @@ import {
   parseCwd,
   parseFirstTurnContext,
   parseLatestTurnContext,
-} from "./parsers";
+} from "./rolloutParsers";
 import { getSessionTitle } from "./rolloutDiscovery";
 
 /**

@@ -1,6 +1,6 @@
+import type { CompactFlashSnapshot } from "../shared/polling/compactFlashMachine";
 import type { LastEntryKind } from "../shared/turnState";
-import type { CompactSnapshot } from "./compactStateMachine";
-import type { ClaudeTurnInfo } from "./parsers";
+import type { ClaudeTurnInfo } from "../shared/ui/sessionTokens/sessionTokenTypes";
 
 /** Active session entry from ~/.claude/sessions/<pid>.json */
 export interface SessionEntry {
@@ -19,17 +19,14 @@ export interface ResolvedSession {
   effort: string | null; // e.g. "xhigh", null when the transcript records none
   contextUsed: number; // tokens currently in context
   contextWindowSize: number; // 200k or 1M
-  autoCompactPct: number; // e.g. 70
-  /** Real compaction fire point in tokens. Distinct from
-   * `autoCompactPct * contextWindowSize` because recent Claude Code
-   * releases stack a small reserve on the override rather than
-   * replacing the default formula. Widget uses the nominal product
-   * for the bar + "N/M" numerator (that's the user's target) - this
-   * effective value drives the "Auto-Compact at ~X" label so the
-   * advertised fire point matches observed behavior. */
+  /** Real compaction fire point in tokens. Claude Code stacks a small
+   * reserve on the auto-compact override rather than replacing the
+   * default formula, so the widget's bar, percent, and "N/M" numerator
+   * all measure against this value and the "Auto-Compact at ~X" label
+   * matches the observed fire point. */
   autoCompactEffectiveTokens: number;
   source: "live" | "lastKnown"; // live = CLI process active, lastKnown = fallback from transcript mtime
-  lastActiveAt: number; // ms - live: Date.now(), lastKnown: transcript file mtime
+  lastActiveAt: number; // ms, the transcript file mtime
   /** Last transcript entry classification. Drives the active-state
    * indicator. `user` and `assistant-pending` mean a response is in
    * flight. `assistant-done`, `interrupted`, `compact-end`, and
@@ -53,22 +50,16 @@ export interface ResolvedSession {
    * from the same tail read that populated `turnState`. Drives the
    * session-token tooltip richness during active turns. */
   turnInfo: ClaudeTurnInfo;
-  /** Estimated output tokens-per-second from the most recent transcript
-   * delta. Computed by comparing successive transcript snapshots: when
-   * the latest assistant turn's output_tokens count grows between two
-   * polls, divide the delta by the wall-clock gap between transcript
-   * mtimes. Null when no recent delta is available (idle session,
-   * transcript not advancing, or session just started). Decays back
-   * to null after ~30s of no further growth so a long idle does not
-   * keep showing a stale "TPS" reading. */
+  /** Output tokens per second from `TpsTracker`: a rolling window over
+   * successive transcript writes, cleared after an idle gap so a pause
+   * never shows a stale reading. Null until the first positive sample. */
   tokensPerSecond: number | null;
-  /** Compact state machine snapshot. When `state: "in-flight"` the
-   * widget renders an orange progress bar in place of the normal
-   * token display. When `state: "idle"` the widget falls through to
-   * the standard render path. Always present so the widget never has
-   * to null-check - the snapshot itself encodes the idle/in-flight
-   * distinction via its `state` field. */
-  compactState: CompactSnapshot;
+  /** Compact-completion flash snapshot from the shared
+   * `CompactFlashMachine`. While `state` is `"flashing-completion"`
+   * the widget renders the saturated orange bar, and `"idle"` falls
+   * through to the standard render path. Always present so the widget
+   * never null-checks. */
+  compactState: CompactFlashSnapshot;
   /** Snapshot of how many Claude sessions in this workspace are
    * currently open and how many of those have an in-flight turn.
    * `total` counts live `~/.claude/sessions/*.json` process files

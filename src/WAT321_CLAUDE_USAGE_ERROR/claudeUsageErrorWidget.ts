@@ -1,4 +1,4 @@
-import type { UsageResponse } from "../shared/claude-usage/claudeUsageTypes";
+import type { UsageResponse } from "../shared/claudeUsage/claudeUsageTypes";
 import {
   UsageErrorWidget,
   type UsageErrorWidgetDescriptor,

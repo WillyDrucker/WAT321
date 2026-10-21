@@ -8,24 +8,18 @@ import type { LastEntryKind } from "../shared/turnState";
  * notification gate).
  */
 
-/** Classify the last meaningful entry in a Codex rollout tail into
- * one of the turn states used by the session token active indicator.
- * Walks backwards, skips bookkeeping events, returns the first
- * definitive event found:
- *   - `assistant-done` - a completed assistant response OR a turn
- *     ended normally by `task_complete`. Resolves the indicator
- *     instantly and is notification-eligible.
- *   - `interrupted` - a turn ended by `turn_aborted`, which Codex
- *     writes on user interrupt (Esc / Ctrl+C). Resolves the indicator
- *     to idle like done, but the notification gate suppresses it so a
- *     cancelled turn never fires a "Codex finished" toast.
- *   - `assistant-pending` - a tool / function call in flight
- *   - `user` - last event was a user message (user is waiting)
- *   - `unknown` - no definitive event in the tail window
- *
- * Unlike `isCodexTurnComplete` (which biases toward true for
- * notification firing), this biases `unknown` to idle so the thinking
- * indicator does not pin itself on when we cannot tell. */
+/** Classify the last meaningful entry in a Codex rollout tail into a
+ * turn state for the session token active indicator. Walks backwards,
+ * skips bookkeeping events, returns the first definitive event:
+ * `assistant-done` (a completed response or a turn ended by
+ * `task_complete`, resolves the indicator and is notification
+ * eligible), `interrupted` (`turn_aborted` on user Esc / Ctrl+C,
+ * resolves to idle but the notification gate suppresses it so a
+ * cancelled turn never toasts), `assistant-pending` (a tool call in
+ * flight), `user` (the user is waiting), `unknown` (nothing definitive
+ * in the window). Unlike `isCodexTurnComplete`, which biases toward
+ * true for notification firing, this biases `unknown` to idle so the
+ * indicator never pins on when we cannot tell. */
 export function classifyCodexTurn(tail: string): LastEntryKind {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {

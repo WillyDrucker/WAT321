@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "../engine/fs/atomicWrite";
-import { normalizePath } from "../engine/fs/pathIdentity";
+import { isSameWorkspaceTree } from "../engine/fs/pathIdentity";
 import { clientStateDir } from "../engine/wat321Paths";
-import { parseCwd } from "./parsers";
+import { parseCwd } from "./rolloutParsers";
 
 /**
  * Persisted pointer to the Codex rollout this workspace was last
@@ -24,20 +24,6 @@ function storePath(): string {
   return join(clientStateDir(), "codex-active-rollout.json");
 }
 
-/** True when a rollout's recorded cwd belongs to this workspace.
- * Bidirectional, matching the discovery walk's own match so a seeded
- * pointer is judged the same way the walk would judge it. */
-function matchesWorkspace(workspacePath: string, cwd: string): boolean {
-  const wsNorm = normalizePath(workspacePath);
-  const cwdNorm = normalizePath(cwd);
-  return (
-    wsNorm === "" ||
-    cwdNorm === wsNorm ||
-    wsNorm.startsWith(`${cwdNorm}/`) ||
-    cwdNorm.startsWith(`${wsNorm}/`)
-  );
-}
-
 /** Re-validated active rollout for this workspace, or null. Returns a
  * path only when the file still exists AND its recorded cwd still
  * matches this workspace, so a stale or foreign pointer is never
@@ -48,7 +34,7 @@ export function readPersistedRollout(workspacePath: string): string | null {
     const path = (JSON.parse(raw) as { rolloutPath?: unknown }).rolloutPath;
     if (typeof path !== "string" || !existsSync(path)) return null;
     const cwd = parseCwd(path);
-    if (!cwd || !matchesWorkspace(workspacePath, cwd)) return null;
+    if (!cwd || !isSameWorkspaceTree(workspacePath, cwd)) return null;
     return path;
   } catch {
     return null;

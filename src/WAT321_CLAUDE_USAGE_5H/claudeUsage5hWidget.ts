@@ -1,5 +1,5 @@
-import { buildTooltip } from "../shared/claude-usage/tooltipBuilder";
-import type { UsageResponse } from "../shared/claude-usage/claudeUsageTypes";
+import { buildTooltip } from "../shared/claudeUsage/claudeUsageTooltip";
+import type { UsageResponse } from "../shared/claudeUsage/claudeUsageTypes";
 import { renderClaudeBar } from "../shared/ui/heatmap";
 import { getClaudeTextColor } from "../shared/ui/textColors";
 import { resolveUsageStyle } from "../shared/ui/usageDisplay";
@@ -33,7 +33,7 @@ const descriptor: UsageWidgetDescriptor<UsageResponse> = {
   },
 };
 
-export class ClaudeUsage5hrWidget extends UsageWidget<UsageResponse> {
+export class ClaudeUsage5hWidget extends UsageWidget<UsageResponse> {
   constructor() {
     super(descriptor);
   }
