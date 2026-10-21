@@ -6,8 +6,26 @@ import {
   closeSync,
 } from "node:fs";
 
+/**
+ * Bounded reads over transcripts and rollouts. Every reader returns
+ * null (or 0) on any I/O error so a poll never throws on a file that
+ * is mid-write or mid-delete. Tail and head reads cap the bytes so a
+ * multi-MB rollout costs the same as a small one.
+ */
+
 const DEFAULT_TAIL_BYTES = 262_144;
 const DEFAULT_HEAD_BYTES = 8_192;
+
+/** File size in bytes, or 0 when the path is null or unreadable. The
+ * turn freshness gates compare sizes to prove a rollout grew. */
+export function fileSizeOrZero(path: string | null): number {
+  if (!path) return 0;
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * Read the last N bytes of a file. Returns the full file if smaller than

@@ -1,37 +1,32 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import type { BridgeTarget, BridgeWaitMode } from "../bridgeTypes";
 import { writeFileAtomic } from "../fs/atomicWrite";
 
 /**
  * Unified envelope format for the WAT321 bridge mailbox.
  *
  * Both directions of every bridge dispatch (outbound prompt + inbound
- * reply) travel as a serialized envelope on disk. The shape is
- * deliberately a superset:
- *   - Codex (Epic Handshake) uses the full schema below with all
- *     `chainId`, `source`, `intent`, etc. fields populated.
- *   - OpenCode / Local LLM use the same shape but populate the minimum
- *     viable subset: `id`, `target`, `alias`, `body`, `createdAt`,
- *     timestamps, optional `waitMode`, `prompt` (outbound only),
- *     `replyToId` (inbound only).
+ * reply) travel as a serialized envelope on disk. The shape is a
+ * superset: OpenCode / Local LLM populate the minimum (`id`, `kind`,
+ * `target`, `createdAt`, `body`, optional `alias` / `waitMode` /
+ * `replyToId`), and Codex traffic also carries the Epic Handshake
+ * chain fields (`chainId`, `source`, `intent`, ...).
  *
- * Designed as a superset so a future merged-inbox UI can render both
- * directions and both tiers without per-source switches. Each tier
- * still owns its own routing semantics - the envelope just carries the
- * data.
+ * The Codex mailbox is written in the Epic Handshake agent dialect
+ * (`WAT321_MCP_SERVER/bin/codex/envelope.mjs`), where `target` names
+ * the agent a message heads to. `parseEnvelope` folds that dialect
+ * onto this shape so one reader serves every inbox.
  *
  * YAML frontmatter + markdown body, atomic tmp+rename on write. Hand-
  * rolled serializer keeps this module dependency-free.
  */
 
 type EnvelopeKind = "outbound" | "inbound";
-export type EnvelopeTarget = "codex" | "opencode" | "local";
-export type EnvelopeWaitMode = "standard" | "adaptive" | "fire-and-forget";
 type EnvelopePriority = "low" | "normal" | "high";
 
 /** Codex-only: the conversational agent labels Epic Handshake uses.
- * Kept on the unified envelope for back-compat with existing Codex
- * envelopes. Non-Codex tiers leave both unset. */
+ * Non-Codex tiers leave both unset. */
 export type EnvelopeAgent = "claude" | "codex";
 
 export interface Envelope {
@@ -43,7 +38,7 @@ export interface Envelope {
   kind: EnvelopeKind;
   /** Backend that ultimately handles (outbound) or produced (inbound)
    * the message. */
-  target: EnvelopeTarget;
+  target: BridgeTarget;
   /** ISO 8601 wall-clock stamp at write time. */
   createdAt: string;
   /** Markdown body. For outbound, the user prompt. For inbound, the
@@ -60,7 +55,7 @@ export interface Envelope {
 
   /** Per-call wait mode the MCP caller asked for. Dispatchers honor
    * this over the sticky flag when set. */
-  waitMode?: EnvelopeWaitMode;
+  waitMode?: BridgeWaitMode;
 
   /** Explicit session alias the caller asked the dispatch to attach
    * to (e.g. "S1", "S2"). Used by the OpenCode / Local LLM dispatcher
@@ -83,7 +78,7 @@ export interface Envelope {
    * error message. */
   error?: boolean;
 
-  // === Codex-only optional fields (Epic Handshake legacy) ===
+  // === Codex-only optional fields (Epic Handshake chain) ===
 
   chainId?: string;
   iteration?: number;
@@ -93,8 +88,8 @@ export interface Envelope {
   priority?: EnvelopePriority;
   intent?: string;
   title?: string;
-  /** Replaces `replyToId` for Codex which has its own naming. Either
-   * field is acceptable on the wire - readers normalize. */
+  /** Codex spelling of `replyToId`. Either field is acceptable on the
+   * wire - readers normalize. */
   replyTo?: string | null;
 }
 
@@ -123,7 +118,7 @@ export function serializeEnvelope(env: Envelope): string {
   }
   if (env.error === true) lines.push(`error: true`);
 
-  // Codex legacy fields - only emitted when present so non-Codex
+  // Codex chain fields - only emitted when present so non-Codex
   // envelopes stay clean.
   if (env.chainId) lines.push(`chain_id: ${env.chainId}`);
   if (env.iteration !== undefined) lines.push(`iteration: ${env.iteration}`);
@@ -173,25 +168,44 @@ export function parseEnvelope(raw: string): Envelope | null {
   if (!fields.target) return null;
   if (!fields.created_at) return null;
 
-  // Derive kind from explicit field (new envelopes) or infer from
-  // chain_id presence (legacy Codex envelopes - inbound replies from
-  // Codex carry chain_id - outbound prompts from Claude do too, but
-  // both have it).
-  let kind: EnvelopeKind = "inbound";
-  if (fields.kind === "outbound" || fields.kind === "inbound") {
-    kind = fields.kind;
-  }
-
   const rawWaitMode = fields.wait_mode;
-  const waitMode: EnvelopeWaitMode | undefined =
+  const waitMode: BridgeWaitMode | undefined =
     rawWaitMode === "standard" ||
     rawWaitMode === "adaptive" ||
     rawWaitMode === "fire-and-forget"
       ? rawWaitMode
       : undefined;
 
-  const target = fields.target as EnvelopeTarget;
-  if (target !== "codex" && target !== "opencode" && target !== "local") {
+  // Two dialects share this frontmatter. The engine dialect names the
+  // backend in `target` and always writes `kind`. The Epic Handshake
+  // agent dialect (`WAT321_MCP_SERVER/bin/codex/envelope.mjs` and its
+  // `.ts` mirror) writes no `kind`, carries `source`, and names
+  // the conversational agent in `target`. Every agent-dialect envelope
+  // is Codex traffic, so it folds onto the backend shape with the
+  // agent kept in `codexTarget` and `kind` derived from which agent
+  // the message heads to.
+  const rawTarget = fields.target;
+  let kind: EnvelopeKind = "inbound";
+  let target: BridgeTarget;
+  let codexTarget = (fields.codex_target as EnvelopeAgent) || undefined;
+  const agentDialect =
+    fields.kind === undefined &&
+    fields.source !== undefined &&
+    (rawTarget === "claude" || rawTarget === "codex");
+  if (agentDialect) {
+    target = "codex";
+    codexTarget = rawTarget as EnvelopeAgent;
+    kind = rawTarget === "claude" ? "inbound" : "outbound";
+  } else if (
+    rawTarget === "codex" ||
+    rawTarget === "opencode" ||
+    rawTarget === "local"
+  ) {
+    target = rawTarget;
+    if (fields.kind === "outbound" || fields.kind === "inbound") {
+      kind = fields.kind;
+    }
+  } else {
     return null;
   }
 
@@ -218,7 +232,7 @@ export function parseEnvelope(raw: string): Envelope | null {
         ? Number(fields.iteration)
         : undefined,
     source: (fields.source as EnvelopeAgent) || undefined,
-    codexTarget: (fields.codex_target as EnvelopeAgent) || undefined,
+    codexTarget,
     sourceSessionFp: (fields.source_session_fp as string) || undefined,
     priority: (fields.priority as EnvelopePriority) || undefined,
     intent: (fields.intent as string) || undefined,
@@ -243,7 +257,7 @@ export function readEnvelope(path: string): Envelope | null {
 /** Build the in-memory shape for an inbound reply. `replyToId` is the
  * outbound envelope id this reply matches - the MCP poller uses it. */
 export function buildInboundEnvelope(input: {
-  target: EnvelopeTarget;
+  target: BridgeTarget;
   body: string;
   replyToId?: string;
   workspacePath?: string;

@@ -5,12 +5,8 @@ import type {
 } from "./contracts";
 
 /**
- * Provider lifecycle registry. Replaces the hand-maintained
- * `ActiveGroups` struct in bootstrap.ts and the per-provider
- * activate/deactivate functions. Adding a third provider means
- * one new `register()` call - no edits across 6 files.
- *
- * The registry owns activation state. It does NOT own services or
+ * Provider lifecycle registry. Adding a provider means one new
+ * `register()` call. The registry owns activation state. It does NOT own services or
  * widgets - those are created by the provider-specific activation
  * function and handed to the registry as a `ProviderGroup`.
  */

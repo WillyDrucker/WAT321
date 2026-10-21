@@ -5,16 +5,15 @@ import type { ProviderKey } from "./contracts";
 import type { EventHub } from "./eventHub";
 import {
   logNotifEvent,
-  sessionIdFromPath,
   type BridgeDecisionReason,
 } from "./notifEventLog";
+import { sessionIdFromPath } from "./transcriptSessionId";
 
 /**
  * Generic bridge that watches a session-token service for contextUsed
  * growth and emits `session.responseComplete`. Dependencies injected
  * so engine stays free of tool-tier reach and each provider supplies
- * its own parser, classifier, and tail reader. See `WAT321_MEMORY_EXTENDED.md`
- * for the dual-trigger rationale and the freshness-gating details.
+ * its own parser, classifier, and tail reader.
  */
 
 /** Transcript writes older than this are treated as state replay /
@@ -204,7 +203,7 @@ export function bridgeSessionResponse(
       kind: "bridge-decision",
       provider: cfg.provider,
       path,
-      sessionId: sessionIdFromPath(cfg.provider, path),
+      sessionId: path ? sessionIdFromPath(cfg.provider, path) : null,
       decision: willFire ? "fire" : "suppress",
       reason,
       contextChanged,

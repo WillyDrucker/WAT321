@@ -15,15 +15,13 @@ import { WAT321_ROOT } from "./wat321Paths";
  * exactly one winner. Sweeps stale tags on each claim.
  *
  * The tag directory is GLOBAL (`~/.wat321/fired-notifications/`), not
- * per-client. This is load-bearing. Keying it off `clientStateDir()`
- * partitioned the tags by workspace hash, so two windows on different
- * workspaces could never see each other's claim - both won, both
- * delivered, and the user got two toasts for one completion. That is
- * not a corner case: a folderless window (`workspaceId()` -> "default")
- * falls back to the globally-newest transcript, so it shadows whichever
- * project is currently active and doubles every toast that project
- * fires. Nothing here needs workspace scoping - `sessionId` is a
- * transcript basename, which is globally unique on its own.
+ * per-client, and that is load-bearing: a folderless window
+ * (`workspaceId()` -> "default") falls back to the globally-newest
+ * transcript, so two windows on different workspaces can observe the
+ * same completion. Partitioned by workspace hash they could never see
+ * each other's claim, and the user would get two toasts for one
+ * completion. `sessionId` is a transcript basename, globally unique on
+ * its own, so nothing here needs workspace scoping.
  *
  * Whichever window wins the race delivers, and the user sees exactly
  * one toast. Which window that is does not matter: the toast content is
@@ -67,8 +65,8 @@ function sanitize(s: string): string {
 
 /** Try to claim the right to fire a notification for this session +
  * completion-time bucket. Returns true if this window owns the fire
- * (any concurrent windows on the same workspace will see false for
- * the same bucket), false otherwise. `wx` create flag is the atomic
+ * (every other window sees false for the same bucket), false
+ * otherwise. `wx` create flag is the atomic
  * primitive - first writer to the path wins. */
 export function tryClaimNotification(
   sessionId: string,

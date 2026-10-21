@@ -9,6 +9,33 @@ import {
 } from "./notificationPlatforms";
 import { SETTING } from "./settingsKeys";
 
+/**
+ * Toast notification delivery.
+ *
+ * Settings under `wat321.notifications.*`:
+ *   mode   - "Off" | "Auto" | "System Notifications" | "In-App"
+ *   claude - per-provider filter (default true)
+ *   codex  - per-provider filter (default true)
+ *
+ * Mode dispatch is literal. "System Notifications" always uses the OS
+ * path - "In-App" always uses the editor's notification bar. Auto picks
+ * system when the editor is unfocused and in-app when focused. Unknown
+ * mode values fail closed (suppressed) rather than silently selecting
+ * a delivery path the user did not choose. The per-platform paths live
+ * in `notificationPlatforms.ts`.
+ *
+ * No silent mode-switch fallback. If the chosen system path fails, the
+ * failure is recorded in the diagnostic ring buffer (visible in the
+ * health command) and the event is not delivered through a different
+ * path. A user who picked "System Notifications" and sees no toast
+ * should run the health command - causes include unregistered AUMID
+ * on Windows, Focus Assist / Do Not Disturb, OS-level notification
+ * permission disabled, or `notify-send` missing on Linux.
+ *
+ * Per-(provider, sessionId) 10s cooldown so distinct sessions can fire
+ * concurrent toasts - the same session repeating within 10s collapses.
+ */
+
 /** Optional probe injected from bootstrap so the toast notifier can
  * skip Codex toasts while the Epic Handshake bridge is dispatching.
  * The engine never imports from a tool - this callback crosses that
@@ -27,8 +54,8 @@ function isEpicHandshakeBridgeActive(): boolean {
  * suppress-codex-toast sentinel on successful turn completion - this
  * consumer reads it once. Returning true means "the most recent Codex
  * activity was bridge-driven, suppress." Covers the gap where Codex's
- * transcript fires `responseComplete` more than 5s after the bridge's
- * `returning` flag has cleared (so `isEpicHandshakeBridgeActive` would
+ * transcript fires `responseComplete` after the bridge's 3s
+ * `returning` latch has cleared (so `isEpicHandshakeBridgeActive` would
  * return false). */
 let recentCodexCompletionConsumer: (() => boolean) | null = null;
 
@@ -47,46 +74,6 @@ function isCodexToastSuppressionEnabled(): boolean {
     .getConfiguration("wat321")
     .get<boolean>(SETTING.epicHandshakeSuppressCodexNotifications, true);
 }
-
-/**
- * Toast notification delivery.
- *
- * Settings under `wat321.notifications.*`:
- *   mode   - "Off" | "Auto" | "System Notifications" | "In-App"
- *   claude - per-provider filter (default true)
- *   codex  - per-provider filter (default true)
- *
- * Mode dispatch is literal. "System Notifications" always uses the OS
- * path - "In-App" always uses the editor's notification bar. Auto picks
- * system when the editor is unfocused and in-app when focused. Unknown
- * mode values fail closed (suppressed) rather than silently selecting
- * a delivery path the user did not choose.
- *
- * Delivery paths:
- *   - Windows: warm PowerShell / WinRT toast via `windowsToastProcess`.
- *     Requires a registered AppUserModelID. Resolved in-process by
- *     the warm PowerShell bootstrap via `Get-StartApps` keyed on
- *     `vscode.env.appName` that extension.ts hands in at activation.
- *   - macOS: `osascript -e 'display notification ...'` (preinstalled,
- *     routes through Notification Center).
- *   - Linux: `notify-send` via libnotify (available on most GNOME /
- *     KDE systems - `notify-send` not present -> delivery fails and is
- *     recorded as `system-failed`).
- *   - In-App (all platforms): `vscode.window.showInformationMessage`
- *     renders VS Code's own bottom-right toast UI. It is NOT routed
- *     to the OS notification center on any platform.
- *
- * No silent mode-switch fallback. If the chosen system path fails, the
- * failure is recorded in the diagnostic ring buffer (visible in the
- * health command) and the event is not delivered through a different
- * path. A user who picked "System Notifications" and sees no toast
- * should run the health command - causes include unregistered AUMID
- * on Windows, Focus Assist / Do Not Disturb, OS-level notification
- * permission disabled, or `notify-send` missing on Linux.
- *
- * Per-(provider, sessionId) 10s cooldown so distinct sessions can fire
- * concurrent toasts - the same session repeating within 10s collapses.
- */
 
 const NOTIFICATION_COOLDOWN_MS = 10_000;
 const MAX_SESSION_TITLE_LENGTH = 40;
@@ -185,10 +172,6 @@ function truncatePreview(text: string | null): string {
   return `${clean.slice(0, MAX_PREVIEW_LENGTH - 1).trimEnd()}\u2026`;
 }
 
-
-
-// --- Event handler ---
-
 function handleResponseComplete(
   payload: AppEvents["session.responseComplete"]
 ): void {
@@ -217,7 +200,7 @@ function handleResponseComplete(
   // result flows back and fires its own toast. The user only wanted
   // the Claude toast in that case - two toasts about the same event
   // is noise. Two suppression sources, in priority order:
-  //   1. Bridge currently active (in-flight or 5s returning latch).
+  //   1. Bridge currently active (in-flight or 3s returning latch).
   //   2. Recent bridge completion sentinel - one-shot, consume-on-read,
   //      30s freshness window. Covers slow Codex transcript writes that
   //      land after the returning latch has cleared.

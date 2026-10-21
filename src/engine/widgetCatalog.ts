@@ -16,7 +16,10 @@ import { SETTING } from "./settingsKeys";
 const DEFAULT_BASE_PRIORITY = 1001;
 
 /** All registered widget descriptors. Order determines default
- * left-to-right status bar position (slot 0 = leftmost). */
+ * left-to-right status bar position (slot 0 = leftmost). The
+ * `wat321.modelBridge` id is the OpenCode Routes widget's on-disk
+ * identity: VS Code persists the right-click Hide state against it,
+ * so the id stays while the display name moved. */
 const WIDGETS = [
   { id: "wat321.session",               name: "Claude Usage (5hr)",           provider: "claude", slot: 0 },
   { id: "wat321.claudeUsageStatus",     name: "Claude Usage Status",          provider: "claude", slot: 1 },
@@ -27,7 +30,7 @@ const WIDGETS = [
   { id: "wat321.sessionTokens",         name: "Claude Session Tokens",        provider: "claude", slot: 6 },
   { id: "wat321.epicHandshake",         name: "Epic Handshake",               provider: "engine", slot: 7 },
   { id: "wat321.codexSessionTokens",    name: "Codex Session Tokens",         provider: "codex",  slot: 8 },
-  { id: "wat321.modelBridge",           name: "OpenCode Routes",                 provider: "engine", slot: 9 },
+  { id: "wat321.modelBridge",           name: "OpenCode Routes",              provider: "engine", slot: 9 },
 ] as const satisfies readonly WidgetDescriptor[];
 
 /** Every widget ID registered in the catalog. Used by Reset WAT321

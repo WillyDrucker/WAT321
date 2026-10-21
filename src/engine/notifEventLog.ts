@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { clientStateDir } from "./wat321Paths";
 
 /**
@@ -112,27 +112,6 @@ function eventLogPath(): string {
   return join(clientStateDir(), EVENT_LOG_FILENAME);
 }
 
-/** Derive the per-session UUID from a transcript / rollout path.
- * Centralized here so every event emitter populates `sessionId`
- * consistently without re-importing provider-specific parsers.
- *
- *  - Claude: `~/.claude/projects/<projectKey>/<UUID>.jsonl` -
- *    sessionId is the filename without extension.
- *  - Codex:  `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<UUID>.jsonl`
- *    where `<ts>` is `YYYY-MM-DDThh-mm-ss` (six dash-separated
- *    parts). The UUID is everything after the sixth dash - older
- *    rollout filenames without the timestamp still hash through the
- *    full basename fallback. */
-export function sessionIdFromPath(
-  provider: "claude" | "codex",
-  path: string | null
-): string | null {
-  if (!path) return null;
-  const file = basename(path, ".jsonl");
-  if (provider === "claude") return file;
-  const parts = file.split("-");
-  return parts.length > 6 ? parts.slice(6).join("-") : file;
-}
 
 /** Append a single event to the JSONL log. Best-effort: a failed
  * write is silently ignored so a disk problem never disrupts the

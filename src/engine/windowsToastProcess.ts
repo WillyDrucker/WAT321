@@ -2,36 +2,20 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 /**
  * Warm PowerShell / WinRT process for near-instant Windows toast
- * notifications.
- *
- * One long-lived `powershell.exe` spawned on first toast. Bootstrap
- * loads the WinRT assemblies, resolves the host's registered
- * AppUserModelID (AUMID) via `Get-StartApps`, echoes the resolved
- * value to stdout for the health command, then enters a ReadLine
- * loop. Each subsequent toast is a one-line expression piped via
- * stdin - the session variable `$aumid` is reused so we do not
- * interpolate the AUMID per toast.
+ * notifications. One long-lived `powershell.exe` spawned on first
+ * toast: bootstrap loads the WinRT assemblies, resolves the host's
+ * AppUserModelID (AUMID) via `Get-StartApps`, echoes it for the health
+ * command, then reads one toast expression per stdin line.
  *
  * AUMID matters because Windows silently discards a toast whose
  * `CreateToastNotifier(<aumid>)` argument is not registered to a
- * Start-menu shortcut. Zero logging, zero user-visible signal. VS
- * Code family forks (Insiders, VSCodium, Cursor, Windsurf) each
- * register their own AUMID via Squirrel at install. `Get-StartApps`
- * enumerates these - we match by `vscode.env.appName` passed in at
- * spawn time. Final fallback is the `powershell` AUMID which is
- * always registered - the toast delivers, but the origin chip reads
- * "Windows PowerShell" instead of the host name.
+ * Start-menu shortcut. Each VS Code fork registers its own, matched
+ * here by `vscode.env.appName`. The fallback is the always-registered
+ * `powershell` AUMID: the toast delivers with a PowerShell origin chip.
  *
- * Encoding: `[Console]::InputEncoding = UTF8` matches Node's stdin
- * write encoding so non-ASCII content (em dashes, smart quotes,
- * emoji, curly-quote title wrappers) is not mangled. OutputEncoding
- * is likewise UTF-8 so Node reads the AUMID echo cleanly.
- *
- * Windows only. Imported unconditionally from `extension.ts` (for
- * `setHostAppName`, `dispose`) and `toastNotifier.ts` (for
- * `showToast`), but the actual PowerShell spawn is gated on
- * `process.platform === "win32"` at the toast call site. Non-Windows
- * platforms never spawn.
+ * Both console encodings are UTF-8 so non-ASCII content survives the
+ * pipe. Imported unconditionally, but the spawn is gated on win32 at
+ * the toast call site.
  */
 
 let hostAppName = "";

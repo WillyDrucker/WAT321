@@ -1,7 +1,7 @@
 /**
- * Every `wat321.*` setting key in one place. Eliminates the drift
- * hazard of the same string literal appearing in service.ts,
- * resetSettings.ts, workspaceScopeHeal.ts, and extension.ts.
+ * Every `wat321.*` setting key in one place, so the same string
+ * literal never drifts between the services, the reset command, the
+ * workspace-scope heal, and the activator.
  *
  * All keys are in unprefixed form (used with
  * `getConfiguration("wat321")`). For the full prefixed form

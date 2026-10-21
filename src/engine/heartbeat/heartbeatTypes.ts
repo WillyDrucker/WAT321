@@ -1,5 +1,4 @@
-import type { EnvelopeTarget, EnvelopeWaitMode } from "../inbox/envelope";
-import type { BridgeStage } from "../bridgeTypes";
+import type { BridgeStage, BridgeTarget, BridgeWaitMode } from "../bridgeTypes";
 
 /**
  * Unified heartbeat shape every backend dispatcher writes during a
@@ -24,7 +23,7 @@ export interface Heartbeat {
    * `turn-heartbeat.<dispatchId>.json`. */
   dispatchId: string;
   /** Backend producing the heartbeat. */
-  target: EnvelopeTarget;
+  target: BridgeTarget;
   /** Workspace path so readers can filter to the active window. */
   workspacePath: string;
   /** Workspace hash mirror of workspacePath for filtering callers
@@ -53,6 +52,6 @@ export interface Heartbeat {
   /** Wait mode this dispatch is running under. Surfaced on the
    * heartbeat so widget gates and MCP-side adaptive logic see the
    * same value the dispatcher resolved. Absent = fall back to the
-   * sticky flag (legacy path). */
-  waitMode?: EnvelopeWaitMode;
+   * sticky flag. */
+  waitMode?: BridgeWaitMode;
 }

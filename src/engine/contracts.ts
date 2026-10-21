@@ -94,11 +94,9 @@ const MODEL_CONTEXT_WINDOWS: readonly ModelContextWindow[] = [
     match: (id) => id.startsWith("gpt-"),
     contextWindowSize: 272_000,
     // Codex slugs are the user-facing identifier in Codex CLI, so show
-    // them raw. Prettifying (e.g. `gpt-5.5` -> `GPT-5.5`) hides the
-    // actual stored model ID and masks config drift: an invalid string
-    // baked into a session's `session_meta.model` reads as plausible
-    // until a turn fires and the API returns 404. Raw slug matches what
-    // Codex TUI shows and makes mismatches immediately obvious.
+    // them raw. A prettified name would mask config drift: an invalid
+    // slug in a session's `session_meta.model` reads as plausible until
+    // a turn fires and the API returns 404.
     displayName: (id) => id,
   },
 ];

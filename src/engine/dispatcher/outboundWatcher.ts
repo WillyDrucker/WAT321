@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
+import type { BridgeTarget } from "../bridgeTypes";
 import {
   buildInboundEnvelope,
   readEnvelope,
   type Envelope,
-  type EnvelopeTarget,
 } from "../inbox/envelope";
 import { allOutboundDirs } from "../inbox/inboxPaths";
 import { writeInbound } from "../inbox/inboxWriter";
@@ -19,27 +19,19 @@ import {
 
 /**
  * Engine-side outbound watcher. fs-watches every backend's outbound
- * dispatch dir for new envelopes, hands each to the matching tier's
- * `BackendDispatcher.run` implementation, and writes the resulting
- * inbound envelope so the MCP-side poller can pick it up.
+ * dispatch dir, hands each new envelope to the matching tier's
+ * `BackendDispatcher.run`, and writes the resulting inbound envelope
+ * for the MCP-side poller. Per-target registration keeps dispatch
+ * orchestration uniform while each tier owns its run-turn semantics
+ * (Codex spawns an app-server, OpenCode posts HTTP/SSE).
  *
- * Per-target dispatcher registration lets the engine handle dispatch
- * orchestration uniformly while each tier owns its run-turn semantics
- * (Codex spawns app-server - OpenCode posts HTTP/SSE - future targets
- * implement whatever fits their backend).
- *
- * Graceful shutdown:
- *   - dispose() broadcasts an AbortSignal to every in-flight handler.
- *   - For each in-flight dispatch, deposits a synthetic "cancelled by
- *     shutdown" inbound envelope so the user sees a clear status when
- *     they reopen VS Code.
- *   - The next session's `sweepStaleOutboundEnvelopes` catches any
- *     outbound file that wasn't moved to sent/ in time.
- *
- * Envelope-side I/O (returning-flag write, outbound->sent move,
- * shutdown / abandoned synthetic envelopes) lives in
- * `outboundEnvelopeIO.ts` so this file stays focused on watcher
- * lifecycle + dispatch flow.
+ * Graceful shutdown: dispose() broadcasts an AbortSignal to every
+ * in-flight handler and deposits a synthetic "cancelled by shutdown"
+ * inbound for each, so the user sees a clear status on reopen, and the
+ * next session's `sweepStaleOutboundEnvelopes` catches any outbound
+ * file not moved to sent/ in time. Envelope-side I/O (returning flag,
+ * outbound to sent move, synthetic envelopes) lives in
+ * `outboundEnvelopeIO.ts`.
  */
 
 const WATCH_DEBOUNCE_MS = 50;
@@ -54,7 +46,7 @@ export class OutboundWatcher implements vscode.Disposable {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private inFlight = new Map<string, InFlight>();
   private shuttingDown = false;
-  private dispatchers = new Map<EnvelopeTarget, BackendDispatcher>();
+  private dispatchers = new Map<BridgeTarget, BackendDispatcher>();
 
   /** Register a per-target dispatcher. The engine routes outbound
    * envelopes matching the target to this implementation. Calling

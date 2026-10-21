@@ -1,26 +1,24 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { writeFileAtomic } from "../fs/atomicWrite";
-import { EH_ROOT_DIR } from "../inbox/inboxPaths";
+import { EPIC_HANDSHAKE_DIR } from "../wat321Paths";
 import type { Heartbeat } from "./heartbeatTypes";
 
 /**
- * Atomic heartbeat writer. Both Codex and non-Codex dispatchers call
- * this on every progress signal. Path layout is shared across tiers:
+ * Atomic heartbeat writer. Every dispatcher calls this on each
+ * progress signal, and `heartbeatReader.ts` finds every backend's
+ * heartbeat in one place:
  *
- *   `<EH_ROOT_DIR>/turn-heartbeat.<dispatchId>.json`
+ *   `<EPIC_HANDSHAKE_DIR>/turn-heartbeat.<dispatchId>.json`
  *
- * Codex uses the Epic Handshake root because that's where its
- * historical heartbeat layout lives. Non-Codex dispatchers also write
- * there (rather than the per-client bridge state dir) so the bridge
- * stage coordinator's existing reader continues to find every
- * backend's heartbeat in one place. Cross-workspace isolation comes
- * from the `workspaceHash` field on the heartbeat itself, which the
- * reader filters on.
+ * Cross-workspace isolation comes from the `workspaceHash` field on
+ * the heartbeat itself, which the reader filters on. Atomic tmp+rename
+ * is load-bearing: the reader runs concurrent with the writer and
+ * would otherwise observe a mid-flush file as a JSON parse error.
  */
 
 function heartbeatPath(dispatchId: string): string {
-  return join(EH_ROOT_DIR, `turn-heartbeat.${dispatchId}.json`);
+  return join(EPIC_HANDSHAKE_DIR, `turn-heartbeat.${dispatchId}.json`);
 }
 
 export function writeHeartbeat(hb: Heartbeat): void {
