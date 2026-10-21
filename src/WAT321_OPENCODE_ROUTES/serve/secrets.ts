@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { ZEN_INSTANCE_ALIASES } from "../../shared/providers/opencode/catalog";
 import { ZEN_API_KEY_SECRET } from "../../shared/providers/opencode/zenApiKeySecret";
 
 /**
@@ -20,8 +21,6 @@ import { ZEN_API_KEY_SECRET } from "../../shared/providers/opencode/zenApiKeySec
  * `shared/providers/opencode/zenApiKeySecret.ts` so the pure catalog can
  * reference it without an upward import into this VS Code-coupled file.
  */
-
-export { ZEN_API_KEY_SECRET };
 
 /** Read a secret by ref. Returns undefined when not set. Never
  * throws - SecretStorage I/O failures degrade to "no key found",
@@ -105,7 +104,7 @@ export async function clearZenApiKey(
   context: vscode.ExtensionContext
 ): Promise<void> {
   const confirm = await vscode.window.showWarningMessage(
-    "Clear the OpenCode Zen API key? Every Zen instance (Big Pickle, GPT 5 Nano, Ling, Hy3, Nemotron, MiniMax M2.7) will report 'needs API key' until you set it again.",
+    `Clear the OpenCode Zen API key? Every Zen instance (${ZEN_INSTANCE_ALIASES.join(", ")}) will report 'needs API key' until you set it again.`,
     "Clear",
     "Cancel"
   );

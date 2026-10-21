@@ -2,43 +2,40 @@ import type { DispatchResult } from "../../engine/dispatcher/dispatcherTypes";
 import { WAT321_RESEARCH_AGENT } from "../../shared/providers/opencode/configBuilder";
 import { readAliases, SESSION_ALIASES_PATH } from "../../shared/bridge/sessionAliases";
 import {
-  findInstance,
-  type OpenCodeRoutesConfigSlice,
-} from "./openCodeDispatchConfig";
+  findRoutesInstance,
+  type OpenCodeRoutesConfigSnapshot,
+} from "../../shared/bridge/openCodeRoutesConfigSnapshot";
 import type { BridgeStage } from "../../engine/bridgeTypes";
 
 /**
- * HTTP dispatch implementations for OpenCode / Local LLM:
- *   - `runZenOneShot` posts to opencode.ai/zen anonymously (no
- *     session, no auth). Used when no session alias is resolved.
- *   - `runSessionAttached` posts to opencode serve's
- *     `/session/{id}/message` with the resolved session id +
- *     instance metadata. opencode serve buffers the full assistant
- *     turn into a single response payload so the POST response
- *     itself returns the assistant parts - no separate GET poll
- *     loop required.
+ * HTTP dispatch implementations for OpenCode / Local LLM.
+ * `runZenOneShot` posts to opencode.ai/zen anonymously (no session, no
+ * auth) when no session alias resolves. `runSessionAttached` posts to
+ * opencode serve's `/session/{id}/message` with the resolved session
+ * id and instance metadata, and because opencode serve buffers the
+ * whole assistant turn into the POST response no GET poll loop is
+ * needed.
  *
- * Both walk the 5-stage heartbeat (`dispatched` -> `received` ->
- * `working` -> `writing`) via the injected `setStage` callback so
- * the bridge stage coordinator advances past `working` (idx 2) on
- * every non-Codex dispatch. The final `complete` push happens in
- * the parent dispatcher's `run()` after the path returns
- * successfully.
- *
- * 10-minute hard cap on every POST: long enough for cold local
- * models, short enough that a hung backend doesn't sit forever in
- * flight. Anything longer is a hang - the user gets a structured
- * timeout envelope they can act on rather than a silent indefinite
- * wait.
+ * Both walk the stage heartbeat (`dispatched` -> `received` ->
+ * `working` -> `writing`) through the injected `setStage` so the
+ * stage coordinator advances past `working` on every non-Codex
+ * dispatch, and the parent dispatcher's `run()` pushes `complete`
+ * after the path returns. Every POST has a 10-minute hard cap: long
+ * enough for cold local models, short enough that a hung backend ends
+ * in a structured timeout envelope instead of an indefinite wait.
  */
 
 const ANON_BASE_URL = "https://opencode.ai/zen/v1";
+/** Outer bound on one dispatch POST. Native fetch drops a connection
+ * that stays silent for 5 minutes (headers or body), so a turn that
+ * sends nothing for that long surfaces as `fetch failed` before this
+ * timer fires. Lifting that cap needs a per-request dispatcher. */
 const DISPATCH_TIMEOUT_MS = 10 * 60_000;
 
 interface DispatchPathArgs {
   target: "opencode" | "local";
   prompt: string;
-  cfg: OpenCodeRoutesConfigSlice | null;
+  cfg: OpenCodeRoutesConfigSnapshot | null;
   signal: AbortSignal;
   setStage: (s: BridgeStage) => void;
 }
@@ -57,7 +54,7 @@ export async function runZenOneShot(
       error: true,
     };
   }
-  const inst = findInstance(cfg, null, "remote");
+  const inst = findRoutesInstance(cfg, null, "remote");
   const model = inst?.model || "big-pickle";
   const alias = inst?.alias || "Big Pickle";
 
@@ -158,8 +155,8 @@ export async function runSessionAttached(
   const sessionId = entry.sessionId;
   const targetKind = target === "local" ? "local" : "remote";
   const inst = entry.instanceId
-    ? findInstance(cfg, entry.instanceId, null)
-    : findInstance(cfg, null, targetKind);
+    ? findRoutesInstance(cfg, entry.instanceId, null)
+    : findRoutesInstance(cfg, null, targetKind);
   const alias = inst?.alias || (target === "local" ? "Local LLM" : "OpenCode");
   const modelRef =
     target === "local"

@@ -1,138 +1,32 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { OPENCODE_ROUTES_CONFIG_PATH } from "../../shared/bridge/openCodeRoutesConfigSnapshot";
-import { readAliases, SESSION_ALIASES_PATH, type SessionTarget } from "../../shared/bridge/sessionAliases";
+import type {
+  OpenCodeRoutesConfigSnapshot,
+  OpenCodeRoutesInstance,
+} from "../../shared/bridge/openCodeRoutesConfigSnapshot";
 import {
-  LAST_USED_PATH,
-  OPENCODE_ROUTES_DIR,
-  USAGE_PATH,
-} from "../openCodeRoutesPaths";
+  readAliases,
+  SESSION_ALIASES_PATH,
+  type SessionTarget,
+} from "../../shared/bridge/sessionAliases";
+import { LAST_USED_PATH } from "../openCodeRoutesPaths";
 
 /**
- * Data sources for the OpenCode Routes status-bar item: the four
- * synchronous JSON readers (heartbeat, config, usage, last-used),
- * the bridge alias lookup, the type contracts they parse into, and
- * the helpers that resolve "which instance is the widget displaying
- * right now" + "what bridge target does it map to". Pulled out so
- * the widget factory file owns only orchestration and the refresh
- * file owns only render.
+ * Data sources for the OpenCode Routes status-bar item beyond the
+ * shared config and heartbeat readers: the last-used sidecar,
+ * the bridge alias lookup, and the helpers that resolve
+ * which instance the widget displays and which bridge target it maps
+ * to. The widget factory owns orchestration and the refresh file owns
+ * render.
  *
  * All readers are best-effort: missing files / parse errors fall
  * through to null so the 1Hz refresh loop never throws from a
  * malformed sidecar.
  */
 
-export interface PhaseEntry {
-  phase: string;
-  elapsedMs: number;
-  summary?: string;
-}
-
-export interface Heartbeat {
-  phase: "calling";
-  requestId?: string;
-  startedAt: string;
-  alias: string;
-  instanceId?: string;
-  dataRetention?: "local" | "retained";
-  model: string;
-  timeoutMs: number;
-  tokens?: number;
-  tokensPerSec?: number;
-  currentPhase?: string;
-  phaseTrace?: PhaseEntry[];
-}
-
-interface ConfigSnapshot {
-  enabled: boolean;
-  activeInstanceId: string;
-  /** Managed OpenCode subprocess URL. Empty when the bridge is
-   * disabled or the manager has not spawned the subprocess yet. */
-  openCodeServerUrl?: string;
-  instances: Array<{
-    id: string;
-    alias: string;
-    kind: "local" | "remote";
-    dataRetention: "local" | "retained";
-    /** Resolved endpoint URL. Local: the user's `wat321.localEndpoint`
-     * (llama-server). Zen: opencode.ai/zen/v1. Used by the session-
-     * tokens poller to probe `/props` for local n_ctx. */
-    endpoint?: string;
-    apiKeyMissing?: boolean;
-    model?: string;
-    /** Model context window in tokens. Local instances may have this
-     * overridden by a runtime `/props.n_ctx` probe. */
-    contextWindow?: number;
-  }>;
-}
-
-interface UsageSnapshot {
-  sinceMs: number;
-  instances: Record<
-    string,
-    { input: number; output: number; calls: number; lastTs?: string }
-  >;
-}
-
 /** Active S<n> alias for the given bridge target, so the Routes
  * tooltip reads parallel to Claude / Codex session tokens. */
 export function readActiveBridgeAlias(target: SessionTarget): string | null {
   return readAliases(SESSION_ALIASES_PATH).activeAliases[target];
-}
-
-/** Heartbeat path. Per-client state dir already partitions per
- * workspace via wsId so no further suffix is required. */
-export function heartbeatPath(): string {
-  return join(OPENCODE_ROUTES_DIR, "heartbeat.json");
-}
-
-export function readHeartbeat(): Heartbeat | null {
-  const path = heartbeatPath();
-  if (!path || !existsSync(path)) return null;
-  try {
-    const raw = readFileSync(path, "utf8").trim();
-    if (raw.length === 0) return null;
-    const parsed = JSON.parse(raw) as Heartbeat;
-    if (typeof parsed?.startedAt !== "string") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export function readConfigSnapshot(): ConfigSnapshot | null {
-  if (!existsSync(OPENCODE_ROUTES_CONFIG_PATH)) return null;
-  try {
-    const raw = readFileSync(OPENCODE_ROUTES_CONFIG_PATH, "utf8");
-    const parsed = JSON.parse(raw) as Partial<ConfigSnapshot>;
-    // Defensive defaults for legacy flat-config.json files. Without
-    // these, reading a stale config from a prior install throws on
-    // the first refresh tick and aborts activation.
-    return {
-      enabled: parsed.enabled === true,
-      activeInstanceId:
-        typeof parsed.activeInstanceId === "string"
-          ? parsed.activeInstanceId
-          : "",
-      openCodeServerUrl:
-        typeof parsed.openCodeServerUrl === "string"
-          ? parsed.openCodeServerUrl
-          : "",
-      instances: Array.isArray(parsed.instances) ? parsed.instances : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function readUsageSnapshot(): UsageSnapshot | null {
-  if (!existsSync(USAGE_PATH)) return null;
-  try {
-    const raw = readFileSync(USAGE_PATH, "utf8");
-    return JSON.parse(raw) as UsageSnapshot;
-  } catch {
-    return null;
-  }
 }
 
 /** Last instance id with a successful dispatch this session. Null
@@ -158,8 +52,8 @@ function readLastUsedInstanceId(): string | null {
  * local-llm). Routing decisions still consult `activeInstanceId` -
  * this only affects what label/stats render. */
 export function activeInstanceFrom(
-  snap: ConfigSnapshot
-): ConfigSnapshot["instances"][number] | null {
+  snap: OpenCodeRoutesConfigSnapshot
+): OpenCodeRoutesInstance | null {
   const lastUsedId = readLastUsedInstanceId();
   if (lastUsedId) {
     const lastUsed = snap.instances.find((i) => i.id === lastUsedId);
@@ -175,8 +69,8 @@ export function activeInstanceFrom(
  * maps to "local" - every Zen route (Big Pickle and friends) maps to
  * "opencode". Null when no instance is selected. */
 export function targetForInstance(
-  instance: ConfigSnapshot["instances"][number] | null
-): "opencode" | "local" | null {
+  instance: OpenCodeRoutesInstance | null
+): SessionTarget | null {
   if (!instance) return null;
   return instance.kind === "local" ? "local" : "opencode";
 }

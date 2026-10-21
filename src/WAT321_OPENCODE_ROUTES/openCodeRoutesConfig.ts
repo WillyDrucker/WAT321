@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
 import * as vscode from "vscode";
 import { SETTING } from "../engine/settingsKeys";
 import { writeFileAtomic } from "../engine/fs/atomicWrite";
@@ -26,7 +25,7 @@ import { resolveApiKeys } from "./serve/secrets";
  * torn JSON parse.
  */
 
-export interface OpenCodeRouteInstance {
+interface OpenCodeRouteInstance {
   id: string;
   alias: string;
   endpoint: string;
@@ -93,10 +92,7 @@ export async function readConfigFromSettings(
     .trim()
     .replace(/\/+$/, "");
   // Empty localEndpoint means "no local LLM" - the catalog drops the
-  // local instance entirely. Any non-empty value enables it. The
-  // boolean toggle was redundant: VS Code settings do not have
-  // conditional visibility, but empty-string-as-off is cleaner than
-  // a separate bool that has to stay in sync.
+  // local instance entirely. Any non-empty value enables it.
   const localEnabled = localEndpoint.length > 0;
 
   const refs = CATALOG.map((c) => c.apiKeyRef).filter((r) => r.length > 0);
@@ -183,13 +179,5 @@ export function writeConfigFile(config: OpenCodeRoutesConfig): boolean {
       return false;
     }
   }
-  if (!existsSync(dirname(OPENCODE_ROUTES_CONFIG_PATH))) {
-    try {
-      mkdirSync(dirname(OPENCODE_ROUTES_CONFIG_PATH), { recursive: true });
-    } catch {
-      return false;
-    }
-  }
   return writeFileAtomic(OPENCODE_ROUTES_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
 }
-

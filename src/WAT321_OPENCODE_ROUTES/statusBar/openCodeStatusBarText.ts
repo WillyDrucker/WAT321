@@ -2,11 +2,8 @@ import * as vscode from "vscode";
 import { SETTING } from "../../engine/settingsKeys";
 import { formatPct } from "../../shared/ui/tokenFormatters";
 import type { TpsThrottle } from "../../shared/ui/tpsThrottle";
-import {
-  formatRouteTokens,
-  type Heartbeat,
-  type readUsageSnapshot,
-} from "./openCodeStatusBarSources";
+import type { OpenCodeDispatchHeartbeat } from "../../shared/bridge/openCodeDispatchHeartbeat";
+import { formatRouteTokens } from "./openCodeStatusBarSources";
 import type { BridgeSessionTokens } from "./sessionTokensPoller";
 
 /**
@@ -17,27 +14,14 @@ import type { BridgeSessionTokens } from "./sessionTokensPoller";
 
 type SessionTokens = BridgeSessionTokens | null;
 
-/** `tokens pct%` for the idle skin. Brand-new session with zero turns
- * reads as `0 0%` which is technically correct yet less useful than
- * the per-instance lifetime counter at idle. Show per-session only
- * once it has real tokens - otherwise fall to lifetime so the bar
- * always carries some signal. */
-export function computeIdleSessionSuffix(args: {
-  sessionTokens: SessionTokens;
-  usage: ReturnType<typeof readUsageSnapshot>;
-  activeInstanceId: string;
-}): string {
-  const { sessionTokens, usage, activeInstanceId } = args;
+/** `tokens pct%` for the idle skin, shown only once the session has
+ * real tokens: a brand-new session reads `0 0%`, technically correct
+ * and useless. */
+export function computeIdleSessionSuffix(sessionTokens: SessionTokens): string {
   if (sessionTokens && sessionTokens.contextUsed > 0) {
     return ` ${formatRouteTokens(sessionTokens.contextUsed)}${pctSuffix(sessionTokens, sessionTokens.contextUsed)}`;
   }
-  const activeUsage = usage?.instances[activeInstanceId];
-  const activeTotalTokens =
-    typeof activeUsage?.input === "number" &&
-    typeof activeUsage?.output === "number"
-      ? activeUsage.input + activeUsage.output
-      : 0;
-  return activeTotalTokens > 0 ? ` ${formatRouteTokens(activeTotalTokens)}` : "";
+  return "";
 }
 
 /** ` pct%` of the context window for `used` tokens, or empty when the
@@ -49,7 +33,7 @@ function pctSuffix(sessionTokens: BridgeSessionTokens, used: number): string {
 }
 
 export function composeInFlightText(args: {
-  heartbeat: Heartbeat;
+  heartbeat: OpenCodeDispatchHeartbeat;
   idleAlias: string;
   sessionTokens: SessionTokens;
   sessionTokensSuffix: string;
@@ -113,10 +97,9 @@ export function composeInFlightText(args: {
 export function idleSig(args: {
   idleAlias: string;
   needsKey: boolean;
-  usageSig: string;
   activeBridgeAlias: string | null;
   sessionTokens: SessionTokens;
 }): string {
-  const { idleAlias, needsKey, usageSig, activeBridgeAlias, sessionTokens } = args;
-  return `idle:${idleAlias}:${needsKey}:${usageSig}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
+  const { idleAlias, needsKey, activeBridgeAlias, sessionTokens } = args;
+  return `idle:${idleAlias}:${needsKey}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
 }

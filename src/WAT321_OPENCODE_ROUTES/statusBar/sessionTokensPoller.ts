@@ -9,28 +9,19 @@ import { EMPTY_LOCAL_PROPS, probeLocalProps, type LocalProps } from "../serve/lo
 
 /**
  * Background poller that reads OpenCode session token data for the
- * bridge's active aliases and exposes a synchronous snapshot. The
- * OpenCode Routes widget renders at 1Hz - this poller runs every 3s
- * to keep the displayed `tokens / window  pct%` figures fresh without
- * blocking the render loop on a network fetch.
+ * bridge's active aliases and exposes a synchronous snapshot, so the
+ * 1Hz OpenCode Routes render never blocks on a network fetch. Polls
+ * every 3s, caches by sessionId, and clears when the alias map's
+ * active entry rotates so a fresh session never inherits the prior
+ * snapshot. The llama-server probe lives in `localModelProbe.ts`.
  *
- * Source of truth for context-fill: OpenCode's own TUI uses the
- * latest assistant message's
- *   `input + output + reasoning + cache.read + cache.write`
- * as the denominator. The Auto-Compact trigger is computed via
- * OpenCode's `overflow.ts:usable()` which subtracts a reserved
- * buffer (default 20K) from the window.
- *
- * Cache shape: keyed by sessionId. Cleared when the alias map's
- * active entry rotates, so a freshly-created session never inherits
- * the prior session's snapshot. The llama-server probe lives in
- * `localModelProbe.ts`.
- *
- * Lives in the OpenCode Routes tier because both the data source
- * (the managed `opencode serve`) and the consumer (OpenCode Routes
- * widget) belong here. Engine never imports from this file -
- * cross-tier consumers subscribe via engine events rather than
- * importing directly.
+ * Context fill follows OpenCode's own TUI: the latest assistant
+ * message's `input + output + reasoning + cache.read + cache.write`
+ * is the fill, and the Auto-Compact trigger is OpenCode's
+ * `overflow.ts:usable()`, the window minus a reserved buffer (default
+ * 20K). Lives in the Routes tier because the data source (the managed
+ * `opencode serve`) and the consumer both do, and the engine never
+ * imports it.
  */
 
 const POLL_INTERVAL_MS = 3_000;
@@ -49,8 +40,6 @@ const MESSAGE_PAGE_LIMIT = 10;
 /** How long one llama-server `/props` answer is reused. */
 const LOCAL_PROPS_TTL_MS = 30_000;
 const TARGETS: readonly SessionTarget[] = ["opencode", "local"];
-
-export type BridgeTarget = SessionTarget;
 
 export interface BridgeSessionTokens {
   sessionId: string;
