@@ -17,6 +17,8 @@ description: Router for the /321 skill family. Resolves -<Flag> against AIDOCS/_
 /321 -DevAudit         audit the source against DEV-AUDIT.md (-FULL refactors)
 /321 -AutoPush         capture, commit, and push to the anchored remote
 /321 -Compact          emit ready-to-paste /compact instructions for the next conversation
+/321 -StartWatcher     hold the conversation on the code page (-INSTALL puts the project on it)
+/321 -StopWatcher      end the watch, the page stays as it is (-DELETE takes the answer down, -UNREGISTER leaves the page)
 ```
 
 `/321` alone prints this usage block.
