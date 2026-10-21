@@ -4,7 +4,6 @@ import {
   getCodexCatalog,
   type CodexCatalogEntry,
   type CodexModelInfo,
-  type CodexModelUpgrade,
   type CodexServiceTier,
 } from "./modelCatalog";
 import {
@@ -15,47 +14,30 @@ import {
 import { hasUnlistedPin, listUnlistedPins } from "./unlistedModelPins";
 
 /**
- * Model facts for the Codex tier, resolved from sources in a fixed
- * order of authority:
+ * Model facts for the Codex tier, resolved in a fixed order of
+ * authority: the live catalog in `modelCatalog.ts` (filled from
+ * `model/list` on the app-server the bridge dispatches to, hidden
+ * models included), then the user's own typed pins in
+ * `unlistedModelPins.ts` (explicit intent, the API gives the real
+ * answer), then `~/.codex/models_cache.json` via `modelsCacheFile.ts`
+ * for display only, until the app-server answers or when it never
+ * will (no codex installed, or one too old to know `model/list`).
  *
- *   1. The live catalog in `modelCatalog.ts`, filled from `model/list`
- *      on the app-server the bridge actually dispatches to, hidden
- *      models included. Authoritative, because it describes the process
- *      that will run the turn.
- *   2. The user's own typed pins in `unlistedModelPins.ts`, for a slug
- *      no app-server has listed yet. Explicit intent, so the gate lets
- *      it through and the API gives the real answer.
- *   3. `~/.codex/models_cache.json` via `modelsCacheFile.ts`, for
- *      display only, until the app-server has answered or when it never
- *      will (no codex installed, a codex too old to know `model/list`).
+ * The file is a DISPLAY hint, only the catalog and the pins GATE: a
+ * file written by some other codex must never decide a session is
+ * broken nor bless a slug the running app-server would 404 on. Gating
+ * fails open with no catalog, or a window that has not asked yet would
+ * block every `thread/resume`. The catalog also ages (the backend
+ * decides per account what a binary may list), so
+ * `codexCatalogRefresh.ts` re-asks when the answer is old.
  *
- * The split that governs everything below: the file is a DISPLAY hint,
- * and only the catalog and the pins GATE. A file written by some other
- * codex must never decide that a session is broken, nor bless a slug
- * the running app-server would 404 on.
- *
- * Gating FAILS OPEN with no catalog. "Cannot validate" must never mean
- * "reject", or a window that has not asked yet would block every
- * `thread/resume`.
- *
- * The catalog also ages. The backend decides per ACCOUNT which models a
- * binary may list (GPT-6 Astra arrived as a staged rollout under an
- * unchanged codex, hidden from the picker), so `codexCatalogRefresh.ts`
- * re-asks when the answer is old.
- *
- * `~/.codex/config.toml` is not read here, or anywhere in WAT321. It is
- * a machine-wide Codex CLI preference that Codex's own TUI writes, and
- * honoring it made a fresh install behave differently on two machines
- * for reasons the UI never showed. Sessions pin their own model, see
+ * `~/.codex/config.toml` is read nowhere in WAT321: it is a machine-wide
+ * TUI preference that made a fresh install behave differently on two
+ * machines. Sessions pin their own model, see
  * `WAT321_EPIC_HANDSHAKE/codexSettings/codexSessionSettings.ts`.
- *
  * `model/list` carries no `context_window`, so the auto-compact ceiling
- * stays file-sourced. See `WAT321_CODEX_SESSION_TOKENS/autoCompactLimit.ts`.
+ * stays file-sourced, see `WAT321_CODEX_SESSION_TOKENS/autoCompactLimit.ts`.
  */
-
-/** Public-facing shapes for the pickers, re-exported from the catalog
- * (their producer) so importers need one module. */
-export type { CodexModelInfo, CodexModelUpgrade };
 
 /** Every model slug the running Codex lists, hidden ones included.
  *

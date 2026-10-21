@@ -1,24 +1,19 @@
 /**
- * The MCP tool definitions exposed to Claude. Up to three tools:
+ * The MCP tool definitions exposed to Claude, up to three: `wat321_ask`
+ * (dispatch, the alias picks the backend), `wat321_session`
+ * (opencode/local session lifecycle, registered only when one of them
+ * is enabled), and `wat321_bridge` (inbox drain, registered whenever
+ * any backend is enabled since every target can reply fire-and-forget).
+ * Read-only state lives on MCP resources (`resources.mjs`) so Claude
+ * pays for those descriptions only on request.
  *
- *   wat321_ask     - dispatch a prompt, alias picks the backend
- *   wat321_session - opencode/local session lifecycle (action enum,
- *                    only registered when opencode or local is enabled)
- *   wat321_bridge  - single-purpose inbox drain (registered whenever
- *                    any backend is enabled, since every target can
- *                    produce fire-and-forget replies)
- *
- * Read-only state (inbox peek, sessions list, instances catalog,
- * status, dispatch/inbox docs) lives on MCP resources (`resources.mjs`)
- * so Claude pays for those descriptions only when the user asks.
- *
- * Every description here is billed to every Claude session's context
- * on every turn. The lean shape carries three load-bearing signals:
- * the trigger phrase, the false-positive guard, and a required-read
- * pointer to `bridge://docs/*` for everything else (wait modes, alias
- * rules, sticky-flag semantics, error recovery). Per-param
- * descriptions are stripped where names self-document. Total tool
- * surface is ~250-300 tokens when all three register.
+ * Every description here is billed to every Claude session on every
+ * turn, so each carries three signals and no more: the trigger phrase,
+ * the false-positive guard, and a required-read pointer to
+ * `bridge://docs/*` for wait modes, alias rules, sticky flags, and
+ * error recovery. Per-param descriptions are stripped where the name
+ * self-documents. The whole surface is ~250-300 tokens with all three
+ * registered.
  */
 
 export function buildTools(enabled) {

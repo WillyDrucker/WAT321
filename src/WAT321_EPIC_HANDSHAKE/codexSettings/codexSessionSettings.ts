@@ -22,36 +22,21 @@ import {
 } from "../codexTurn/threadRecord";
 
 /**
- * The model and effort an Epic Handshake session runs, and the rules
- * for how a session acquires them.
+ * The model and effort an Epic Handshake session runs, and how a
+ * session acquires them. WAT321 owns this state because Codex does not:
+ * a thread's model is fixed at `thread/start` and forgotten, and a
+ * resume from a cold app-server reports the `config.toml` model, not
+ * the one the thread last ran (verified by probe). A pin that survives
+ * closing the IDE therefore lives in our own session record.
  *
- * WAT321 owns this state because Codex does not. A thread's model is
- * fixed at `thread/start` and then forgotten: resume it from a cold
- * app-server and Codex reports the `config.toml` model, not the one the
- * thread was created with or last ran. Verified by probe. So a pin that
- * survives closing the IDE has to live in our own session record.
- *
- * The lifecycle, which is the whole feature:
- *
- *   - A session is BORN on whatever Codex recommends right then, read
- *     live from `model/list` (`isDefault` plus that model's
- *     `defaultReasoningEffort`). Nothing is hardcoded, so the day
- *     OpenAI promotes a successor a newly created session picks it up
- *     on its own.
- *   - A session KEEPS what it was last set to. Pick 5.5 at `high` and
- *     S1 stays 5.5 / `high` across restarts until you change it again.
- *   - A session FORGETS on reset. Deleting it is how a user returns to
- *     Codex's current recommendation, and `resetBridgeThread` nulls
- *     both fields for exactly that reason.
- *
- * `~/.codex/config.toml` is deliberately not consulted. It is a machine-
- * wide Codex CLI preference that Codex's own TUI writes when a user
- * picks a model there, and honoring it would mean a fresh WAT321 install
- * behaves differently on two machines for reasons invisible in our UI.
- * WAT321 never reads it and never writes it.
- *
- * Per workspace, because `BridgeThreadRecord` is: one bridge session per
- * workspace, S1 then S2 as it is reset.
+ * Lifecycle: a session is BORN on whatever Codex recommends right then
+ * (`model/list` `isDefault` plus that model's `defaultReasoningEffort`,
+ * nothing hardcoded), KEEPS what it was last set to across restarts,
+ * and FORGETS on reset, which is how a user returns to Codex's current
+ * recommendation. `~/.codex/config.toml` is never read: it is a
+ * machine-wide TUI preference that would make a fresh install behave
+ * differently on two machines for reasons invisible in our UI. One
+ * record per workspace, S1 then S2 as it is reset.
  */
 
 /** What a session runs. Either field may be null, which `turn/start`
@@ -61,24 +46,17 @@ export interface CodexSessionPin {
   effort: CodexEffortLevel | null;
 }
 
-/** Workspaces whose legacy migration has already been attempted in this
- * window.
- *
- * `readSessionPin` sits on the status-bar tick via
- * `bridgeStageCoordinator`, and migration walks `~/.codex/sessions` to
- * find a rollout. Without this latch, a record whose migration write
- * fails (EBUSY, read-only disk) would re-run that walk on every tick for
- * the life of the window. One attempt per workspace is enough: the write
- * either landed, in which case the record now answers for itself, or it
- * did not, in which case retrying at 1Hz will not help. Caching the
- * result means a failed write still yields a stable answer for the rest
- * of the window instead of silently reverting to Codex's default.
- *
- * Keyed by THREAD id, not workspace. A recovered or rotated session is a
- * different thread, so it misses this cache and migrates on its own
- * terms. Keying by workspace would hand the new thread the previous
- * one's model, and nothing here could invalidate it: `sessionRecovery`
- * cannot import this module without a cycle. */
+/** Threads whose legacy migration has already been attempted in this
+ * window. `readSessionPin` runs on the status-bar tick and migration
+ * walks `~/.codex/sessions`, so without this latch a record whose
+ * migration write fails (EBUSY, read-only disk) would re-walk at 1Hz
+ * for the life of the window. One attempt is enough: the write landed
+ * and the record answers for itself, or it did not and retrying will
+ * not help, and the cached result keeps the answer stable instead of
+ * reverting to Codex's default. Keyed by THREAD id, not workspace:
+ * a recovered or rotated session is a different thread and migrates on
+ * its own terms, and nothing here could invalidate a workspace key
+ * since `sessionRecovery` cannot import this module without a cycle. */
 const migrationCache = new Map<string, CodexSessionPin>();
 
 /** What Codex would run for a brand-new session, right now. Both halves
@@ -101,22 +79,15 @@ export function defaultEffortForModel(slug: string | null): CodexEffortLevel | n
   return typeof cand === "string" && cand.length > 0 ? cand : null;
 }
 
-/** Recover a pin for a session that predates this field.
- *
- * Order matters, most deliberate signal first:
- *   1. The retired per-workspace override flag. If it exists the user
- *      explicitly picked that model in our picker, so it is the newest
- *      statement of intent we have.
- *   2. The model the rollout shows the session actually running. This
- *      recovers the truth for a user who never opened the picker, and it
- *      must read `turn_context` as well as the header: rollouts written
- *      by older Codex CLIs carry no `session_meta.model` at all, so a
- *      header-only read reports null and the session gets silently moved
- *      onto whatever Codex recommends today.
- *   3. Codex's current recommendation, as a last resort.
- *
- * Step 2 is why an existing S1 does not jump to 5.6 on upgrade. Whatever
- * it has been running is what it keeps. */
+/** Recover a pin for a session that predates this field, most
+ * deliberate signal first: the retired per-workspace override flag
+ * (the user picked that model in our picker), then the model the
+ * rollout shows the session actually running (read from `turn_context`
+ * as well as the header, because rollouts from older Codex CLIs carry
+ * no `session_meta.model` and a header-only read would silently move
+ * the session onto today's recommendation), then Codex's current
+ * recommendation. The rollout step is why an existing S1 keeps the
+ * model it has been running across an upgrade. */
 function migrateLegacyPin(record: BridgeThreadRecord): CodexSessionPin {
   const wsHash = workspaceHash(record.workspacePath);
   const recommended = codexRecommendedPin();

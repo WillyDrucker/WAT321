@@ -1,29 +1,18 @@
-import { readBridgeProjectName } from "../../shared/bridge/bridgeConfig";
-import type {
-  OpenCodeRoutesConfigSnapshot,
-  OpenCodeRoutesInstance,
+import {
+  findRoutesInstance,
+  type OpenCodeRoutesConfigSnapshot,
+  type OpenCodeRoutesInstance,
 } from "../../shared/bridge/openCodeRoutesConfigSnapshot";
 import type { SessionTarget } from "../../shared/bridge/sessionAliases";
 
 /**
  * Data the OpenCode / Local-LLM "Manage Sessions" submenu reads: the
  * session list from the managed `opencode serve`, the per-target
- * picker configuration, the catalog instance a target resolves to,
- * and the session display name every surface shares. Rows are built
- * in `openCodeSessionsRows.ts` and the picker shell lives in
- * `openCodeSessionsPicker.ts`.
+ * picker configuration, and the catalog instance a target resolves
+ * to. Rows are built in `openCodeSessionsRows.ts`, the picker shell
+ * lives in `openCodeSessionsPicker.ts`, and the session display name
+ * comes from `shared/bridge/bridgeConfig.ts`.
  */
-
-/** Standardized session display label. Mirrors the unified bridge
- * handlers so the picker, bridge response text, and any future
- * surfaces all read the same way. */
-export function formatSessionDisplayName(
-  target: SessionTarget,
-  alias: string
-): string {
-  const targetLabel = target === "local" ? "Local" : "OpenCode";
-  return `${readBridgeProjectName()} Epic Handshake Claude-to-${targetLabel} ${alias}`;
-}
 
 export interface OpenCodeSessionMeta {
   id: string;
@@ -76,16 +65,6 @@ export function pickInstanceForTarget(
   opencodeCfg: OpenCodeRoutesConfigSnapshot | null,
   target: SessionTarget
 ): OpenCodeRoutesInstance | null {
-  if (!opencodeCfg) return null;
   const cfg = TARGET_CONFIGS[target];
-  const instances = opencodeCfg.instances ?? [];
-  const candidates = instances.filter((i) => i.kind === cfg.instanceKind);
-  if (candidates.length === 0) return null;
-  const active = candidates.find((i) => i.id === opencodeCfg.activeInstanceId);
-  if (active) return active;
-  const fallback = candidates.find(
-    (i) => i.id === cfg.fallbackInstanceId
-  );
-  if (fallback) return fallback;
-  return candidates[0];
+  return findRoutesInstance(opencodeCfg, null, cfg.instanceKind, cfg.fallbackInstanceId);
 }

@@ -5,14 +5,15 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { writeFileAtomic } from "../../engine/fs/atomicWrite";
-import { EPIC_HANDSHAKE_DIR } from "../epicHandshakePaths";
+import { EPIC_HANDSHAKE_DIR } from "../../engine/wat321Paths";
 import { workspaceHash } from "../../engine/workspaceHash";
 
 /**
  * Per-workspace persistence for the shared Codex bridge thread. One
  * record per workspace, keyed by `workspaceHash(path)`. Stores the
- * current Codex `thread_id`, a session counter (increments on reset),
- * and a friendly display name derived from the workspace folder.
+ * current Codex `thread_id`, the session counter behind the S<N>
+ * name, the failure bookkeeping, and the session's pinned model,
+ * effort, and speed.
  *
  * Reset command nulls `thread_id` and bumps `sessionCounter` - next
  * prompt spawns a fresh thread with the incremented S<N> in the name.
@@ -36,9 +37,8 @@ export interface BridgeThreadRecord {
   createdAt: string;
   /** ISO timestamp of last reset, or null if never reset. */
   lastResetAt: string | null;
-  /** ISO timestamp of last successful prompt, or null. Used to
-   * short-circuit the resume round-trip if the last prompt was
-   * recent enough that the thread is certainly still good. */
+  /** ISO timestamp of the last successful prompt, or null. Arms the
+   * delivered flash on the widget and shows in the health report. */
   lastSuccessAt?: string | null;
   /** Consecutive recoverable-shaped failures since last success.
    * Threshold-based rotation (default 3) kicks in if this stays
@@ -83,7 +83,7 @@ export interface BridgeThreadRecord {
   pinResolved?: boolean;
 }
 
-export function recordPath(workspacePath: string): string {
+function recordPath(workspacePath: string): string {
   return join(EPIC_HANDSHAKE_DIR, `bridge-thread.${workspaceHash(workspacePath)}.json`);
 }
 

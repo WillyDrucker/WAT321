@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import { writeFileAtomic } from "../../engine/fs/atomicWrite";
 import {
@@ -109,7 +110,7 @@ function hasPendingPrompt(workspacePath: string | null): boolean {
     const cutoff = Date.now() - STALE_BRIDGE_STATE_MS;
     for (const f of readdirSync(dir)) {
       if (!f.endsWith(".md")) continue;
-      if (mtimeMs(`${dir}/${f}`) >= cutoff) return true;
+      if (mtimeMs(join(dir, f)) >= cutoff) return true;
     }
     return false;
   } catch {
@@ -118,22 +119,16 @@ function hasPendingPrompt(workspacePath: string | null): boolean {
 }
 
 /** Single source of truth for "is there an interruptable turn right
- * now?" Used by both the status bar refresh loop and every menu
- * entry that gates Cancel. Must match the window in which
- * `codexDispatcher.runTurnOnce` actually polls the cancel flag:
- * inbox has a fresh envelope waiting for dispatch OR a fresh
- * in-flight/processing flag exists. Returning flag is deliberately
- * excluded - by then the turn is complete and there is nothing to
- * interrupt.
- *
- * Staleness gate: flags older than `STALE_BRIDGE_STATE_MS` without
- * any matching fresh state are treated as crashed-mid-turn cruft
- * and ignored. The dispatcher's flag writers are explicit (not
- * heartbeat-style refresh), so without this gate a mid-turn crash
- * or VS Code restart leaves the widget animating forever.
- *
- * Flags read are workspace-scoped so a sibling VS Code instance's
- * active turn does not flip this workspace's widget to "busy." */
+ * now?", used by the status bar refresh loop and every menu entry that
+ * gates Cancel. Matches the window in which `codexDispatcher.runTurnOnce`
+ * polls the cancel flag: a fresh envelope waiting in the inbox OR a
+ * fresh in-flight / processing flag. The returning flag is excluded,
+ * since by then the turn is complete. Flags older than
+ * `STALE_BRIDGE_STATE_MS` without matching fresh state are crashed
+ * mid-turn cruft and ignored, otherwise a crash or VS Code restart
+ * would leave the widget animating forever (the flag writers are
+ * explicit, not heartbeat-refreshed). Flags are workspace-scoped, so a
+ * sibling window's turn never flips this widget to busy. */
 export function isBridgeBusy(workspacePath: string | null): boolean {
   if (!workspacePath) return false;
   const hash = workspaceHash(workspacePath);

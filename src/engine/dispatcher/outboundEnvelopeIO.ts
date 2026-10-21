@@ -7,15 +7,16 @@ import {
   unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import type { BridgeTarget } from "../bridgeTypes";
 import { writeFileAtomic } from "../fs/atomicWrite";
+import { EPIC_HANDSHAKE_DIR } from "../wat321Paths";
 import { workspaceHash } from "../workspaceHash";
 import {
   buildInboundEnvelope,
   readEnvelope,
   type Envelope,
-  type EnvelopeTarget,
 } from "../inbox/envelope";
-import { EH_ROOT_DIR, allOutboundDirs, sentDir } from "../inbox/inboxPaths";
+import { allOutboundDirs, sentDir } from "../inbox/inboxPaths";
 import { writeInbound } from "../inbox/inboxWriter";
 
 /**
@@ -46,9 +47,9 @@ const STALE_OUTBOUND_MS = 5 * 60_000;
 export function writeReturningFlag(workspacePath: string): void {
   try {
     const wsHash = workspaceHash(workspacePath);
-    const path = join(EH_ROOT_DIR, `returning.${wsHash}.flag`);
-    if (!existsSync(EH_ROOT_DIR)) {
-      mkdirSync(EH_ROOT_DIR, { recursive: true });
+    const path = join(EPIC_HANDSHAKE_DIR, `returning.${wsHash}.flag`);
+    if (!existsSync(EPIC_HANDSHAKE_DIR)) {
+      mkdirSync(EPIC_HANDSHAKE_DIR, { recursive: true });
     }
     writeFileAtomic(path, new Date().toISOString());
     const t = setTimeout(() => {
@@ -69,7 +70,7 @@ export function writeReturningFlag(workspacePath: string): void {
  * Failure here leaves a stale file the next activation's sweep
  * catches. */
 export function moveOutboundToSent(
-  target: EnvelopeTarget,
+  target: BridgeTarget,
   outboundPath: string,
   workspacePath: string
 ): void {

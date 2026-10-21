@@ -2,7 +2,7 @@
   "name": "wat321",
   "displayName": "WAT321",
   "description": "Willy's AI Tools - Real-time Claude & Codex usage widgets",
-  "version": "1.5.34",
+  "version": "1.5.35",
   "publisher": "WillyDrucker",
   "repository": {
     "type": "git",
@@ -81,10 +81,6 @@
       {
         "command": "wat321.modelBridge.show",
         "title": "WAT321: OpenCode Routes - Show Output"
-      },
-      {
-        "command": "wat321.modelBridge.legacyMenu",
-        "title": "WAT321: OpenCode Routes - Menu (legacy)"
       },
       {
         "command": "wat321.modelBridge.setZenApiKey",
@@ -271,7 +267,7 @@
             "default": false,
             "scope": "application",
             "order": 1,
-            "markdownDescription": "**WIP** - Enable OpenCode widgets (session tokens). Widgets hide automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\nAdditionally installs the OpenCode managed harness `opencode serve` to access free routable models (Big Pickle, MiniMax M2.7, Ling 2.6 Flash, Hy3 Preview, Nemotron 3 Super). Auto-spawns a serve subprocess so Claude and your tool-using harness can dispatch against any catalog instance, including your local LLM, giving it tool capabilities.\n\n**Data usage on free models ONLY.** Per OpenCode's docs, during the free period collected data may be used to improve the model. Nemotron 3 Super Free additionally has prompts and outputs logged by NVIDIA. If you don't want training-eligible traffic, disable this and use Claude / Codex / your local LLM only. Required for the local LLM harness; data usage does not apply to local routes."
+            "markdownDescription": "**WIP** - Enable OpenCode widgets (session tokens). Widgets hide automatically when the OpenCode CLI is not installed (`npm i -g opencode-ai`).\n\nAdditionally installs the OpenCode managed harness `opencode serve` to access free routable models (Big Pickle, GLM 5.3 Flash, DeepSeek V4.1 Flash, Nemotron 3.5 Super VL, MiniMax M3.1 Flash). Auto-spawns a serve subprocess so Claude and your tool-using harness can dispatch against any catalog instance, including your local LLM, giving it tool capabilities.\n\n**Data usage on free models ONLY.** Per OpenCode's docs, during the free period collected data may be used to improve the model. Nemotron 3 Super Free additionally has prompts and outputs logged by NVIDIA. If you don't want training-eligible traffic, disable this and use Claude / Codex / your local LLM only. Required for the local LLM harness; data usage does not apply to local routes."
           }
         }
       },
@@ -428,8 +424,7 @@
     "package": "npm run build && npm prune --omit=dev && npx vsce package && npm install"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "undici": "^8.2.0"
+    "@modelcontextprotocol/sdk": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

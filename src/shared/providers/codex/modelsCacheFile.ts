@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { CODEX_MODELS_CACHE_PATH } from "./codexHome";
 import type { CodexModelInfo, CodexModelUpgrade, CodexServiceTier } from "./modelCatalog";
 
 /**
@@ -18,7 +17,6 @@ import type { CodexModelInfo, CodexModelUpgrade, CodexServiceTier } from "./mode
  * a millisecond.
  */
 
-const MODELS_CACHE_PATH = join(homedir(), ".codex", "models_cache.json");
 
 interface ReasoningLevelEntry {
   effort?: string;
@@ -51,10 +49,10 @@ interface ModelsCacheFile {
 /** Parsed entries, or an empty list on any I/O or parse failure.
  * Callers treat empty as "nothing known", never as "nothing valid". */
 function readCacheEntries(): ModelsCacheEntry[] {
-  if (!existsSync(MODELS_CACHE_PATH)) return [];
+  if (!existsSync(CODEX_MODELS_CACHE_PATH)) return [];
   try {
     const parsed = JSON.parse(
-      readFileSync(MODELS_CACHE_PATH, "utf8")
+      readFileSync(CODEX_MODELS_CACHE_PATH, "utf8")
     ) as ModelsCacheFile;
     return Array.isArray(parsed.models) ? parsed.models : [];
   } catch {

@@ -1,46 +1,43 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { writeFileAtomic } from "../../engine/fs/atomicWrite";
+import {
+  OPENCODE_HEARTBEAT_PATH,
+  type OpenCodeDispatchHeartbeat,
+} from "../../shared/bridge/openCodeDispatchHeartbeat";
 import { LAST_USED_PATH, OPENCODE_ROUTES_DIR } from "../openCodeRoutesPaths";
 
 /**
  * OpenCode widget heartbeat + last-used sidecar writers for the FF
- * dispatcher. Cross-tier contract: shares the
- * `<OPENCODE_ROUTES_DIR>/heartbeat.json` + `<LAST_USED_PATH>` shape
- * with the MCP-runtime writer in `WAT321_MCP_SERVER/bin/opencode/heartbeat.mjs`.
- * Atomic tmp+rename so the widget reader never sees a torn write.
+ * dispatcher. Cross-tier contract: shares the heartbeat shape in
+ * `shared/bridge/openCodeDispatchHeartbeat.ts` and the `last-used.json`
+ * shape with the MCP-runtime writer in
+ * `WAT321_MCP_SERVER/bin/opencode/heartbeat.mjs`. Atomic tmp+rename so
+ * the widget reader never sees a torn write.
  */
 
-const OPENCODE_HEARTBEAT_PATH = join(OPENCODE_ROUTES_DIR, "heartbeat.json");
+type WidgetHeartbeatMeta = Pick<
+  OpenCodeDispatchHeartbeat,
+  "startedAt" | "requestId" | "alias" | "instanceId" | "dataRetention" | "model" | "timeoutMs"
+>;
 
-interface OpenCodeWidgetHeartbeatPayload {
-  startedAt: string;
-  requestId: string;
-  alias: string;
-  instanceId: string | null;
-  dataRetention: "local" | "retained" | null;
-  model: string;
-  timeoutMs: number;
+function ensureStateDir(): void {
+  if (!existsSync(OPENCODE_ROUTES_DIR)) {
+    mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
+  }
 }
 
-export function writeOpenCodeWidgetHeartbeat(
-  payload: OpenCodeWidgetHeartbeatPayload
-): void {
+/** The FF dispatcher reads the whole reply in one response, so the
+ * token fields stay at zero and the widget renders elapsed seconds. */
+export function writeOpenCodeWidgetHeartbeat(meta: WidgetHeartbeatMeta): void {
   try {
-    if (!existsSync(OPENCODE_ROUTES_DIR)) {
-      mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
-    }
-    writeFileAtomic(
-      OPENCODE_HEARTBEAT_PATH,
-      `${JSON.stringify({
-        phase: "calling",
-        ...payload,
-        tokens: 0,
-        tokensPerSec: 0,
-        currentPhase: "DISPATCH",
-        phaseTrace: [],
-      })}\n`
-    );
+    ensureStateDir();
+    const beat: OpenCodeDispatchHeartbeat = {
+      phase: "calling",
+      ...meta,
+      tokens: 0,
+      tokensPerSec: 0,
+    };
+    writeFileAtomic(OPENCODE_HEARTBEAT_PATH, `${JSON.stringify(beat)}\n`);
   } catch {
     // best-effort - widget falls back to idle when the file is missing
   }
@@ -67,9 +64,7 @@ interface OpenCodeLastUsedMeta {
 export function writeOpenCodeLastUsed(meta: OpenCodeLastUsedMeta): void {
   if (!meta.instanceId) return;
   try {
-    if (!existsSync(OPENCODE_ROUTES_DIR)) {
-      mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
-    }
+    ensureStateDir();
     const payload = {
       instanceId: meta.instanceId,
       alias: meta.alias,

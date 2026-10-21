@@ -99,7 +99,7 @@ export async function showLateRepliesPicker(
     ];
 
     const pick = await vscode.window.showQuickPick<RepliesPick>(items, {
-      title: `Late Codex replies (${replies.length})${paused ? " - paused" : ""}`,
+      title: `Late replies (${replies.length})${paused ? " - paused" : ""}`,
       placeHolder: "Pick a reply to copy, or choose an action",
     });
     if (!pick) return;

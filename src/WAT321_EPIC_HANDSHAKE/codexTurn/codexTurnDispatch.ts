@@ -1,4 +1,3 @@
-import { statSync } from "node:fs";
 import type { AppServerClient } from "../appServer/appServerClient";
 import type { Envelope } from "./envelope";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
@@ -19,6 +18,7 @@ import {
   writeReturningFlag,
   writeSuppressCodexToast,
 } from "./turnFlags";
+import { createFreshnessGate } from "./turnRecovery";
 import { runTurnOnce } from "./turnRunner";
 import { currentWaitMode } from "./waitMode";
 
@@ -29,9 +29,8 @@ import { currentWaitMode } from "./waitMode";
  * accounting, and absorbs "Codex committed the reply but the marshal
  * step threw" failures by recovering the reply from the rollout.
  *
- * Separated from `codexDispatcher.ts` because the dispatcher class
- * is mostly inbox-watching + lifecycle. This module is the turn
- * orchestration the class calls from one site (`processEnvelope`).
+ * `codexDispatcher.ts` owns inbox-watching and lifecycle and calls
+ * this orchestration from one site (`processEnvelope`).
  */
 
 interface DispatchDeps {
@@ -60,16 +59,12 @@ export async function dispatchTurn(
   });
   const threadReady = Date.now();
 
-  // Seed for reply-recovery in the outer catch below. Captured once
-  // threadId is known so the catch can tell a fresh reply (committed
-  // during THIS turn) from stale text already in the rollout when the
-  // turn started. seedRolloutSize covers the rare byte-identical-reply
-  // case where assistant text matches but the rollout still grew.
-  const seedRolloutPath = findRolloutPath(threadId);
-  const seedAssistantText = seedRolloutPath
-    ? (tryRolloutRecovery(seedRolloutPath) ?? "")
-    : "";
-  const seedRolloutSize = sizeOrZero(seedRolloutPath);
+  // Freshness gate for reply recovery in the outer catch below, seeded
+  // once threadId is known so the catch can tell a reply committed
+  // during THIS turn from stale text already in the rollout.
+  const freshness = createFreshnessGate(findRolloutPath(threadId), () =>
+    findRolloutPath(threadId)
+  );
 
   try {
     writeInFlightFlag(workspacePath);
@@ -119,12 +114,8 @@ export async function dispatchTurn(
       // reply to the rollout. Try a recovery pass with the seed
       // comparison before declaring failure. Freshness gated so stale
       // prior-turn text never gets delivered as ours.
-      const recoveryRollout = findRolloutPath(threadId);
-      const recovered = tryRolloutRecovery(recoveryRollout);
-      const grew =
-        recoveryRollout !== null &&
-        sizeOrZero(recoveryRollout) > seedRolloutSize;
-      if (recovered !== null && (recovered !== seedAssistantText || grew)) {
+      const recovered = tryRolloutRecovery(findRolloutPath(threadId));
+      if (recovered !== null && freshness.isFreshText(recovered)) {
         logger.info(
           `[recover] dispatch catch absorbed throw (chain ${env.chainId}); rollout has fresh reply len=${recovered.length}, delivering instead of blocker`
         );
@@ -188,14 +179,5 @@ async function runTurnWithCompactRetry(
     }
     logger.info(`compact complete; retrying turn on same thread`);
     return await runTurnOnce(opts);
-  }
-}
-
-function sizeOrZero(path: string | null): number {
-  if (!path) return 0;
-  try {
-    return statSync(path).size;
-  } catch {
-    return 0;
   }
 }

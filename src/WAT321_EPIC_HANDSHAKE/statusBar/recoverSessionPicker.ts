@@ -7,7 +7,7 @@ import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
 
 /**
  * Switch-to-recoverable-session sub-picker. Opens from the CODEX
- * SESSION row in `showSessionsSubmenu`. The active session is marked
+ * SESSION row in `showManageCodexSubmenu`. The active session is marked
  * with a leading green check - selecting a different one rewrites
  * `bridge-thread.<wshash>.json#threadId` so the next prompt resumes
  * that session instead of the previously-active one.

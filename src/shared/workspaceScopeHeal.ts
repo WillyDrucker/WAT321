@@ -96,12 +96,12 @@ async function clearWorkspaceScope(key: string): Promise<void> {
   }
 }
 
-/** Fire-and-forget heal on activation. Strips stale workspace-scope
- * values for every application-scoped wat321 key. Never throws. */
+/** Strip stale workspace-scope values for every application-scoped
+ * wat321 key. Fire-and-forget, run from Reset. Never throws. */
 export function healStaleApplicationScopeKeys(): void {
   for (const key of APPLICATION_SCOPE_KEYS) {
     void clearWorkspaceScope(key).catch(() => {
-      // best-effort - never block activation
+      // best-effort - never block the reset
     });
   }
 

@@ -2,12 +2,12 @@ import { existsSync } from "node:fs";
 import type { UsageServiceDiagnostics } from "../../engine/contracts";
 import type { ServiceState, StateListener } from "../../engine/serviceTypes";
 import type { TransitionReason, TransitionStatus } from "../../engine/usageTransitionLog";
-import { Coordinator } from "../cacheCoordinator";
+import { CacheCoordinator } from "../cacheCoordinator";
 import { CountdownTicker } from "./countdownTicker";
 import { KickstartGate } from "./kickstartGate";
 import { CACHE_FRESHNESS_OK_MS, CLAIM_TTL_MS, POLL_INTERVAL_MS } from "./pollingTimings";
 import { computeStartupDelay } from "./startupDelay";
-import { resolveStateFreshness, statesEqual } from "./stateMachine";
+import { resolveStateFreshness, statesEqual } from "./serviceStateRules";
 import { UsageServiceErrorState } from "./usageServiceErrorState";
 import { UsageFetchCycle } from "./usageServiceFetchCycle";
 import { UsagePollSchedule } from "./usageServicePollSchedule";
@@ -46,7 +46,7 @@ export abstract class UsageServiceBase<TResponse> {
 
   private readonly kickstart = new KickstartGate();
   private readonly schedule = new UsagePollSchedule(() => void this.refresh());
-  private readonly coordinator: Coordinator<ServiceState<TResponse>>;
+  private readonly coordinator: CacheCoordinator<ServiceState<TResponse>>;
   private readonly countdown: CountdownTicker;
   private readonly transitionLogger: TransitionLogger;
   private readonly errorState: UsageServiceErrorState;
@@ -57,7 +57,7 @@ export abstract class UsageServiceBase<TResponse> {
       ? { status: "loading" }
       : { status: "not-connected" };
 
-    this.coordinator = new Coordinator<ServiceState<TResponse>>(
+    this.coordinator = new CacheCoordinator<ServiceState<TResponse>>(
       config.cacheFile,
       config.claimFile,
       CACHE_FRESHNESS_OK_MS,

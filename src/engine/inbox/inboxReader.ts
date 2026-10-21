@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { parseEnvelope, type Envelope, type EnvelopeTarget } from "./envelope";
+import type { BridgeTarget } from "../bridgeTypes";
+import { parseEnvelope, type Envelope } from "./envelope";
 import { allInboundDirs, sentDir } from "./inboxPaths";
 
 /**
@@ -25,7 +26,7 @@ import { allInboundDirs, sentDir } from "./inboxPaths";
 const LATE_REPLY_THRESHOLD_MS = 1_000;
 
 export interface DrainedReply {
-  target: EnvelopeTarget;
+  target: BridgeTarget;
   filename: string;
   fullPath: string;
   envelope: Envelope;
@@ -50,9 +51,9 @@ export interface DrainedReply {
 function walkInboundFiles(
   workspacePath: string | null,
   predicate: (mtimeMs: number) => boolean
-): { target: EnvelopeTarget; dir: string; filename: string; fullPath: string; mtimeMs: number; size: number }[] {
+): { target: BridgeTarget; dir: string; filename: string; fullPath: string; mtimeMs: number; size: number }[] {
   const out: {
-    target: EnvelopeTarget;
+    target: BridgeTarget;
     dir: string;
     filename: string;
     fullPath: string;

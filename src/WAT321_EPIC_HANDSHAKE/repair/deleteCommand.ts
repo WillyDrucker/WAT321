@@ -1,19 +1,17 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import * as vscode from "vscode";
-import { EPIC_HANDSHAKE_DIR } from "../epicHandshakePaths";
+import { listRecoverableSessions } from "../codexTurn/sessionRecovery";
+import {
+  bridgeThreadDisplayName,
+  bridgeThreadNamePattern,
+} from "../codexTurn/threadNaming";
+import { loadBridgeThreadRecordIfExists } from "../codexTurn/threadRecord";
+import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
 import { buildDeleteAllDiagnostic } from "./deleteCommandDiagnostic";
 import {
   clearBridgeThreadRecord,
   deleteRolloutFilesByThreadId,
   stripSessionIndexEntries,
 } from "./deleteCommandSteps";
-import { listRecoverableSessions } from "../codexTurn/sessionRecovery";
-import { bridgeThreadDisplayName } from "../codexTurn/threadNaming";
-import type { BridgeThreadRecord } from "../codexTurn/threadRecord";
-import { bridgeThreadNamePattern } from "../codexTurn/threadNaming";
-import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
-import { workspaceHash } from "../../engine/workspaceHash";
 
 /**
  * Destructive delete of the current workspace's Codex bridge session
@@ -45,23 +43,10 @@ export async function deleteCurrentCodexSession(
     return;
   }
 
-  const recordPath = join(
-    EPIC_HANDSHAKE_DIR,
-    `bridge-thread.${workspaceHash(workspacePath)}.json`
-  );
-  if (!existsSync(recordPath)) {
+  const record = loadBridgeThreadRecordIfExists(workspacePath);
+  if (record === null) {
     void vscode.window.showInformationMessage(
       "Epic Handshake: no Codex session exists for this workspace."
-    );
-    return;
-  }
-
-  let record: BridgeThreadRecord;
-  try {
-    record = JSON.parse(readFileSync(recordPath, "utf8")) as BridgeThreadRecord;
-  } catch {
-    void vscode.window.showErrorMessage(
-      "Epic Handshake: bridge-thread state is unreadable."
     );
     return;
   }
@@ -95,7 +80,6 @@ export async function deleteCurrentCodexSession(
   );
   const projectedNext = clearBridgeThreadRecord(
     workspacePath,
-    recordPath,
     record,
     logger,
     "bridge-thread record null failed"
@@ -146,9 +130,7 @@ export async function deleteAllCodexSessions(
     // and points the user there.
     logger.info("[delete-all] (0) diagnostic:");
     for (const row of diag.rows) logger.info(`  ${row}`);
-    logger.info(
-      `[delete-all] workspace=${workspacePath} basename=${diag.basename} normalized=${diag.normalized}`
-    );
+    logger.info(`[delete-all] workspace=${workspacePath} basename=${diag.basename}`);
     const pick = await vscode.window.showInformationMessage(
       `Epic Handshake: ${diag.summary}`,
       "View details"
@@ -176,13 +158,8 @@ export async function deleteAllCodexSessions(
     logger,
     "bulk session_index strip failed"
   );
-  const recordPath = join(
-    EPIC_HANDSHAKE_DIR,
-    `bridge-thread.${workspaceHash(workspacePath)}.json`
-  );
   const projectedNext = clearBridgeThreadRecord(
     workspacePath,
-    recordPath,
     null,
     logger,
     "bridge-thread record null failed"

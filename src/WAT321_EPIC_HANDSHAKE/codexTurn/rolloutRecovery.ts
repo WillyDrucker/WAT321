@@ -1,29 +1,23 @@
-import { parseLastAssistantText } from "../../shared/codex-rollout/assistantTextParser";
-import { extractCurrentTurn } from "../../shared/codex-rollout/phaseParser";
-import { parseStageInfo } from "../../shared/codex-rollout/stageInfoParser";
+import { parseLastAssistantText } from "../../shared/codexRollout/assistantTextParser";
+import { extractCurrentTurn } from "../../shared/codexRollout/rolloutTurnSlice";
+import { parseStageInfo } from "../../shared/codexRollout/stageInfoParser";
 import { readTail } from "../../engine/fs/fileReaders";
 
 /**
  * Codex rollout-recovery primitives for `turnRunner`. Codex's flush
- * latency after a stall/hard-cap interrupt can substantially exceed
- * a single short grace window: a long reply that was mid-stream when
- * the interrupt fired can take seconds to commit its final
- * `task_complete` + `agent_message` to the rollout. A polling loop
- * catches that late commit - a single `setTimeout` would miss it and
- * produce a synthetic "max turn duration" error reply when Codex
- * actually had a real reply one second later.
+ * after a stall or hard-cap interrupt can take seconds to commit the
+ * final `task_complete` + `agent_message` to the rollout, so a polling
+ * loop catches that late commit where a single `setTimeout` would
+ * produce a synthetic "max turn duration" error one second before a
+ * real reply landed. Three windows live here because `runTurnOnce`
+ * polls from distinct paths: stall / hard-cap (generous),
+ * `turn/completed` failure (short, the notification already arrived),
+ * and the background late-delivery watch.
  *
- * Three windows live here because `runTurnOnce` invokes the poller
- * from distinct paths: stall/hard-cap (generous), `turn/completed`
- * failure (short, the notification already arrived), and the
- * background late-delivery watch. Co-locating the windows, the
- * polling fn, and the parser keeps every recovery decision in one place.
- *
- * Turn-scoping is load-bearing here: `parseStageInfo` and
- * `parseLastAssistantText` are both called on the current-turn slice
- * only. Without that, a failed current turn would happily "recover"
- * with stale assistant text from a prior completed turn in the same
- * rollout - a silent wrong-answer bug.
+ * Turn-scoping is load-bearing: `parseStageInfo` and
+ * `parseLastAssistantText` run on the current-turn slice only,
+ * otherwise a failed turn would "recover" stale assistant text from a
+ * prior completed turn in the same rollout, a silent wrong answer.
  */
 
 export interface RecoveryWindow {

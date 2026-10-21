@@ -1,31 +1,21 @@
 /**
- * Smoothed tokens-per-second for OpenCode and Local dispatches.
- * Mirrors the windowed math in `src/shared/sessionTokens/tpsTracker.ts`
- * so these dispatches read in the same magnitude as Claude/Codex.
+ * Smoothed tokens-per-second for OpenCode and Local dispatches,
+ * mirroring the windowed math in `src/shared/sessionTokens/tpsTracker.ts`
+ * so these dispatches read in the same magnitude as Claude and Codex.
  *
  * Idle gaps reset the window (a tool-wait pause would otherwise smear
- * the rate). Min window age + min token delta block the first
- * sample-pair from spiking when the first SSE chunk lands. The window
- * threshold (2s) matches the 2s poll cadence so a short bridge
- * dispatch (4-6 seconds is common) reports a real rate before
- * completing instead of staying at 0/s.
- *
- * `lastObservedTokens` is durable across the idle-gap clear: the
- * unchanged-tokens guard reads this marker, not `samples`. Without
- * it, a stale-token sample arriving after an idle clear would push
- * the stale value as a fresh baseline and the next real sample would
- * average against an artificially-old timestamp.
- *
- * `awaitingBaseline` mirrors the TS tracker: the first sample after a
- * session start or idle-gap clear is consumed as a baseline anchor
- * (updates `lastObservedTokens`, does not enter `samples`). The
- * rollback branch leaves `awaitingBaseline` cleared because
- * `lastObservedTokens = totalTokens` already pins the post-compact
- * floor, so the next sample with new tokens enters the window
- * directly. Without the baseline anchor, the first computable window
- * measures from "tokens already accumulated when we started watching"
- * to "tokens after first new chunk", which on a first turn caps the
- * rate at 999/s.
+ * the rate). A minimum window age and token delta stop the first
+ * sample pair from spiking on the first SSE chunk, and the 2s window
+ * threshold matches the 2s poll so a 4-6 second dispatch reports a
+ * real rate before completing. `lastObservedTokens` survives the
+ * idle-gap clear and backs the unchanged-tokens guard, so a stale
+ * sample after a clear cannot become a fresh baseline. The first sample
+ * after a start or a clear is consumed as the baseline anchor
+ * (`awaitingBaseline`), never entering `samples`: without it the first
+ * window would measure from the tokens already accumulated before
+ * watching began and cap at 999/s. The rollback branch leaves the flag
+ * clear because `lastObservedTokens = totalTokens` already pins the
+ * post-compact floor.
  */
 
 const TPS_MAX = 999;

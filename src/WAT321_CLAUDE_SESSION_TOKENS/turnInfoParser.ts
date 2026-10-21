@@ -1,4 +1,4 @@
-import type { ClaudeTurnInfo } from "../shared/ui/sessionTokens/sessionTokenWidget";
+import type { ClaudeTurnInfo } from "../shared/ui/sessionTokens/sessionTokenTypes";
 import { parseMostRecentCacheEvent } from "./cacheEventParser";
 
 /**
@@ -16,23 +16,12 @@ import { parseMostRecentCacheEvent } from "./cacheEventParser";
  *     machine's clean-exit transition.
  */
 
-/** Structured signal Claude Code writes at the end of every
- * compact. Empirically verified against recent Claude Code releases.
- *
- *   {
- *     "type": "system",
- *     "subtype": "compact_boundary",
- *     "content": "Conversation compacted",
- *     "timestamp": "...",
- *     "compactMetadata": {
- *       "trigger": "manual" | "auto",
- *       "preTokens": <int>,
- *       "durationMs": <int>,
- *       "postTokens": <int>,
- *       ...
- *     }
- *   }
- */
+/** Structured signal Claude Code writes at the end of every compact,
+ * verified against recent releases: `{ "type": "system", "subtype":
+ * "compact_boundary", "content": "Conversation compacted",
+ * "timestamp": "...", "compactMetadata": { "trigger": "manual" |
+ * "auto", "preTokens": <int>, "durationMs": <int>, "postTokens":
+ * <int>, ... } }` */
 interface CompactBoundary {
   /** ms since epoch parsed from the entry's `timestamp` field. */
   at: number;

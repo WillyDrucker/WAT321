@@ -1,36 +1,19 @@
 import type { CodexEffortOverride } from "../../engine/bridgeTypes";
 
 /**
- * Typed bindings for the `codex app-server` JSON-RPC 2.0 protocol.
+ * Typed bindings for the `codex app-server` JSON-RPC 2.0 protocol
+ * (reference: https://developers.openai.com/codex/app-server and the
+ * Rust source in `openai/codex/codex-rs/app-server-protocol/`). Only
+ * what Epic Handshake uses is bound: the requests initialize,
+ * thread/start, thread/resume, thread/name/set, thread/compact/start,
+ * turn/start, turn/interrupt, and model/list, plus the notifications
+ * item/agentMessage/delta and turn/completed.
  *
- * Reference: https://developers.openai.com/codex/app-server and the
- * Rust source in `openai/codex/codex-rs/app-server-protocol/`. Only
- * the methods and notifications Epic Handshake actually uses are
- * bound here:
- *
- *   Requests:
- *     - initialize          - handshake at connection start
- *     - thread/start        - create a fresh Bridge thread
- *     - thread/resume       - resume a persisted thread by id
- *     - thread/name/set     - stamp a display name for the TUI picker
- *     - thread/compact/start - in-place compact on context exceeded
- *     - turn/start          - dispatch a Bridge message as a turn
- *     - turn/interrupt      - cancel an in-flight turn
- *     - model/list          - models THIS app-server can actually run
- *
- *   Notifications (server to client):
- *     - item/agentMessage/delta  (streamed assistant content)
- *     - turn/completed           (terminal for a turn)
- *
- * Method and notification names are passed as string literals at call
- * sites to keep the protocol surface honest: what the dispatcher
- * actually sends is what you see. Request param types are typed
- * strictly so TypeScript enforces correctness on the wire shape.
- * Results are typed as `unknown` - callers do their own runtime shape
- * check. This insulates us from minor server-side schema changes: if
- * Codex adds a field, our code keeps working - if a field we rely on
- * goes missing, the runtime check fails loud at exactly the call site
- * that cares.
+ * Method names stay string literals at the call sites, so what the
+ * dispatcher sends is what you read. Params are typed strictly, results
+ * are `unknown` and shape-checked at the call site that cares, so a
+ * field Codex adds changes nothing and a field that goes missing fails
+ * loud exactly where it is read.
  */
 
 // -----------------------------------------------------------------------
@@ -98,23 +81,16 @@ type TurnSandboxPolicy =
   | { type: "workspaceWrite" }
   | { type: "dangerFullAccess" };
 
-/** `turn/start` params. Begins a new turn with the given input.
- *
- * `approvalPolicy` is always `"never"` - the bridge has no UI to
- * relay Codex's approval prompts back mid-turn.
- *
- * All three are re-read on every turn, so a change in the Codex Model
- * Settings picker takes effect on the next prompt with no thread reset.
- * They come from two different scopes: `sandboxPolicy` from the
- * workspace's `codex-sandbox.<wsHash>.flag`, and `model` + `effort` from
- * the session's `BridgeThreadRecord` (see `codexSessionSettings.ts`).
- *
- * `model` and `effort` accept null, which Codex reads as "inherit from
- * the thread / config.toml". A pinned session never sends a null model.
- * Verified empirically that Codex enforces per-turn values (turn_context
- * records them and the tool router blocks out-of-policy operations), and
- * that a thread does NOT remember its model across an app-server
- * restart, which is why `model` is re-sent on every turn. */
+/** `turn/start` params. `approvalPolicy` is always `"never"`, the
+ * bridge has no UI to relay approval prompts mid-turn. All three
+ * settings are re-read on every turn, so a change in the Codex Model
+ * Settings picker takes effect on the next prompt with no thread reset:
+ * `sandboxPolicy` from the workspace's `codex-sandbox.<wsHash>.flag`,
+ * `model` and `effort` from the session's `BridgeThreadRecord` (see
+ * `codexSessionSettings.ts`). `model` and `effort` accept null, which
+ * Codex reads as "inherit from the thread / config.toml", but a pinned
+ * session never sends a null model: Codex enforces per-turn values and
+ * a thread does NOT remember its model across an app-server restart. */
 export interface TurnStartParams {
   threadId: string;
   /** Input content. We send a single text block constructed from
@@ -156,44 +132,30 @@ export interface TurnInterruptParams {
 
 /**
  * `model/list` reports the models the app-server on the other end of
- * this pipe can actually run. The fields bound below have held steady
- * on every codex-cli release probed so far. The retirement pointers
- * are optional because older releases never send them.
+ * this pipe can actually run. The bound fields have held steady on
+ * every codex-cli release probed, the retirement pointers are optional
+ * because older releases never send them.
  *
- * WARNING: the field names here are NOT the ones in
- * `~/.codex/models_cache.json`. The RPC is camelCase and renames every
- * field we care about (`slug` -> `id`, `visibility` -> `hidden`,
- * `supported_reasoning_levels[].effort` ->
+ * WARNING: the field names are NOT the cache file's. The RPC is
+ * camelCase and renames every field that matters (`slug` -> `id`,
+ * `visibility` -> `hidden`, `supported_reasoning_levels[].effort` ->
  * `supportedReasoningEfforts[].reasoningEffort`,
  * `default_reasoning_level` -> `defaultReasoningEffort`,
- * `upgrade.retirement_at` ISO string -> `upgradeInfo.retirementAt`
- * epoch seconds). Do not copy-paste shapes between the two.
+ * `upgrade.retirement_at` ISO -> `upgradeInfo.retirementAt` epoch
+ * seconds). `isDefault` exists only here, `context_window` only in the
+ * file, so the default model comes from the RPC and the auto-compact
+ * ceiling stays file-sourced.
  *
- * Two further differences that drive design decisions upstream:
- *   - `isDefault` exists here and nowhere in the file, so we no longer
- *     guess the default model by sorting on `priority`.
- *   - `context_window` exists in the file and NOT here, so the
- *     auto-compact ceiling cannot move onto this RPC.
- *
- * The list is decided server-side for the account AND the binary. A
- * staged rollout lists a model for some accounts first (GPT-6 Astra),
- * and a model can list only from a given codex release onward (GPT-6.1
- * Sol lists on a newer codex and not on an older one, same account,
- * same minute). So two machines can get different answers, and one
- * machine's answer can change with no upgrade or change on one. That
- * is why the catalog records when it was fetched and which binary
- * answered.
- *
- * The response omits hidden models entirely (0.142.5 returns 3 where
- * its file lists 4), so `hidden` has always been observed false.
- *
- * `serviceTiers` drives the Speed row. Its deprecated twin
- * `additionalSpeedTiers` is ignored.
- *
- * Also on the wire and deliberately unbound until something consumes
- * them: `defaultServiceTier`, `inputModalities`, `supportsPersonality`,
- * `multiAgentVersion`, `modelSpecialty`, `availabilityNux`,
- * `availableAccessPrograms`.
+ * The list is decided server-side per account AND per binary, so two
+ * machines answer differently and one answer can change with no
+ * upgrade: the catalog records when it was fetched and which binary
+ * answered. Hidden models are omitted from the response (0.142.5
+ * returns 3 where its file lists 4), so `hidden` has only been seen
+ * false. `serviceTiers` drives the Speed row, its deprecated twin
+ * `additionalSpeedTiers` is ignored. Also on the wire and unbound until
+ * something consumes them: `defaultServiceTier`, `inputModalities`,
+ * `supportsPersonality`, `multiAgentVersion`, `modelSpecialty`,
+ * `availabilityNux`, `availableAccessPrograms`.
  */
 export interface ModelListParams {
   /** Omit for the first page. Feed back `nextCursor` for the rest. */

@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { fileSizeOrZero } from "../../engine/fs/fileReaders";
 import { tryRolloutRecovery } from "./rolloutRecovery";
 
 /**
@@ -20,12 +20,6 @@ export interface FreshnessGate {
    * differs from the seed OR the rollout has grown past the seed
    * size. */
   isFreshText(text: string): boolean;
-  /** Seed text captured at construction. Exposed for callers that
-   * want to log or assert the baseline. */
-  seedAssistantText: string;
-  /** Seed rollout size in bytes at construction. Same exposure
-   * rationale as `seedAssistantText`. */
-  seedRolloutSize: number;
 }
 
 /** Build a freshness gate for the rollout at `seedRolloutPath`.
@@ -37,33 +31,20 @@ export function createFreshnessGate(
   seedRolloutPath: string | null,
   resolveRolloutPath: () => string | null
 ): FreshnessGate {
-  const seedAssistantText = seedRolloutPath
-    ? (() => {
-        try {
-          return tryRolloutRecovery(seedRolloutPath) ?? "";
-        } catch {
-          return "";
-        }
-      })()
-    : "";
-  const seedRolloutSize = seedRolloutPath ? sizeOrZero(seedRolloutPath) : 0;
+  let seedAssistantText = "";
+  if (seedRolloutPath) {
+    try {
+      seedAssistantText = tryRolloutRecovery(seedRolloutPath) ?? "";
+    } catch {
+      seedAssistantText = "";
+    }
+  }
+  const seedRolloutSize = fileSizeOrZero(seedRolloutPath);
 
   return {
     isFreshText(text) {
       if (text !== seedAssistantText) return true;
-      const path = resolveRolloutPath();
-      if (!path) return false;
-      return sizeOrZero(path) > seedRolloutSize;
+      return fileSizeOrZero(resolveRolloutPath()) > seedRolloutSize;
     },
-    seedAssistantText,
-    seedRolloutSize,
   };
-}
-
-function sizeOrZero(path: string): number {
-  try {
-    return statSync(path).size;
-  } catch {
-    return 0;
-  }
 }

@@ -62,7 +62,7 @@ export function attachTurnWatchers(deps: TurnWatcherDeps): () => void {
   };
 }
 
-function startLivenessHeartbeat(deps: TurnWatcherDeps): NodeJS.Timeout {
+function startLivenessHeartbeat(deps: TurnWatcherDeps): ReturnType<typeof setInterval> {
   const t = setInterval(() => {
     if (deps.isSettled()) return;
     if (!deps.client.isAlive) {
@@ -87,7 +87,7 @@ function startLivenessHeartbeat(deps: TurnWatcherDeps): NodeJS.Timeout {
   return t;
 }
 
-function startSilentCompletionWatcher(deps: TurnWatcherDeps): NodeJS.Timeout {
+function startSilentCompletionWatcher(deps: TurnWatcherDeps): ReturnType<typeof setInterval> {
   const t = setInterval(() => {
     if (deps.isSettled()) return;
     if (!deps.isTurnObserved()) return;
@@ -104,7 +104,7 @@ function startSilentCompletionWatcher(deps: TurnWatcherDeps): NodeJS.Timeout {
   return t;
 }
 
-function startCancelWatcher(deps: TurnWatcherDeps): NodeJS.Timeout {
+function startCancelWatcher(deps: TurnWatcherDeps): ReturnType<typeof setInterval> {
   const cancelPath = cancelFlagPath(deps.wsHash);
   return setInterval(() => {
     if (!existsSync(cancelPath)) return;

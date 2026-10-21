@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
 import { writeFileAtomic } from "../engine/fs/atomicWrite";
 import { OPENCODE_ROUTES_DIR, PREFERENCES_PATH } from "./openCodeRoutesPaths";
 
@@ -31,10 +30,6 @@ const DEFAULT_PREFERENCES: OpenCodeRoutesPreferences = {
 function ensureDir(): void {
   if (!existsSync(OPENCODE_ROUTES_DIR)) {
     mkdirSync(OPENCODE_ROUTES_DIR, { recursive: true });
-  }
-  const dir = dirname(PREFERENCES_PATH);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
   }
 }
 

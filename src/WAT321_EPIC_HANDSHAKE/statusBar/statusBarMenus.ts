@@ -10,7 +10,7 @@ import { createMenuDispatch } from "./statusBarMenuActions";
 import { currentWorkspacePath, isPaused } from "./statusBarState";
 import { listRecoverableSessions } from "../codexTurn/sessionRecovery";
 import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
-import { readNewestHeartbeat } from "../bridgeStage/turnHeartbeat";
+import { readNewestHeartbeat } from "../../engine/heartbeat/heartbeatReader";
 import {
   currentWaitMode,
   nextWaitMode,

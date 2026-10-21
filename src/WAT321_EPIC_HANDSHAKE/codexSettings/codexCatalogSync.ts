@@ -137,10 +137,8 @@ function forgetPinsNowListed(
  *
  * On any failure (a codex too old to know `model/list`, transport
  * error, timeout) the catalog is left as it was and every reader falls
- * back to `models_cache.json`, failing open. That is precisely the
- * behavior WAT321 shipped before this module existed, which is what
- * makes an unreachable RPC a no-op rather than a regression for users
- * upgrading from an older WAT321 or running an older Codex.
+ * back to `models_cache.json`, failing open, so an unreachable RPC is
+ * a no-op rather than a regression for users running an older Codex.
  */
 export async function syncCodexCatalog(
   client: AppServerClient,

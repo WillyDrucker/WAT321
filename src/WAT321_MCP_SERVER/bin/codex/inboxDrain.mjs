@@ -125,8 +125,11 @@ function queuedEnvelopeEntries() {
 function heartbeatEntries() {
   const entries = [];
   for (const beat of listTurnHeartbeats(WORKSPACE_HASH)) {
-    const id = typeof beat?.envelopeId === "string" ? beat.envelopeId : null;
+    const id = typeof beat?.dispatchId === "string" ? beat.dispatchId : null;
     if (id === null) continue;
+    // Every target's heartbeat shares this directory, so the Codex
+    // summary skips OpenCode and Local turns.
+    if (beat?.target === "opencode" || beat?.target === "local") continue;
     const lastProgressAt =
       typeof beat?.lastProgressAt === "number" ? beat.lastProgressAt : null;
     const staleSec =

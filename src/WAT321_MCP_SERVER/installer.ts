@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { copyProdModules } from "../shared/mcp/copyProdModules";
+import { copyProdModules } from "./installerProdModules";
 import {
   healLegacyAllowlistEntries,
   preAllowMcpTools,
@@ -7,51 +7,42 @@ import {
 } from "../shared/providers/claude/mcpAllowlist";
 import { workspaceId } from "../engine/wat321Paths";
 import {
-  consoleLogger,
   runClaudeCli,
+  silentLogger,
   sweepPriorMcpEntries,
   sweepStaleClaudeJsonEntries,
   type UnifiedLogger,
 } from "./installerClaudeCli";
 import {
-  BIN_DIR,
-  UNIFIED_MCP_NAME,
+  BRIDGE_BIN_DIR,
   extractUnifiedScripts,
+  UNIFIED_MCP_NAME,
 } from "./installerScripts";
-import { createBridgeLogger } from "./outputChannel";
+import { createOutputChannelLogger } from "../engine/outputChannelLogger";
 
 /**
  * Unified bridge installer. Epic Handshake's enable/disable toggle is
- * the single switch: EH enable dispatches
- * `wat321.bridge.installUnified`, EH disable dispatches
- * `wat321.bridge.uninstallUnified`. Both commands are internal-only -
- * no command palette entries, so the user never thinks about MCP
- * registration directly.
+ * the single switch: enable dispatches `wat321.bridge.installUnified`,
+ * disable dispatches `wat321.bridge.uninstallUnified`, both internal
+ * commands with no palette entry.
  *
- * Install:
- *   1. Extract bin scripts to `~/.wat321/bridge/bin/` and copy
- *      `node_modules/` for prod deps.
- *   2. Sweep dormant `wat321` entries from `~/.claude.json`'s
- *      projects tree whose args[0] points at a path that no longer
- *      exists.
- *   3. Sweep any existing MCP entry by name so `claude mcp add` can
- *      re-register without duplicate-name errors.
- *   4. Register the MCP entry with the wsId injected via `--env`.
- *      Project scope when a workspace folder is open - user scope with
- *      the sentinel `default` wsId when VS Code is folderless, so a
- *      window with no folder still gets a working bridge.
- *   5. Pre-allow the unified tool surface in Claude's settings.
- *
- * Uninstall reverses the registration plus the pre-allow list. Script
- * extraction lives in `installerScripts` - the `claude mcp ...`
- * subprocess wrapper plus the two sweep helpers live in
+ * Install: extract the bin scripts to `~/.wat321/bridge/bin/` with the
+ * prod `node_modules/`, sweep dormant `wat321` entries from
+ * `~/.claude.json` whose args[0] no longer exists, sweep any existing
+ * entry by name so `claude mcp add` can re-register, register with the
+ * wsId (and, with a folder open, the workspace path) injected via
+ * `--env`, then pre-allow the tool surface in Claude's settings.
+ * Project scope with a workspace folder, user scope with the sentinel
+ * `default` wsId when VS Code is folderless so that window still gets
+ * a working bridge. Uninstall reverses the registration and the
+ * pre-allow list. Script extraction lives in `installerScripts`, the
+ * `claude mcp` subprocess wrapper and the two sweeps in
  * `installerClaudeCli`.
  */
 
-// Tool surface: dispatch + session lifecycle + inbox consume. Inbox
-// peek and other read-only state moved to MCP resources, which don't
-// need pre-allowance because resources/read is a different permission
-// surface than tool calls.
+// The tool surface pre-allowed in Claude settings. Read-only state
+// ships as MCP resources instead, which need no pre-allowance because
+// `resources/read` is a different permission surface than tool calls.
 const UNIFIED_ALLOWED_TOOLS = [
   "mcp__wat321__wat321_ask",
   "mcp__wat321__wat321_session",
@@ -62,13 +53,13 @@ const UNIFIED_ALLOWED_TOOLS = [
  * register the new MCP entry, pre-allow new tool names. */
 export async function installUnifiedBridge(
   context: vscode.ExtensionContext,
-  logger: UnifiedLogger = consoleLogger
+  logger: UnifiedLogger = silentLogger
 ): Promise<{ ok: boolean; error?: string; scriptPath?: string }> {
   let scriptPath: string;
   try {
     scriptPath = extractUnifiedScripts(context);
-    logger.info(`unified bridge scripts extracted to ${BIN_DIR}`);
-    copyProdModules(context, BIN_DIR, logger);
+    logger.info(`unified bridge scripts extracted to ${BRIDGE_BIN_DIR}`);
+    copyProdModules(context, BRIDGE_BIN_DIR, logger);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error(`extractUnifiedScripts failed: ${msg}`);
@@ -102,6 +93,7 @@ export async function installUnifiedBridge(
       UNIFIED_MCP_NAME,
       "--env",
       `WAT321_WORKSPACE_ID=${wsId}`,
+      ...(workspaceCwd ? ["--env", `WAT321_WORKSPACE_PATH=${workspaceCwd}`] : []),
       "--",
       "node",
       scriptPath,
@@ -131,7 +123,7 @@ export async function installUnifiedBridge(
  * folder-mode registration) and user-scope (the folderless-mode
  * registration plus any defensive sweep target). */
 export async function uninstallUnifiedBridge(
-  logger: UnifiedLogger = consoleLogger
+  logger: UnifiedLogger = silentLogger
 ): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const workspaceCwd = workspaceFolder?.uri.fsPath;
@@ -162,8 +154,8 @@ export async function uninstallUnifiedBridge(
 export function registerUnifiedBridgeCommands(
   context: vscode.ExtensionContext
 ): void {
-  const { logger, channel } = createBridgeLogger();
-  context.subscriptions.push(channel);
+  const logger = createOutputChannelLogger("WAT321: Bridge");
+  context.subscriptions.push(logger);
 
   // Internal-only commands - dispatched by Epic Handshake on enable /
   // disable. Not contributed to the command palette. Idempotent so a

@@ -1,26 +1,19 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { readTail } from "../engine/fs/fileReaders";
-import { getProjectKey, normalizePath } from "../engine/fs/pathIdentity";
+import { getProjectKey, isSameWorkspaceTree } from "../engine/fs/pathIdentity";
+import { CLAUDE_PROJECTS_DIR } from "../shared/providers/claude/claudeHome";
+import { compareActivity, rankActivity } from "../shared/sessionTokens/activityRanking";
 import type { LastEntryKind } from "../shared/turnState";
-import { classifyClaudeTurn } from "./turnClassifier";
+import { classifyClaudeTurn } from "./claudeTurnClassifier";
 import type { SessionEntry } from "./claudeSessionTokenTypes";
 
 /**
  * Live-session discovery for Claude. `walkWorkspaceSessions` does the
  * `~/.claude/sessions/*.json` I/O once per poll. `rankActiveSession`
  * and `tallyWorkspaceSessions` are pure consumers over that result.
- *
- * The lastKnown fallback (`findLastKnownTranscript`) lives in
- * `lastKnownTranscriptScan.ts` and is re-exported from this file so
- * the service keeps a single import surface.
+ * The lastKnown fallback lives in `lastKnownTranscriptScan.ts`.
  */
-
-export {
-  findLastKnownTranscript,
-  type LastKnownTranscript,
-} from "./lastKnownTranscriptScan";
 
 /** Per-session snapshot surfaced by the walker. Carries every field
  * the rank and tally consumers need so neither has to re-read the
@@ -33,40 +26,6 @@ export interface SessionCandidate {
   mtime: number;
   turnState: LastEntryKind;
 }
-
-const ACTIVITY_SCORE: Record<string, number> = {
-  "assistant-pending": 3,
-  user: 2,
-  "assistant-done": 1,
-  "compact-end": 0,
-  interrupted: 0,
-  unknown: 0,
-};
-
-/** Freshness gate for the activity-first ranking. A transcript whose
- * tail still classifies as `assistant-pending` but whose mtime is
- * older than this window is treated as stale (activity score forced
- * to 0) so an orphaned mid-turn transcript from days ago can't outrank
- * a freshly-active session. 5 minutes covers the longest reasonable
- * in-flight Claude turn while excluding stale tails. Candidates outside
- * the window still compete on mtime. */
-const ACTIVITY_FRESHNESS_MS = 5 * 60_000;
-
-/** Hot-recency window. A transcript written to within this window is
- * the strongest "user is here right now" signal the file system can
- * give us: either the user just typed, or Claude just streamed a
- * response, or both. Candidates inside this window outrank candidates
- * outside it regardless of activity score, so a session the user just
- * touched wins against a sibling whose mid-turn classification is
- * older but technically still inside the 5-minute activity window.
- *
- * Trade-off the constant encodes: a Claude turn that goes silent for
- * more than this (deep Opus thinking with no transcript writes, slow
- * tool dispatch) drops out of "hot" even though the user is still
- * waiting for it. Picked to be longer than a typical between-write
- * gap during normal turns and short enough that a stale background
- * session loses preference quickly once the user moves on. */
-const HOT_RECENCY_MS = 60_000;
 
 /** Walk `~/.claude/sessions/*.json` once and return every workspace-
  * matching session as a `SessionCandidate`. Bidirectional cwd match
@@ -89,8 +48,6 @@ export function walkWorkspaceSessions(
     return [];
   }
 
-  const wsNorm = normalizePath(workspacePath);
-  const home = homedir();
   const candidates: SessionCandidate[] = [];
 
   for (const file of files) {
@@ -98,20 +55,11 @@ export function walkWorkspaceSessions(
       const entry: SessionEntry = JSON.parse(
         readFileSync(join(sessionsDir, file), "utf8")
       );
-      const entryCwd = normalizePath(entry.cwd);
-      const match =
-        wsNorm === ""
-          ? true
-          : entryCwd === wsNorm ||
-            wsNorm.startsWith(`${entryCwd}/`) ||
-            entryCwd.startsWith(`${wsNorm}/`);
-      if (!match) continue;
+      if (!isSameWorkspaceTree(workspacePath, entry.cwd)) continue;
 
       const projectKey = getProjectKey(entry.cwd);
       const transcriptPath = join(
-        home,
-        ".claude",
-        "projects",
+        CLAUDE_PROJECTS_DIR,
         projectKey,
         `${entry.sessionId}.jsonl`
       );
@@ -134,54 +82,28 @@ export function walkWorkspaceSessions(
   return candidates;
 }
 
-/** Pick the most-deserving workspace candidate. Tiered ranking:
- *
- *   1. Hot recency. A candidate written within HOT_RECENCY_MS
- *      outranks every candidate outside that window. The strongest
- *      "user is here right now" signal the file system gives us, so
- *      a sibling whose mid-turn classification is older than the
- *      hot window cannot steal focus from a session the user just
- *      touched.
- *   2. Activity score. Inside the same hot bucket, prefer
- *      `assistant-pending` over `user` over `assistant-done`.
- *      Activity score is gated by ACTIVITY_FRESHNESS_MS so an
- *      orphaned mid-turn tail from days ago cannot outrank a fresh
- *      idle session.
- *   3. mtime. Most-recent-write wins.
- *   4. Entrypoint tiebreaker. `claude-vscode` beats other
- *      entrypoints when all of the above are equal. */
+/** Pick the most-deserving workspace candidate: the shared
+ * hot-recency > activity > mtime ranking, with `claude-vscode`
+ * winning a full tie so the editor's own session takes the widget
+ * over a terminal twin. */
 export function rankActiveSession(
   candidates: readonly SessionCandidate[]
 ): SessionEntry | null {
   if (candidates.length === 0) return null;
-
-  interface RankedCandidate {
-    entry: SessionEntry;
-    mtime: number;
-    activity: number;
-    isHot: boolean;
-  }
   const now = Date.now();
-  const ranked: RankedCandidate[] = candidates.map((c) => {
-    const rawActivity = ACTIVITY_SCORE[c.turnState] ?? 0;
-    const fresh = now - c.mtime <= ACTIVITY_FRESHNESS_MS;
-    const activity = fresh ? rawActivity : 0;
-    const isHot = now - c.mtime <= HOT_RECENCY_MS;
-    return { entry: c.entry, mtime: c.mtime, activity, isHot };
-  });
-
+  const ranked = candidates.map((c) => ({
+    entry: c.entry,
+    rank: rankActivity(c.turnState, c.mtime, now),
+  }));
   let best = ranked[0];
   for (let i = 1; i < ranked.length; i++) {
     const c = ranked[i];
+    const cmp = compareActivity(c.rank, best.rank);
     const beats =
-      (c.isHot && !best.isHot) ||
-      (c.isHot === best.isHot &&
-        (c.activity > best.activity ||
-          (c.activity === best.activity && c.mtime > best.mtime) ||
-          (c.activity === best.activity &&
-            c.mtime === best.mtime &&
-            c.entry.entrypoint === "claude-vscode" &&
-            best.entry.entrypoint !== "claude-vscode")));
+      cmp > 0 ||
+      (cmp === 0 &&
+        c.entry.entrypoint === "claude-vscode" &&
+        best.entry.entrypoint !== "claude-vscode");
     if (beats) best = c;
   }
   return best.entry;

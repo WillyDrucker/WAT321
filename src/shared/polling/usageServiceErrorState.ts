@@ -13,7 +13,7 @@ import {
   isNetworkError,
 } from "./errorClassification";
 import { HttpError } from "./httpError";
-import { isCacheableState } from "./stateMachine";
+import { isCacheableState } from "./serviceStateRules";
 import type { KickstartGate } from "./kickstartGate";
 import type {
   TransitionLogger,

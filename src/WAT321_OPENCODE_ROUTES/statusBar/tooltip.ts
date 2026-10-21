@@ -1,17 +1,18 @@
-import { readBridgeProjectName } from "../../shared/bridge/bridgeConfig";
 import * as vscode from "vscode";
 import { SETTING } from "../../engine/settingsKeys";
-import { formatPct, formatTokens, makeTokenBar } from "../../shared/ui/tokenFormatters";
+import { formatSessionDisplayName, readBridgeProjectName } from "../../shared/bridge/bridgeConfig";
+import type { OpenCodeDispatchHeartbeat } from "../../shared/bridge/openCodeDispatchHeartbeat";
+import type { SessionTarget } from "../../shared/bridge/sessionAliases";
 import { wrapAndTruncateTitle } from "../../shared/ui/sessionTokens/sessionTitleWrap";
+import { formatPct, formatTokens, makeTokenBar } from "../../shared/ui/tokenFormatters";
 import type { BridgeSessionTokens } from "./sessionTokensPoller";
-import type { Heartbeat } from "./statusBarItem";
 
 /**
  * Tooltip composition for the OpenCode Routes widget. Layout matches
  * the Claude / Codex session-token tooltips: bold provider header,
  * wrapped session title, model line, 📁 used/window block, bar,
- * (optional) in-flight stage line + phase trace + generation line,
- * RETENTION (cloud-routed only), Auto-Compact pinned to the bottom.
+ * (optional) in-flight generation line, RETENTION (cloud-routed
+ * only), Auto-Compact pinned to the bottom.
  */
 
 const FOLDER_ICON = "\u{1F4C1}";
@@ -20,47 +21,9 @@ const CLAMP_ICON = "\u{1F5DC}\u{FE0F}";
  * vocabulary. Big Pickle and GPT 5 Nano both render "OpenCode session
  * token context" so users see one consistent header per service
  * regardless of which specific Zen route is active. */
-function providerHeaderLabel(target: "opencode" | "local" | null): string {
+function providerHeaderLabel(target: SessionTarget | null): string {
   if (target === "local") return "Local LLM";
   return "OpenCode";
-}
-
-/** Canonical session display name the EH menus use:
- * `${projectName} Epic Handshake Claude-to-${OpenCode|Local} S${n}`.
- * Returns null when no alias is bound so the title line skips
- * entirely instead of rendering an awkward partial name. */
-function composeSessionTitle(
-  target: "opencode" | "local" | null,
-  alias: string | null
-): string | null {
-  if (!target || !alias) return null;
-  const projectName = readBridgeProjectName();
-  const targetLabel = target === "local" ? "Local" : "OpenCode";
-  return `${projectName} Epic Handshake Claude-to-${targetLabel} ${alias}`;
-}
-
-/** Map heartbeat `currentPhase` to the 5-stage display vocabulary the
- * Claude / Codex tooltips use. Best-effort: phases that don't map
- * cleanly fall through to null and the stage line is suppressed. */
-function mapPhaseToStage(currentPhase: string | undefined): {
-  fraction: string;
-  label: string;
-} | null {
-  switch ((currentPhase || "").toUpperCase()) {
-    case "DISPATCH":
-      return { fraction: "1/5", label: "dispatched" };
-    case "RECEIPT":
-      return { fraction: "2/5", label: "received" };
-    case "STARTED":
-    case "HALFWAY":
-      return { fraction: "3/5", label: "working" };
-    case "COMPLETING":
-      return { fraction: "4/5", label: "writing" };
-    case "TASK":
-      return { fraction: "5/5", label: "complete" };
-    default:
-      return null;
-  }
 }
 
 /** `Model: name (window context)` formatter. Local LLM uses the probed
@@ -80,13 +43,13 @@ function formatModelLine(
 }
 
 export function buildOpenCodeRoutesTooltip(opts: {
-  hb: Heartbeat | null;
+  hb: OpenCodeDispatchHeartbeat | null;
   catalogAlias: string;
   catalogContextWindow: number | null;
   retention: "local" | "retained" | undefined;
   needsKey: boolean;
   sessionTokens: BridgeSessionTokens | null;
-  target: "opencode" | "local" | null;
+  target: SessionTarget | null;
   activeBridgeAlias: string | null;
 }): vscode.MarkdownString {
   const {
@@ -106,11 +69,12 @@ export function buildOpenCodeRoutesTooltip(opts: {
   // Header: provider service name, not the catalog alias.
   md.appendMarkdown(`**${providerHeaderLabel(target)} session token context**  \n`);
 
-  // Wrapped session title in quotes. Two-line max with ellipsis on
+  // Wrapped session title in quotes, skipped entirely when no alias is
+  // bound so no partial name renders. Two-line max with ellipsis on
   // overflow. Two trailing spaces + newline = MarkdownString hard
   // line break so wrap-line-2 lands on its own row.
-  const fullTitle = composeSessionTitle(target, activeBridgeAlias);
-  if (fullTitle) {
+  if (target && activeBridgeAlias) {
+    const fullTitle = formatSessionDisplayName(target, activeBridgeAlias);
     const wrapped = wrapAndTruncateTitle(fullTitle).replace(/\n/g, '"  \n"');
     md.appendMarkdown(`"${wrapped}"  \n`);
   }
@@ -154,30 +118,13 @@ export function buildOpenCodeRoutesTooltip(opts: {
     }
   }
 
-  // In-flight stage block: stage-line + phase trace + generation line.
-  if (hb) {
-    const stage = mapPhaseToStage(hb.currentPhase);
-    if (stage) {
-      md.appendMarkdown(
-        `\n${providerHeaderLabel(target)}: ${stage.fraction} ${stage.label}\n`
-      );
-    }
-    const phaseTrace = hb.phaseTrace || [];
-    if (phaseTrace.length > 0) {
-      md.appendMarkdown(`\n**Phase trace**\n\n`);
-      for (const p of phaseTrace) {
-        const elapsed = `${(p.elapsedMs / 1000).toFixed(1)}s`;
-        const summary = p.summary ? ` - *${p.summary.replace(/\*/g, "")}*` : "";
-        md.appendMarkdown(`- \`${p.phase.padEnd(11)}\` ${elapsed}${summary}\n`);
-      }
-    }
-    if (typeof hb.tokens === "number" && hb.tokens > 0) {
-      const tpsEnabled = vscode.workspace
-        .getConfiguration("wat321")
-        .get<boolean>(SETTING.enableTokensPerSecondCounters, false);
-      const rateSuffix = tpsEnabled ? ` at ${hb.tokensPerSec ?? 0} tok/s` : "";
-      md.appendMarkdown(`\nGeneration: ${hb.tokens} tokens${rateSuffix}\n`);
-    }
+  // In-flight generation line, once the backend has streamed tokens.
+  if (hb && typeof hb.tokens === "number" && hb.tokens > 0) {
+    const tpsEnabled = vscode.workspace
+      .getConfiguration("wat321")
+      .get<boolean>(SETTING.enableTokensPerSecondCounters, false);
+    const rateSuffix = tpsEnabled ? ` at ${hb.tokensPerSec ?? 0} tok/s` : "";
+    md.appendMarkdown(`\nGeneration: ${hb.tokens} tokens${rateSuffix}\n`);
   }
 
   // RETENTION above Auto-Compact for cloud-routed instances. Local

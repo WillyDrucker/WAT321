@@ -1,29 +1,22 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { BRIDGE_CONFIG_PATH } from "../shared/bridge/bridgeConfig";
 import * as vscode from "vscode";
-import { SETTING } from "../engine/settingsKeys";
 import { writeFileAtomic } from "../engine/fs/atomicWrite";
+import { SETTING } from "../engine/settingsKeys";
 import { bridgeStateDir } from "../engine/wat321Paths";
+import { BRIDGE_CONFIG_PATH } from "../shared/bridge/bridgeConfig";
+import { installUnifiedBridge } from "./installer";
 
 /**
- * WAT321 Bridge - extension-side ownership of the unified MCP server.
- *
- * The unified `channel.mjs` reads enabled-feature flags from the
- * per-client bridge state dir to decide which targets and tools to
- * advertise to Claude. This module owns:
- *
- *   - bridge config writer (refreshes on activate + settings change)
- *   - auto-install on Epic Handshake enable (idempotent)
- *   - session-alias map storage at
- *     `~/.wat321/clients/<wsId>/bridge/session-aliases.json`
- *   - project-name stamp for standardized session display labels
- *   - auto-create OpenCode S1 session on OpenCode Routes enable
- *
- * Epic Handshake's enabled flag is the single switch for the bridge.
- * Disabling EH sweeps the unified MCP entry - enabling installs it.
+ * The unified bridge config: `channel.mjs` reads enabled-target flags
+ * and the project name from the per-client bridge state dir on every
+ * call. This module writes that snapshot on activate and on every
+ * relevant settings or workspace-folder change, and re-runs the
+ * unified install on activate while Epic Handshake is enabled. The
+ * installer lives in `installer.ts`, the S1 auto-create in
+ * `autoCreateSession.ts`.
  */
 
-const BRIDGE_DIR = bridgeStateDir();
+const BRIDGE_STATE_DIR = bridgeStateDir();
 
 interface BridgeConfig {
   enabled: {
@@ -84,8 +77,8 @@ function snapshotConfig(): BridgeConfig {
  * "all-disabled" so a write failure degrades gracefully. */
 function writeBridgeConfig(): void {
   try {
-    if (!existsSync(BRIDGE_DIR)) {
-      mkdirSync(BRIDGE_DIR, { recursive: true });
+    if (!existsSync(BRIDGE_STATE_DIR)) {
+      mkdirSync(BRIDGE_STATE_DIR, { recursive: true });
     }
     const snapshot = snapshotConfig();
     writeFileAtomic(BRIDGE_CONFIG_PATH, JSON.stringify(snapshot, null, 2));
@@ -109,7 +102,6 @@ async function autoInstallIfEnabled(
     .get<boolean>(SETTING.epicHandshakeEnabled, false);
   if (!ehEnabled) return;
   try {
-    const { installUnifiedBridge } = await import("./installer");
     await installUnifiedBridge(context);
   } catch {
     // best-effort - install failure surfaces in the bridge output channel

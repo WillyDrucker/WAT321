@@ -13,25 +13,20 @@ import {
  * The sandbox override flag, plus the legacy-sweep readers that carry
  * a workspace-scoped model or effort flag into the session record.
  *
- * Sandbox is workspace-scoped and stays that way: it is a safety
- * posture for a folder, not a property of one conversation. Each VS
- * Code workspace carries its own, so a test instance and a main dev
- * window do not bleed into each other.
+ * Sandbox is workspace-scoped and stays that way: a safety posture for
+ * a folder, not a property of one conversation, so a test instance and
+ * a main dev window never bleed into each other. Per-turn override is
+ * the whole mechanism: `thread/start` creates the thread at the maximum
+ * ceiling and `turn/start` reads the authoritative policy, so a user
+ * can dial down for one turn and back up for the next with no thread
+ * reset (verified by probe: turn_context records the override and the
+ * tool router rejects out-of-policy operations).
  *
- * Per-turn override is the entire mechanism. `thread/start` creates the
- * thread at the maximum ceiling and the authoritative policy for any
- * given turn is read at `turn/start` time. That is what lets a user dial
- * down for one turn and back up for the next with no thread reset
- * (verified via probe: turn_context records the override AND the tool
- * router rejects out-of-policy operations).
- *
- * Model and effort are per-session fields on `BridgeThreadRecord`,
- * owned by `codexSessionSettings.ts`: a workspace-scoped pin would
- * bleed across every session in a folder and outlive the session it
- * was chosen for. The readers below exist only for the legacy sweep.
- *
- * All flags are best-effort I/O. A missed read falls back to "no
- * override", which is the safe direction.
+ * Model and effort live per session on `BridgeThreadRecord`, owned by
+ * `codexSessionSettings.ts`, because a workspace-scoped pin would bleed
+ * across every session in a folder. The readers below exist only for
+ * the legacy sweep. All flag I/O is best-effort: a missed read means
+ * "no override", the safe direction.
  */
 
 // -----------------------------------------------------------------
@@ -118,7 +113,6 @@ export function clearLegacyCodexPinFlags(wsHash: string): void {
   }
 }
 
-
 /** Every level Codex has shipped to date. This is a FLOOR, never a
  * ceiling: the gate below unions it with whatever the app-server or the
  * cache reports, so a level OpenAI adds later still flows through.
@@ -165,4 +159,3 @@ export function readLegacyCodexEffortFlag(
     return null;
   }
 }
-

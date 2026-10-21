@@ -5,6 +5,24 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.35] - 2026-10-21
+
+### Added
+
+- **Four fresh free OpenCode Zen routes take over from the four that had gone dark.** GLM 5.3 Flash, DeepSeek V4.1 Flash, Nemotron 3.5 Super VL, and MiniMax M3.1 Flash replace the retired entries, with context windows read from the same registry OpenCode uses. If your active instance or a session alias pointed at a retired route, it moves to the successor on its own the next time the extension starts.
+
+### Changed
+
+- **The old OpenCode Routes status bar menu is gone.** Its sessions list, pause and cancel rows, Zen key submenu, and totals reset had no working backend left. The Active Instance picker stays, and session and instance management keep running through the Epic Handshake dropdown.
+- **The extension is leaner.** It ships one runtime dependency now, so the package is about two megabytes smaller, and every source file is under 300 lines after a sweep that renamed files to say what they own. You should notice nothing else.
+
+### Fixed
+
+- **A Codex reply that lands after the wait ends registers on the extension side again.** The extension's inbox reader accepted only the envelope shape it writes itself, so a late Codex reply stayed invisible to it until the next bridge call drained it.
+- **Changing your auto-compact settings updates the Claude token bar right away** instead of waiting for the next transcript write.
+- **The bridge inbox check no longer reports an OpenCode or Local turn as Codex work.** A stalled local turn used to read as a wedged Codex turn, complete with advice to restart Codex.
+- **Staging a clipboard image on Linux falls back to xclip when wl-paste cannot reach a Wayland display,** so X11 sessions with wl-clipboard installed work again.
+
 ## [1.5.34] - 2026-09-29
 
 ### Added

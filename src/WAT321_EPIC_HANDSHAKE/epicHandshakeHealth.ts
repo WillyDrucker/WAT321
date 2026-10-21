@@ -7,7 +7,7 @@ import { peekResolvedClaudeCli } from "../shared/providers/claude/cliResolver";
 import { peekResolvedCodexCli } from "../shared/providers/codex/cliResolver";
 import { peekResolvedOpenCodeCli } from "../shared/providers/opencode/cliResolver";
 import type { ResolvedCli } from "../shared/providers/cliResolver";
-import { EPIC_HANDSHAKE_DIR } from "./epicHandshakePaths";
+import { EPIC_HANDSHAKE_DIR } from "../engine/wat321Paths";
 import type { BridgeThreadRecord } from "./codexTurn/threadRecord";
 
 /**
@@ -59,7 +59,7 @@ export function appendEpicHandshakeHealth(lines: string[]): void {
   lines.push("  architecture: sync MCP bridge (Claude -> Codex forward direction)");
 
   // CLI binary resolution surface. Helps the user diagnose "where is
-  // my claude/codex coming from?" - especially relevant now that the
+  // my claude/codex coming from?" The
   // bridge can fall back to the marketplace extension's bundled binary
   // when nothing is on PATH. peek* returns undefined when no probe has
   // run yet (rare in practice - isClaudeAvailable runs at activate).

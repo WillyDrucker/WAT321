@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { formatSessionDisplayName } from "../../shared/bridge/bridgeConfig";
 import {
   readAliases,
   SESSION_ALIASES_PATH,
@@ -17,7 +18,6 @@ import {
 } from "./openCodeSessionsRows";
 import {
   fetchSessions,
-  formatSessionDisplayName,
   pickInstanceForTarget,
   TARGET_CONFIGS,
 } from "./openCodeSessionsSource";
@@ -35,20 +35,11 @@ import { isPaused, setPaused } from "../statusBar/statusBarState";
  * picker stays separate because Codex sessions live in Codex's own
  * rollout files, not in opencode.db.
  *
- * Row set (Codex-style single-active-session model):
- *   - BACK
- *   - <TOOL> MODEL: <name>           (one click switches catalog instance)
- *   - CURRENT <TOOL> SESSION         (click opens switch sub-picker)
- *   - RESET <TOOL> SESSION           (toast confirm - clears active alias)
- *   - DELETE <TOOL> SESSION (S#)     (toast confirm - only when active)
- *   - DELETE ALL <TOOL> SESSIONS (#) (toast confirm)
- *   - PAUSE/RESUME, CANCEL
- *
- * Active-alias state lives in `aliases.activeAliases[target]` in
- * `~/.wat321/bridge/session-aliases.json`. The bridge consumer
- * (`WAT321_MCP_SERVER/bin/opencode/dispatch.mjs`) resolves a missing `session` arg to that
- * active value, so the menu's CURRENT row is the user-facing source
- * of truth and dispatch follows automatically.
+ * Active-alias state lives in `aliases.activeAliases[target]` in the
+ * per-client `session-aliases.json`. The bridge consumer
+ * (`WAT321_MCP_SERVER/bin/opencode/dispatch.mjs`) resolves a missing
+ * `session` arg to that active value, so the menu's CURRENT row is the
+ * user-facing source of truth and dispatch follows automatically.
  *
  * Rows live in `openCodeSessionsRows.ts`, data sources in
  * `openCodeSessionsSource.ts`, the switch sub-picker in

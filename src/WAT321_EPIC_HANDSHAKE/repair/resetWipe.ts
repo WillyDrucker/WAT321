@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { workspaceHash } from "../../engine/workspaceHash";
+import { EPIC_HANDSHAKE_DIR } from "../../engine/wat321Paths";
 import {
-  EPIC_HANDSHAKE_DIR,
   inboxClaudeDir,
   inboxCodexDir,
   sentClaudeDir,
@@ -15,26 +15,17 @@ import {
 
 /**
  * Workspace-scoped wipe of every Epic Handshake artifact tied to one
- * workspace. Used by `resetCleanup` to clear THIS workspace's EH state
- * without disturbing peer windows.
- *
- * Targets:
- *   - inbox/codex/<wsHash>/ + inbox/claude/<wsHash>/ (envelopes)
- *   - sent/codex/<wsHash>/ + sent/claude/<wsHash>/ (history)
- *   - every `*.<wsHash>.flag` file at the EH root (runtime sentinels
- *     plus user-data flags - reset is the moment to clear both)
- *   - the session's pinned model + effort, cleared in place
- *
- * The session record itself SURVIVES, because its `sessionCounter` is
- * what keeps S<N> names from colliding with rollouts still on disk.
- * Only the pin is cleared, so Reset returns the user to Codex's current
- * recommendation exactly as it did when the pin lived in a `.flag` file
- * that this sweep deleted.
- *
- * Skips peer wsHash subfolders and root-level shared content (the
- * bin/ subdir, turn-heartbeat.*.json which self-cleans, the pre-
- * partition legacy sentinels which `clearStaleRuntimeFiles` handles
- * on the next activate).
+ * workspace, used by `resetCleanup` so peer windows are untouched:
+ * inbox and sent envelopes under the workspace hash, every
+ * `*.<wsHash>.flag` at the EH root (runtime sentinels and user-data
+ * flags alike), and the session's pinned model and effort, cleared
+ * in place. The session record itself SURVIVES because its
+ * `sessionCounter` keeps S<N> names from colliding with rollouts still
+ * on disk, and clearing only the pin returns the user to Codex's
+ * current recommendation. Peer wsHash folders and root-level shared
+ * content are skipped: `bin/`, the self-cleaning
+ * `turn-heartbeat.*.json`, and the pre-partition legacy sentinels that
+ * `clearStaleRuntimeFiles` handles on the next activate.
  */
 export function wipeWorkspaceEpicHandshakeState(workspacePath: string): void {
   const wsHash = workspaceHash(workspacePath);

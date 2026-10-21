@@ -92,8 +92,6 @@ WDDOCS/
 ARCHIVE/
 # Editor / generated preview
 README_PREVIEW.html
-TEMP/*
-!TEMP/.gitkeep
 .env.*
 # Machine-local MCP + settings (paths / IDs / tokens)
 # --- 321_STD additions ---

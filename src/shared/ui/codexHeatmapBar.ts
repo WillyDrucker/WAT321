@@ -50,29 +50,17 @@ function fillCharForBand(band: HeatmapBand): string {
   }
 }
 
-/** Build a Codex band-based heatmap progress bar.
- *
- * Codex's bar fills right-to-left as capacity drops, so a single
- * band color applied to the whole filled portion is the right
- * model: the bar "shrinks from green into black" and the filled
- * cells shift color as the user crosses band thresholds. Unlike the
- * Claude heatmap this does not need a per-cell rolling rule.
- *
- * Two edge cases get special treatment here so the bar always
- * communicates its state honestly:
- *
- *   1. **Minimum red cell**. At very low remaining (0-4% for a
- *      10-wide bar, 0-9% for 5-wide) the rounded fill count is
- *      zero, so a pure `round()` produces an all-black bar - which
- *      reads as "no data" rather than "almost depleted". The band
- *      is correctly classified as red, but the visual is empty.
- *      The helper forces the fill count to at least one cell when
- *      in the red band so the critical state is always visible.
- *
- *   2. **Fully depleted override**. At exactly 0% remaining (100%
- *      used) every cell renders black - the bar represents what is
- *      left, so a fully empty bar is the honest reading of "nothing
- *      left". The used-direction bars own the all-red treatment. */
+/** Build a Codex band-based heatmap progress bar. Codex's bar fills
+ * right-to-left as capacity drops, so one band color over the whole
+ * filled portion is the right model: the bar shrinks from green into
+ * black and the filled cells shift color at the band thresholds, with
+ * no per-cell rolling rule. Two edge cases keep it honest: in the red
+ * band the fill is forced to at least one cell, because at 0-4%
+ * remaining (0-9% on a 5-wide bar) a plain `round()` gives an all-black
+ * bar that reads as "no data" rather than "almost depleted", and at
+ * exactly 0% remaining every cell renders black, since an empty bar is
+ * the honest reading of nothing left (the used-direction bars own the
+ * all-red treatment). */
 export function buildCodexHeatmapBar(usedPct: number, width: number): string {
   const clamped = Math.max(0, Math.min(100, usedPct));
   const remainingPct = Math.max(0, 100 - clamped);

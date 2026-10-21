@@ -17,7 +17,7 @@ import { writeFileAtomic } from "../engine/fs/atomicWrite";
  *   - Stale claims (> `claimTtlMs`) can be overwritten by any instance
  *   - Per-instance read throttle prevents excessive disk reads
  */
-export class Coordinator<TState> {
+export class CacheCoordinator<TState> {
   private cachedRead: { timestamp: number; state: TState } | null = null;
   private lastReadAt = 0;
 

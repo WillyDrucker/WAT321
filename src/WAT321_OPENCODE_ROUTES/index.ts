@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { OutboundWatcher } from "../engine/dispatcher/outboundWatcher";
+import { createOutputChannelLogger } from "../engine/outputChannelLogger";
 import { SETTING } from "../engine/settingsKeys";
 import {
   readConfigFromSettings,
@@ -8,10 +9,11 @@ import {
 import { OPENCODE_ROUTES_DIR } from "./openCodeRoutesPaths";
 import { createOpenCodeManager } from "./serve/openCodeServeManager";
 import { createOpenCodeDispatcher } from "./dispatch/openCodeDispatcher";
-import { createOpenCodeRoutesLogger } from "./openCodeRoutesLogger";
-import { clearZenApiKey, promptAndStoreZenApiKey, readSecret, ZEN_API_KEY_SECRET } from "./serve/secrets";
+import { clearZenApiKey, promptAndStoreZenApiKey, readSecret } from "./serve/secrets";
+import { ZEN_API_KEY_SECRET } from "../shared/providers/opencode/zenApiKeySecret";
+import { migrateRetiredRouteIds } from "./retiredRouteMigration";
 import { createOpenCodeRoutesStatusBarItem } from "./statusBar/statusBarItem";
-import { pickActiveInstance } from "./statusBar/statusBarMenu";
+import { pickActiveInstance } from "./statusBar/activeInstancePicker";
 
 /**
  * OpenCode Routes tier entry. Lifecycle:
@@ -40,8 +42,8 @@ interface OpenCodeRoutesHandle {
 export function activateOpenCodeRoutes(
   context: vscode.ExtensionContext
 ): OpenCodeRoutesHandle {
-  const { logger, channel } = createOpenCodeRoutesLogger();
-  context.subscriptions.push({ dispose: () => channel.dispose() });
+  const logger = createOutputChannelLogger("WAT321: OpenCode Routes");
+  migrateRetiredRouteIds();
 
   const statusBar = createOpenCodeRoutesStatusBarItem(context, logger);
   context.subscriptions.push({ dispose: () => statusBar.dispose() });
@@ -167,8 +169,7 @@ export function activateOpenCodeRoutes(
     }),
     // Cross-tier entry point: the EH widget's Manage OpenCode Sessions
     // submenu's MODEL row dispatches here so it can swap the active
-    // instance without importing from this tier directly. Same picker
-    // the legacy OpenCode Routes click menu opens.
+    // instance without importing from this tier directly.
     vscode.commands.registerCommand(
       "wat321.modelBridge.pickActiveInstance",
       async (kindFilter?: "remote" | "local") => {
@@ -193,4 +194,3 @@ export function activateOpenCodeRoutes(
     },
   };
 }
-

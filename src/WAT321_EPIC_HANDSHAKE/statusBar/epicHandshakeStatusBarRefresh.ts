@@ -4,15 +4,15 @@ import { workspaceHash } from "../../engine/workspaceHash";
 import type { BridgeStageCoordinator } from "../bridgeStage/bridgeStageCoordinator";
 import { MailPulse } from "./epicHandshakeMailPulse";
 import { processingFlagPath } from "../epicHandshakePaths";
+import { openCodeDispatchStartedAtMs } from "../../shared/bridge/openCodeDispatchHeartbeat";
 import {
   isWaitModeFlashActive,
-  readOpenCodeHeartbeatActivity,
   syntheticOpenCodeStage,
 } from "./epicHandshakeStatusBarSources";
 import type { InboxCoordinator } from "../../engine/inbox/inboxCoordinator";
 import { currentWorkspacePath, isBridgeBusy } from "./statusBarState";
 import { loadBridgeThreadRecordIfExists } from "../codexTurn/threadRecord";
-import { adaptiveStageCycle } from "../bridgeStage/turnHeartbeat";
+import { adaptiveStageCycle } from "./stageGlyphs";
 import { isAdaptive } from "../codexTurn/waitMode";
 
 /**
@@ -22,8 +22,9 @@ import { isAdaptive } from "../codexTurn/waitMode";
  * out-of-band.
  *
  * State priority (first match wins):
- *   paused -> bridge-error sticky -> in-flight -> delivered flash ->
- *   late-reply (mail) -> error -> idle.
+ *   paused -> stage walker -> sending -> processing -> delivered
+ *   flash -> returning -> OpenCode dispatch -> wait-mode flash ->
+ *   late-reply mail -> bridge-error -> idle.
  *
  * Animation frames use wall-clock parity (`Math.floor(now/1000) % 2`)
  * so no dedicated animation timer is needed - the 1000ms refresh
@@ -162,6 +163,10 @@ export function refreshEpicHandshakeItem(
     now - state.deliveredShownAt < DELIVERED_HOLD_MS;
   if (!justDelivered) state.deliveredShownAt = null;
 
+  // OpenCode / Local LLM dispatch heartbeat, read once per tick. The
+  // state dir is per-client, so the only gate is an open workspace.
+  const openCodeStartedAt = wsHash ? openCodeDispatchStartedAtMs() : null;
+
   let icon: string;
 
   if (paused) {
@@ -212,20 +217,19 @@ export function refreshEpicHandshakeItem(
     // arrow-left briefly between walker-end and delivered-flash.
     icon = "$(wat321-square-check)";
   } else if (returning) {
-    // Post-turn latch: the dispatcher holds this flag for 5000ms
+    // Post-turn latch: the dispatcher holds this flag for 3000ms
     // so the return animation is visible if the walker did not
     // already cover stage 5's arrow-left cycle. In adaptive mode
     // the walker always reaches stage 5 with its own arrow-left
     // cycle so this branch is mostly a fallback.
     icon = oneHz ? "$(wat321-square-arrow-left)" : "$(wat321-square)";
-  } else if (readOpenCodeHeartbeatActivity(wsHash) !== null) {
+  } else if (openCodeStartedAt !== null) {
     // OC/Local dispatch in flight (and no Codex turn active - the
     // earlier branches would have caught that). Drives the same
     // adaptive cycle the Codex flow uses, with the stage
     // synthesized from elapsed time. Standard / fire-and-forget
     // fall back to the classic outbound arrow cycle.
-    const mb = readOpenCodeHeartbeatActivity(wsHash);
-    const elapsedMs = mb !== null ? Math.max(0, now - mb.startedAtMs) : 0;
+    const elapsedMs = Math.max(0, now - openCodeStartedAt);
     icon = adaptive
       ? adaptiveStageCycle(syntheticOpenCodeStage(elapsedMs), oneHz, false)
       : oneHz

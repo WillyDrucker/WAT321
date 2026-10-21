@@ -1,29 +1,20 @@
 import { CATALOG } from "./catalog";
 
 /**
- * `opencode.json` builder for the WAT321-managed harness.
+ * `opencode.json` builder for the WAT321-managed harness. Declares both
+ * providers, `llama.cpp` for local and `zen` for cloud routes. The Zen
+ * API key flows through the `OPENCODE_ZEN_KEY` env, so the file on
+ * disk carries only the substitution placeholder.
  *
- * Declares both providers (`llama.cpp` for local, `zen` for cloud
- * routes). The Zen API key flows via the `OPENCODE_ZEN_KEY` env so
- * the JSON file is safe to leave on disk - it carries only the
- * substitution placeholder.
- *
- * Zen model blocks are derived from `CATALOG` so context windows stay
- * in lock-step with the widget's source of truth. Output ceilings are
- * layered on top here because they are harness budgeting, not a model
- * fact the widget needs.
- *
- * Local llama.cpp's `limit` block is omitted entirely so reasoning
- * models (Qwen3, DeepSeek R1) have headroom to emit chain-of-thought
- * before tool_calls. OpenCode's schema rejects a partial limit block
- * (recent OpenCode releases require both `context` and `output` when `limit` is
- * present), so the choice is "both fields" or "no block at all" -
- * the latter lets OpenCode's 32K fallback apply, which matches what
- * the widget already shows for the local route.
- *
- * When a catalog entry has no `contextWindow` (route with unknown
- * underlying model, e.g. `hy3-preview-free`), the limit block is
- * omitted entirely and OpenCode falls back to its 32K default.
+ * Zen model blocks derive from `CATALOG` so context windows stay in
+ * lock-step with the widget, with output ceilings layered on here as
+ * harness budgeting. A catalog entry without `contextWindow` gets no
+ * limit block and OpenCode's 32K default applies. Local llama.cpp
+ * gets no `limit` block either, so reasoning models (Qwen3, DeepSeek
+ * R1) keep headroom for chain-of-thought before tool_calls: OpenCode
+ * rejects a partial block (both `context` and `output` or neither),
+ * and the 32K fallback matches what the widget shows for the local
+ * route.
  */
 
 /** Per-Zen-route minimum output budget. Reasoning + tool-call payload
@@ -66,6 +57,13 @@ const RESEARCH_AGENT_PROMPT =
   "DO NOT refuse webfetch citing 'I cannot access live data' or 'I don't have real-time tools' - you literally have webfetch, use it.\n\n" +
   "Skip webfetch only for questions answerable from stable general knowledge (math, definitions, well-established history, code logic).";
 
+/** Provider key values OpenCode writes into opencode.json verbatim.
+ * llama.cpp ignores the bearer token, so any non-empty string serves.
+ * OpenCode resolves `{env:NAME}` at request time, so the Zen key never
+ * lands on disk. */
+const LOCAL_PROVIDER_KEY = "not-needed";
+const ZEN_PROVIDER_KEY = "{env:OPENCODE_ZEN_KEY}";
+
 export function buildOpenCodeJson(localEndpoint: string): string {
   const zenModels: Record<string, { name: string; limit?: { context: number; output: number } }> = {};
   for (const entry of CATALOG) {
@@ -86,7 +84,7 @@ export function buildOpenCodeJson(localEndpoint: string): string {
         npm: "@ai-sdk/openai-compatible",
         options: {
           baseURL: `${localEndpoint.replace(/\/+$/, "")}/v1`,
-          apiKey: "not-needed",
+          apiKey: LOCAL_PROVIDER_KEY,
         },
         // OpenCode rejects any modelID not declared in this map. The
         // local LLM is whatever llama.cpp / Ollama / vLLM has loaded -
@@ -103,7 +101,7 @@ export function buildOpenCodeJson(localEndpoint: string): string {
         npm: "@ai-sdk/openai-compatible",
         options: {
           baseURL: "https://opencode.ai/zen/v1",
-          apiKey: "{env:OPENCODE_ZEN_KEY}",
+          apiKey: ZEN_PROVIDER_KEY,
         },
         models: zenModels,
       },
@@ -128,7 +126,7 @@ export function buildOpenCodeJson(localEndpoint: string): string {
 }
 
 /** Zen routes the verifier checks for explicit output ceilings. Routes
- * without a catalog `contextWindow` (e.g. `hy3-preview-free`) are
+ * without a catalog `contextWindow` are
  * intentionally absent - the builder skips their `limit` block, so
  * the verifier should not flag the absence either. */
 export const ZEN_VERIFIED_MODELS = CATALOG

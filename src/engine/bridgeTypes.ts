@@ -52,20 +52,23 @@ export function isBridgeStage(value: unknown): value is BridgeStage {
   );
 }
 
-/** Minimal heartbeat info the snapshot exposes. The full `TurnHeartbeat`
- * type lives inside the EH tier - status-bar widgets only need
- * `turnStartedAt` to compute ceremony elapsed-since-start plus
- * `target` to suppress their debug ceremony on off-target dispatches,
- * so the structural subset stays in engine and the wider type stays
- * where its fields are produced. */
+/** The backend a bridge dispatch is routed to. Names the mailbox an
+ * envelope lands in, the dispatcher that serves it, and the writer of
+ * its heartbeat. */
+export type BridgeTarget = "codex" | "opencode" | "local";
+
+/** The heartbeat subset the snapshot exposes. The full `Heartbeat`
+ * lives in `engine/heartbeat/heartbeatTypes.ts` - status-bar widgets
+ * only need `turnStartedAt` to compute ceremony elapsed-since-start
+ * plus `target` to suppress their debug ceremony on off-target
+ * dispatches, so the structural subset is all the snapshot carries. */
 interface BridgeHeartbeatInfo {
   turnStartedAt?: number;
   /** Backend producing this heartbeat. Lets a session-tokens widget
    * filter ceremony / stage-driven animations to its own provider so
    * the Codex widget stops playing `debug-disconnect`/`debug-connected`
-   * during a non-Codex (Big Pickle / Local LLM) dispatch. Optional for
-   * legacy heartbeat files that pre-date the unified writer. */
-  target?: "codex" | "opencode" | "local";
+   * during a non-Codex (Big Pickle / Local LLM) dispatch. */
+  target: BridgeTarget;
 }
 
 /** Active wait mode at snapshot time. Drives downstream widget
@@ -86,8 +89,8 @@ export type BridgeWaitMode = "standard" | "adaptive" | "fire-and-forget";
  * complete them. The trailing `string` arm keeps the type OPEN, because
  * the authoritative list is whatever each model advertises under
  * `supportedReasoningEfforts` from the `model/list` RPC, not anything
- * WAT321 declares. A closed union is what silently dropped `max` and
- * `ultra` when GPT-5.6 shipped them. Validity is decided at runtime
+ * WAT321 declares. A closed union would silently drop a level a newer
+ * model advertises. Validity is decided at runtime
  * against the live catalog, never by this type. */
 export type CodexEffortLevel =
   | "low"
@@ -112,7 +115,7 @@ export type CodexEffortOverride = CodexEffortLevel | null;
  * distinguishes sync (fixed budget) from adaptive (extends while the
  * dispatcher heartbeat stays fresh) so the tooltip can render the
  * right wait shape. Null when no wait is in flight. */
-interface BridgeWaitInfo {
+export interface BridgeWaitInfo {
   target: "codex";
   timeoutSec: number;
   startedAt: number;

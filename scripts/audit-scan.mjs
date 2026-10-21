@@ -14,6 +14,8 @@ const SRC = join(ROOT, "src");
 const SIZE_TARGET = 300;
 const SIZE_CEILING = 350;
 const DIR_LOOK_TRIGGER = 25;
+const HEADER_LOOK = 20;
+const BLOCK_LOOK = 15;
 /** Files whose version markers are the sanctioned legacy sweep, not
  * release stamps. */
 const VERSION_MARKER_SANCTIONED = new Set([
@@ -62,6 +64,34 @@ for (const f of files) {
 for (const [d, n] of [...dirCount].sort((a, b) => b[1] - a[1])) {
   if (n > 8) console.log(`  ${String(n).padStart(3)} ${d}${n > DIR_LOOK_TRIGGER ? "  <- look" : ""}`);
 }
+
+// ---- re-exports: barrels and name-only forwards
+console.log("\n## Re-exports (barrels and name-only forwards)");
+const barrelRe = /^export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s+/gm;
+const forwardRe = /^export\s+(?:type\s+)?\{([^}]+)\};?\s*$/gm;
+const importRe = /^import\s+(?:type\s+)?\{([^}]+)\}\s+from/gm;
+const bareName = (part) => part.replace(/^\s*type\s+/, "").split(/\s+as\s+/)[0].trim();
+let reexports = 0;
+for (const f of files) {
+  const src = text.get(f);
+  const imported = new Set();
+  for (const m of src.matchAll(importRe)) {
+    for (const part of m[1].split(",")) {
+      const name = part.replace(/^\s*type\s+/, "").split(/\s+as\s+/).pop().trim();
+      if (name) imported.add(name);
+    }
+  }
+  const report = (line) => {
+    reexports++;
+    console.log(`  ${rel(f)}: ${line.trim()}`);
+  };
+  for (const m of src.matchAll(barrelRe)) report(m[0]);
+  for (const m of src.matchAll(forwardRe)) {
+    const names = m[1].split(",").map(bareName).filter(Boolean);
+    if (names.some((n) => imported.has(n))) report(m[0]);
+  }
+}
+console.log(`  (${reexports} candidates)`);
 
 // ---- exports with no caller outside their file
 console.log("\n## Exports with no reference outside their own file");
@@ -204,6 +234,70 @@ for (const [label, test] of patterns) {
   console.log(`  ${label}: ${hits.length}`);
   for (const h of hits.slice(0, 25)) console.log(`      ${h}`);
   if (hits.length > 25) console.log(`      ... ${hits.length - 25} more`);
+}
+
+// ---- comment volume
+console.log(`\n## Comment volume (module header over ${HEADER_LOOK} lines, other comment blocks over ${BLOCK_LOOK})`);
+// Every comment block as [startLine, lineCount]: a block comment runs
+// from its opening line to the line that closes it, and a run of
+// whole-line `//` comments is one block.
+function commentBlocks(src) {
+  const out = [];
+  const ls = src.split(/\r?\n/);
+  for (let i = 0; i < ls.length; i++) {
+    if (/^\s*\/\*/.test(ls[i])) {
+      let j = i;
+      while (j < ls.length && !ls[j].includes("*/")) j++;
+      out.push([i + 1, j - i + 1]);
+      i = j;
+    } else if (/^\s*\/\//.test(ls[i])) {
+      let j = i;
+      while (j + 1 < ls.length && /^\s*\/\//.test(ls[j + 1])) j++;
+      out.push([i + 1, j - i + 1]);
+      i = j;
+    }
+  }
+  return out;
+}
+// The module header is the first comment block that precedes the first
+// line of non-import code. Null when the file opens with code.
+function moduleHeader(src, blocks) {
+  const ls = src.split(/\r?\n/);
+  let firstCode = ls.length + 1;
+  let inImport = false;
+  for (let i = 0; i < ls.length; i++) {
+    const l = ls[i];
+    if (/^#!/.test(l)) continue;
+    if (inImport) {
+      if (/;\s*$/.test(l)) inImport = false;
+      continue;
+    }
+    if (/^\s*$/.test(l) || isCommentLine(l)) continue;
+    if (/^import\b/.test(l)) {
+      inImport = !/;\s*$/.test(l);
+      continue;
+    }
+    firstCode = i + 1;
+    break;
+  }
+  return blocks.find(([start]) => start < firstCode) ?? null;
+}
+const longHeaders = [];
+const longBlocks = [];
+for (const f of files) {
+  const src = text.get(f);
+  const blocks = commentBlocks(src);
+  const header = moduleHeader(src, blocks);
+  if (header !== null && header[1] > HEADER_LOOK) longHeaders.push([header[1], `${rel(f)}:${header[0]}`]);
+  for (const b of blocks) {
+    if (b !== header && b[1] > BLOCK_LOOK) longBlocks.push([b[1], `${rel(f)}:${b[0]}`]);
+  }
+}
+for (const [label, list] of [["module headers", longHeaders], ["other comment blocks", longBlocks]]) {
+  list.sort((a, b) => b[0] - a[0]);
+  console.log(`  ${label}: ${list.length}`);
+  for (const [n, where] of list.slice(0, 25)) console.log(`      ${String(n).padStart(3)} ${where}`);
+  if (list.length > 25) console.log(`      ... ${list.length - 25} more`);
 }
 
 // ---- settings dual-anchoring

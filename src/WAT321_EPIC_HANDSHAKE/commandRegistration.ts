@@ -10,9 +10,8 @@ import type { EpicHandshakeLogger } from "./epicHandshakeLogger";
 
 /**
  * Command palette registration. Each command is a thin shim over a
- * tier-level operation - pulled out of the tier class so the lifecycle
- * shell stays focused on activate/deactivate plumbing rather than
- * per-command boilerplate.
+ * tier-level operation, so the lifecycle shell holds only the
+ * activate/deactivate plumbing.
  *
  * `refreshStatusBar` threads state from the tier through here - we do
  * not import the tier class itself to keep the dependency one-

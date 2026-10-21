@@ -19,9 +19,7 @@ function getRawDisplayMode(): RawDisplayMode {
   return "auto";
 }
 
-/** Resolve "auto" to a concrete mode given an active provider count.
- * Exported so bootstrap's display-mode tracker can call it without
- * needing the full getDisplayMode + registry dependency. */
+/** Resolve "auto" to a concrete mode given an active provider count. */
 function resolveDisplayMode(activeProviderCount: number): DisplayMode {
   const raw = getRawDisplayMode();
   // "full+compact" is a split mode: usage widgets stay Full while

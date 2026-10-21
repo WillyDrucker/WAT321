@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { getProjectKey } from "../engine/fs/pathIdentity";
+import { CLAUDE_PROJECTS_DIR } from "../shared/providers/claude/claudeHome";
 import { SESSION_TOKEN_RESCAN_MS } from "../shared/polling/pollingTimings";
 import {
   findLastKnownTranscript,
-  rankActiveSession,
   type LastKnownTranscript,
-  type SessionCandidate,
-} from "./transcriptDiscovery";
+} from "./lastKnownTranscriptScan";
+import { rankActiveSession, type SessionCandidate } from "./transcriptDiscovery";
 
 /**
  * Which transcript the widget follows. A live CLI session for this
@@ -43,16 +43,13 @@ export class ActiveTranscriptResolver {
   }
 
   resolve(
-    home: string,
     candidates: readonly SessionCandidate[],
     now: number
   ): ActiveTranscript | null {
     const live = rankActiveSession(candidates);
     if (live) {
       const transcriptPath = join(
-        home,
-        ".claude",
-        "projects",
+        CLAUDE_PROJECTS_DIR,
         getProjectKey(live.cwd),
         `${live.sessionId}.jsonl`
       );

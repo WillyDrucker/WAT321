@@ -15,7 +15,7 @@ import { registerClearSettingsCommand } from "./shared/resetSettings";
 import { workspaceId } from "./engine/wat321Paths";
 import { registerBridgeConfigWriter } from "./WAT321_MCP_SERVER";
 import { registerAutoCreateOpenCodeS1 } from "./WAT321_MCP_SERVER/autoCreateSession";
-import { registerUnifiedBridgeCommands } from "./WAT321_MCP_SERVER/installer";
+import { registerUnifiedBridgeCommands, uninstallUnifiedBridge } from "./WAT321_MCP_SERVER/installer";
 import { activateEpicHandshake } from "./WAT321_EPIC_HANDSHAKE";
 import { activateOpenCodeRoutes } from "./WAT321_OPENCODE_ROUTES";
 
@@ -40,15 +40,11 @@ export function activate(context: vscode.ExtensionContext) {
   if (process.platform === "win32") {
     setHostAppName(vscode.env.appName);
     // Reset the warm-PS circuit breaker when the window regains focus.
-    // The warm PowerShell process can be reaped or killed (logoff, AV,
-    // task-manager) while the window is in the background, and a few
-    // notification events firing during the unfocused stretch can trip
-    // the five-bootstrap-fail breaker. Without a reset, the user comes
-    // back to a window that silently drops the next five minutes of
-    // toasts. Resetting on focus regain pays a single fresh spawn
-    // attempt at the moment the user is actually there to notice if
-    // notifications are still broken. Underlying problems re-trip the
-    // breaker - this just removes the stale-cooldown failure mode.
+    // The warm PowerShell process can be reaped while the window is in
+    // the background, and a few notification events during that
+    // stretch can trip the five-bootstrap-fail breaker, which would
+    // silently drop the next five minutes of toasts. A fresh spawn
+    // attempt on focus regain lands when the user is there to notice.
     let lastFocused = vscode.window.state.focused;
     context.subscriptions.push(
       vscode.window.onDidChangeWindowState((s) => {
@@ -90,7 +86,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Server tier) handles dispatch for both. Wrapped in try/catch so a
   // fatal bug in this tier never takes down the core Claude / Codex
   // widgets - OpenCode Routes is opt-in, the usage widgets are not.
-  let openCodeRoutes: { resetCleanup: () => Promise<void>; dispose: () => void } | null = null;
+  let openCodeRoutes: ReturnType<typeof activateOpenCodeRoutes> | null = null;
   try {
     openCodeRoutes = activateOpenCodeRoutes(context);
     context.subscriptions.push(openCodeRoutes);
@@ -141,7 +137,6 @@ export function activate(context: vscode.ExtensionContext) {
     // this second pass covers the pre-allowed tool surface that lives
     // in the user-scope settings file. Idempotent.
     try {
-      const { uninstallUnifiedBridge } = await import("./WAT321_MCP_SERVER/installer");
       await uninstallUnifiedBridge();
     } catch {
       // best-effort - reset continues regardless

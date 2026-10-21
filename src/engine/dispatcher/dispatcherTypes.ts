@@ -1,4 +1,5 @@
-import type { Envelope, EnvelopeTarget } from "../inbox/envelope";
+import type { BridgeTarget } from "../bridgeTypes";
+import type { Envelope } from "../inbox/envelope";
 
 /**
  * Shared contracts for backend dispatchers. Codex (Epic Handshake) and
@@ -44,7 +45,7 @@ export interface DispatchResult {
 export interface BackendDispatcher {
   /** Which target this dispatcher handles. Used by the engine to
    * route outbound envelopes to the right run-turn implementation. */
-  readonly target: EnvelopeTarget;
+  readonly target: BridgeTarget;
   /** Whether the dispatcher is currently accepting new envelopes.
    * Set false during shutdown so the outbound watcher stops handing
    * off work mid-tear-down. */

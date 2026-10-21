@@ -1,11 +1,10 @@
 import * as vscode from "vscode";
 import type { TpsThrottle } from "../../shared/ui/tpsThrottle";
+import { readOpenCodeDispatchHeartbeat } from "../../shared/bridge/openCodeDispatchHeartbeat";
+import { readOpenCodeRoutesConfigSnapshot } from "../../shared/bridge/openCodeRoutesConfigSnapshot";
 import {
   activeInstanceFrom,
   readActiveBridgeAlias,
-  readConfigSnapshot,
-  readHeartbeat,
-  readUsageSnapshot,
   targetForInstance,
 } from "./openCodeStatusBarSources";
 import type { BridgeSessionTokensPoller } from "./sessionTokensPoller";
@@ -14,11 +13,10 @@ import { buildOpenCodeRoutesTooltip } from "./tooltip";
 
 /**
  * Stateful refresh for the OpenCode Routes status-bar item. Reads
- * config + heartbeat + usage + session-tokens, composes the tooltip and
+ * config + heartbeat + session-tokens, composes the tooltip and
  * the text (`openCodeStatusBarText.ts`), and applies them only when they
  * change (text and tooltip have independent change signatures so a
- * mid-dispatch phase transition does not reset the seconds counter
- * stride).
+ * tooltip rebuild never resets the seconds counter stride).
  *
  * Persisted state on `ctx.state` lets the function be called from a
  * setInterval without recapturing closures every tick:
@@ -45,7 +43,7 @@ export interface RefreshContext {
 export function refreshStatusBarItem(ctx: RefreshContext): void {
   const { item, sessionTokensPoller, tpsThrottle, state } = ctx;
 
-  const snap = readConfigSnapshot();
+  const snap = readOpenCodeRoutesConfigSnapshot();
   if (!snap?.enabled || snap.instances.length === 0) {
     if (state.lastText !== undefined) {
       item.hide();
@@ -57,7 +55,7 @@ export function refreshStatusBarItem(ctx: RefreshContext): void {
   // In-flight heartbeat's instance overrides `last-used.json` since
   // last-used only flips on success at dispatch end. Falls back to
   // `activeInstanceFrom` between dispatches.
-  const liveHeartbeat = readHeartbeat();
+  const liveHeartbeat = readOpenCodeDispatchHeartbeat();
   const liveInstance = liveHeartbeat
     ? snap.instances.find((i) => i.id === liveHeartbeat.instanceId) ?? null
     : null;
@@ -88,12 +86,6 @@ export function refreshStatusBarItem(ctx: RefreshContext): void {
   // Handshake dropdown.
   const isLocal = active.kind === "local";
   const idleIcon = isLocal ? "$(wat321-llama)" : "$(wat321-opencode)";
-  const usage = readUsageSnapshot();
-  const usageSig = usage
-    ? Object.entries(usage.instances)
-        .map(([id, u]) => `${id}:${u.input}:${u.output}:${u.calls}`)
-        .join("|")
-    : "";
 
   // Active bridge alias for the displayed instance's target bucket.
   // Used by the tooltip + as the cache key for the session-tokens
@@ -111,11 +103,7 @@ export function refreshStatusBarItem(ctx: RefreshContext): void {
   const sessionTokens = activeBridgeTarget
     ? sessionTokensPoller.snapshot(activeBridgeTarget)
     : null;
-  const sessionTokensSuffix = computeIdleSessionSuffix({
-    sessionTokens,
-    usage,
-    activeInstanceId: active.id,
-  });
+  const sessionTokensSuffix = computeIdleSessionSuffix(sessionTokens);
 
   let text: string;
   let tooltipSig: string;
@@ -141,7 +129,9 @@ export function refreshStatusBarItem(ctx: RefreshContext): void {
       elapsedMs,
     });
     text = live.text;
-    tooltipSig = `live:${liveHeartbeat.currentPhase || "DISPATCH"}:${(liveHeartbeat.phaseTrace || []).length}:${usageSig}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
+    // Keyed on the request, not the streaming token count, so the
+    // hover is rebuilt once per dispatch rather than every tick.
+    tooltipSig = `live:${liveHeartbeat.requestId ?? ""}:${activeBridgeAlias ?? ""}:${sessionTokens?.contextUsed ?? 0}:${sessionTokens?.contextWindow ?? 0}:${sessionTokens?.autoCompactTokens ?? 0}`;
     tooltip = buildOpenCodeRoutesTooltip({
       hb: liveHeartbeat,
       catalogAlias: live.alias,
@@ -161,7 +151,6 @@ export function refreshStatusBarItem(ctx: RefreshContext): void {
     tooltipSig = idleSig({
       idleAlias,
       needsKey,
-      usageSig,
       activeBridgeAlias,
       sessionTokens,
     });

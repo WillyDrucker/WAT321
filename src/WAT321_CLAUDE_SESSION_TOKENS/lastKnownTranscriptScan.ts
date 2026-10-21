@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { getProjectKey } from "../engine/fs/pathIdentity";
-import { parseCwd } from "./parsers";
+import { CLAUDE_PROJECTS_DIR } from "../shared/providers/claude/claudeHome";
+import { parseCwd } from "./transcriptParsers";
 
 /**
  * Last-known-transcript fallback scanner. Used by the Claude session
@@ -40,24 +40,19 @@ export interface LastKnownTranscript {
 export function findLastKnownTranscript(
   workspacePath: string
 ): LastKnownTranscript | null {
-  const projectsDir = join(homedir(), ".claude", "projects");
-  if (!existsSync(projectsDir)) return null;
+  if (!existsSync(CLAUDE_PROJECTS_DIR)) return null;
 
-  const workspaceBest = findNewestJsonlInWorkspaceDir(
-    projectsDir,
-    workspacePath
-  );
+  const workspaceBest = findNewestJsonlInWorkspaceDir(workspacePath);
   if (workspaceBest) return workspaceBest;
 
   if (workspacePath !== "") return null;
-  return findNewestJsonlAcrossAllProjects(projectsDir);
+  return findNewestJsonlAcrossAllProjects();
 }
 
 /** Stage 1: case-insensitive lookup of the workspace's project dir,
  * then newest .jsonl inside it. Returns null if the workspace path
  * is empty, the project dir does not exist, or the dir is empty. */
 function findNewestJsonlInWorkspaceDir(
-  projectsDir: string,
   workspacePath: string
 ): LastKnownTranscript | null {
   if (!workspacePath) return null;
@@ -66,11 +61,11 @@ function findNewestJsonlInWorkspaceDir(
 
   let matchedDir: string | null = null;
   try {
-    const entries = readdirSync(projectsDir);
+    const entries = readdirSync(CLAUDE_PROJECTS_DIR);
     const targetLower = projectKey.toLowerCase();
     for (const e of entries) {
       if (e.toLowerCase() === targetLower) {
-        matchedDir = join(projectsDir, e);
+        matchedDir = join(CLAUDE_PROJECTS_DIR, e);
         break;
       }
     }
@@ -85,19 +80,17 @@ function findNewestJsonlInWorkspaceDir(
 /** Stage 2: sweep every project dir under ~/.claude/projects and
  * return the globally-newest .jsonl. Used only when the workspace path
  * is empty (folderless VS Code window). */
-function findNewestJsonlAcrossAllProjects(
-  projectsDir: string
-): LastKnownTranscript | null {
+function findNewestJsonlAcrossAllProjects(): LastKnownTranscript | null {
   let dirs: string[];
   try {
-    dirs = readdirSync(projectsDir);
+    dirs = readdirSync(CLAUDE_PROJECTS_DIR);
   } catch {
     return null;
   }
 
   let best: LastKnownTranscript | null = null;
   for (const d of dirs) {
-    const full = join(projectsDir, d);
+    const full = join(CLAUDE_PROJECTS_DIR, d);
     try {
       if (!statSync(full).isDirectory()) continue;
     } catch {

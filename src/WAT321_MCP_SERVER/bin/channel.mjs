@@ -1,43 +1,29 @@
 #!/usr/bin/env node
 /**
- * WAT321 unified MCP server entry. Registered as `wat321` at project
- * scope on every workspace where Epic Handshake is enabled. Tool
- * surface plus MCP resources for read-only state:
+ * WAT321 unified MCP server entry, registered as `wat321` at project
+ * scope wherever Epic Handshake is enabled. Three tools (`wat321_ask`
+ * alias-driven dispatch, `wat321_session` lifecycle for opencode/local,
+ * `wat321_bridge` inbox drain) plus read-only resources:
+ * `bridge://instances`, `bridge://sessions/{target}`,
+ * `bridge://inbox/{target}` (peek, not drain), `bridge://status`, and
+ * `bridge://docs/*`.
  *
- *   wat321_ask         - alias-driven dispatch (router resolves)
- *   wat321_session     - session lifecycle for opencode/local (action enum)
- *   wat321_bridge      - single-purpose inbox drain
+ * STAY LEAN: every tool registered here bills its description and
+ * schema to every Claude session forever, so three tools is the cap.
+ * A new capability prefers, in order, an existing tool's response
+ * shape or action enum, a standalone script under `bin/`, a new
+ * resource (read-only, separate token bucket), and only then a tool.
  *
- *   bridge://instances         - catalog of configured backends
- *   bridge://sessions/{target} - session aliases per target
- *   bridge://inbox/{target}    - pending late replies (peek, not drain)
- *   bridge://status            - daemon health, last-used backend
- *   bridge://docs/*            - dispatch and inbox reference
- *
- * MCP surface philosophy: STAY LEAN. Every tool registered here adds
- * its description + inputSchema to every Claude session's context
- * forever (cached on the first turn but billed against the budget).
- * Three tools is the cap. New capabilities prefer in order:
- *   1. Extending an existing tool's response shape or action enum
- *      (zero surface growth, e.g. `wat321_session.action` covers
- *      create / delete / rename in one tool)
- *   2. A standalone script under `bin/` invoked via Bash
- *   3. A new MCP resource (read-only, separate token bucket)
- *   4. Only when none of the above fit: a new tool, with description
- *      pulling its weight against the per-session cost
- *
- * Conditional registration: at startup, the server reads the enabled
- * targets from the per-client `bridge/config.json` (the extension
- * writes it on activate + on settings change). Disabled targets are
- * stripped from the tool surface AND from the resource list so users
- * pay zero context tokens for tools that would just error. Tool-list
- * refresh requires a VS Code reload, since MCP tool registrations are
- * snapshotted at connection time.
+ * Registration is conditional: at startup the server reads the enabled
+ * targets from the per-client `bridge/config.json` (written by the
+ * extension on activate and on settings change) and strips disabled
+ * targets from the tool and resource lists. MCP snapshots the tool list
+ * at connection time, so a change needs a VS Code reload.
  *
  * Module map: `toolCatalog.mjs` declares the tools, `askRouter.mjs`
  * resolves aliases, `toolDispatch.mjs` routes a call into `codex/` or
- * `opencode/`, `bridgeDrain.mjs` combines the inboxes, and
- * `resources.mjs` serves the read-only surface.
+ * `opencode/`, `bridgeDrain.mjs` combines the inboxes, `resources.mjs`
+ * serves the read-only surface.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";

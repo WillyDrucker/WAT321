@@ -1,44 +1,26 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
-import { bridgeStateDir } from "../wat321Paths";
+import type { BridgeTarget } from "../bridgeTypes";
+import { bridgeStateDir, EPIC_HANDSHAKE_DIR } from "../wat321Paths";
 import { workspaceHash } from "../workspaceHash";
-import type { EnvelopeTarget } from "./envelope";
 
 /**
  * Single source of truth for inbox / outbound / sent directory paths
- * across every backend. Centralizing the layout here means dispatchers,
- * MCP runtime, status bar widgets, and the coordinator all derive
- * paths from the same function instead of inlining `join(...)` calls
- * with literal "inbox" / "sent" segments.
+ * across every backend: dispatchers, status bar widgets, and the
+ * coordinator derive paths here instead of inlining "inbox" / "sent"
+ * segments. `WAT321_EPIC_HANDSHAKE/epicHandshakePaths.ts` carries the
+ * same Codex layout for that tier, and the MCP runtime mirrors both in
+ * `WAT321_MCP_SERVER/bin/epicHandshakePaths.mjs`.
  *
- * Layout per target:
- *
- *   codex (Epic Handshake legacy paths):
- *     outbound: ~/.wat321/epic-handshake/inbox/codex/<wsHash>/<id>.md
- *     inbound:  ~/.wat321/epic-handshake/inbox/claude/<wsHash>/<id>.md
- *     sent:     ~/.wat321/epic-handshake/sent/claude/<wsHash>/<id>.md
- *
- *   opencode / local (per-client bridge mailbox):
- *     outbound: <bridgeStateDir>/dispatch/<target>/<id>.md
- *     inbound:  <bridgeStateDir>/inbox/<target>/<id>.md
- *     sent:     <bridgeStateDir>/sent/<target>/<id>.md
- *
- * The Codex paths are encoded directly here rather than imported from
- * `WAT321_EPIC_HANDSHAKE/constants`. Engine is the authoritative router
- * for the unified inbox abstraction across targets - reverse-importing
- * from a tool tier would invert the dep-direction rule (engine never
- * depends on tiers). The EH tier still owns the same path constants
- * for its own internal use - this file just stops piggybacking on
- * those exports to keep the dep arrow one-way.
- *
- * The Codex paths are kept on their historical layout because the
- * Epic Handshake bridge is enabled-by-default in many existing
- * installs and changing the layout would orphan pending envelopes.
- * Non-Codex paths live under the per-client bridge state dir so
- * multiple VS Code windows don't share inboxes.
+ * codex (Epic Handshake mailbox, partitioned by workspace hash):
+ * outbound `<EPIC_HANDSHAKE_DIR>/inbox/codex/<wsHash>/<id>.md`, inbound
+ * `.../inbox/claude/<wsHash>/<id>.md`, sent `.../sent/claude/<wsHash>/`.
+ * opencode / local (per-client bridge mailbox): outbound
+ * `<bridgeStateDir>/dispatch/<target>/<id>.md`, inbound
+ * `.../inbox/<target>/`, sent `.../sent/<target>/`. The Codex layout
+ * cannot move: the bridge is enabled by default in existing installs
+ * and a new layout would orphan pending envelopes.
  */
 
-const EPIC_HANDSHAKE_DIR = join(homedir(), ".wat321", "epic-handshake");
 const INBOX_CODEX_ROOT = join(EPIC_HANDSHAKE_DIR, "inbox", "codex");
 const INBOX_CLAUDE_ROOT = join(EPIC_HANDSHAKE_DIR, "inbox", "claude");
 const SENT_CLAUDE_ROOT = join(EPIC_HANDSHAKE_DIR, "sent", "claude");
@@ -54,7 +36,7 @@ function ehSentClaudeDir(wsHash: string): string {
 }
 
 function outboundDir(
-  target: EnvelopeTarget,
+  target: BridgeTarget,
   workspacePath: string | null
 ): string {
   if (target === "codex") {
@@ -64,7 +46,7 @@ function outboundDir(
 }
 
 export function inboundDir(
-  target: EnvelopeTarget,
+  target: BridgeTarget,
   workspacePath: string | null
 ): string {
   if (target === "codex") {
@@ -74,7 +56,7 @@ export function inboundDir(
 }
 
 export function sentDir(
-  target: EnvelopeTarget,
+  target: BridgeTarget,
   workspacePath: string | null
 ): string {
   if (target === "codex") {
@@ -87,7 +69,7 @@ export function sentDir(
  * envelopes land in. Used by the multi-target inbox coordinator and
  * the unified `wat321_bridge()` drain. */
 export function allInboundDirs(workspacePath: string | null): {
-  target: EnvelopeTarget;
+  target: BridgeTarget;
   dir: string;
 }[] {
   return [
@@ -101,7 +83,7 @@ export function allInboundDirs(workspacePath: string | null): {
  * these to detect abandoned dispatches from a previous VS Code
  * session. */
 export function allOutboundDirs(workspacePath: string | null): {
-  target: EnvelopeTarget;
+  target: BridgeTarget;
   dir: string;
 }[] {
   return [
@@ -110,7 +92,3 @@ export function allOutboundDirs(workspacePath: string | null): {
     { target: "local", dir: outboundDir("local", workspacePath) },
   ];
 }
-
-/** Root dir for Codex's Epic Handshake state. Exported for migration
- * code that needs to manipulate paths beyond the inbox/sent layout. */
-export const EH_ROOT_DIR = EPIC_HANDSHAKE_DIR;

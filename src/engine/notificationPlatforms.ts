@@ -3,10 +3,10 @@ import * as vscode from "vscode";
 import { showToast as showWindowsToast } from "./windowsToastProcess";
 
 /**
- * Platform-specific notification delivery paths split out of
- * `toastNotifier.ts` so the dispatch logic (cooldown, mode, provider
- * gating, suppression) stays readable end-to-end. No state lives
- * here - each function takes a header/title/preview and returns a
+ * Platform-specific notification delivery paths, kept apart from the
+ * dispatch logic in `toastNotifier.ts` (cooldown, mode, provider
+ * gating, suppression). No state lives here beyond the spawn-failure
+ * set - each function takes a header/title/preview and returns a
  * delivery success bool.
  *
  * Windows: warm PowerShell / WinRT toast via `windowsToastProcess`.
@@ -37,17 +37,11 @@ function escapeAppleScript(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-/** Tracks recent async spawn failures by binary name so the next
- * synchronous `showSystemNotification` call returns `false` honestly
- * after we have observed the OS path is broken. Without this the
- * caller records `system` for every fire-and-forget `notify-send`
- * even when the binary is missing - the bool return is synchronous
- * but the spawn `'error'` event arrives asynchronously. The first
- * call still over-reports - every call after that records correctly.
- * Map cleared by manual reset only - in practice the user installs
- * `notify-send` (or fixes Mac permissions) once and the entry stays
- * stale, which is fine - a real fix path on the user side does not
- * regress the next-call accuracy. */
+/** Binaries whose async spawn has already failed, so the next
+ * synchronous `showSystemNotification` call returns false honestly.
+ * The bool return is synchronous but the spawn `'error'` event arrives
+ * later, so only the first call over-reports. Entries are never
+ * cleared at runtime. */
 const asyncSpawnFailures = new Set<string>();
 
 function showMacNotification(

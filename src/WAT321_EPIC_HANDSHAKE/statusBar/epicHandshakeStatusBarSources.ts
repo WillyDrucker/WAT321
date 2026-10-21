@@ -1,56 +1,25 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { openCodeRoutesStateDir } from "../../engine/wat321Paths";
 import { waitModeFlashFlagPath } from "../epicHandshakePaths";
 
 /**
- * Data sources the Epic Handshake widget reads each refresh tick:
+ * Data sources the Epic Handshake widget reads each refresh tick
+ * beyond the engine's bridge snapshot and the shared OpenCode dispatch
+ * heartbeat (`shared/bridge/openCodeDispatchHeartbeat.ts`):
  *
- *   - OpenCode / Local LLM dispatch heartbeat (for the OC-in-flight
- *     animation when no Codex turn is active)
- *   - Synthetic stage progression for OC/Local turns (the unified
- *     bridge handlers don't emit real stage transitions yet)
+ *   - Synthetic stage progression for OpenCode / Local LLM turns, the
+ *     fallback while the engine's turn heartbeat has no latched stage
  *   - Wait-mode-flash sentinel (lazy-cleans the flag file when the
  *     2.5s window expires so a stale sentinel never rides into a
  *     later session)
  *
  * All readers are best-effort: missing files / parse errors fall
- * through to null/false so the 1Hz refresh loop never throws.
+ * through to false so the 1Hz refresh loop never throws.
  */
 
-interface OpenCodeHeartbeatActivity {
-  startedAtMs: number;
-}
-
-/** Read the OpenCode/Local dispatch heartbeat for this workspace.
- * The state dir is already per-client so no per-instance suffix is
- * needed. Null when no workspace is active or the file is missing /
- * malformed. */
-export function readOpenCodeHeartbeatActivity(
-  wsHash: string | null
-): OpenCodeHeartbeatActivity | null {
-  if (!wsHash) return null;
-  const path = join(openCodeRoutesStateDir(), "heartbeat.json");
-  try {
-    if (!existsSync(path)) return null;
-    const raw = readFileSync(path, "utf8").trim();
-    if (raw.length === 0) return null;
-    const parsed = JSON.parse(raw) as { startedAt?: unknown };
-    if (typeof parsed.startedAt !== "string") return null;
-    const t = new Date(parsed.startedAt).getTime();
-    if (!Number.isFinite(t)) return null;
-    return { startedAtMs: t };
-  } catch {
-    return null;
-  }
-}
-
 /** Synthesize a Codex-style stage from elapsed time since the
- * OpenCode dispatch started. The unified bridge's OC/Local handlers
- * don't emit real stage transitions yet, so the widget runs a time-
- * driven progression to give the user the same visual rhythm during
- * an OC/Local turn that they get during a Codex turn. Stays on
- * `working` for the long tail of generation. */
+ * OpenCode dispatch started, so the widget runs the same visual
+ * rhythm during an OpenCode / Local turn that it does during a Codex
+ * turn. Stays on `working` for the long tail of generation. */
 export function syntheticOpenCodeStage(
   elapsedMs: number
 ): "dispatched" | "received" | "working" {

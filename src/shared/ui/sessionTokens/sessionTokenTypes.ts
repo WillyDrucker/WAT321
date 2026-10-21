@@ -1,4 +1,4 @@
-import type { StageInfo } from "../../codex-rollout/turnStageTypes";
+import type { StageInfo } from "../../codexRollout/turnStageTypes";
 import type { LastEntryKind } from "../../turnState";
 
 /**
@@ -13,7 +13,7 @@ import type { LastEntryKind } from "../../turnState";
 
 /** Cache-event classification surfaced in the Claude session-token
  * tooltip. */
-export type CacheEventKind =
+type CacheEventKind =
   | "HIT-clean"
   | "LOAD-compact"
   | "MISS-TTL"

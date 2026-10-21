@@ -9,10 +9,10 @@ import {
 } from "./openCodeDispatchHeartbeat";
 import { readAliases, SESSION_ALIASES_PATH } from "../../shared/bridge/sessionAliases";
 import {
-  findInstance,
-  readActiveAlias,
-  readRoutesConfig,
-} from "./openCodeDispatchConfig";
+  findRoutesInstance,
+  readOpenCodeRoutesConfigSnapshot,
+} from "../../shared/bridge/openCodeRoutesConfigSnapshot";
+import { readActiveAlias } from "./openCodeDispatchAlias";
 import {
   runSessionAttached,
   runZenOneShot,
@@ -22,27 +22,20 @@ import type { BridgeStage } from "../../engine/bridgeTypes";
 /**
  * Extension-side dispatcher for OpenCode (and OpenCode-aliased models
  * like Big Pickle) plus Local LLM. Implements the engine's
- * `BackendDispatcher` contract so the engine's `OutboundWatcher`
- * drives it the same way it drives the Codex dispatcher.
+ * `BackendDispatcher` contract so `OutboundWatcher` drives it exactly
+ * like the Codex dispatcher: an outbound envelope lands in
+ * `<bridgeStateDir>/dispatch/<target>/`, the watcher invokes `run()`,
+ * which resolves the target instance and session alias, starts the
+ * stage heartbeat ticker (heartbeats land in the Epic Handshake root
+ * for the stage coordinator), and delegates the HTTP to `runZenOneShot`
+ * (anonymous) or `runSessionAttached` in `openCodeDispatchPaths.ts`.
+ * On graceful shutdown the engine aborts the request signal, this
+ * dispatcher propagates it, and the watcher writes a synthetic
+ * "cancelled by shutdown" inbound.
  *
- * Lifecycle parity with Codex:
- *   - Outbound envelope arrives in `<bridgeStateDir>/dispatch/<target>/`.
- *   - `OutboundWatcher` picks it up and invokes `run()`.
- *   - `run()` resolves the target instance + session alias, wires
- *     the bridge stage heartbeat ticker, and delegates the actual
- *     HTTP to `runZenOneShot` (anonymous) or `runSessionAttached`
- *     (session-attached) in `openCodeDispatchPaths.ts`.
- *   - During the call, heartbeats land in EH_ROOT so the bridge
- *     stage coordinator can animate.
- *   - On graceful shutdown, the engine aborts the request's signal,
- *     this dispatcher propagates to its AbortController, and the
- *     watcher writes a synthetic "cancelled by shutdown" inbound.
- *
- * The HTTP logic ports the relevant slices of
- * `WAT321_MCP_SERVER/bin/opencode/dispatch.mjs` because the MCP
- * runtime is `.mjs` and cannot be imported here. Kept narrow:
- * only the fire-and-forget paths are ported. Sync dispatch
- * continues to run inline in the MCP runtime.
+ * The HTTP logic ports only the fire-and-forget slices of
+ * `WAT321_MCP_SERVER/bin/opencode/dispatch.mjs`, which the extension
+ * cannot import. Sync dispatch still runs inline in the MCP runtime.
  */
 
 const HEARTBEAT_INTERVAL_MS = 5_000;
@@ -72,7 +65,7 @@ class OpenCodeDispatcher implements BackendDispatcher {
     const env = request.envelope;
     const prompt = env.body;
     const sessionAlias = readActiveAlias(this.target, env);
-    const cfg = readRoutesConfig();
+    const cfg = readOpenCodeRoutesConfigSnapshot();
 
     // Resolve the instance once so the engine heartbeat + widget
     // heartbeat + post-dispatch last-used sidecar all see consistent
@@ -85,8 +78,8 @@ class OpenCodeDispatcher implements BackendDispatcher {
         : undefined;
     const targetKind = this.target === "local" ? "local" : "remote";
     const resolvedInst = aliasEntry?.instanceId
-      ? findInstance(cfg, aliasEntry.instanceId, null)
-      : findInstance(cfg, null, targetKind);
+      ? findRoutesInstance(cfg, aliasEntry.instanceId, null)
+      : findRoutesInstance(cfg, null, targetKind);
     const widgetAlias =
       resolvedInst?.alias ||
       env.alias ||
@@ -220,12 +213,10 @@ class OpenCodeDispatcher implements BackendDispatcher {
   }
 }
 
-/** Factory the activation code calls to build the dispatcher for a
- * given target. Symmetric with the Codex dispatcher factory in
- * `WAT321_EPIC_HANDSHAKE/index.ts` so future per-target dispatchers
- * follow the same shape. No logger parameter today - the dispatcher
- * surfaces errors via the inbound envelope's `error: true` flag,
- * which is what the user sees. */
+/** Build the dispatcher for a target with a `dispose` attached, so
+ * the activation code can push it to `context.subscriptions`. No
+ * logger: the dispatcher surfaces errors through the inbound
+ * envelope's `error: true` flag, which is what the user sees. */
 export function createOpenCodeDispatcher(
   target: "opencode" | "local"
 ): vscode.Disposable & BackendDispatcher {

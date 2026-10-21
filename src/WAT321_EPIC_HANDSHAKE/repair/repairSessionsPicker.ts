@@ -24,7 +24,7 @@ import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
  * onto Codex's default. When Codex claims everything is valid but
  * prompts still fail, `forceRepairFlow.ts` takes over. The scan and
  * the rewrite live in `repairSessionsScan.ts`, and the shared submenu
- * in `menuPickers.ts` calls its `findRepairableSessions` to render the
+ * in `manageCodexSubmenu.ts` calls its `findRepairableSessions` to render the
  * conditional REPAIR row count.
  *
  * Repairing rewrites the rollout AND repins the live session, because

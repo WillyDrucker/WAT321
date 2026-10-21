@@ -1,12 +1,11 @@
 import * as vscode from "vscode";
-import { codexCatalogAgeMs } from "../../shared/providers/codex/modelCatalog";
+import { codexCatalogAgeMs, type CodexModelInfo } from "../../shared/providers/codex/modelCatalog";
 import {
   defaultCodexModelSlug,
   getCodexModelInfo,
   listKnownCodexSlugs,
   listSelectableCodexModels,
   listUnlistedCodexModels,
-  type CodexModelInfo,
 } from "../../shared/providers/codex/models";
 import { rememberUnlistedPin } from "../../shared/providers/codex/unlistedModelPins";
 import { refreshCodexCatalog } from "./codexCatalogRefresh";

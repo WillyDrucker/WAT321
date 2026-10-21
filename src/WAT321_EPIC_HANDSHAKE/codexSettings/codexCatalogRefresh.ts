@@ -73,26 +73,20 @@ export async function hydrateCodexCatalog(
 
 /**
  * Guarantee a fresh catalog before showing the user a list of models,
- * without ever asking them to run a command first.
- *
- * Three tiers, cheapest first:
- *   1. Already in memory and younger than `CATALOG_FRESH_FOR_MS`.
- *   2. The sidecar this same binary wrote on a previous run, when it is
- *      younger than memory and fresh. No process.
- *   3. A short-lived app-server, spawned only to answer `model/list` and
- *      shut down immediately. About two seconds on a warm machine. Its
- *      answer is persisted, so a window pays this at most once per ten
- *      minutes of picker use.
+ * without ever asking them to run a command first. Three tiers,
+ * cheapest first: memory younger than `CATALOG_FRESH_FOR_MS`, then the
+ * sidecar this same binary wrote earlier when it is younger and fresh
+ * (no process), then a short-lived app-server spawned only to answer
+ * `model/list` (about two seconds warm, persisted, so a window pays it
+ * at most once per ten minutes of picker use).
  *
  * Tier 3 is the only place WAT321 spawns codex outside a dispatch, and
- * it is deliberate: the caller is the Codex model picker or the repair
- * flow, so the user has explicitly asked what models exist. It is a
- * separate child from the dispatcher's, so the dispatcher's warm client
- * and 15-minute idle timer are untouched either way.
- *
- * Never throws. On any failure the catalog keeps its last answer, the
- * picker falls back to `~/.codex/models_cache.json` when there was
- * none, and validity keeps failing open.
+ * on purpose: the caller is the model picker or the repair flow, so the
+ * user asked what models exist. It is a separate child, so the
+ * dispatcher's warm client and idle timer are untouched. Never
+ * throws: on any failure the catalog keeps its last answer, the picker
+ * falls back to `~/.codex/models_cache.json` when there was none, and
+ * validity keeps failing open.
  */
 export async function ensureCodexCatalog(
   logger: EpicHandshakeLogger,

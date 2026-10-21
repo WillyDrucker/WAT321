@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { normalizePath } from "../engine/fs/pathIdentity";
 import type { CodexSessionIndex } from "./codexSessionTokenTypes";
 import {
   rankRollouts,
@@ -23,7 +22,6 @@ import {
  * `rolloutRanking.ts`.
  */
 
-
 /** How many calendar day-directories back we walk. 30 days covers
  * any realistic active-session age - older rollouts are ignored. */
 const MAX_DAYS_TO_SCAN = 30;
@@ -45,7 +43,6 @@ export function findLatestRollout(
     return { path: null, total: 0, inProgress: 0, candidates: [] };
   }
 
-  const wsNorm = normalizePath(workspacePath);
   const now = Date.now();
   const candidates: ScoredRollout[] = [];
   let daysScanned = 0;
@@ -78,14 +75,14 @@ export function findLatestRollout(
           }
 
           for (const file of files) {
-            const candidate = scoreRollout(join(dayDir, file), wsNorm, now);
+            const candidate = scoreRollout(join(dayDir, file), workspacePath, now);
             if (candidate) candidates.push(candidate);
           }
         }
       }
     }
   } catch {
-    // ignore
+    // best-effort
   }
 
   // Keep an already-tracked session in contention even after its rollout
@@ -98,7 +95,7 @@ export function findLatestRollout(
   // so a sticky path can never widen scope to another project's session -
   // discovery stays strictly project-scoped (no cross-instance leakage).
   if (stickyPath && !candidates.some((c) => c.path === stickyPath)) {
-    const sticky = scoreRollout(stickyPath, wsNorm, now);
+    const sticky = scoreRollout(stickyPath, workspacePath, now);
     if (sticky) candidates.push(sticky);
   }
 
@@ -129,7 +126,7 @@ export function getSessionTitle(
       }
     }
   } catch {
-    // ignore
+    // best-effort
   }
   return "";
 }

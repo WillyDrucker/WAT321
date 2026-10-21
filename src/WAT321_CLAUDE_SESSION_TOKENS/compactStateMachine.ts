@@ -1,5 +1,4 @@
 import {
-  COMPACT_BAR_CELL_COUNT,
   CompactFlashMachine,
   type CompactFlashSnapshot,
 } from "../shared/polling/compactFlashMachine";
@@ -14,9 +13,8 @@ import { parseRecentCompactBoundaries } from "./turnInfoParser";
  * observable signal is the structured `type:"system",
  * subtype:"compact_boundary"` entry at the end of the operation, so the
  * display is end-only: on a fresh boundary, fire a brief completion
- * flash - otherwise idle. (Live in-flight detection would require
- * writing into `~/.claude/`, outside WAT321's contract - see the
- * compact in-flight investigation in WAT321_SESSION_EXTENDED.)
+ * flash - otherwise idle. Live in-flight detection would require
+ * writing into `~/.claude/`, outside WAT321's contract.
  *
  * This adapter owns the Claude-specific parsing: it reads the boundary
  * entries from the tail, maps `trigger` to the flash hold (manual is
@@ -36,17 +34,13 @@ const AUTO_COMPACT_FLASH_MS = 1_500;
  * they're actively watching, so hold a little longer. */
 const MANUAL_COMPACT_FLASH_MS = 2_500;
 
-/** Re-exported so the Claude widget + render-data types keep importing
- * the snapshot shape from the tier they already depend on. */
-export type CompactSnapshot = CompactFlashSnapshot;
-
 export class CompactStateMachine {
   private readonly core = new CompactFlashMachine();
 
   /** Parse the Claude tail into a normalized observation and fold it
    * into the shared machine. Public signature matches what the
    * service / widget call, so neither needs edits. */
-  sync(args: { tail: string; sessionId: string; now: number }): CompactSnapshot {
+  sync(args: { tail: string; sessionId: string; now: number }): CompactFlashSnapshot {
     const { tail, sessionId, now } = args;
     const recent = parseRecentCompactBoundaries(tail, HISTORICAL_WINDOW);
     const newest = recent.length > 0 ? recent[recent.length - 1] : null;
@@ -72,7 +66,3 @@ export class CompactStateMachine {
     return this.core.getDiagnostics();
   }
 }
-
-/** Width of the compact bar in cells. Re-exported for the widget
- * renderer so the bar layout stays in sync with the snapshot math. */
-export { COMPACT_BAR_CELL_COUNT };

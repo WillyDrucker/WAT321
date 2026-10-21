@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join, normalize } from "node:path";
 import { writeFileAtomic } from "../engine/fs/atomicWrite";
 import { resolveClaudeCli } from "../shared/providers/claude/cliResolver";
-import { BIN_DIR, UNIFIED_MCP_NAME } from "./installerScripts";
+import { BRIDGE_BIN_DIR, UNIFIED_MCP_NAME } from "./installerScripts";
 
 /**
  * Claude-CLI mechanics used by the bridge installer: `claude mcp ...`
@@ -30,7 +30,8 @@ export interface UnifiedLogger {
   error(message: string): void;
 }
 
-export const consoleLogger: UnifiedLogger = {
+/** Default for callers without an output channel. */
+export const silentLogger: UnifiedLogger = {
   info: () => undefined,
   warn: () => undefined,
   error: () => undefined,
@@ -108,7 +109,7 @@ export function sweepStaleClaudeJsonEntries(logger: UnifiedLogger): void {
     return;
   }
   if (typeof parsed !== "object" || parsed === null) return;
-  const expected = normalize(join(BIN_DIR, "channel.mjs")).toLowerCase();
+  const expected = normalize(join(BRIDGE_BIN_DIR, "channel.mjs")).toLowerCase();
 
   const root = parsed as { projects?: Record<string, unknown> };
   const projects = root.projects;

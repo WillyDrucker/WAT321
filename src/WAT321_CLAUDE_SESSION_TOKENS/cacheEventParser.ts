@@ -1,31 +1,23 @@
-import type { CacheEvent } from "../shared/ui/sessionTokens/sessionTokenWidget";
 import {
   CACHE_REBUILD_CREATION_MIN,
   CACHE_REBUILD_RATIO_DENOM,
-} from "../shared/ui/sessionTokens/sessionTokenHelpers";
+} from "../shared/ui/sessionTokens/sessionTokenCacheBannerLatch";
+import type { CacheEvent } from "../shared/ui/sessionTokens/sessionTokenTypes";
 
 /**
- * Cache LOAD/MISS classifier for Claude transcripts. Walks back
- * through up to `lookback` assistant turns and reports the most
- * recent cache event. Pure transcript-derived. Reads only the same
- * `tail` string the rest of the parser already operates on - no
- * file reads, no HTTP calls, no process spawns. Output powers a
- * tooltip-only readout - no banner flashing, no alarms.
+ * Cache LOAD/MISS classifier for Claude transcripts. Walks back through
+ * up to `lookback` assistant turns on the same `tail` string the rest
+ * of the parser reads (no file reads, HTTP, or spawns) and reports the
+ * most recent cache event for the tooltip only: the banner thresholds
+ * in `sessionTokenCacheBannerLatch` are unaffected.
  *
- * Detection (per turn, newest first):
- *   - cc >= CACHE_REBUILD_CREATION_MIN AND cc >= cr * CACHE_REBUILD_RATIO_DENOM
- *     -> rebuild detected. Classify by:
- *       - preceding user has `isCompactSummary` -> LOAD-compact
- *       - gap from prior assistant ts to current user ts >
- *         CACHE_TTL_GAP_MS -> MISS-TTL
- *       - preceding user has tool_result content >=
- *         LARGE_TOOL_RESULT_BYTES -> MISS-large-payload
- *       - else -> MISS-unknown
- *   - No rebuild in the lookback window -> HIT-clean.
- *
- * Read-only diagnosis. The cache LOAD/MISS banner thresholds in
- * `sessionTokenCacheBannerLatch` are unaffected - this only adds
- * tooltip visibility for events that would otherwise be silent.
+ * Per turn, newest first: cc >= CACHE_REBUILD_CREATION_MIN AND cc >=
+ * cr * CACHE_REBUILD_RATIO_DENOM is a rebuild, classified LOAD-compact
+ * when the preceding user entry `isCompactSummary`, MISS-TTL when the
+ * gap from the prior assistant ts to the user ts exceeds
+ * CACHE_TTL_GAP_MS, MISS-large-payload when the preceding user entry
+ * carries a tool_result of LARGE_TOOL_RESULT_BYTES or more, else
+ * MISS-unknown. No rebuild in the lookback window is HIT-clean.
  */
 
 /** Cache TTL gap. A user prompt landing more than this many ms
@@ -33,11 +25,9 @@ import {
 const CACHE_TTL_GAP_MS = 5 * 60 * 1000;
 /** Tool-result content size flagged as "large payload". */
 const LARGE_TOOL_RESULT_BYTES = 50_000;
-// Cache-rebuild detection shares the banner-latch thresholds
-// (CACHE_REBUILD_CREATION_MIN / CACHE_REBUILD_RATIO_DENOM in
-// sessionTokenHelpers) so the tooltip and banner never disagree. One
-// source of truth - loosening either re-introduces the
-// LOAD-against-incremental-write bug.
+// Cache-rebuild detection shares the banner latch's thresholds so the
+// tooltip and the banner never disagree: a looser floor here would
+// classify an incremental write as a LOAD the banner never showed.
 
 interface TurnRecord {
   assistantTs: number;

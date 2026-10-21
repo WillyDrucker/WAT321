@@ -65,7 +65,7 @@ export function makeBackItem(): MenuRow<"back"> {
 
 /** Separator row, labeled or blank. QuickPick reserves `kind` for
  * separators, which is why row discriminators elsewhere are named
- * `rowKind` or `rowType`. */
+ * `rowKind`. */
 export function makeSeparator(label = ""): vscode.QuickPickItem {
   return { label, kind: vscode.QuickPickItemKind.Separator };
 }
