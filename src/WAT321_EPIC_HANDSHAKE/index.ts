@@ -15,7 +15,7 @@ import {
   watchEnableSetting,
 } from "./epicHandshakeEnableFlow";
 import { appendEpicHandshakeHealth } from "./epicHandshakeHealth";
-import { createOutputChannelLogger } from "./epicHandshakeLogger";
+import { createEpicHandshakeLogger } from "./epicHandshakeLogger";
 import {
   clearStaleRuntimeFiles,
   migrateLegacyEnvelopes,
@@ -31,25 +31,21 @@ import { createEpicHandshakeStatusBarItem } from "./statusBar/statusBarItem";
 import { clearBridgeRuntimeFlags, writeCancelFlag } from "./codexTurn/turnFlags";
 
 /**
- * Epic Handshake tier entry point. Sync MCP architecture:
+ * Epic Handshake tier entry point. The enable flow runs
+ * `claude mcp add -s project wat321 -- node <path>` through the unified
+ * MCP installer, which extracts the bridge scripts and prod-only
+ * node_modules into `~/.wat321/bridge/bin/`, and every Claude session
+ * then sees `wat321_ask`, `wat321_session`, and `wat321_bridge` by MCP
+ * auto-discovery. The extension-side `CodexDispatcher` watches
+ * `inbox/codex/` and drives `codex app-server`, and replies land in
+ * `inbox/claude/` for the blocking `wat321_ask` call or for
+ * `wat321_bridge()` after a fire-and-forget.
  *
- *   - Enable flow runs `claude mcp add -s project wat321 -- node <path>`
- *     against the unified MCP installer, which extracts the bridge
- *     scripts plus prod-only node_modules into `~/.wat321/bridge/bin/`.
- *   - Any Claude session sees `wat321_ask` (dispatch), `wat321_session`
- *     (session lifecycle), and `wat321_bridge` (single-purpose inbox
- *     drain) via MCP auto-discovery.
- *   - The extension-side `CodexDispatcher` watches `inbox/codex/` and
- *     drives `codex app-server` to produce replies - replies land in
- *     `inbox/claude/` where the blocking `wat321_ask` call picks them
- *     up synchronously, or where `wat321_bridge()` drains them when
- *     the caller used fire-and-forget.
- *
- * Enable / disable flow + setting watcher + provider checks live in
+ * Enable / disable, the setting watcher, and provider checks live in
  * `epicHandshakeEnableFlow.ts`, the toast notifier probes in
- * `bridgeToastProbes.ts`. This file owns the tier class + its
- * activation lifecycle + the runtime orchestration (restart, reset,
- * dispatcher start/stop).
+ * `bridgeToastProbes.ts`. This file owns the tier class, its activation
+ * lifecycle, and the runtime orchestration (restart, reset, dispatcher
+ * start/stop).
  */
 
 /** How long the restart-bridge orchestration waits between writing
@@ -66,7 +62,7 @@ const STATUS_BAR_REFRESH_MS = 1000;
 class EpicHandshakeTier {
   private readonly disposables: vscode.Disposable[] = [];
   private dispatcher: CodexDispatcher | null = null;
-  private readonly loggerHandle = createOutputChannelLogger();
+  private readonly loggerHandle = createEpicHandshakeLogger();
   private readonly logger = this.loggerHandle.logger;
   private statusBar: ReturnType<typeof createEpicHandshakeStatusBarItem> | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;

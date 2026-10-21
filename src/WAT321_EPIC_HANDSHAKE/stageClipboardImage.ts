@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { EPIC_HANDSHAKE_DIR } from "./epicHandshakePaths";
+import { EPIC_HANDSHAKE_DIR } from "../engine/wat321Paths";
 import type { EpicHandshakeLogger } from "./epicHandshakeLogger";
 
 /**
@@ -16,7 +16,7 @@ import type { EpicHandshakeLogger } from "./epicHandshakeLogger";
  * Platform matrix:
  *   - Windows: PowerShell + System.Windows.Forms.Clipboard.GetImage
  *   - macOS:   osascript with «class PNGf» clipboard flavor
- *   - Linux:   xclip (must be installed separately)
+ *   - Linux:   wl-paste (Wayland) or xclip (X11), installed separately
  *
  * Failure modes are all toast-only: no image on clipboard, platform
  * not supported, tool missing. The command never throws.
@@ -143,17 +143,20 @@ end run
       return;
     }
     if (process.platform === "linux") {
-      // xclip is the common path - wayland users may need wl-paste.
-      // We only wire xclip here - wl-paste can be a follow-up.
-      const xc = spawn("sh", [
+      // wl-paste covers Wayland and xclip covers X11. Presence alone
+      // cannot tell them apart (wl-clipboard installs on X11 too), so a
+      // failed wl-paste falls through to xclip, the same chain as
+      // `WAT321_EPIC_HANDSHAKE/bin/stage-clipboard.mjs`.
+      const target = `"${out.replace(/"/g, '\\"')}"`;
+      const lx = spawn("sh", [
         "-c",
-        `xclip -selection clipboard -t image/png -o > "${out.replace(/"/g, '\\"')}"`,
+        `{ command -v wl-paste >/dev/null 2>&1 && wl-paste --type image/png > ${target}; } || xclip -selection clipboard -t image/png -o > ${target}`,
       ]);
-      xc.on("error", (err) => {
-        logger.warn(`[clipboard-stage] xclip spawn failed: ${err.message}`);
+      lx.on("error", (err) => {
+        logger.warn(`[clipboard-stage] clipboard tool spawn failed: ${err.message}`);
         resolve(false);
       });
-      xc.on("exit", (code) => {
+      lx.on("exit", (code) => {
         resolve(code === 0 && existsSync(out) && statSync(out).size > 0);
       });
       return;

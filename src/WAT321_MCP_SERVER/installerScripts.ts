@@ -6,7 +6,7 @@ import { atomicCopy } from "../engine/fs/atomicCopy";
 
 /**
  * On-disk layout for the unified bridge plus the script-extraction
- * step. Owns the path constants (`BRIDGE_DIR`, `BIN_DIR`) that both
+ * step. Owns the path constants (`BRIDGE_INSTALL_DIR`, `BRIDGE_BIN_DIR`) that both
  * the install orchestrator and the Claude-CLI helpers depend on, so
  * the dependency direction stays one way (orchestrator + cli ->
  * scripts) with no circular import. The MCP entry name lives here for
@@ -21,8 +21,8 @@ import { atomicCopy } from "../engine/fs/atomicCopy";
  * here or in `package.json`.
  */
 
-export const BRIDGE_DIR = join(homedir(), ".wat321", "bridge");
-export const BIN_DIR = join(BRIDGE_DIR, "bin");
+const BRIDGE_INSTALL_DIR = join(homedir(), ".wat321", "bridge");
+export const BRIDGE_BIN_DIR = join(BRIDGE_INSTALL_DIR, "bin");
 export const UNIFIED_MCP_NAME = "wat321";
 const ENTRY_SCRIPT = "channel.mjs";
 const SHIPPED_EXTENSIONS = [".mjs", ".md"];
@@ -68,18 +68,18 @@ export function extractUnifiedScripts(
   const source = bundledBinDir(context);
   const shipped = listShipped(source);
   for (const rel of shipped) {
-    const dest = join(BIN_DIR, rel);
+    const dest = join(BRIDGE_BIN_DIR, rel);
     mkdirSync(dirname(dest), { recursive: true });
     atomicCopy(join(source, rel), dest);
   }
   const keep = new Set(shipped);
-  for (const rel of listShipped(BIN_DIR)) {
+  for (const rel of listShipped(BRIDGE_BIN_DIR)) {
     if (keep.has(rel)) continue;
     try {
-      unlinkSync(join(BIN_DIR, rel));
+      unlinkSync(join(BRIDGE_BIN_DIR, rel));
     } catch {
       // best-effort
     }
   }
-  return join(BIN_DIR, ENTRY_SCRIPT);
+  return join(BRIDGE_BIN_DIR, ENTRY_SCRIPT);
 }

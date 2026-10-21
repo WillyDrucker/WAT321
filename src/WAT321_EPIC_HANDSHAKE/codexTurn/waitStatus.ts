@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import type { BridgeWaitInfo } from "../../engine/bridgeTypes";
+import { waitStatusPath } from "../epicHandshakePaths";
 
 /**
  * Reader for the per-workspace `wait-status.<wsHash>.json` sidecar
- * that the unified MCP server's `WAT321_MCP_SERVER/bin/codex/waitStatus.mjs`
- * writes whenever a sync `wat321_ask` enters its blocking poll loop.
+ * that `WAT321_MCP_SERVER/bin/codex/waitStatus.mjs` writes whenever a
+ * sync or adaptive `wat321_ask` enters its blocking poll loop.
  * Surfaces the wait budget so the Claude session-tokens tooltip can
  * render a "Waiting on Codex: Ns" line without the widget having to
  * import from the bridge bin.
@@ -16,27 +16,14 @@ import { join } from "node:path";
  * so the tooltip never sticks on a phantom wait.
  */
 
-const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
-
-export type WaitMode = "sync" | "adaptive";
-
 interface WaitStatusFile {
   envelopeId: string;
   workspaceHash: string;
   target: "codex";
   timeoutSec: number;
   startedAt: number;
-  /** Wait mode the MCP server is using for this dispatch. Optional
-   * for back-compat with older sidecars that did not write the field
-   * (those are treated as sync since that was the only mode then). */
-  mode?: WaitMode;
-}
-
-interface WaitStatus {
-  target: "codex";
-  timeoutSec: number;
-  startedAt: number;
-  mode: WaitMode;
+  /** A sidecar without the field came from a sync wait. */
+  mode?: BridgeWaitInfo["mode"];
 }
 
 /** Parse the sidecar for the given workspace hash. Returns `null` when
@@ -44,9 +31,9 @@ interface WaitStatus {
  * sentinel). The budget-elapsed safety net runs at twice the declared
  * timeout so a legitimate near-deadline read still surfaces the wait
  * line, while a multi-day-old artifact does not. */
-export function readWaitStatus(wsHash: string | null): WaitStatus | null {
+export function readWaitStatus(wsHash: string | null): BridgeWaitInfo | null {
   if (!wsHash) return null;
-  const path = join(EH_DIR, `wait-status.${wsHash}.json`);
+  const path = waitStatusPath(wsHash);
   if (!existsSync(path)) return null;
   let raw: string;
   try {
@@ -64,7 +51,7 @@ export function readWaitStatus(wsHash: string | null): WaitStatus | null {
   if (parsed.target !== "codex") return null;
   if (typeof parsed.timeoutSec !== "number" || parsed.timeoutSec <= 0) return null;
   if (typeof parsed.startedAt !== "number") return null;
-  const mode: WaitMode =
+  const mode: BridgeWaitInfo["mode"] =
     parsed.mode === "adaptive" || parsed.mode === "sync" ? parsed.mode : "sync";
   // Crash safety: filter out sidecars from a crashed/killed bridge
   // process. Sync mode uses 2x its declared timeout (typical 120s

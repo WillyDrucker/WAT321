@@ -35,42 +35,27 @@ import { epicHandshakeLogger } from "../epicHandshakeLogger";
 import { isPaused, setPaused } from "../statusBar/statusBarState";
 
 /**
- * Combined "Codex Model Settings" picker - one entry point for all
- * four values the bridge passes on every `turn/start`:
- *   - sandbox  (Full-Access | Read-Only)
- *   - model    (any non-hidden slug the running app-server advertises,
- *              re-asked when the answer is old or on the REFRESH row,
- *              with a retirement notice on models OpenAI is winding down)
- *   - effort   (whatever the SELECTED model advertises, so `max` and
- *              `ultra` appear only on the models that advertise them)
- *   - speed    (Standard | Fast, a toggle shown only when the selected
- *              model offers a tier beyond standard)
+ * Combined "Codex Model Settings" picker - one entry point for the
+ * four values the bridge passes on every `turn/start`: sandbox (a
+ * direct toggle), model and effort (sub-pickers over what the running
+ * app-server advertises), and speed (a toggle shown only when the
+ * selected model offers a tier beyond standard).
  *
- * Each row shows the current value. `*default*` marks rows matching
- * CODEX's own recommendation: `model/list`'s `isDefault` model, that
- * model's `defaultReasoningEffort`, and a read-only sandbox. Nothing
- * here is a default of WAT321's, and `~/.codex/config.toml` is not
- * read. A leading green check (✔️) marks the active selection inside
- * sub-pickers.
+ * `*default*` marks rows matching CODEX's own recommendation, which
+ * is `model/list`'s `isDefault` model, its `defaultReasoningEffort`,
+ * and a read-only sandbox. Nothing here is a default of WAT321's.
  *
- * Sandbox is a direct toggle (no sub-picker) - one click flips
- * between full-access and read-only. Model and effort open sub-
- * pickers because each has multiple options.
- *
- * Scope differs by row, and the difference is deliberate. Sandbox is a
- * safety posture for a FOLDER, stored in a per-workspace flag file.
- * Model, effort, and speed belong to the SESSION, stored on its
- * `BridgeThreadRecord`, so S1 keeps what the user last chose across
- * restarts and S2 starts fresh on Codex's recommendation. See
- * `codexSessionSettings.ts`.
- *
- * Sub-pickers + baseline/label helpers live in sibling files
- * (`codexModelPicker.ts`, `codexEffortPicker.ts`,
- * `codexDefaultsBaseline.ts`).
+ * Scope differs by row on purpose: sandbox is a safety posture for a
+ * FOLDER (per-workspace flag file), while model, effort, and speed
+ * belong to the SESSION (`BridgeThreadRecord`), so S1 keeps what the
+ * user chose across restarts and S2 starts fresh. See
+ * `codexSessionSettings.ts`. Sub-pickers and label helpers live in
+ * `codexModelPicker.ts`, `codexEffortPicker.ts`, and
+ * `codexDefaultsBaseline.ts`.
  */
 
 type DefaultsRow = vscode.QuickPickItem & {
-  row: "model" | "effort" | "speed" | "sandbox" | "back" | "pause" | "resume" | "cancel";
+  rowKind: "model" | "effort" | "speed" | "sandbox" | "back" | "pause" | "resume" | "cancel";
 };
 
 /** Headline for the "CODEX MODEL SETTINGS" row in the sessions
@@ -161,18 +146,18 @@ export async function showCodexDefaultsPicker(
         : "";
 
     const items: DefaultsRow[] = [
-      { ...makeBackItem(), row: "back" },
+      { ...makeBackItem(), rowKind: "back" },
       {
         label: modelRowLabel(model),
         description: modelRowDescription(model),
         iconPath: new vscode.ThemeIcon("symbol-method"),
-        row: "model",
+        rowKind: "model",
       },
       {
         label: effortRowLabel(effort),
         description: "Click to change effort.",
         iconPath: new vscode.ThemeIcon("dashboard"),
-        row: "effort",
+        rowKind: "effort",
       },
       ...(speed !== null
         ? [
@@ -180,7 +165,7 @@ export async function showCodexDefaultsPicker(
               label: speedRowLabel(speed),
               description: speedRowDescription(speed),
               iconPath: new vscode.ThemeIcon("zap"),
-              row: "speed" as const,
+              rowKind: "speed" as const,
             },
           ]
         : []),
@@ -188,13 +173,13 @@ export async function showCodexDefaultsPicker(
         label: `SANDBOX PERMISSION: ${sandboxLabel}${sandboxDefaultTag}`,
         description: `Click to switch to ${sandboxNext}.`,
         iconPath: new vscode.ThemeIcon("shield"),
-        row: "sandbox",
+        rowKind: "sandbox",
       },
       {
         ...pauseItem,
-        row: pauseItem.action === "resume" ? "resume" : "pause",
+        rowKind: pauseItem.action === "resume" ? "resume" : "pause",
       },
-      { ...cancelItem, row: "cancel" },
+      { ...cancelItem, rowKind: "cancel" },
     ];
 
     const pick = await vscode.window.showQuickPick<DefaultsRow>(items, {
@@ -202,7 +187,7 @@ export async function showCodexDefaultsPicker(
       placeHolder: "Pick a setting to change",
     });
     if (!pick) return;
-    if (pick.row === "back") {
+    if (pick.rowKind === "back") {
       // Walk back to the sessions submenu (this picker's parent),
       // not straight to main. Honors the user's expectation that
       // BACK unwinds one level rather than closing the whole stack.
@@ -210,7 +195,7 @@ export async function showCodexDefaultsPicker(
       return;
     }
 
-    if (pick.row === "model") {
+    if (pick.rowKind === "model") {
       const result = await pickModel(model);
       // Picking a model resets effort to that model's own default, since
       // effort levels are model-scoped. `writeSessionModel` owns that
@@ -220,7 +205,7 @@ export async function showCodexDefaultsPicker(
       }
       continue;
     }
-    if (pick.row === "effort") {
+    if (pick.rowKind === "effort") {
       // `model` here is the session's effective model, never null unless
       // no catalog has answered at all. The effort picker narrows its rows
       // to that model's advertised levels, so passing an unresolved value
@@ -230,26 +215,26 @@ export async function showCodexDefaultsPicker(
       if (result.kind === "picked") writeSessionEffort(workspacePath, result.value);
       continue;
     }
-    if (pick.row === "speed" && speed !== null) {
+    if (pick.rowKind === "speed" && speed !== null) {
       writeSessionServiceTier(workspacePath, speed.on ? null : speed.fast.id);
       continue;
     }
-    if (pick.row === "sandbox") {
+    if (pick.rowKind === "sandbox") {
       writeCodexSandboxOverride(
         wsHash,
         sandbox === "full-access" ? "read-only" : "full-access"
       );
       continue;
     }
-    if (pick.row === "pause") {
+    if (pick.rowKind === "pause") {
       setPaused(true);
       return;
     }
-    if (pick.row === "resume") {
+    if (pick.rowKind === "resume") {
       setPaused(false);
       continue;
     }
-    if (pick.row === "cancel") {
+    if (pick.rowKind === "cancel") {
       // Route cancel through the parent dispatch so the standard
       // cancel handler runs (writes the cancel sentinel, etc). No
       // turn can be in flight here since the entry guard locks

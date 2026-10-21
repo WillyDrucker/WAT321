@@ -5,9 +5,13 @@ import {
   statSync,
   type Dirent,
 } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { readFirstLine } from "../../engine/fs/fileReaders";
+import { samePath } from "../../engine/fs/pathIdentity";
+import {
+  CODEX_SESSION_INDEX_PATH,
+  CODEX_SESSIONS_DIR,
+} from "../../shared/providers/codex/codexHome";
 import { readRolloutLatestModel } from "./rolloutModel";
 import { bridgeThreadNamePattern } from "./threadNaming";
 import {
@@ -19,16 +23,17 @@ import {
 /**
  * Read-only scans over Codex's session storage, plus the one write
  * that reattaches the bridge record to a session they surface.
- *   - `findRolloutPath` walks `~/.codex/sessions/` for the rollout
- *     file backing a given threadId. The TurnMonitor stats + tails
- *     this for stage advancement.
+ *   - `walkRolloutFiles` and `findRolloutPath` walk `~/.codex/sessions/`
+ *     for every rollout, and for the one backing a given threadId. The
+ *     TurnMonitor stats + tails that one for stage advancement.
+ *   - `readRolloutCwd` proves which workspace a rollout belongs to.
  *   - `listRecoverableSessions` walks Codex's `session_index.jsonl`
  *     for prior bridge threads whose rollout file still exists, so
  *     the user can reattach via the Recover menu.
  *
  * Codex never cleans its session_index even after a session delete -
  * stale entries are filtered by checking that the rollout file still
- * exists on disk. We never mutate Codex's state files. Model slug
+ * exists on disk. Nothing here mutates Codex's state files. Model slug
  * readers live in `rolloutModel.ts`.
  */
 
@@ -39,16 +44,11 @@ export interface RecoverableSession {
   createdAt: string | null;
 }
 
-/** Walk ~/.codex/sessions/ recursively and return the absolute path
- * of the first file whose name contains the given threadId. Used by
- * the TurnMonitor to stat + tail the bridge-specific rollout (not
- * just "newest by mtime for this workspace" which may be a user TUI
- * session). Returns null if not found. Best-effort walk - filesystem
- * errors are silently swallowed. */
-export function findRolloutPath(threadId: string): string | null {
-  const root = join(homedir(), ".codex", "sessions");
-  if (!existsSync(root)) return null;
-  const stack: string[] = [root];
+/** Every file under `~/.codex/sessions/`, depth-first. Best-effort:
+ * a directory that cannot be read is skipped. */
+export function* walkRolloutFiles(): Generator<string> {
+  if (!existsSync(CODEX_SESSIONS_DIR)) return;
+  const stack: string[] = [CODEX_SESSIONS_DIR];
   while (stack.length > 0) {
     const dir = stack.pop();
     if (dir === undefined) break;
@@ -60,23 +60,30 @@ export function findRolloutPath(threadId: string): string | null {
     }
     for (const e of entries) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) {
-        stack.push(p);
-      } else if (e.name.includes(threadId)) {
-        return p;
-      }
+      if (e.isDirectory()) stack.push(p);
+      else yield p;
     }
+  }
+}
+
+/** Absolute path of the first rollout whose file name contains the
+ * given threadId, so the TurnMonitor stats + tails the bridge's own
+ * rollout rather than "newest by mtime for this workspace", which may
+ * be a user TUI session. Null when not found. */
+export function findRolloutPath(threadId: string): string | null {
+  for (const p of walkRolloutFiles()) {
+    if (basename(p).includes(threadId)) return p;
   }
   return null;
 }
 
-/** Read `session_meta.payload.cwd` from the rollout header. Used to
- * confirm a rollout actually belongs to the current workspace before
- * including it in a recoverable or bulk-delete set. Basename match on
- * the thread name is not enough on its own - two workspaces named `foo`
- * in different parent paths would collide. Returns null on any parse
- * failure - callers treat that as "do not claim ownership". */
-function readRolloutCwd(rolloutPath: string): string | null {
+/** Read `session_meta.payload.cwd` from the rollout header. Confirms a
+ * rollout actually belongs to the current workspace before a recovery
+ * or bulk-delete set claims it. Basename match on the thread name is
+ * not enough on its own - two workspaces named `foo` in different
+ * parent paths would collide. Null on any parse failure - callers treat
+ * that as "do not claim ownership". */
+export function readRolloutCwd(rolloutPath: string): string | null {
   // `readFirstLine` reads in chunks until a newline, so an oversized
   // session_meta first line (routinely 15-25KB on recent Codex CLI
   // rollouts - can grow further as Codex adds metadata) is always
@@ -98,19 +105,6 @@ function readRolloutCwd(rolloutPath: string): string | null {
   }
 }
 
-/** Compare two filesystem paths for workspace-identity purposes.
- * Normalizes Windows backslashes to forward slashes and strips a
- * trailing separator so `C:/Code/project` and `C:\Code\project\` match.
- * Case-insensitive on win32 because `C:\dev\...` and `C:\Dev\...`
- * name the same folder. */
-function pathsMatch(a: string, b: string): boolean {
-  const norm = (p: string): string => {
-    const s = p.replace(/\\/g, "/").replace(/\/+$/, "");
-    return process.platform === "win32" ? s.toLowerCase() : s;
-  };
-  return norm(a) === norm(b);
-}
-
 /** List every Codex session in the local index whose thread_name
  * matches our bridge pattern for this workspace. Sorted by counter
  * descending (newest first). Read-only scan - we never mutate Codex
@@ -118,12 +112,11 @@ function pathsMatch(a: string, b: string): boolean {
  * the bridge to a previously-abandoned session. */
 export function listRecoverableSessions(workspacePath: string): RecoverableSession[] {
   const pattern = bridgeThreadNamePattern(workspacePath);
-  const indexPath = join(homedir(), ".codex", "session_index.jsonl");
-  if (!existsSync(indexPath)) return [];
+  if (!existsSync(CODEX_SESSION_INDEX_PATH)) return [];
 
   const out: RecoverableSession[] = [];
   try {
-    const raw = readFileSync(indexPath, "utf8");
+    const raw = readFileSync(CODEX_SESSION_INDEX_PATH, "utf8");
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
@@ -141,20 +134,16 @@ export function listRecoverableSessions(workspacePath: string): RecoverableSessi
         // Codex does not clean its own index when a session is
         // deleted - the entry stays but the rollout file is gone.
         // Filter out entries whose rollout no longer exists so the
-        // Recover dropdown only offers live sessions. We never edit
-        // Codex's index - stale entries just don't surface in our UI.
+        // Recover dropdown only offers live sessions.
         const rolloutPath = findRolloutPath(entry.id);
         if (rolloutPath === null) continue;
         // Basename-scoped thread-name match is ambiguous when two
-        // workspaces share a basename in different parent paths.
-        // Confirm ownership by reading `session_meta.cwd` from the
-        // rollout header and requiring an exact path match. Without
-        // this a sibling `foo/` in another location can surface here
-        // and get swept by bulk delete. Sessions whose header cannot
-        // be read or fails the match are silently skipped - we only
-        // claim sessions we can prove belong to this workspace.
+        // workspaces share a basename in different parent paths, so
+        // require the rollout header's cwd to match this workspace.
+        // Sessions whose header cannot be read or fails the match are
+        // skipped - only sessions provably ours are claimed.
         const rolloutCwd = readRolloutCwd(rolloutPath);
-        if (rolloutCwd === null || !pathsMatch(rolloutCwd, workspacePath)) {
+        if (rolloutCwd === null || !samePath(rolloutCwd, workspacePath)) {
           continue;
         }
         let mtime: string | null = null;

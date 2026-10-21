@@ -9,6 +9,22 @@ import {
 } from "../epicHandshakePaths";
 import { workspaceHash } from "../../engine/workspaceHash";
 
+/**
+ * Flag files the dispatcher writes during a Codex turn so the status
+ * bar, in another process boundary (extension window vs background
+ * dispatcher), can render the right animation without an event channel:
+ * `in-flight.<wshash>.flag` from dispatch start until clear,
+ * `processing.<wshash>.flag` from Codex's first streaming delta until
+ * completion or failure, `returning.<wshash>.flag` written on success
+ * and auto-cleared 3000ms later. The cancel sentinel and the
+ * suppress-codex-toast sentinel live here too, documented at their
+ * writers below.
+ *
+ * All flags are per-workspace, so a turn in workspace A never renders
+ * workspace B busy on the same machine, and best-effort: a missed write
+ * costs a missed animation frame, never a blocked turn.
+ */
+
 /** Drop the cancel sentinel for this workspace. The status-bar
  * menu's Cancel action calls this - `runTurnOnce` polls the sentinel
  * every 500ms inside the active turn promise and interrupts Codex
@@ -24,27 +40,6 @@ export function writeCancelFlag(workspacePath: string): void {
  * - 30s covers worst-observed cases without risking suppression of a
  * later, unrelated Codex turn that happens to land in the same window. */
 const SUPPRESS_CODEX_TOAST_FRESHNESS_MS = 30_000;
-
-/**
- * Flag files the dispatcher writes during a Codex turn so the status
- * bar (a different process boundary concern: extension window vs
- * background dispatcher) can render the right animation without
- * needing a direct event channel.
- *
- *   in-flight.<wshash>.flag   - present from turn dispatch start
- *                               until clear
- *   processing.<wshash>.flag  - present once Codex emits its first
- *                               streaming delta - cleared on turn
- *                               completion/failure
- *   returning.<wshash>.flag   - written on success - auto-cleared
- *                               5000ms later
- *
- * All flags are per-workspace so a turn in workspace A never makes
- * workspace B's status bar render "busy" on the same machine.
- *
- * All flags are best-effort. A missed write only costs a missed
- * animation frame - never block the turn on flag I/O.
- */
 
 export function writeInFlightFlag(workspacePath: string): void {
   setFlag(inFlightFlagPath(workspaceHash(workspacePath)));

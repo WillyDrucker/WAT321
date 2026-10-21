@@ -1,5 +1,5 @@
-import { BRIDGE_STAGE_ORDER, type BridgeStage, type BridgeWaitMode } from "../../engine/bridgeTypes";
-import type { TurnHeartbeat } from "./turnHeartbeat";
+import { BRIDGE_STAGE_ORDER, type BridgeStage } from "../../engine/bridgeTypes";
+import type { Heartbeat } from "../../engine/heartbeat/heartbeatTypes";
 import { COMPLETE_WALK_HOLD_MS, FAST_WALK_INTERMEDIATE_MS, STAGE_LATCH_MS, STAGE_MAX_HOLD_MS, stageIdx, type LatchState } from "./bridgeStageMap";
 
 /**
@@ -42,10 +42,10 @@ interface AdvanceLatchResult {
  * `this.latchState` from the returned `nextLatch`. */
 export function advanceLatch(
   prevLatch: LatchState | null,
-  hb: TurnHeartbeat,
+  hb: Heartbeat,
   now: number
 ): AdvanceLatchResult {
-  if (prevLatch === null || prevLatch.envelopeId !== hb.envelopeId) {
+  if (prevLatch === null || prevLatch.envelopeId !== hb.dispatchId) {
     return startNewEnvelope(hb, now);
   }
 
@@ -81,17 +81,17 @@ export function advanceLatch(
 /** First tick of a fresh envelope. Always starts at `dispatched` so
  * stage 1 gets visible time even when the heartbeat's very first
  * write is `received`. */
-function startNewEnvelope(hb: TurnHeartbeat, now: number): AdvanceLatchResult {
+function startNewEnvelope(hb: Heartbeat, now: number): AdvanceLatchResult {
   return {
     nextLatch: {
-      envelopeId: hb.envelopeId,
+      envelopeId: hb.dispatchId,
       displayedStage: "dispatched",
       displayedAt: now,
       turnStartedAt: hb.turnStartedAt ?? now,
       completeWalkAt: null,
       lastTargetStage: hb.stage,
       lostHeartbeatAt: null,
-      waitMode: hb.waitMode as BridgeWaitMode | undefined,
+      waitMode: hb.waitMode,
       target: hb.target,
     },
     displayedStage: "dispatched",
@@ -171,4 +171,3 @@ function advanceStage(
     releasedEnvelopeId: null,
   };
 }
-

@@ -123,8 +123,6 @@ export async function withOpenCodeHeartbeat(meta, runDispatch) {
       timeoutMs: meta.timeoutMs,
       tokens,
       tokensPerSec,
-      currentPhase: "DISPATCH",
-      phaseTrace: [],
     });
     writeTurnHeartbeat({
       dispatchId: requestId,

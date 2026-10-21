@@ -34,10 +34,7 @@ export async function spawnFreshThread(opts: {
   workspacePath: string;
   logger: EpicHandshakeLogger;
 }): Promise<{ threadId: string; record: BridgeThreadRecord }> {
-  const counter = nextCollisionFreeCounter(
-    opts.workspacePath,
-    opts.record.sessionCounter
-  );
+  const counter = nextCollisionFreeCounter(opts.workspacePath);
   // Always create the thread at the maximum ceiling. Per-turn
   // overrides on `turn/start` are authoritative for actual policy -
   // each turn passes the live sandbox/model/effort values from the
@@ -133,7 +130,7 @@ export function rotateThreadRecord(
   const next: BridgeThreadRecord = {
     ...record,
     threadId: null,
-    sessionCounter: nextCollisionFreeCounter(workspacePath, record.sessionCounter),
+    sessionCounter: nextCollisionFreeCounter(workspacePath),
     lastResetAt: new Date().toISOString(),
     consecutiveFailures: 0,
     lastError: null,
@@ -153,7 +150,7 @@ export function noteSuccess(record: BridgeThreadRecord): void {
 }
 
 /** Mark failure: bump consecutive counter, stash lastError. The
- * threshold check at the top of dispatchToCodex uses this. */
+ * threshold check in `threadReadiness.ts` uses this. */
 export function noteFailure(record: BridgeThreadRecord, message: string): void {
   saveBridgeThreadRecord({
     ...record,

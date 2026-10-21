@@ -73,10 +73,11 @@ export function listTurnHeartbeats(wsHash) {
 
 /** Drop the per-workspace `returning.<wsHash>.flag` for 3s so the
  * bridge widget's stage 4 alternating frame flips from blank to
- * left-arrow. Mirrors the Codex turnRunner's `writeReturningFlag` so
- * sync MCP dispatches play the same return ceremony Codex and FF
- * non-Codex play. The unref'd timeout lets the MCP runtime exit
- * without waiting on this cleanup. */
+ * left-arrow. Mirrors `writeReturningFlag` in
+ * `WAT321_EPIC_HANDSHAKE/codexTurn/turnFlags.ts` so sync MCP dispatches
+ * play the same return ceremony Codex and FF non-Codex play. The
+ * unref'd timeout lets the MCP runtime exit without waiting on this
+ * cleanup. */
 export function writeReturningFlag(wsHash) {
   if (typeof wsHash !== "string" || wsHash.length === 0) return;
   try {

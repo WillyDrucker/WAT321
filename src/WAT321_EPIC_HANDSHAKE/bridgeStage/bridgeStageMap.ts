@@ -1,51 +1,35 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { BRIDGE_STAGE_ORDER, type BridgeStageSnapshot, type BridgeWaitMode, type BridgeStage } from "../../engine/bridgeTypes";
+import {
+  BRIDGE_STAGE_ORDER,
+  type BridgeStage,
+  type BridgeStageSnapshot,
+  type BridgeTarget,
+  type BridgeWaitMode,
+} from "../../engine/bridgeTypes";
 
 /**
  * Stage definitions, timing constants, and shared types for the Epic
  * Handshake bridge state machine. `bridgeStageCoordinator` owns
- * lifecycle and orchestration - `bridgeStageWalker` owns the per-tick
- * advance logic - this file owns what the stages mean.
+ * lifecycle and orchestration, `bridgeStageWalker` owns the per-tick
+ * advance logic, this file owns what the stages mean.
  *
- * Stage map - what each square-N cycle means:
+ * Stage map, the one home for what each square-N cycle means:
  *
- *   1 dispatched   square-one   <-> arrow-right   outbound to Codex
- *     Codex side:  app-server child spawning OR thread/start +
- *                  turn/start being dialed in. Cold first dispatch
- *                  can run ~20s - subsequent dispatches over the same
- *                  connection move through in <1s.
- *     Entry:       writeHeartbeat("dispatched") when turnRunner starts.
- *     Exit:        observeRpcProgress("turn-started") or rollout
- *                  task_started. Force-exit at 30s ceiling.
- *
- *   2 received     square-two   <-> arrow-right   prompt accepted
- *     Codex side:  initial reasoning before any tool call.
- *     Entry:       task_started rollout event or turn/started RPC.
- *     Exit:        first function_call / web_search_call response item
- *                  or force-advance after 15s.
- *
- *   3 working      square-three <-> blank          Codex working
- *     Codex side:  active tool use - 80-95% of wall time on tool-
- *                  heavy turns.
- *     Entry:       first function_call or web_search_call entry.
- *     Exit:        agent_message phase=final_answer or post-tool
- *                  reasoning threshold or force-advance after 30s.
- *
- *   4 writing      square-four  <-> blank          composing answer
- *   4 + returning  square-four  <-> arrow-left     reply imminent
- *     Codex side:  final assistant message text being produced.
- *     Entry:       agent_message phase=final_answer or post-tool
- *                  reasoning heuristic.
- *     Exit:        task_complete. No force-advance - stage 5 is
- *                  reserved for genuine completion.
- *
- *   5 complete     square-five  <-> arrow-left     delivered back
- *     Codex side:  turn done, bridge writing the reply envelope.
- *     Entry:       task_complete or turn/completed RPC.
- *     Exit:        held 3s + COMPLETE_WALK_HOLD_MS so one full cycle
- *                  is always visible, then widget transitions to the
- *                  returning-arrow handoff animation.
+ *   1 dispatched  square-one   / arrow-right  outbound: app-server
+ *     spawning or thread/start + turn/start being dialed in (a cold
+ *     first dispatch can take ~20s). Exit on turn-started or rollout
+ *     task_started, forced at 30s.
+ *   2 received    square-two   / arrow-right  prompt accepted, initial
+ *     reasoning. Exit on the first function_call / web_search_call
+ *     item, forced at 15s.
+ *   3 working     square-three / blank        active tool use, most of
+ *     the wall time on tool-heavy turns. Exit on agent_message
+ *     final_answer or the post-tool reasoning threshold, forced at 30s.
+ *   4 writing     square-four  / blank        final text being produced,
+ *     arrow-left once `returning` is set. Exit on task_complete only,
+ *     never forced: stage 5 means genuine completion.
+ *   5 complete    square-five  / arrow-left   turn done, reply envelope
+ *     written. Held 3s + COMPLETE_WALK_HOLD_MS so one full cycle is
+ *     always visible, then the returning-arrow handoff.
  */
 
 /** Minimum display time per stage before the walker may advance to
@@ -87,7 +71,7 @@ export const STAGE_MAX_HOLD_MS: Record<BridgeStage, number> = {
  * the ceremony ends. */
 export const CEREMONY_MS = 4000;
 
-/** Backstop polling interval. fs-watch on EH_DIR drives most ticks
+/** Backstop polling interval. fs-watch on the Epic Handshake dir drives most ticks
  * instantly - the timer remains for time-based progressions
  * (ceremony window expiring, stage min-hold elapsing during
  * dispatcher silence). */
@@ -104,8 +88,6 @@ export const IDLE_SUSPEND_MS = 30_000;
  * laggy. */
 export const WATCH_DEBOUNCE_MS = 50;
 
-/** Bridge state directory the coordinator watches and reads. */
-export const EH_DIR = join(homedir(), ".wat321", "epic-handshake");
 
 /** Stage 5 hold after the synthetic walker reaches `complete` but
  * before we release the envelope. Keeps stage 5 visible briefly
@@ -162,7 +144,7 @@ export interface LatchState {
    * Persists across the walker's lifetime so off-target ceremony
    * suppression in the Codex widget reads a stable value even after
    * the raw heartbeat clears. */
-  target?: "codex" | "opencode" | "local";
+  target: BridgeTarget;
 }
 
 export const IDLE_SNAPSHOT: BridgeStageSnapshot = {

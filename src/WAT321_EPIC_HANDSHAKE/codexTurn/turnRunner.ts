@@ -18,7 +18,7 @@ import type { RpcProgressKind } from "./turnMonitorOptions";
 import { createFreshnessGate } from "./turnRecovery";
 import { buildTurnStartParams } from "./turnStartParams";
 import { attachTurnWatchers } from "./turnWatchers";
-import type { WaitMode } from "./waitMode";
+import type { BridgeWaitMode } from "../../engine/bridgeTypes";
 
 /**
  * One-shot Codex turn execution. Subscribes to the JSON-RPC progress
@@ -66,7 +66,7 @@ interface TurnRunnerOptions {
    * stall windows for Fire-and-Forget so long-chained scrapes do not
    * trip a false stall while Claude is no longer blocking. Locked
    * during in-flight turns (menu guard) so the value holds. */
-  waitMode: WaitMode;
+  waitMode: BridgeWaitMode;
 }
 
 export function runTurnOnce(opts: TurnRunnerOptions): Promise<string> {

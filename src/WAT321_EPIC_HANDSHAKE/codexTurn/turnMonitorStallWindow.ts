@@ -1,4 +1,4 @@
-import type { StageInfo } from "../../shared/codex-rollout/turnStageTypes";
+import type { StageInfo } from "../../shared/codexRollout/turnStageTypes";
 
 /**
  * Stall-window selector for `TurnMonitor`. Pure function so its
@@ -14,8 +14,9 @@ import type { StageInfo } from "../../shared/codex-rollout/turnStageTypes";
  * reasoning tokens - a reasoning-only phase can run long without any
  * tool call, signalled by `reasoningTokens > 0`.
  *
- * The floor (`stallFloorMs`) lets Fire-and-Forget ride out long chained
- * tool calls - Standard/Adaptive leave it at 0.
+ * The floor (`stallFloorMs`) lets Adaptive ride out long chained tool
+ * calls. Standard leaves it at 0, and Fire-and-Forget disables the
+ * timers entirely.
  */
 
 const SHELL_COMMAND_WINDOW_MS = 180_000;

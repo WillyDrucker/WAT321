@@ -1,10 +1,14 @@
-import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { basename } from "node:path";
 import { writeFileAtomic } from "../../engine/fs/atomicWrite";
-import { findRolloutPath } from "../codexTurn/sessionRecovery";
+import { CODEX_SESSION_INDEX_PATH } from "../../shared/providers/codex/codexHome";
+import { findRolloutPath, walkRolloutFiles } from "../codexTurn/sessionRecovery";
 import { nextCollisionFreeCounter } from "../codexTurn/threadNaming";
-import type { BridgeThreadRecord } from "../codexTurn/threadRecord";
+import {
+  loadBridgeThreadRecordIfExists,
+  saveBridgeThreadRecord,
+  type BridgeThreadRecord,
+} from "../codexTurn/threadRecord";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
 
 /**
@@ -20,22 +24,22 @@ import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
  * fill from landing back at S1.
  */
 
-/** Walk `~/.codex/sessions/...` and unlink every file whose path
- * contains any of the supplied thread ids. Returns the count of
- * removed files. Errors are best-effort - any single unlink failure
- * is swallowed and reflected only by the count. A walk-wide failure
- * is logged once with the supplied label as prefix. */
+/** Unlink every rollout whose file name contains any of the supplied
+ * thread ids. Returns the count of removed files. Errors are
+ * best-effort - any single unlink failure is swallowed and reflected
+ * only by the count. A walk-wide failure is logged once with the
+ * supplied label as prefix. */
 export function deleteRolloutFilesByThreadId(
   threadIds: Set<string>,
   logger: EpicHandshakeLogger,
   warnLabel: string
 ): number {
-  const sessionsRoot = join(homedir(), ".codex", "sessions");
   let removed = 0;
   try {
-    for (const file of walk(sessionsRoot)) {
+    for (const file of walkRolloutFiles()) {
+      const name = basename(file);
       for (const tid of threadIds) {
-        if (file.includes(tid)) {
+        if (name.includes(tid)) {
           try {
             unlinkSync(file);
             removed++;
@@ -66,10 +70,9 @@ export function stripSessionIndexEntries(
   logger: EpicHandshakeLogger,
   warnLabel: string
 ): number {
-  const indexPath = join(homedir(), ".codex", "session_index.jsonl");
-  if (!existsSync(indexPath)) return 0;
+  if (!existsSync(CODEX_SESSION_INDEX_PATH)) return 0;
   try {
-    const raw = readFileSync(indexPath, "utf8");
+    const raw = readFileSync(CODEX_SESSION_INDEX_PATH, "utf8");
     const lines = raw.split("\n");
     const kept = lines.filter((line) => {
       if (!line.trim()) return false;
@@ -88,7 +91,7 @@ export function stripSessionIndexEntries(
       }
     });
     const stripped = lines.filter((l) => l.trim()).length - kept.length;
-    if (!writeFileAtomic(indexPath, `${kept.join("\n")}\n`)) {
+    if (!writeFileAtomic(CODEX_SESSION_INDEX_PATH, `${kept.join("\n")}\n`)) {
       logger.warn(`${warnLabel}: atomic write rejected`);
     }
     return stripped;
@@ -99,41 +102,24 @@ export function stripSessionIndexEntries(
   }
 }
 
-/** Null the bridge-thread record at `recordPath`: threadId=null,
- * counter bumped to the gap-filled next, failure fields reset, pinned
- * model + effort forgotten. When `knownRecord` is non-null the caller
- * already parsed the record - pass null to defensively re-read it (used
- * by the bulk path which doesn't load the record at the start). Returns
- * the projected next counter, or null if the record can't be read /
- * written.
+/** Null the workspace's bridge-thread record: threadId=null, counter
+ * bumped to the gap-filled next, failure fields reset, pinned model +
+ * effort forgotten. Pass the record when the caller already loaded it,
+ * or null to load it here (the bulk path). Returns the projected next
+ * counter, or null when no record exists or the write fails.
  *
  * Clearing the pin is what makes "delete the session" the way back to
  * Codex's current recommendation. Keep this in step with
  * `resetBridgeThread`, which does the same for the Reset path. */
 export function clearBridgeThreadRecord(
   workspacePath: string,
-  recordPath: string,
   knownRecord: BridgeThreadRecord | null,
   logger: EpicHandshakeLogger,
   warnLabel: string
 ): number | null {
-  let record: BridgeThreadRecord;
-  if (knownRecord !== null) {
-    record = knownRecord;
-  } else {
-    if (!existsSync(recordPath)) return null;
-    try {
-      record = JSON.parse(readFileSync(recordPath, "utf8")) as BridgeThreadRecord;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`${warnLabel}: ${msg}`);
-      return null;
-    }
-  }
-  const projectedNext = nextCollisionFreeCounter(
-    workspacePath,
-    record.sessionCounter
-  );
+  const record = knownRecord ?? loadBridgeThreadRecordIfExists(workspacePath);
+  if (record === null) return null;
+  const projectedNext = nextCollisionFreeCounter(workspacePath);
   const next: BridgeThreadRecord = {
     ...record,
     threadId: null,
@@ -147,25 +133,9 @@ export function clearBridgeThreadRecord(
     serviceTier: null,
     pinResolved: true,
   };
-  if (!writeFileAtomic(recordPath, JSON.stringify(next, null, 2))) {
+  if (!saveBridgeThreadRecord(next)) {
     logger.warn(`${warnLabel}: atomic write rejected`);
     return null;
   }
   return projectedNext;
-}
-
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  let entries: Array<{ name: string; isDirectory: () => boolean }>;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of entries) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walk(p));
-    else out.push(p);
-  }
-  return out;
 }

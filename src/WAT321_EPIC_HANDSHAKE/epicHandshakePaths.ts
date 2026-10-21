@@ -1,13 +1,12 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { EPIC_HANDSHAKE_DIR } from "../engine/wat321Paths";
 
 /**
- * Epic Handshake shared paths and flag locations. Everything the
- * tier writes lives under `~/.wat321/epic-handshake/` so Reset WAT321
- * wipes it cleanly. No other writes outside this root.
+ * Epic Handshake mailbox partitions and flag locations. Everything the
+ * tier writes lives under `EPIC_HANDSHAKE_DIR` so Reset WAT321 wipes
+ * it cleanly. No other writes outside this root. The MCP runtime
+ * mirrors this file in `WAT321_MCP_SERVER/bin/epicHandshakePaths.mjs`.
  */
-
-export const EPIC_HANDSHAKE_DIR = join(homedir(), ".wat321", "epic-handshake");
 
 /** Inbox + sent root directories. Envelopes are partitioned per
  * workspace inside each one (e.g. `inbox/codex/<wshash>/<id>.md`)
@@ -39,17 +38,17 @@ export function sentClaudeDir(wsHash: string): string {
 }
 
 /** EH-owned bin directory. Holds the clipboard-staging helper
- * (`stage-clipboard.mjs`). The unified MCP server (`channel.mjs`) now
- * lives under `~/.wat321/bridge/bin/` at project scope - see
+ * (`stage-clipboard.mjs`). The MCP server itself (`channel.mjs`) is
+ * installed under `~/.wat321/bridge/bin/` by
  * `WAT321_MCP_SERVER/installer.ts`. */
 export const BIN_DIR = join(EPIC_HANDSHAKE_DIR, "bin");
 
 /** Per-workspace turn flag path helpers. Every runtime sentinel is
  * partitioned by workspace hash so toggling wait mode, pausing the
  * bridge, or running a turn in one VS Code window never leaks into a
- * sibling. `turn-heartbeat.<envelopeId>.json` is keyed by envelope
- * (per-call) rather than by workspace, but its reader filters on the
- * `workspaceHash` field inside the JSON. */
+ * sibling. The per-turn `turn-heartbeat.<dispatchId>.json` is keyed
+ * per call instead and owned by `engine/heartbeat/`, whose reader
+ * filters on the `workspaceHash` field inside the JSON. */
 export function inFlightFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `in-flight.${wsHash}.flag`);
 }
@@ -69,15 +68,15 @@ export function waitModeFlashFlagPath(wsHash: string): string {
  * on successful turn completion - the toast notifier consumes-and-
  * deletes it when Codex's transcript-driven `responseComplete` fires
  * within the freshness window. Decouples bridge-completion suppression
- * from the 5s `returning` flag latch so a slow Codex transcript write
- * (>5s after RPC completion) still gets suppressed. */
+ * from the 3s `returning` flag latch so a slow Codex transcript write
+ * (>3s after RPC completion) still gets suppressed. */
 export function suppressCodexToastFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `suppress-codex-toast.${wsHash}.flag`);
 }
 
 /** Per-workspace toggle for Codex bridge sandbox. When present, Codex
  * sessions in this workspace run with `danger-full-access` instead of
- * the default `read-only`. Toggled live via the Codex Session Settings
+ * the default `read-only`. Toggled live via the Codex Model Settings
  * picker. Read on every `turn/start` so toggling takes effect on the
  * next prompt without a thread reset.
  *
@@ -89,37 +88,26 @@ export function codexSandboxFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-sandbox.${wsHash}.flag`);
 }
 
-/** Companion sentinel that records whether the user has ever explicitly
- * set the sandbox state for this workspace (regardless of which value
- * they picked). Used to drive the "*default*" tag in the picker - the
- * tag should appear on truly pristine slots (fresh install, post-Reset)
- * and disappear once the user makes any choice, even if their choice
- * happens to match the schema default (read-only). Without this, every
- * read-only slot would re-render *default* after the user explicitly
- * picked it, which reads as "you haven't done anything" when they have.
- *
- * Sentinel is write-once-then-stays - no logic deletes it short of
- * Reset wiping `~/.wat321/`. */
+/** Companion sentinel: the user has explicitly set the sandbox state
+ * for this workspace, whichever value they picked. Drives the
+ * "*default*" tag in the picker, which marks only pristine slots
+ * (fresh install, post-Reset) and disappears once the user chooses,
+ * even when the choice matches the read-only default. Write-once:
+ * nothing deletes it short of Reset wiping `~/.wat321/`. */
 export function codexSandboxTouchedFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-sandbox-touched.${wsHash}.flag`);
 }
 
-/** RETIRED per-workspace model override. Body is the bare slug (e.g.
- * `gpt-5.4-mini`).
- *
- * Superseded by the per-session `model` field on `BridgeThreadRecord`.
- * A workspace-scoped pin bled across every session in a folder and
- * outlived the session it was chosen for. Nothing writes this path any
- * more: `migrateLegacyPin` reads it once to adopt a choice an existing
- * user already made, then `clearLegacyCodexPinFlags` deletes it. Kept
- * only so that migration and the Reset sweep can name the file. */
+/** RETIRED per-workspace model override, body the bare slug. Superseded
+ * by the per-session `model` on `BridgeThreadRecord`. Nothing writes it:
+ * `migrateLegacyPin` reads it once and `clearLegacyCodexPinFlags`
+ * deletes it, and both need to name the file. */
 export function codexModelFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-model.${wsHash}.flag`);
 }
 
-/** RETIRED per-workspace reasoning-effort override. Body is the bare
- * effort level (e.g. `xhigh`). Same history and same migration path as
- * the model flag above. */
+/** RETIRED per-workspace reasoning-effort override, body the bare
+ * level. Same migration path as the model flag above. */
 export function codexEffortFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `codex-effort.${wsHash}.flag`);
 }
@@ -160,11 +148,10 @@ export function adaptiveFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `adaptive.${wsHash}.flag`);
 }
 
-/** Path for the per-turn heartbeat file the dispatcher writes on
- * every monitor stage transition. Body is JSON: stage, fraction,
- * activeTool, elapsedMs, lastProgressAt. Read by channel.mjs to
- * extend its MCP blocking window while Codex is progressing, and
- * by statusBarItem.ts to render stage fraction + tooltip detail. */
-export function turnHeartbeatPath(envelopeId: string): string {
-  return join(EPIC_HANDSHAKE_DIR, `turn-heartbeat.${envelopeId}.json`);
+/** Per-workspace sidecar the MCP server writes while a sync or
+ * adaptive `wat321_ask` blocks on a Codex reply. The server owns the
+ * write and clear lifecycle - this tier only reads it, through
+ * `codexTurn/waitStatus.ts`. */
+export function waitStatusPath(wsHash: string): string {
+  return join(EPIC_HANDSHAKE_DIR, `wait-status.${wsHash}.json`);
 }

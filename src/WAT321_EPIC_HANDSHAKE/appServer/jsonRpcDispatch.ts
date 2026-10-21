@@ -15,10 +15,6 @@ import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
  * side - this helper handles everything that arrives back over
  * stdout, plus failure surfaces (timeout, transport error,
  * shutdown) that need to reject pending requests cleanly.
- *
- * Split out of `appServerClient.ts` so the client class can stay
- * focused on lifecycle (spawn / shutdown / force-kill) and the
- * send/subscribe public surface.
  */
 
 /** Handler for a JSON-RPC notification. Receives the raw `params`

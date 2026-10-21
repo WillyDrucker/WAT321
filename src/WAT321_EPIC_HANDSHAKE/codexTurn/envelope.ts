@@ -1,27 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import type { BridgeWaitMode } from "../../engine/bridgeTypes";
 import { writeFileAtomic } from "../../engine/fs/atomicWrite";
 
 /**
- * Envelope format for Epic Handshake messages passed between agents
- * via the filesystem mailbox. Shape matches exactly what
- * `WAT321_MCP_SERVER/bin/codex/envelope.mjs` writes on the dispatch side, so
- * both sides stay in sync.
+ * The Epic Handshake agent dialect of the mailbox envelope: `source`
+ * and `target` name the conversational agents, not the backend.
+ * Shape matches exactly what `WAT321_MCP_SERVER/bin/codex/envelope.mjs`
+ * writes on the dispatch side, so both sides stay in sync. The engine
+ * reader (`engine/inbox/envelope.ts`) folds this dialect onto the
+ * unified shape for cross-backend surfaces like the late-reply picker.
  *
  * YAML frontmatter + markdown body, atomic tmp+rename on write.
  * Hand-rolled serializer keeps the module dependency-free.
  */
 
 export type EnvelopeAgent = "claude" | "codex";
-
-/** Per-call wait mode the MCP caller asked for. Carried in envelope
- * frontmatter so the dispatcher honors the same mode the MCP server
- * resolved (per-call args win over the sticky flag, but the
- * dispatcher reads from disk where args are not visible without this
- * field). Optional for back-compat: older envelopes without the field
- * fall through to `currentWaitMode()` flag-based resolution on the
- * dispatcher side. */
-export type EnvelopeWaitMode = "standard" | "adaptive" | "fire-and-forget";
 
 export interface Envelope {
   id: string;
@@ -36,7 +30,11 @@ export interface Envelope {
   createdAt: string;
   replyTo: string | null;
   title?: string;
-  waitMode?: EnvelopeWaitMode;
+  /** Per-call wait mode the MCP caller asked for. Per-call args win
+   * over the sticky flag, and the dispatcher reads from disk where
+   * args are not visible without this field. An envelope without it
+   * falls through to `currentWaitMode()` flag resolution. */
+  waitMode?: BridgeWaitMode;
   body: string;
 }
 
@@ -112,7 +110,7 @@ export function parseEnvelope(raw: string): Envelope | null {
   }
 
   const rawWaitMode = fields.wait_mode;
-  const waitMode: EnvelopeWaitMode | undefined =
+  const waitMode: BridgeWaitMode | undefined =
     rawWaitMode === "standard" ||
     rawWaitMode === "adaptive" ||
     rawWaitMode === "fire-and-forget"

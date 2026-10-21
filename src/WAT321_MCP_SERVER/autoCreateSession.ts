@@ -1,27 +1,24 @@
 import * as vscode from "vscode";
+import { SETTING } from "../engine/settingsKeys";
 import {
+  findRoutesInstance,
   readOpenCodeRoutesConfigSnapshot,
   type OpenCodeRoutesConfigSnapshot,
   type OpenCodeRoutesInstance,
 } from "../shared/bridge/openCodeRoutesConfigSnapshot";
 import { readAliases, SESSION_ALIASES_PATH, writeAliases } from "../shared/bridge/sessionAliases";
-import { SETTING } from "../engine/settingsKeys";
-
-// Resolve paths via `wat321Paths` rather than `./index` - this module
-// is re-exported from index.ts, so a `from "./index"` import returns
-// undefined at module load before index has finished evaluating.
 
 /**
- * Auto-create the resumable S1 session for OpenCode (and later Local
- * LLM) when the user first enables OpenCode Routes. Mirrors how Codex's
- * S1 thread exists immediately on Epic Handshake enable - the user
- * shouldn't have to manually run `wat321_session({action:"create"})`
- * before their first dispatch.
+ * Auto-create the resumable S1 session for OpenCode when the user
+ * first enables OpenCode Routes. Mirrors how Codex's S1 thread exists
+ * immediately on Epic Handshake enable - the user shouldn't have to
+ * manually run `wat321_session({action:"create"})` before their first
+ * dispatch.
  *
  * Idempotent: skips when an opencode S1 alias is already present in
  * the alias map. Best-effort: if opencode serve hasn't finished
  * spawning yet, retries with a short backoff window. Failure is
- * logged silently - the user can still create sessions manually.
+ * silent - the user can still create sessions manually.
  *
  * Triggered from:
  *   - Bridge tier activate (covers fresh installs + reload)
@@ -29,23 +26,11 @@ import { SETTING } from "../engine/settingsKeys";
  *     for the first time after install)
  */
 
-
 const RETRY_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 8_000;
-
-function pickInstance(cfg: OpenCodeRoutesConfigSnapshot): OpenCodeRoutesInstance | null {
-  const instances = Array.isArray(cfg.instances) ? cfg.instances : [];
-  // Prefer the user's active instance when it's a remote (the auto-S1
-  // exists for OpenCode targets specifically - local instances get a
-  // separate auto-S1 when the local-llm target lands).
-  const active = instances.find((i) => i.id === cfg.activeInstanceId);
-  if (active && active.kind === "remote") return active;
-  // Fall back to Big Pickle if it's in the catalog.
-  const bigPickle = instances.find((i) => i.id === "big-pickle");
-  if (bigPickle) return bigPickle;
-  // Last resort: first remote instance.
-  return instances.find((i) => i.kind === "remote") ?? null;
-}
+/** The remote instance S1 binds to when the active instance is not a
+ * remote. Same fallback the Epic Handshake session pickers use. */
+const FALLBACK_REMOTE_INSTANCE_ID = "big-pickle";
 
 async function attemptCreate(cfg: OpenCodeRoutesConfigSnapshot, instance: OpenCodeRoutesInstance): Promise<string | null> {
   const url = cfg.openCodeServerUrl;
@@ -87,8 +72,8 @@ async function waitForOpencodeServe(): Promise<OpenCodeRoutesConfigSnapshot | nu
 /** Run the auto-create flow. Idempotent. Best-effort. */
 async function ensureOpenCodeS1(): Promise<void> {
   const config = vscode.workspace.getConfiguration("wat321");
-  const mbEnabled = config.get<boolean>(SETTING.enableOpenCode, false);
-  if (!mbEnabled) return;
+  const openCodeEnabled = config.get<boolean>(SETTING.enableOpenCode, false);
+  if (!openCodeEnabled) return;
 
   const aliases = readAliases(SESSION_ALIASES_PATH);
   if (Object.keys(aliases.opencode).length > 0) {
@@ -99,7 +84,7 @@ async function ensureOpenCodeS1(): Promise<void> {
   const cfg = await waitForOpencodeServe();
   if (cfg === null) return;
 
-  const instance = pickInstance(cfg);
+  const instance = findRoutesInstance(cfg, null, "remote", FALLBACK_REMOTE_INSTANCE_ID);
   if (instance === null) return;
 
   const sessionId = await attemptCreate(cfg, instance);

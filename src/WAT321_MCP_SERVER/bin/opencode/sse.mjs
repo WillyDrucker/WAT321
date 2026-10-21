@@ -2,26 +2,19 @@ import { log } from "../channelLog.mjs";
 import { fetchLatestMessage } from "./serveApi.mjs";
 
 /**
- * Tap OpenCode's `/event` SSE stream during a session-attached dispatch
- * and feed live progress to the heartbeat. Char count of the
- * accumulating assistant reply text serves as a token-count proxy so
- * the OpenCode Routes widget renders `Nt @ X/s` instead of seconds-elapsed.
+ * Tap OpenCode's `/event` SSE stream during a session-attached
+ * dispatch and feed live progress to the heartbeat, with the char count
+ * of the accumulating reply as a token proxy so the OpenCode Routes
+ * widget renders `Nt @ X/s` instead of seconds elapsed. Resolves once
+ * the SSE response headers arrive, and the caller MUST await it before
+ * the dispatch POST: a fast local LLM can finish before the SSE GET
+ * completes its handshake, leaving the heartbeat at tokens=0.
  *
- * Returns once the SSE response headers have arrived. Caller MUST
- * await this before firing the dispatch POST: a fast local LLM can
- * finish generating before the SSE GET completes its handshake,
- * leaving the heartbeat at tokens=0 for the entire dispatch and the
- * widget falling back to elapsed-seconds.
- *
- * Best-effort: any tap failure leaves the dispatch untouched. The POST
- * still completes and the response payload is still parsed normally.
- *
- * Poll fallback covers non-streaming providers (Zen / Big Pickle and
- * friends) that return the assistant reply as one chunk after the
- * model finishes. Polling /session/{id}/message every 2s reads
- * in-progress text length even when SSE never streams. Streaming
- * providers still win in latency because pushProgress is monotonic:
- * whichever source reports higher first sticks.
+ * Best-effort: a tap failure leaves the dispatch untouched. A 2s poll
+ * of `/session/{id}/message` covers non-streaming providers (Zen / Big
+ * Pickle return the reply as one chunk), and streaming providers still
+ * win on latency because pushProgress is monotonic: whichever source
+ * reports higher first sticks.
  */
 
 const SSE_HANDSHAKE_TIMEOUT_MS = 5_000;

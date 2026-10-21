@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
 import { formatRelativeTime } from "../../engine/durationFormat";
+import { formatSessionDisplayName } from "../../shared/bridge/bridgeConfig";
 import type { OpenCodeRoutesInstance } from "../../shared/bridge/openCodeRoutesConfigSnapshot";
 import type { SessionTarget } from "../../shared/bridge/sessionAliases";
 import { makeBackItem, makeCancelItem, makePauseResumeItem } from "../../shared/ui/menuRows";
 import { EPIC_HANDSHAKE_MENU_TEXT } from "../statusBar/menuActions";
-import { formatSessionDisplayName, type OpenCodeSessionMeta } from "./openCodeSessionsSource";
+import type { OpenCodeSessionMeta } from "./openCodeSessionsSource";
 import { isPaused, setPaused } from "../statusBar/statusBarState";
 
 /**
@@ -20,7 +21,7 @@ type SwitchOutcome =
   | { kind: "close" };
 
 interface SwitchRow extends vscode.QuickPickItem {
-  rowType: "session" | "back" | "pause" | "resume" | "cancel";
+  rowKind: "session" | "back" | "pause" | "resume" | "cancel";
   alias?: string;
 }
 
@@ -58,7 +59,7 @@ export async function showSwitchSessionPicker(args: {
       const display = formatSessionDisplayName(target, alias);
       const isActive = alias === activeAlias;
       return {
-        rowType: "session",
+        rowKind: "session",
         label: `${isActive ? "✔️ " : ""}${display}`,
         description: `${modelHint}${ageLabel ? `  -  ${ageLabel}` : ""}`,
         alias,
@@ -67,13 +68,13 @@ export async function showSwitchSessionPicker(args: {
   );
   const subPause = makePauseResumeItem(isPaused(), EPIC_HANDSHAKE_MENU_TEXT);
   const switchItems: SwitchRow[] = [
-    { ...makeBackItem(), rowType: "back" },
+    { ...makeBackItem(), rowKind: "back" },
     ...aliasRows,
     {
       ...subPause,
-      rowType: subPause.action === "resume" ? "resume" : "pause",
+      rowKind: subPause.action === "resume" ? "resume" : "pause",
     },
-    { ...makeCancelItem(EPIC_HANDSHAKE_MENU_TEXT), rowType: "cancel" },
+    { ...makeCancelItem(EPIC_HANDSHAKE_MENU_TEXT), rowKind: "cancel" },
   ];
   const switchPick = await vscode.window.showQuickPick<SwitchRow>(
     switchItems,
@@ -82,17 +83,17 @@ export async function showSwitchSessionPicker(args: {
       placeHolder: "Pick a session to mark active",
     }
   );
-  if (!switchPick || switchPick.rowType === "cancel") return { kind: "close" };
-  if (switchPick.rowType === "back") return { kind: "reopen" };
-  if (switchPick.rowType === "pause") {
+  if (!switchPick || switchPick.rowKind === "cancel") return { kind: "close" };
+  if (switchPick.rowKind === "back") return { kind: "reopen" };
+  if (switchPick.rowKind === "pause") {
     setPaused(true);
     return { kind: "close" };
   }
-  if (switchPick.rowType === "resume") {
+  if (switchPick.rowKind === "resume") {
     setPaused(false);
     return { kind: "reopen" };
   }
-  if (switchPick.rowType === "session" && switchPick.alias !== undefined) {
+  if (switchPick.rowKind === "session" && switchPick.alias !== undefined) {
     return { kind: "switched", alias: switchPick.alias };
   }
   return { kind: "close" };

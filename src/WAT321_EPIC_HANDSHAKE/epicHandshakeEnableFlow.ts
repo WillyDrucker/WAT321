@@ -9,7 +9,7 @@ import {
   isOpenCodeAvailable,
 } from "./cliAvailability";
 import { pausedFlagPath } from "./epicHandshakePaths";
-import { applyDefaultWaitMode, currentWaitMode } from "./statusBar/statusBarItem";
+import { applyWaitMode, currentWaitMode } from "./codexTurn/waitMode";
 
 /**
  * Settings-driven enable / disable flow for the Epic Handshake tier.
@@ -149,7 +149,7 @@ async function runEnableFlow(deps: EnableFlowDeps): Promise<void> {
  * paused sentinel so a later re-enable starts active. */
 async function runDisableFlow(deps: EnableFlowDeps): Promise<void> {
   await deps.stopBridge();
-  // EH is the single switch now. uninstallUnifiedBridge sweeps both
+  // EH is the single switch. uninstallUnifiedBridge sweeps both
   // user and project scope on its own. Idempotent.
   try {
     await vscode.commands.executeCommand("wat321.bridge.uninstallUnified");
@@ -215,7 +215,7 @@ export function seedDefaultWaitMode(opts: { force?: boolean } = {}): void {
     }
     // Adaptive is the fixed default at activate. The click menu still
     // toggles between Adaptive and Fire-and-Forget at runtime.
-    applyDefaultWaitMode("adaptive", ws);
+    applyWaitMode("adaptive", ws);
   } catch {
     // best-effort
   }

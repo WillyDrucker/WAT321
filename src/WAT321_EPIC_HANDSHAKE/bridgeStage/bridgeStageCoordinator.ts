@@ -6,9 +6,9 @@ import type {
   BridgeWaitMode,
 } from "../../engine/bridgeTypes";
 import type { EventHub } from "../../engine/eventHub";
+import { EPIC_HANDSHAKE_DIR } from "../../engine/wat321Paths";
 import { workspaceHash } from "../../engine/workspaceHash";
 import {
-  EH_DIR,
   IDLE_SNAPSHOT,
   IDLE_SUSPEND_MS,
   LATCH_ORPHAN_GRACE_MS,
@@ -27,7 +27,7 @@ import { advanceLatch } from "./bridgeStageWalker";
 import { readSessionPin } from "../codexSettings/codexSessionSettings";
 import { returningFlagPath } from "../epicHandshakePaths";
 import { isBridgeBusy, isPaused } from "../statusBar/statusBarState";
-import { readNewestHeartbeat } from "./turnHeartbeat";
+import { readNewestHeartbeat } from "../../engine/heartbeat/heartbeatReader";
 import { currentWaitMode } from "../codexTurn/waitMode";
 import { readWaitStatus } from "../codexTurn/waitStatus";
 
@@ -81,15 +81,15 @@ export class BridgeStageCoordinator
     this.interval = null;
   }
 
-  /** Lazy-attach fs.watch on EH_DIR. Created by the EH tier on
+  /** Lazy-attach fs.watch on the Epic Handshake dir. Created by the EH tier on
    * activate - if missing here we'll retry on the next tick once the
    * tier creates it. Watch failure is non-fatal - the polling timer
    * keeps state fresh regardless. */
   private attachWatcher(): void {
     if (this.watcher !== null) return;
-    if (!existsSync(EH_DIR)) return;
+    if (!existsSync(EPIC_HANDSHAKE_DIR)) return;
     try {
-      this.watcher = watch(EH_DIR, { persistent: false }, () => {
+      this.watcher = watch(EPIC_HANDSHAKE_DIR, { persistent: false }, () => {
         if (this.debounceTimer !== null) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
           this.debounceTimer = null;
@@ -202,7 +202,7 @@ export class BridgeStageCoordinator
     );
     const waitMode: BridgeWaitMode =
       this.latchState?.waitMode ??
-      (rawHeartbeat?.waitMode as BridgeWaitMode | undefined) ??
+      rawHeartbeat?.waitMode ??
       currentWaitMode(workspacePath);
     const ctx: SnapshotContext = {
       workspacePath,
@@ -216,7 +216,7 @@ export class BridgeStageCoordinator
     if (this.latchState !== null) {
       const matchedHb =
         rawHeartbeat !== null &&
-        rawHeartbeat.envelopeId === this.latchState.envelopeId
+        rawHeartbeat.dispatchId === this.latchState.envelopeId
           ? rawHeartbeat
           : null;
       if (matchedHb !== null) {
@@ -252,7 +252,7 @@ export class BridgeStageCoordinator
     // dispatcher is still emitting heartbeats.
     if (
       rawHeartbeat !== null &&
-      rawHeartbeat.envelopeId !== this.lastCompletedEnvelopeId
+      rawHeartbeat.dispatchId !== this.lastCompletedEnvelopeId
     ) {
       const result = advanceLatch(null, rawHeartbeat, now);
       this.latchState = result.nextLatch;

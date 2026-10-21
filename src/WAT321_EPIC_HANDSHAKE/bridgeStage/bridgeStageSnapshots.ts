@@ -1,6 +1,6 @@
 import type { BridgeStageSnapshot } from "../../engine/bridgeTypes";
 import { CEREMONY_MS, IDLE_SNAPSHOT, type LatchState } from "./bridgeStageMap";
-import type { TurnHeartbeat } from "./turnHeartbeat";
+import type { Heartbeat } from "../../engine/heartbeat/heartbeatTypes";
 
 /**
  * The snapshot shapes `bridgeStageCoordinator.ts` publishes from one
@@ -22,7 +22,7 @@ export function latchedSnapshot(
   ctx: SnapshotContext,
   latch: LatchState,
   stage: NonNullable<BridgeStageSnapshot["latchedStage"]>,
-  heartbeat: TurnHeartbeat,
+  heartbeat: Heartbeat,
   now: number
 ): BridgeStageSnapshot {
   const ceremonyActive = now - latch.turnStartedAt < CEREMONY_MS;
@@ -54,7 +54,7 @@ export function preCeremonySnapshot(ctx: SnapshotContext): BridgeStageSnapshot {
  * still show what last ran. */
 export function idleSnapshot(
   ctx: SnapshotContext,
-  heartbeat: TurnHeartbeat | null
+  heartbeat: Heartbeat | null
 ): BridgeStageSnapshot {
   return { ...IDLE_SNAPSHOT, ...ctx, heartbeat };
 }
@@ -68,9 +68,9 @@ export function synthesizeHeartbeat(
   workspacePath: string,
   wsHash: string,
   now: number
-): TurnHeartbeat {
+): Heartbeat {
   return {
-    envelopeId: latch.envelopeId,
+    dispatchId: latch.envelopeId,
     target: latch.target,
     workspacePath,
     workspaceHash: wsHash,

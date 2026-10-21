@@ -1,11 +1,10 @@
 import { statSync } from "node:fs";
 import { BRIDGE_STAGE_ORDER, type BridgeStage } from "../../engine/bridgeTypes";
 import { readTail } from "../../engine/fs/fileReaders";
-import { parseStageInfo } from "../../shared/codex-rollout/stageInfoParser";
-import type { StageInfo } from "../../shared/codex-rollout/turnStageTypes";
+import { parseStageInfo } from "../../shared/codexRollout/stageInfoParser";
+import type { StageInfo } from "../../shared/codexRollout/turnStageTypes";
 import {
   resolveTurnMonitorOptions,
-  type MonitorSnapshot,
   type ResolvedTurnMonitorOptions,
   type RpcProgressKind,
   type TurnMonitorOptions,
@@ -14,35 +13,24 @@ import { stallWindowFor } from "./turnMonitorStallWindow";
 import { TurnMonitorTimers } from "./turnMonitorTimers";
 
 /**
- * Adaptive turn watchdog for the Epic Handshake dispatcher. Replaces
- * the single 300s wall-clock timeout with a progress-aware state
- * machine driven by:
+ * Adaptive turn watchdog for the Epic Handshake dispatcher: a
+ * progress-aware state machine fed by RPC notifications (`turn/started`,
+ * `item/started`, `item/completed`, `item/agentMessage/delta` via
+ * `observeRpcProgress()`) and by rollout polling every `pollIntervalMs`
+ * (tail read through `parseStageInfo`, mtime bumps catching the
+ * `token_count` and `reasoning` events the RPC stream never surfaces).
  *
- *   - RPC notification observations (`turn/started`, `item/started`,
- *     `item/completed`, `item/agentMessage/delta`) - fed in via
- *     `observeRpcProgress()`.
- *   - Rollout file polling every `pollIntervalMs` - reads the tail,
- *     runs `parseStageInfo`, detects phase advances and fresh
- *     activity (mtime bumps catch `token_count` and `reasoning`
- *     events that do not surface at item-level in the RPC stream).
+ * Budgets: phase 0 to 1 within `phase0WindowMs` of start, else hard
+ * fail ("Codex never activated"). From phase 1 a tool-aware window
+ * since the last progress signal (table in `turnMonitorStallWindow.ts`),
+ * else soft fail ("Codex stalled during <tool>"). `hardCapMs` is the
+ * wall-clock ceiling, else hard fail ("Codex exceeded max turn
+ * duration").
  *
- * Budget windows:
- *
- *   - Phase 0 -> 1: `phase0WindowMs` from start until `task_started`
- *     or `turn/started` observed. Timeout = hard fail
- *     ("Codex never activated").
- *   - Phase 1 onward: tool-aware window since any progress signal -
- *     see `turnMonitorStallWindow.ts` for the per-tool table.
- *     Timeout = soft fail ("Codex stalled during <tool>").
- *   - `hardCapMs`: absolute wall-clock ceiling. Timeout = hard fail
- *     ("Codex exceeded max turn duration").
- *
- * Callers drive completion from outside. The monitor reports stall
- * or cap via `onStall` / `onHardCap`, and the caller sends
- * `turn/interrupt` + writes the error envelope. Successful turn
- * completion is the caller's responsibility (turn/completed RPC or
- * rollout task_complete) - the monitor just stops when `stop()` is
- * invoked. Timer handles live in `turnMonitorTimers.ts`.
+ * The monitor only reports, via `onStall` / `onHardCap`: the caller
+ * sends `turn/interrupt` and writes the error envelope, drives
+ * completion from turn/completed or rollout task_complete, and calls
+ * `stop()`. Timer handles live in `turnMonitorTimers.ts`.
  */
 
 export class TurnMonitor {
@@ -131,18 +119,6 @@ export class TurnMonitor {
     this.advanceStageTo(stage, this.lastInfo);
   }
 
-  /** Latest stage info snapshot, or null if no rollout read has
-   * succeeded yet. Used by the dispatcher to write heartbeat files
-   * on demand. */
-  getSnapshot(): MonitorSnapshot | null {
-    if (!this.lastInfo) return null;
-    return {
-      stage: this.currentStage,
-      info: this.lastInfo,
-      elapsedMs: Date.now() - this.turnStartAt,
-    };
-  }
-
   /** Stop watching. Idempotent. Clears every timer. Called by the
    * dispatcher in a `finally` at turn end regardless of outcome. */
   stop(): void {
@@ -216,8 +192,7 @@ export class TurnMonitor {
     }
   }
 
-  /** Monotonic stage advance with transition logging. Emits
-   * onStageChange when the stage actually advances. Walks one step
+  /** Monotonic stage advance with transition logging. Walks one step
    * at a time when the target skips stages, so each intermediate
    * stage fires its own callbacks. Important: on fast turns the RPC
    * `turn/completed` arrives before the 5s rollout poll can catch
@@ -242,7 +217,6 @@ export class TurnMonitor {
       this.options.logger.info(
         `[monitor] stage=${step} elapsed=${elapsedMs}ms${tool}`
       );
-      this.options.onStageChange?.(step, effectiveInfo);
       this.options.onProgress(step, effectiveInfo);
     }
   }

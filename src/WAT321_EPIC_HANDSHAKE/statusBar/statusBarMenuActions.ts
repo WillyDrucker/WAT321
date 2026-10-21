@@ -12,11 +12,9 @@ import type {
   ActionContext,
   DispatchAction,
 } from "./menuActions";
-import {
-  showRecoverSessionPicker,
-  showRepairSessionsPicker,
-  showSessionsSubmenu,
-} from "./menuPickers";
+import { showManageCodexSubmenu } from "./manageCodexSubmenu";
+import { showRecoverSessionPicker } from "./recoverSessionPicker";
+import { showRepairSessionsPicker } from "../repair/repairSessionsPicker";
 import {
   showLocalLLMSessionsPicker,
   showOpenCodeSessionsPicker,
@@ -218,7 +216,7 @@ export function createMenuDispatch(deps: MenuDispatchDeps): DispatchAction {
         await deps.reopenMainMenu({ inFlight: isBridgeBusy(ctx.ws) });
         break;
       case "manage-sessions":
-        await showSessionsSubmenu({
+        await showManageCodexSubmenu({
           ws: ctx.ws,
           inFlight: ctx.inFlight,
           recoverable: ctx.recoverable,

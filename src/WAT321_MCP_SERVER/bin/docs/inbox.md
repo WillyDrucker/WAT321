@@ -99,12 +99,11 @@ health.
 
 ## What about MCP server restart?
 
-Non-Codex FF dispatches run in the MCP server's event loop. If the
-server process exits before the dispatch completes (VS Code closed,
-reload, etc.), the in-flight reply is lost. The user opted into "fire
-and forget" knowing the call might not complete. Files already in the
-inbox from earlier completed dispatches persist on disk and survive
-restarts.
-
-Codex FF is more robust: the Epic Handshake dispatcher runs as a
-separate process and continues even when Claude Code is closed.
+Every fire-and-forget dispatch, Codex and non-Codex alike, runs in the
+VS Code extension host, not in the MCP server process, so an MCP server
+restart (a Claude Code reload) never loses one. Closing VS Code does:
+an in-flight OpenCode or Local LLM call is aborted and a "cancelled by
+shutdown" reply is written to the inbox so the outcome stays visible,
+and a Codex turn in flight is interrupted with the app-server, so
+reissue the prompt if no reply arrived. Replies already in the inbox
+persist on disk across restarts.

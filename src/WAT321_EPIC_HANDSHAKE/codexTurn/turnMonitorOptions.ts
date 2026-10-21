@@ -1,4 +1,4 @@
-import type { StageInfo } from "../../shared/codex-rollout/turnStageTypes";
+import type { StageInfo } from "../../shared/codexRollout/turnStageTypes";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
 import type { BridgeStage } from "../../engine/bridgeTypes";
 
@@ -13,15 +13,13 @@ import type { BridgeStage } from "../../engine/bridgeTypes";
 
 export interface TurnMonitorOptions {
   /** Resolver for the bridge thread's rollout .jsonl path. Called on
-   * every poll tick until it returns a non-null path, then on every
-   * subsequent tick to keep the path fresh (Codex may rotate files
-   * mid-turn for compaction). The dispatcher passes a thunk that
-   * wraps `findRolloutPath(threadId)` so the monitor can keep
-   * retrying while Codex is still creating the file - prior eager-
-   * resolution-at-start left the monitor permanently in RPC-only
-   * mode if the file did not exist at dispatch time, which stranded
-   * the status-bar glyph at stage 2/5 because nothing else advances
-   * `working` / `writing`.
+   * every poll tick, so the monitor keeps retrying while Codex is
+   * still creating the file and follows a rotation mid-turn (Codex
+   * may swap files for compaction). The dispatcher passes a thunk
+   * that wraps `findRolloutPath(threadId)`. Eager resolution at start
+   * would leave the monitor in RPC-only mode whenever the file did
+   * not exist yet, stranding the status-bar glyph at stage 2/5
+   * because nothing else advances `working` / `writing`.
    *
    * Pass a thunk that always returns null to disable rollout polling
    * (RPC-only mode). */
@@ -35,11 +33,6 @@ export interface TurnMonitorOptions {
    * stall clock but never refresh the heartbeat, so channel.mjs
    * would bail at `initialDeadline + stallWindow`. */
   onProgress: (stage: BridgeStage, info: StageInfo) => void;
-  /** Fires whenever the monitor advances to a later stage. UI uses
-   * this to log the transition. onProgress also fires on every
-   * transition so callers don't need to subscribe to both if they
-   * only care about "did anything happen" semantics. */
-  onStageChange?: (stage: BridgeStage, info: StageInfo) => void;
   /** Fires when the stall window expires with no progress signal. */
   onStall: (reason: string) => void;
   /** Fires when `hardCapMs` elapses regardless of progress. */
@@ -85,19 +78,12 @@ export type RpcProgressKind =
   | "delta"
   | "item-completed";
 
-export interface MonitorSnapshot {
-  stage: BridgeStage;
-  info: StageInfo;
-  elapsedMs: number;
-}
-
 /** Options after defaults have been applied. The class holds one of
  * these as `this.options` so every method can read numbers / flags
  * directly without `??` fallbacks at every site. */
 export interface ResolvedTurnMonitorOptions {
   resolveRolloutPath: () => string | null;
   onProgress: (stage: BridgeStage, info: StageInfo) => void;
-  onStageChange?: (stage: BridgeStage, info: StageInfo) => void;
   onStall: (reason: string) => void;
   onHardCap: () => void;
   logger: EpicHandshakeLogger;
@@ -115,7 +101,6 @@ export function resolveTurnMonitorOptions(
   return {
     resolveRolloutPath: opts.resolveRolloutPath,
     onProgress: opts.onProgress,
-    onStageChange: opts.onStageChange,
     onStall: opts.onStall,
     onHardCap: opts.onHardCap,
     logger: opts.logger,

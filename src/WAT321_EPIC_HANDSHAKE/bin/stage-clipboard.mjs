@@ -1,34 +1,19 @@
 #!/usr/bin/env node
 // WAT321 Epic Handshake - Stage Clipboard Image (cross-platform)
 //
-// Writes whatever image is on the OS clipboard to a PNG file under
+// Writes whatever image is on the OS clipboard to a PNG under
 // ~/.wat321/epic-handshake/attachments/clipboard/ and prints the
-// absolute path to stdout. Exits 1 with a stderr message if the
-// clipboard has no image or the platform tool is unavailable.
+// absolute path to stdout (exit 1 with a stderr message when the
+// clipboard has no image or the platform tool is missing). Claude runs
+// it once, only when about to send a bridge prompt that references the
+// image, and puts the printed path in the prompt body so Codex reads
+// the file from disk and the bytes never enter Claude's token budget.
 //
-// Trigger discipline (IMPORTANT):
-//   Run this ONLY when about to send a bridge prompt (wat321_ask)
-//   that references the staged image. Do NOT pre-stage speculatively,
-//   do NOT run on every clipboard paste. The user pastes a screenshot,
-//   says "send to Codex", THEN this runs once.
-//
-// Usage:
-//   node ~/.wat321/epic-handshake/bin/stage-clipboard.mjs
-//   node ~/.wat321/epic-handshake/bin/stage-clipboard.mjs /tmp/img.png
-//
-// Called by Claude via Bash when the user wants Codex to see a pasted
-// screenshot. Claude includes the printed path inline in the prompt
-// body so Codex reads the image directly from disk. Image bytes never
-// enter Claude's token budget.
-//
-// Platform requirements:
-//   Windows: PowerShell (preinstalled)
-//   macOS:   osascript (preinstalled)
-//   Linux:   wl-paste (Wayland) or xclip (X11) installed separately
-//
-// Sweep-before-stage: anything in the staging dir older than the TTL
-// is unlinked before the new file lands. Combined with the channel
-// handler's per-dispatch sweep and Reset WAT321's full wipe, that
+// Usage: node ~/.wat321/epic-handshake/bin/stage-clipboard.mjs [out.png]
+// Platform tools: PowerShell (Windows), osascript (macOS), wl-paste or
+// xclip (Linux, installed separately). Anything in the staging dir
+// older than the TTL is unlinked before the new file lands, which with
+// the channel handler's per-dispatch sweep and Reset WAT321's wipe
 // covers the "5min or once cleared" cleanup contract.
 
 import { spawnSync } from "node:child_process";
@@ -128,22 +113,22 @@ end run
 }
 
 function stageLinux(outPath) {
-  // wl-paste covers Wayland and xclip covers X11. Prefer wl-paste because
-  // most modern distros ship Wayland by default.
+  // wl-paste covers Wayland and xclip covers X11. Presence alone cannot
+  // tell them apart (wl-clipboard installs on X11 too), so every tool
+  // present runs in turn and the first capture that succeeds wins.
   const which = (cmd) => {
     const res = spawnSync("sh", ["-c", `command -v ${cmd}`]);
     return res.status === 0;
   };
-  let cmd;
-  if (which("wl-paste")) {
-    cmd = `wl-paste --type image/png > "${outPath.replace(/"/g, '\\"')}"`;
-  } else if (which("xclip")) {
-    cmd = `xclip -selection clipboard -t image/png -o > "${outPath.replace(/"/g, '\\"')}"`;
-  } else {
+  const target = `"${outPath.replace(/"/g, '\\"')}"`;
+  const attempts = [];
+  if (which("wl-paste")) attempts.push(`wl-paste --type image/png > ${target}`);
+  if (which("xclip")) attempts.push(`xclip -selection clipboard -t image/png -o > ${target}`);
+  if (attempts.length === 0) {
     fail("install xclip or wl-clipboard to extract clipboard images");
     return false;
   }
-  const res = spawnSync("sh", ["-c", cmd], {
+  const res = spawnSync("sh", ["-c", attempts.join(" || ")], {
     stdio: ["ignore", "ignore", "ignore"],
   });
   return res.status === 0;

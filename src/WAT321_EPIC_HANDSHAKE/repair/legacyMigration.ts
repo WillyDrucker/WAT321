@@ -1,11 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import * as vscode from "vscode";
 import { writeFileAtomic } from "../../engine/fs/atomicWrite";
 import {
   adaptiveFlagPath,
   cancelFlagPath,
-  EPIC_HANDSHAKE_DIR,
   fireAndForgetFlagPath,
   inboxClaudeDir,
   inboxCodexDir,
@@ -21,6 +20,7 @@ import {
   suppressCodexToastFlagPath,
   waitModeFlashFlagPath,
 } from "../epicHandshakePaths";
+import { EPIC_HANDSHAKE_DIR } from "../../engine/wat321Paths";
 import { parseEnvelope } from "../codexTurn/envelope";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
 import { workspaceHash } from "../../engine/workspaceHash";
@@ -39,8 +39,8 @@ import { workspaceHash } from "../../engine/workspaceHash";
  *   - `clearStaleRuntimeFiles`: deletes per-workspace runtime flags
  *     left behind by a prior crash (in-flight, processing, returning,
  *     cancel, wait-mode flash, suppress-codex-toast) and drops the
- *     user-scope fire-and-forget sentinel so activation restores the
- *     configured default wait mode. Pending inbox replies are
+ *     user-scope fire-and-forget sentinel so activation returns to the
+ *     Adaptive default. Pending inbox replies are
  *     deliberately preserved (the 1h TTL inside `sweepStaleInboxMail`
  *     handles genuinely-stale entries on subsequent dispatches).
  *     Paused and adaptive flags intentionally survive across restarts.
@@ -98,7 +98,7 @@ function migrateLegacyDir(
           : join(sentClaudeDir("legacy"), f);
 
     try {
-      const destDir = join(dest, "..");
+      const destDir = dirname(dest);
       if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
       writeFileAtomic(dest, readFileSync(src));
       unlinkSync(src);
@@ -135,22 +135,15 @@ function migrateLegacyFlag(globalPath: string, perWorkspacePath: string): void {
   }
 }
 
-/** Sweep any orphan runtime files left behind by a prior crash or
- * abrupt VS Code exit. Called once on activate. The 1h safety TTL
- * for in-inbox mail (`sweepStaleInboxMail` in mailbox.ts, fires on
- * every bridge dispatch) handles genuinely-stale replies - this
- * function only clears short-lived sentinels (in-flight, processing,
- * returning, cancel, wait-mode flash) that a prior crash could have
- * left in a misleading state.
- *
- * **Pending late replies in inbox/claude/ are preserved.** Issue #64:
- * a Codex reply that landed in the inbox immediately before VS Code
- * restarted (long-running fire-and-forget scrape, mid-flight close)
- * must survive activation so the next `wat321_ask` or `wat321_bridge`
- * call can deliver it. A "clean slate" sweep that moved every pending
- * reply to sent/ on activate would cause silent reply loss - the 1h
- * TTL on subsequent dispatches catches truly stale entries without
- * stranding fresh ones. */
+/** Sweep orphan runtime files left by a prior crash or abrupt exit,
+ * once on activate: only the short-lived sentinels (in-flight,
+ * processing, returning, cancel, wait-mode flash) a crash could leave
+ * misleading. Genuinely stale replies are the 1h TTL's job
+ * (`sweepStaleInboxMail` in mailbox.ts, on every dispatch). Pending
+ * late replies in inbox/claude/ are preserved (Issue #64): a reply that
+ * landed right before a restart must survive activation so the next
+ * `wat321_ask` or `wat321_bridge` call delivers it, and a clean-slate
+ * sweep would lose it silently. */
 export function clearStaleRuntimeFiles(): void {
   const ws0 = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const hash = ws0 ? workspaceHash(ws0) : null;

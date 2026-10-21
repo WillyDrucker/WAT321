@@ -26,10 +26,8 @@ import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
  * `statusBarMenus.ts`.
  */
 
-export { showRecoverSessionPicker } from "./recoverSessionPicker";
-export { showRepairSessionsPicker } from "../repair/repairSessionsPicker";
 
-export async function showSessionsSubmenu(opts: {
+export async function showManageCodexSubmenu(opts: {
   ws: string | null;
   inFlight: boolean;
   recoverable: RecoverableSession[];
@@ -37,8 +35,8 @@ export async function showSessionsSubmenu(opts: {
 }): Promise<void> {
   const paused = isPaused();
 
-  // Codex Defaults entry point. Combined picker for sandbox + model +
-  // effort - all three are per-turn overrides on `turn/start`, so the
+  // Codex Defaults entry point. Combined picker for sandbox, model,
+  // effort, and speed - all per-turn overrides on `turn/start`, so the
   // change takes effect on the next prompt without a thread reset.
   // Locks during an in-flight bridge turn because the override flags
   // are read mid-turn - switching while a turn is outstanding would

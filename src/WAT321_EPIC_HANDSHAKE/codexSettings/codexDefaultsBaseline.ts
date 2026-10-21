@@ -1,11 +1,10 @@
 import type { CodexEffortLevel } from "../../engine/bridgeTypes";
-import type { CodexServiceTier } from "../../shared/providers/codex/modelCatalog";
+import type { CodexModelInfo, CodexServiceTier } from "../../shared/providers/codex/modelCatalog";
 import {
   codexFastTier,
   defaultCodexModelSlug,
   getCodexModelInfo,
   isUnlistedCodexModel,
-  type CodexModelInfo,
 } from "../../shared/providers/codex/models";
 import { workspaceHash } from "../../engine/workspaceHash";
 import {

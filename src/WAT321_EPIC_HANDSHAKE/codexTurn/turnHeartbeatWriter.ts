@@ -1,19 +1,14 @@
-import { existsSync, unlinkSync } from "node:fs";
-import { writeFileAtomic } from "../../engine/fs/atomicWrite";
-import { turnHeartbeatPath } from "../epicHandshakePaths";
+import type { BridgeStage, BridgeWaitMode } from "../../engine/bridgeTypes";
+import type { Heartbeat } from "../../engine/heartbeat/heartbeatTypes";
+import { deleteHeartbeat, writeHeartbeat } from "../../engine/heartbeat/heartbeatWriter";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
-import type { WaitMode } from "./waitMode";
 
 /**
- * Per-turn heartbeat writer. The bridge status bar widget polls the
- * heartbeat file every second to drive its stage glyph, latch, and
- * tooltip - `runTurnOnce` writes through this factory so the file
- * format and atomic write semantics live in one place.
- *
- * Atomic tmp+rename is load-bearing - the status-bar reader runs
- * concurrent with the writer and would otherwise observe a mid-flush
- * file as a JSON parse error, falling back to a legacy animation
- * that visibly conflicts with the stage glyph the user expects.
+ * Per-turn heartbeat writer for Codex turns. `runTurnOnce` writes
+ * through this factory so stage-entry stamping and the turn clock
+ * live in one place, while the file itself goes through the engine
+ * writer every backend shares. The engine keys heartbeats by dispatch
+ * id, which for a Codex turn is the envelope id.
  */
 
 interface HeartbeatStageInfo {
@@ -26,7 +21,7 @@ interface HeartbeatWriterOptions {
   envelopeId: string;
   workspacePath: string;
   wsHash: string;
-  waitMode: WaitMode;
+  waitMode: BridgeWaitMode;
   logger: EpicHandshakeLogger;
 }
 
@@ -34,11 +29,11 @@ export interface HeartbeatWriter {
   /** Write a heartbeat at the given stage. Stage entry is stamped on
    * first observation - subsequent calls at the same stage refresh
    * `lastProgressAt` without bumping the stamp. */
-  write(stage: string, info?: HeartbeatStageInfo): void;
+  write(stage: BridgeStage, info?: HeartbeatStageInfo): void;
   /** Latest stage this writer has observed. The liveness heartbeat
    * re-emits at this stage so a long quiet stretch does not regress
    * the displayed stage to `dispatched`. */
-  lastStage(): string;
+  lastStage(): BridgeStage;
   /** Wall-clock when the turn started (writer construction time).
    * Drives the ceremony window and per-stage elapsed displays. */
   startedAt(): number;
@@ -53,10 +48,9 @@ export interface HeartbeatWriter {
 export function createHeartbeatWriter(
   opts: HeartbeatWriterOptions
 ): HeartbeatWriter {
-  const heartbeatFile = turnHeartbeatPath(opts.envelopeId);
-  const stageEnteredAt: Partial<Record<string, number>> = {};
+  const stageEnteredAt: Partial<Record<BridgeStage, number>> = {};
   const turnStartedAt = Date.now();
-  let lastObservedStage = "dispatched";
+  let lastObservedStage: BridgeStage = "dispatched";
 
   return {
     write(stage, info) {
@@ -73,8 +67,9 @@ export function createHeartbeatWriter(
           `[stage] envelope=${opts.envelopeId} -> ${stage} at +${ms}ms (tools=${info?.toolCallCount ?? 0})`
         );
       }
-      const body = JSON.stringify({
-        envelopeId: opts.envelopeId,
+      const heartbeat: Heartbeat = {
+        dispatchId: opts.envelopeId,
+        target: "codex",
         workspacePath: opts.workspacePath,
         workspaceHash: opts.wsHash,
         stage,
@@ -84,13 +79,13 @@ export function createHeartbeatWriter(
         lastProgressAt: Date.now(),
         turnStartedAt,
         stageEnteredAt,
-        // Stamp the resolved wait mode so the BridgeStageCoordinator
-        // drives `snapshot.waitMode` from the active turn rather than
-        // the sticky flag - per-call FF / adaptive args would
-        // otherwise be invisible to the widget animation gate.
+        // The resolved wait mode rides on the heartbeat so the stage
+        // coordinator drives `snapshot.waitMode` from the active turn
+        // rather than the sticky flag - per-call FF / adaptive args
+        // would otherwise be invisible to the widget animation gate.
         waitMode: opts.waitMode,
-      });
-      writeFileAtomic(heartbeatFile, body);
+      };
+      writeHeartbeat(heartbeat);
     },
     lastStage() {
       return lastObservedStage;
@@ -99,13 +94,7 @@ export function createHeartbeatWriter(
       return turnStartedAt;
     },
     scheduleCleanup(delayMs) {
-      const t = setTimeout(() => {
-        try {
-          if (existsSync(heartbeatFile)) unlinkSync(heartbeatFile);
-        } catch {
-          // best-effort
-        }
-      }, delayMs);
+      const t = setTimeout(() => deleteHeartbeat(opts.envelopeId), delayMs);
       t.unref?.();
     },
   };
