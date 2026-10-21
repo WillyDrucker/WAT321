@@ -2,31 +2,21 @@ import { formatFiveHourReset, formatWeeklyReset } from "../ui/resetFormatters";
 import type { CodexUsageResponse, RateLimitWindow } from "./codexUsageTypes";
 
 /**
- * Decides which Codex rate-limit window feeds which usage widget, by
- * reading each window's OWN declared duration rather than the slot it
- * arrived in.
- *
- * Why this exists. Slot position is not a contract. The API can publish
- * a single `primary_window` whose `limit_window_seconds` is 604800
- * (seven days) with `secondary_window` null. Mapping windows by slot
- * would push that 7-day window through the 5-hour formatter, so a reset
- * six days out reads "Resets 12:13AM (152hr 49min)", while the weekly
- * widget draws a full green bar over a window that does not exist,
- * because an absent window reports 0% used, which floors to 100%
- * remaining.
+ * Decides which Codex rate-limit window feeds which usage widget by
+ * reading each window's OWN declared duration, never the slot it
+ * arrived in. Slot position is not a contract: the API can publish a
+ * single `primary_window` of 604800 seconds with `secondary_window`
+ * null, and mapping by slot would push that 7-day window through the
+ * 5-hour formatter ("Resets 12:13AM (152hr 49min)") while the weekly
+ * widget draws a full green bar over a window that does not exist.
  *
  * `limit_window_seconds` is self-describing, so it is the only honest
- * key. A window of a day or less is the short (5-hour-class) limit and
- * anything longer is the long (weekly-class) limit. Label and reset
- * formatter both follow from that, which means an 8-hour or 30-day
- * window OpenAI ships later renders correctly with no code change here.
- *
- * Deliberately STATELESS. There is no mode flag, nothing persisted, and
- * nothing to migrate. Every poll re-derives the layout from the payload
- * in hand, so the day OpenAI restores the 5-hour window the widget
- * returns on the very next poll with nothing to reset and no stale state
- * to unwind. That is a stronger guarantee than a remembered mode could
- * give, because there is nothing here that can get stuck.
+ * key: a day or less is the short (5-hour-class) limit, anything longer
+ * the long (weekly-class) limit, and label and reset formatter follow,
+ * so an 8-hour or 30-day window ships with no code change here.
+ * Deliberately stateless: every poll re-derives the layout from the
+ * payload in hand, so a restored 5-hour window shows on the next poll
+ * with nothing to unwind.
  */
 
 /** The line between a short (5-hour-class) and a long (weekly-class)

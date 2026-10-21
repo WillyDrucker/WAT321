@@ -1,7 +1,7 @@
 import type { ServiceState } from "../../engine/serviceTypes";
-import type { Coordinator } from "../cacheCoordinator";
+import type { CacheCoordinator } from "../cacheCoordinator";
 import { FETCH_COOLDOWN_MS, STARTUP_JITTER_MS } from "./pollingTimings";
-import { resolveStateFreshness } from "./stateMachine";
+import { resolveStateFreshness } from "./serviceStateRules";
 
 /**
  * Compute how long to wait before the first refresh cycle. Shared by
@@ -20,7 +20,7 @@ import { resolveStateFreshness } from "./stateMachine";
 const MIN_STARTUP_DELAY_MS = 5_000;
 
 export function computeStartupDelay<TData>(
-  coordinator: Coordinator<ServiceState<TData>>
+  coordinator: CacheCoordinator<ServiceState<TData>>
 ): number {
   const cache = coordinator.readCache();
   let base: number;

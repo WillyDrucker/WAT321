@@ -2,42 +2,27 @@
  * In-memory catalog of the models the Codex app-server WAT321 actually
  * dispatches to reports for itself, via the `model/list` RPC.
  *
- * Why this exists. `~/.codex/models_cache.json` is a single file that
- * EVERY codex binary on the machine overwrites with the catalog its own
- * version knows, and the backend tailors that catalog to the asking
- * client's version. A user running the OpenAI ChatGPT VS Code extension
- * alongside the npm CLI has two writers and one file, last writer wins.
- * The file can therefore describe a binary we never dispatch to: models
- * vanish from the picker, and slugs the running app-server handles fine
- * get flagged as unknown. The app-server answers for itself, so it is
- * the only source that always matches the process running the turn.
+ * It exists because `~/.codex/models_cache.json` is one file that every
+ * codex binary on the machine overwrites with its own version's
+ * catalog (the ChatGPT VS Code extension beside the npm CLI is two
+ * writers, last one wins), so the file can describe a binary we never
+ * dispatch to. The app-server answers for the process that runs the
+ * turn. The answer is also tied to a moment: the backend decides per
+ * account what a binary may list and can switch a model on with no
+ * upgrade, so `fetchedAt` lets a picker decide to ask again.
  *
- * An answer is tied to a MOMENT as well as a binary. The backend decides
- * per account which models a binary may list, and can switch one on
- * with no upgrade at all (GPT-6 Astra arrived as a staged rollout under
- * an unchanged codex). `fetchedAt` records when the app-server answered
- * so a picker can decide the answer is old enough to ask again.
+ * Filled by `codexDispatcher.ensureClient()` right after `initialize`
+ * on an app-server already being spawned. The catalog never spawns a
+ * process or touches the idle timer, so no hover can trigger a cold
+ * start (the picker's one deliberate spawn is `codexCatalogSync.ts`).
+ * The dispatcher clears it on force restart and on stop, and it
+ * survives an idle shutdown because the same binary respawns.
  *
- * Populated opportunistically by `codexDispatcher.ensureClient()` right
- * after `initialize`, on an app-server that was already being spawned.
- * The catalog NEVER spawns a process of its own and never touches the
- * dispatcher's idle timer, so warm / cold behavior is unchanged and no
- * tooltip hover can trigger a cold start. The one deliberate spawn is
- * the picker's, owned by `codexCatalogSync.ts`.
- *
- * Lifetime is owned by the dispatcher, which clears the catalog on force
- * restart and on stop so an answer cannot outlive the process that gave
- * it. It deliberately SURVIVES an idle shutdown, because the same binary
- * respawns and its answer is still true.
- *
- * Empty until the first successful `initialize`. Callers MUST fail open
- * while it is empty: an absent answer means "cannot validate", never
- * "reject". Once non-null it is authoritative and must not be unioned
- * with the cache file, which may describe a different binary entirely.
- *
- * Deliberately absent from `model/list`: `context_window`. That field
- * lives only in the cache file, so the auto-compact ceiling stays
- * file-sourced. See `WAT321_CODEX_SESSION_TOKENS/autoCompactLimit.ts`.
+ * Empty until the first `initialize`. Callers MUST fail open while it
+ * is empty, and once non-null it is authoritative and never unioned
+ * with the cache file. `model/list` carries no `context_window`, so the
+ * auto-compact ceiling stays file-sourced, see
+ * `WAT321_CODEX_SESSION_TOKENS/autoCompactLimit.ts`.
  */
 
 /** A model OpenAI is retiring, and what Codex recommends in its place.

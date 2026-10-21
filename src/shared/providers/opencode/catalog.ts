@@ -48,11 +48,11 @@ interface CatalogEntry {
   /** Model context window in tokens. Drives the session-tokens widget
    * %-used + Auto-Compact threshold display. OpenCode does not
    * disclose Zen route limits via its `/provider` catalog (it returns
-   * `limit.context: 0` for our user-added providers), so we hardcode
-   * conservative best-known values per route here. Local LLM is
-   * resolved at runtime via llama-server's `/props.n_ctx` since the
-   * loaded model decides - the catalog value is a fallback only. Leave
-   * undefined when the route's underlying model is unknown - the
+   * `limit.context: 0` for our user-added providers), so the Zen values
+   * here come from the models.dev registry OpenCode itself reads. Local
+   * LLM is resolved at runtime via llama-server's `/props.n_ctx` since
+   * the loaded model decides - the catalog value is a fallback only.
+   * Leave undefined when the route's underlying model is unknown - the
    * widget then renders cumulative tokens without a percentage bar. */
   contextWindow?: number;
 }
@@ -105,47 +105,10 @@ export const CATALOG: readonly CatalogEntry[] = [
     contextWindow: 400_000,
   },
   {
-    id: "ling-2-6-flash",
-    alias: "Ling 2.6 Flash",
+    id: "glm-5-3-flash-free",
+    alias: "GLM 5.3 Flash",
     endpoint: ZEN_BASE_URL,
-    model: "ling-2.6-flash",
-    kind: "remote",
-    dataRetention: "retained",
-    apiKeyRef: ZEN_API_KEY_SECRET,
-    harnessProviderID: "zen",
-    anonymousAccess: true,
-    contextWindow: 128_000,
-  },
-  {
-    id: "hy3-preview-free",
-    alias: "Hy3 Preview",
-    endpoint: ZEN_BASE_URL,
-    model: "hy3-preview-free",
-    kind: "remote",
-    dataRetention: "retained",
-    apiKeyRef: ZEN_API_KEY_SECRET,
-    harnessProviderID: "zen",
-    anonymousAccess: true,
-    // Underlying model unknown - leave undefined so the widget
-    // renders cumulative tokens without a percentage bar.
-  },
-  {
-    id: "nemotron-3-super-free",
-    alias: "Nemotron 3 Super",
-    endpoint: ZEN_BASE_URL,
-    model: "nemotron-3-super-free",
-    kind: "remote",
-    dataRetention: "retained",
-    apiKeyRef: ZEN_API_KEY_SECRET,
-    harnessProviderID: "zen",
-    anonymousAccess: true,
-    contextWindow: 128_000,
-  },
-  {
-    id: "minimax-m2-5-free",
-    alias: "MiniMax M2.7",
-    endpoint: ZEN_BASE_URL,
-    model: "minimax-m2.5-free",
+    model: "glm-5.3-flash-free",
     kind: "remote",
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
@@ -153,4 +116,55 @@ export const CATALOG: readonly CatalogEntry[] = [
     anonymousAccess: true,
     contextWindow: 200_000,
   },
+  {
+    id: "deepseek-v4-1-flash-free",
+    alias: "DeepSeek V4.1 Flash",
+    endpoint: ZEN_BASE_URL,
+    model: "deepseek-v4.1-flash-free",
+    kind: "remote",
+    dataRetention: "retained",
+    apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
+    anonymousAccess: true,
+    contextWindow: 200_000,
+  },
+  {
+    id: "nemotron-3-5-super-vl-free",
+    alias: "Nemotron 3.5 Super VL",
+    endpoint: ZEN_BASE_URL,
+    model: "nemotron-3.5-super-vl-free",
+    kind: "remote",
+    dataRetention: "retained",
+    apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
+    anonymousAccess: true,
+    contextWindow: 1_048_576,
+  },
+  {
+    id: "minimax-m3-1-flash-free",
+    alias: "MiniMax M3.1 Flash",
+    endpoint: ZEN_BASE_URL,
+    model: "minimax-m3.1-flash-free",
+    kind: "remote",
+    dataRetention: "retained",
+    apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
+    anonymousAccess: true,
+    contextWindow: 1_000_000,
+  },
 ] as const;
+
+/** Aliases of every Zen-routed instance, for the API key prompts. */
+/** Routes the catalog has retired, keyed to the route that took over
+ * the slot. Saved preferences and session alias bindings migrate
+ * through this table at activation. */
+export const RETIRED_INSTANCE_IDS: Readonly<Record<string, string>> = {
+  "ling-2-6-flash": "glm-5-3-flash-free",
+  "hy3-preview-free": "deepseek-v4-1-flash-free",
+  "nemotron-3-super-free": "nemotron-3-5-super-vl-free",
+  "minimax-m2-5-free": "minimax-m3-1-flash-free",
+};
+
+export const ZEN_INSTANCE_ALIASES: readonly string[] = CATALOG.filter(
+  (entry) => entry.harnessProviderID === "zen"
+).map((entry) => entry.alias);

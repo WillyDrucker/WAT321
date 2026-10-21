@@ -39,9 +39,6 @@ async function updateSettingAllScopes(
  * the underlying config state at `false` across Global /
  * Workspace / WorkspaceFolder.
  *
- * Exported for any action-trigger checkbox that needs clearing
- * across all scopes.
- *
  * Note: the Settings UI does not always repaint the visible
  * checkbox row in place after a config.update originating from
  * the row's own tick-origin handler call stack. That is a VS

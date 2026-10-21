@@ -5,32 +5,24 @@ import { WAT321_ROOT } from "../../../engine/wat321Paths";
 import type { CodexCatalogEntry, CodexModelUpgrade } from "./modelCatalog";
 
 /**
- * Disk sidecar for the live Codex model catalog.
+ * Disk sidecar for the live Codex model catalog. The in-memory catalog
+ * fills only once the bridge has spawned an app-server, on the first
+ * dispatch and never at activate (see `WAT321_EPIC_HANDSHAKE/index.ts`),
+ * so without a sidecar a freshly opened window's picker falls back to
+ * `~/.codex/models_cache.json`, the file every codex binary overwrites,
+ * and models appear and vanish between windows.
  *
- * Why persist at all. The in-memory catalog only fills once the bridge
- * has spawned an app-server, which happens on the first dispatch, never
- * at activate (see `WAT321_EPIC_HANDSHAKE/index.ts`, "No activate-time codex
- * daemon spawn"). Without a sidecar the model picker in a freshly opened
- * window falls back to `~/.codex/models_cache.json`, the shared file
- * every codex binary on the machine overwrites with its own version's
- * catalog. That is precisely the wrong answer the catalog exists to
- * replace, and the user sees models appear and vanish between windows.
- *
- * Why this is not the "remember the richer list" idea we rejected. That
- * one merged a DIFFERENT binary's file into our view and would offer
- * slugs the running app-server 404s on. This stores one binary's own
- * answer under a key that identifies that binary: its resolved command
- * plus the exact `--version` line. A codex upgraded, downgraded, or
- * swapped for the extension-bundled one produces a different key, the
- * sidecar is ignored, and we fall back exactly as before. It can never
- * describe a binary we are not talking to.
- *
- * Identity is not freshness. The backend can switch a model on for this
- * account under an unchanged binary, so the sidecar also records WHEN
- * the answer was given and the picker re-asks once that is old.
- *
- * Best-effort throughout. A missing, unreadable, or mismatched sidecar
- * is a silent no-op that leaves validity failing open.
+ * The sidecar stores one binary's own answer under a key that
+ * identifies that binary (its resolved command plus the exact
+ * `--version` line), so an upgraded, downgraded, or extension-bundled
+ * codex produces a different key, the sidecar is ignored, and the
+ * fallback applies. It can never describe a binary we are not talking
+ * to, unlike merging another binary's file would. Identity is not
+ * freshness: the backend can switch a model on under an unchanged
+ * binary, so the sidecar also records WHEN the answer was given and the
+ * picker re-asks once that is old. Best-effort throughout: a missing,
+ * unreadable, or mismatched sidecar is a silent no-op that leaves
+ * validity failing open.
  */
 
 /** Basename of the sidecar. Exported so `resetSettings.ts` can name it

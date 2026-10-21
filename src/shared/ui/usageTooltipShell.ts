@@ -1,14 +1,11 @@
 import * as vscode from "vscode";
 
 /**
- * Shared HTML shell for the full / compact mode usage tooltips
- * (Claude and Codex). Minimal-mode tooltips render differently
- * (emoji bars) and stay in their provider tooltip builders.
- *
- * The shell is deliberately identical across providers so the two
- * surfaces stay pixel-consistent. Providers supply their own strings,
- * bar colors, and row semantics (used vs remaining) via the rows
- * array.
+ * The two tooltip shells the Claude and Codex usage widgets share, so
+ * the two providers stay pixel-consistent: an HTML layout for the full
+ * and compact display modes, and an emoji-bar markdown layout for
+ * minimal mode. Providers supply their own strings, bar colors or bar
+ * text, and row semantics (used vs remaining) through the rows array.
  */
 
 interface UsageTooltipRow {
@@ -25,11 +22,9 @@ interface UsageTooltipInput {
   /** Heading text, e.g. "Claude usage limits". */
   heading: string;
   /** Codicon token rendered to the left of the heading, e.g.
-   * `$(claude)` / `$(openai)`. Theme-icons support is enabled on
-   * the MarkdownString when present. Icon color is theme default -
-   * VS Code's codicon CSS overrides inline styles on both the
-   * wrapper and the codicon element itself in MarkdownString
-   * tooltips. */
+   * `$(claude)` / `$(openai)`. Icon color is theme default - VS Code's
+   * codicon CSS overrides inline styles on both the wrapper and the
+   * codicon element itself in MarkdownString tooltips. */
   headingIcon?: string;
   /** Right-aligned plan label, e.g. "Max (20x)" / "Pro". */
   planLabel: string;
@@ -65,10 +60,6 @@ export function buildUsageTooltipHtml(input: UsageTooltipInput): vscode.Markdown
     ? `\n<div style="font-size:10px;opacity:0.6;margin-top:6px;">${input.footer}</div>\n`
     : "";
 
-  // Build the heading icon prefix. If a color is supplied, wrap in a
-  // styled span so the codicon inherits it. VS Code renders the
-  // codicon glyph via the `codicon` font - CSS `color` on the parent
-  // cascades to the glyph.
   // `&nbsp;&nbsp;` after the icon guarantees visible spacing since
   // plain whitespace collapses in markdown and `margin-right` on a
   // wrapping span is unreliable inside MarkdownString HTML.
@@ -79,9 +70,8 @@ export function buildUsageTooltipHtml(input: UsageTooltipInput): vscode.Markdown
   const md = new vscode.MarkdownString();
   md.isTrusted = false;
   md.supportHtml = true;
-  // Theme-icon support enabled so the `$(claude)` / `$(openai)` token
-  // in the heading renders as a codicon glyph. Without it they render
-  // as literal `$(...)` text.
+  // Theme-icon support so the `$(claude)` / `$(openai)` token in the
+  // heading renders as a codicon glyph instead of literal `$(...)`.
   md.supportThemeIcons = Boolean(input.headingIcon);
   md.appendMarkdown(`
 <div style="min-width:280px;">
@@ -94,5 +84,46 @@ ${footerHtml}
 <div style="font-size:9px;opacity:0.4;margin-top:8px;">Updated ${new Date().toLocaleTimeString()}</div>
 </div>
 `);
+  return md;
+}
+
+/** A minimal-mode row. The bar is already-rendered text, the same
+ * emoji bar the status bar shows, so heatmap rules stay uniform. */
+interface UsageTooltipMinimalRow {
+  title: string;
+  valueLabel: string;
+  bar: string;
+  resetLine: string;
+}
+
+interface UsageTooltipMinimalInput {
+  heading: string;
+  headingIcon: string;
+  planLabel: string;
+  rows: UsageTooltipMinimalRow[];
+  /** Footer notes, one paragraph each (Codex credits, no-data). */
+  notes?: string[];
+}
+
+export function buildUsageTooltipMinimal(
+  input: UsageTooltipMinimalInput
+): vscode.MarkdownString {
+  const md = new vscode.MarkdownString();
+  md.isTrusted = false;
+  // HTML for `&nbsp;` to render as a non-breaking space (plain
+  // whitespace collapses in markdown), theme icons so the brand
+  // codicon renders.
+  md.supportHtml = true;
+  md.supportThemeIcons = true;
+  md.appendMarkdown(
+    `${input.headingIcon}&nbsp;&nbsp;**${input.heading}** ${input.planLabel}\n\n`
+  );
+  for (const row of input.rows) {
+    md.appendMarkdown(`**${row.title}** ${row.valueLabel}  \n`);
+    md.appendMarkdown(`${row.bar}  \n`);
+    md.appendMarkdown(`${HOURGLASS} ${row.resetLine}\n\n`);
+  }
+  for (const note of input.notes ?? []) md.appendMarkdown(`${note}\n\n`);
+  md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
   return md;
 }

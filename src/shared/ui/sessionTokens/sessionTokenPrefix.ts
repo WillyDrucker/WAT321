@@ -1,42 +1,32 @@
 import type { BridgeStageSnapshot } from "../../../engine/bridgeTypes";
 import { isPidAlive } from "../../../engine/pidLiveness";
-import { isOpenCodeDispatchActive } from "./sessionTokenHelpers";
+import { isOpenCodeDispatchActive } from "../../bridge/openCodeDispatchHeartbeat";
 import type {
   SessionTokenRenderData,
   SessionTokenWidgetDescriptor,
 } from "./sessionTokenTypes";
 
 /**
- * Pure prefix-selection for the session-token widget. Decides which
- * codicon string drives the leading "thinking" cell on every render.
+ * Pure prefix selection for the session-token widget: which codicon
+ * drives the leading "thinking" cell on every render.
  *
  * Routing order:
- *   1. Claude waiting on OpenCode / Local-LLM (heartbeat fresh, EH
- *      idle) -> 1Hz claude / blank blink. Same shape as EH bridge wait.
- *   2. EH bridge in flight (and not bypassed):
- *      - pre-ceremony: 1Hz logo blink against blank
- *      - ceremony active: provider-specific - Claude uses its native
- *        activeFrames - Codex uses debug-disconnect / debug-connected
- *        alternation
- *      - post-ceremony Claude: 1Hz claude / blank (waiting on Codex)
- *      - post-ceremony Codex stage=dispatched: debug-disconnect /
- *        debug-connected (rollout file not yet present)
- *      - post-ceremony Codex stage>=received: falls through to native
- *   3. Native path: turnState in [user, assistant-pending] AND
- *      (pidAlive OR mtime fresh) -> activeFrames cycle. Otherwise
- *      idlePrefix.
+ *   1. Claude waiting on OpenCode / Local LLM (heartbeat fresh, EH
+ *      idle): 1Hz claude / blank blink, the same shape as a bridge wait.
+ *   2. EH bridge in flight and not bypassed: pre-ceremony a 1Hz logo
+ *      blink, during the ceremony Claude's native activeFrames or
+ *      Codex's debug-disconnect / debug-connected alternation, after
+ *      it Claude blinks claude / blank while Codex keeps alternating at
+ *      stage dispatched and falls through to native from received on.
+ *   3. Native: turnState in [user, assistant-pending] AND (pidAlive OR
+ *      mtime fresh) cycles activeFrames, otherwise idlePrefix.
  *
- * Bypasses:
- *   - Claude under wait-mode=fire-and-forget: skips every bridge
- *     branch (MCP call returned immediately, Claude is unblocked).
- *   - Codex when the active dispatch targets OpenCode / Local-LLM:
- *     skips every bridge branch (Codex side is idle during a Big
- *     Pickle FF call).
- *
- * Bridge ceremony / phase / stage definitions live in
- * `WAT321_EPIC_HANDSHAKE/bridgeStage/bridgeStageMap.ts`. Both session-token
- * widgets and the bridge widget read the same snapshot, so they
- * always observe the same phase + stage at the same instant.
+ * Bypasses: Claude under fire-and-forget skips every bridge branch (the
+ * MCP call returned at once), and Codex skips them when the active
+ * dispatch targets OpenCode / Local LLM (its side is idle). Stage
+ * meanings live in `WAT321_EPIC_HANDSHAKE/bridgeStage/bridgeStageMap.ts`,
+ * and both session-token widgets read the same snapshot as the bridge
+ * widget, so all three observe the same stage at the same instant.
  */
 
 /** No-PID fallback window. mtime is doing both jobs (continuity AND
@@ -122,8 +112,7 @@ export function pickPrefix<TState extends { status: string }>(
 
   // Codex widget suppresses every bridge-driven animation when the
   // active dispatch targets OpenCode / Local LLM - the Codex side is
-  // doing nothing during a Big Pickle FF dispatch. Missing target on
-  // the heartbeat (legacy / pre-target-plumbing) assumes codex.
+  // doing nothing during a Big Pickle FF dispatch.
   const heartbeatTarget = snapshot.heartbeat?.target;
   const codexOffTarget =
     d.provider === "Codex" &&

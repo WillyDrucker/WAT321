@@ -5,27 +5,22 @@ import { writeFileAtomic } from "../../engine/fs/atomicWrite";
 
 /**
  * Session alias storage shared by the unified bridge MCP server, the
- * Epic Handshake session pickers, and the status-bar widget. The file
- * lives at `~/.wat321/clients/<wsId>/bridge/session-aliases.json` and
- * carries:
- *   - per-target alias bucket (`opencode`, `local`) mapping S1, S2, ...
- *     to `{sessionId, instanceId}`
- *   - `activeAliases` per target - the alias the bridge consumer
- *     resolves to when a wat321_ask call omits `session`. The EH menu's
- *     CURRENT row writes this - `WAT321_MCP_SERVER/bin/opencode/dispatch.mjs` reads it.
+ * Epic Handshake session pickers, and the status-bar widget, at
+ * `~/.wat321/clients/<wsId>/bridge/session-aliases.json`: a per-target
+ * bucket (`opencode`, `local`) mapping S1, S2, ... to `{sessionId,
+ * instanceId}`, plus `activeAliases` per target, the alias the bridge
+ * consumer resolves to when a `wat321_ask` call omits `session` (the
+ * EH menu's CURRENT row writes it,
+ * `WAT321_MCP_SERVER/bin/opencode/dispatch.mjs` reads it).
  *
- * `instanceId` on each entry is the catalog id the session was bound to
- * at create time. Persisting it lets the heartbeat layer render the
- * actually-bound model on resume rather than the user's currently-
- * active model, which can drift when they switch the MODEL row between
- * sessions. OpenCode's session storage pins the model server-side, so
- * the alias-side instanceId mirrors that truth.
- *
- * Legacy normalization: pre-instanceId alias entries stored a bare
- * session-id string. `readAliases` normalizes those to
- * `{sessionId, instanceId: null}` on read so existing users don't lose
- * sessions on upgrade. `activeAliases` is normalized to `null` when
- * absent or pointing at an alias the bucket no longer contains.
+ * `instanceId` is the catalog id the session was bound to at create
+ * time, so the heartbeat layer renders the actually-bound model on
+ * resume rather than the currently active one (OpenCode pins the model
+ * server-side, the alias mirrors that truth). `readAliases` normalizes
+ * pre-instanceId entries (a bare session-id string) to `{sessionId,
+ * instanceId: null}` so existing users keep their sessions, and
+ * `activeAliases` to `null` when absent or pointing at an alias the
+ * bucket no longer contains.
  */
 
 /** The one alias map every tier reads and the MCP runtime writes. */

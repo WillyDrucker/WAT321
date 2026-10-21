@@ -1,14 +1,15 @@
 import type { BridgeStage } from "../../engine/bridgeTypes";
 
 /**
- * Shared types for Codex rollout phase parsing. Used by:
+ * Shared types for Codex rollout stage parsing. Used by:
  *   - `CodexSessionTokenService` for tooltip richness (current tool,
  *     plan progress, reasoning/output split)
  *   - `CodexDispatcher` + `TurnMonitor` for bridge adaptive timeout
  *
  * The `parseStageInfo` parser lives in `stageInfoParser.ts` as pure
- * string -> struct logic - no watchers, no state. Both consumers read their own rollout file and call the
- * parser on the tail buffer they already have.
+ * string -> struct logic - no watchers, no state. Both consumers read
+ * their own rollout file and call the parser on the tail buffer they
+ * already have.
  */
 
 /** Single step in Codex's native `update_plan` function call. */

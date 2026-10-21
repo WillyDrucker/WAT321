@@ -1,4 +1,4 @@
-import { DiscoveryPoller } from "./discovery";
+import { DiscoveryPoller } from "./discoveryPoller";
 import { POLL_INTERVAL_MS } from "./pollingTimings";
 import {
   startRecoveryWatchdog,

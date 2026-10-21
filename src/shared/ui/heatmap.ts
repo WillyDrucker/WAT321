@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { SETTING } from "../../engine/settingsKeys";
-import { makeBar as makeClaudeBarDefault } from "../claude-usage/formatters";
-import { makeBar as makeCodexBarDefault } from "../codex-usage/formatters";
+import { makeBar as makeClaudeBarDefault } from "../claudeUsage/claudeUsageFormatters";
+import { makeBar as makeCodexBarDefault } from "../codexUsage/codexUsageFormatters";
 import {
   buildClaudeHeatmapBar,
   buildClaudeRemainingHeatmapBar,

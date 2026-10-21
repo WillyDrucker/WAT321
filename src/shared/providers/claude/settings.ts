@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { CLAUDE_SETTINGS_PATH } from "./claudeHome";
 
 /**
  * Read-only accessor for `~/.claude/settings.json` used by the Claude
@@ -22,8 +21,6 @@ import { join } from "node:path";
  * the nominal override target and Claude Code's actual compaction
  * trigger. Update that constant if Claude Code's behavior shifts.
  */
-
-export const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
 
 /**
  * Claude's built-in auto-compact formula (no override set):
@@ -58,9 +55,9 @@ function computeDefaultAutoCompactPct(contextWindowSize: number): number {
 /** Read an env value from `~/.claude/settings.json` `env` block. Lossy -
  * any read/parse failure collapses to null. */
 function readSettingsEnv(key: string): string | null {
-  if (!existsSync(SETTINGS_PATH)) return null;
+  if (!existsSync(CLAUDE_SETTINGS_PATH)) return null;
   try {
-    const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
+    const settings = JSON.parse(readFileSync(CLAUDE_SETTINGS_PATH, "utf8")) as Record<string, unknown>;
     const env = (settings.env as Record<string, unknown>) || {};
     const v = env[key];
     if (v === null || v === undefined || v === "") return null;
@@ -75,9 +72,9 @@ function readSettingsEnv(key: string): string | null {
  * there, and the transcript never records the suffix. Lossy, false on
  * any read or parse failure. */
 export function modelSettingSelectsMillionVariant(): boolean {
-  if (!existsSync(SETTINGS_PATH)) return false;
+  if (!existsSync(CLAUDE_SETTINGS_PATH)) return false;
   try {
-    const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
+    const settings = JSON.parse(readFileSync(CLAUDE_SETTINGS_PATH, "utf8")) as Record<string, unknown>;
     const model = settings.model;
     return typeof model === "string" && model.trim().toLowerCase().endsWith("[1m]");
   } catch {
@@ -117,43 +114,22 @@ function readMaxContextTokens(): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** User override parsed as a valid percentage (1-100), or the
- * model-aware default. Context window size drives the default so
- * ~83% shows for 200k models and ~97% for 1M models. */
-export function readAutoCompactPct(contextWindowSize: number): number {
-  const raw = readAutoCompactOverrideRaw();
-  if (raw !== null) {
-    const val = parseInt(raw, 10);
-    if (val >= 1 && val <= 100) return val;
-  }
-  return computeDefaultAutoCompactPct(contextWindowSize);
-}
-
 /** Real auto-compact fire point in absolute tokens, accounting for
  * the empirical drift between the nominal target and the actual
- * trigger. Resolution order:
- *   1. WINDOW + PCT pair (current Claude Code behavior). WINDOW
- *      declares the denominator, PCT is the percentage applied to
- *      it. Effective trigger = `(pct / 100) * window` minus the
- *      empirical drift reserve.
- *   2. WINDOW alone (legacy interpretation). Older Claude Code
- *      releases treated this as an absolute trigger. Current releases
- *      appear to ignore PCT without WINDOW and may also ignore WINDOW
- *      alone. Kept here so users on older Claude Code that still
- *      honor it see the right number.
- *   3. PCT alone applied to MAX_CONTEXT (legacy interpretation).
- *      Currently defunct in recent Claude Code releases, but kept for
- *      backward compatibility with older releases where it still
- *      worked.
- *   4. Built-in default formula on the effective context window.
+ * trigger. Resolution order: a WINDOW + PCT pair (current Claude Code
+ * behavior, trigger = `(pct / 100) * window` minus the drift reserve),
+ * then WINDOW alone as an absolute trigger (older Claude Code releases
+ * honored it, current ones appear to ignore it), then PCT alone applied
+ * to MAX_CONTEXT (defunct in recent releases, kept for older ones),
+ * then the built-in default formula on the effective context window.
  *
  * Widget consumers use this as the unified denominator for bars, the
  * displayed percentage, the "N/M" numerator's right-hand side, and
  * the "Auto-Compact at ~X" tooltip line. The nominal ceiling
- * (`autoCompactPct * contextWindow`) is no longer surfaced anywhere -
- * showing 73% / 730k while compaction actually fires at 715k confused
- * the percentage / fire-point relationship. The widget now reports the
- * actual hit point everywhere it shows a target. */
+ * (`autoCompactPct * contextWindow`) is never surfaced: showing 73% /
+ * 730k while compaction actually fires at 715k would confuse the
+ * percentage / fire-point relationship, so every target the widget
+ * shows is the actual hit point. */
 export function readAutoCompactEffectiveTriggerTokens(
   contextWindowSize: number
 ): number {

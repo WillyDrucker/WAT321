@@ -11,29 +11,18 @@ import {
 import { dirname } from "node:path";
 
 /**
- * Atomic single-holder claim file for cross-instance coordination.
- * Only one VS Code window can own the claim at a time. Stale claims
- * (crashed owner) are reclaimed based on either the parseable
- * `acquiredAt` timestamp or the filesystem mtime when the content is
- * corrupt.
- *
- * Extracted out of `Coordinator` so the coordinator class can stay
- * focused on cache reads/writes and per-instance read throttling.
- * The claim logic is pure file I/O over a path - no instance state.
- *
- * Crash-safety notes:
- *
- * Corrupt claim files (zero-byte, partial write, unparseable JSON) are
- * treated as stale if their filesystem mtime is older than `ttlMs`.
- * The main source of a corrupt claim is a crash between
- * `openSync("wx")` and `writeSync(fd, payload)`, which would leave a
- * zero-byte file on disk. Without the mtime fallback, that would
- * deadlock every instance forever because `JSON.parse` throws before
- * the TTL check can run.
- *
- * Note: claim writes go through the owned file descriptor (`writeSync`)
- * rather than reopening the path (`writeFileSync`), so the truncate
- * window that `writeFileSync(path)` would create does not exist here.
+ * Atomic single-holder claim file for cross-instance coordination: one
+ * VS Code window owns the claim at a time, pure file I/O over a path
+ * with no instance state. A stale claim (crashed owner) is reclaimed
+ * on its parseable `acquiredAt` timestamp, or on the filesystem mtime
+ * being older than `ttlMs` when the content is corrupt (zero-byte,
+ * partial, unparseable JSON). The usual corrupt claim is a crash
+ * between `openSync("wx")` and `writeSync(fd, payload)`, and without
+ * the mtime fallback it would deadlock every instance forever because
+ * `JSON.parse` throws before the TTL check runs. Writes go through the
+ * owned descriptor (`writeSync`) rather than reopening the path, so
+ * the truncate window `writeFileSync(path)` would create does not
+ * exist here.
  */
 
 /** Try to atomically claim the refresh slot at `claimPath`. Returns

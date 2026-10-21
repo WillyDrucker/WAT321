@@ -27,38 +27,20 @@ export const CLAUDE_YELLOW_THRESHOLD = 70;
 export const CLAUDE_RED_THRESHOLD = 85;
 
 /** Build a Claude "rolling" heatmap progress bar with per-cell
- * coloring.
+ * coloring. Unlike the Codex band bar, which colors the whole filled
+ * portion at once, this one is position-aware: cells from a threshold
+ * position up to the current fill take the phase color and cells below
+ * stay blue. The phase comes from fixed percent thresholds (70 yellow,
+ * 85 red, 100 all red) and the first colored cell from the fill count
+ * at those thresholds, so the model tracks the natural cell crossovers
+ * of both the 10-wide and the 5-wide bar without bumping the fill.
+ * In the red phase any yellow cell in range demotes back to blue.
  *
- * Unlike the Codex band bar which picks a single color for the whole
- * filled portion, the Claude heatmap is position-aware: cells past a
- * configurable position are colored, cells below stay blue. The
- * active phase (blue / yellow / red) is driven by constant percent
- * thresholds (70 and 85) that don't depend on width, and the "first
- * colored cell" position is derived from the fill count at those
- * thresholds. This keeps the model aligned with the natural cell
- * crossovers of the default progress bar in both 10-wide and 5-wide
- * renderings without ever bumping the fill count.
- *
- * Rules (usedPct is the Claude utilization percentage, 0-100):
- *
- *   usedPct  <  70       blue phase   all filled cells blue
- *   70 <= usedPct <  85  yellow phase cells from firstYellowCell up
- *                                     to the current fill are yellow -
- *                                     cells below are blue
- *   85 <= usedPct <  100 red phase    cells from firstRedCell up to
- *                                     the current fill are red - cells
- *                                     below are blue (any previously
- *                                     yellow cell in that range
- *                                     "demotes" back to blue)
- *   usedPct  == 100      override     every cell is red
- *
- * In a 10-wide bar firstYellowCell=7 and firstRedCell=9, so the
- * yellow band is cells 7-8 and the red band is cells 9-10 with no
- * overlap. In a 5-wide bar firstYellowCell=4 and firstRedCell=4, so
- * cell 4 is yellow during 70-84 and upgrades in place to red at 85 -
- * the yellow and red bands share cell 4. That sharing is what lets
- * the compact bar avoid a dead zone after the 85% threshold without
- * needing any rounding hacks. */
+ * In a 10-wide bar firstYellowCell=7 and firstRedCell=9, so yellow is
+ * cells 7-8 and red is cells 9-10 with no overlap. In a 5-wide bar
+ * both are 4: cell 4 is yellow during 70-84 and upgrades in place to
+ * red at 85, which is what lets the compact bar avoid a dead zone
+ * after the 85% threshold without rounding hacks. */
 export function buildClaudeHeatmapBar(usedPct: number, width: number): string {
   const clamped = Math.max(0, Math.min(100, usedPct));
 

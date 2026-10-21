@@ -1,19 +1,21 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
-
-import { WAT321_ROOT } from "../../engine/wat321Paths";
+import { clientStateDir, WAT321_ROOT } from "../../engine/wat321Paths";
+import { CLAUDE_CREDENTIALS_PATH, CLAUDE_HOME_DIR } from "../providers/claude/claudeHome";
 import { UsageServiceBase } from "../polling/usageServiceBase";
-import { clientStateDir } from "../../engine/wat321Paths";
 import type { UsageResponse } from "./claudeUsageTypes";
 
-const AUTH_DIR = join(homedir(), ".claude");
-const CREDENTIALS_FILE = join(AUTH_DIR, ".credentials.json");
+/**
+ * Claude usage polling against the Anthropic OAuth usage endpoint,
+ * authenticated with the token in `~/.claude/.credentials.json`. One
+ * window at a time writes the shared cache under `WAT321_ROOT`, see
+ * `UsageServiceBase`.
+ */
 
 export class ClaudeUsageSharedService extends UsageServiceBase<UsageResponse> {
   constructor() {
     super({
-      authDir: AUTH_DIR,
+      authDir: CLAUDE_HOME_DIR,
       cacheFile: join(WAT321_ROOT, "claude-usage.cache.json"),
       claimFile: join(WAT321_ROOT, "claude-usage.claim"),
       endpointUrl: "https://api.anthropic.com/api/oauth/usage",
@@ -24,7 +26,7 @@ export class ClaudeUsageSharedService extends UsageServiceBase<UsageResponse> {
 
   protected getAuth(): { token: string; headers: Record<string, string> } | null {
     try {
-      const creds = JSON.parse(readFileSync(CREDENTIALS_FILE, "utf8"));
+      const creds = JSON.parse(readFileSync(CLAUDE_CREDENTIALS_PATH, "utf8"));
       const token = creds?.claudeAiOauth?.accessToken;
       if (!token) return null;
       return {

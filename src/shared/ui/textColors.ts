@@ -1,13 +1,19 @@
 import type { DisplayMode } from "../../engine/displayMode";
 import { isProviderActive } from "../../engine/displayMode";
-import { getRemainingPct } from "../codex-usage/formatters";
+import { getRemainingPct } from "../codexUsage/codexUsageFormatters";
 import { bandFromRemaining } from "./codexHeatmapBar";
 import { isHeatmapEnabled } from "./heatmap";
+import {
+  CLAUDE_BRAND_BLUE,
+  CODEX_BRAND_GREEN,
+  SESSION_TOKENS_WHITE,
+  SESSION_TOKENS_YELLOW,
+} from "./hexColors";
 
 /**
- * Text color resolvers for WAT321 widgets. Separated from heatmap.ts
- * so widgets that only need text colors don't import bar-rendering
- * logic. Each resolver returns a hex color string or `undefined`
+ * Text color resolvers for WAT321 widgets. Kept apart from
+ * `heatmap.ts` so widgets that only need text colors do not import
+ * bar rendering. Each resolver returns a hex color or `undefined`
  * (fall back to the theme's default status bar foreground).
  */
 
@@ -31,8 +37,8 @@ export function getSessionTokenColor(
   whitePct: number = 90,
   yellowPct: number = 95
 ): string | undefined {
-  if (isHeatmapEnabled() && pctOfCeiling >= yellowPct) return "#eab308";
-  if (pctOfCeiling >= whitePct) return "#ffffff";
+  if (isHeatmapEnabled() && pctOfCeiling >= yellowPct) return SESSION_TOKENS_YELLOW;
+  if (pctOfCeiling >= whitePct) return SESSION_TOKENS_WHITE;
   return undefined;
 }
 
@@ -47,7 +53,7 @@ export function getClaudeTextColor(
 ): string | undefined {
   if (!isHeatmapEnabled()) return undefined;
   if (!isProviderActive("codex")) return undefined;
-  if (mode === "minimal") return "#2977d6";
+  if (mode === "minimal") return CLAUDE_BRAND_BLUE;
   return undefined;
 }
 
@@ -62,8 +68,8 @@ export function getCodexTextColor(
 ): string | undefined {
   if (!isHeatmapEnabled()) return undefined;
   if (!isProviderActive("claude")) return undefined;
-  if (mode === "minimal") return "#22c55e";
+  if (mode === "minimal") return CODEX_BRAND_GREEN;
   const remainingPct = getRemainingPct(usedPct);
-  if (bandFromRemaining(remainingPct) !== "green") return "#22c55e";
+  if (bandFromRemaining(remainingPct) !== "green") return CODEX_BRAND_GREEN;
   return undefined;
 }

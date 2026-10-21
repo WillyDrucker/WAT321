@@ -1,20 +1,28 @@
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import { getDisplayMode } from "../../engine/displayMode";
 import { bandFromRemaining } from "../ui/codexHeatmapBar";
 import { renderCodexBar } from "../ui/heatmap";
+import { AMBER_WARNING, CODEX_BRAND_GREEN, RED_CRITICAL } from "../ui/hexColors";
 import { resolveUsageStyle } from "../ui/usageDisplay";
-import { buildUsageTooltipHtml } from "../ui/usageTooltipHtml";
-import { formatPlanLabel, getRemainingPct } from "./formatters";
+import { buildUsageTooltipHtml, buildUsageTooltipMinimal } from "../ui/usageTooltipShell";
+import { formatPlanLabel, getRemainingPct } from "./codexUsageFormatters";
 import type { CodexUsageResponse } from "./codexUsageTypes";
-import { resolveCodexWindows, type CodexUsageRow } from "./windows";
+import { resolveCodexWindows, type CodexUsageRow } from "./codexUsageWindows";
 
-/** Codex full-mode bar color, derived from the same remaining bands
- * as the status-bar heatmap so hover and widget always agree. */
+/**
+ * The Codex usage tooltip: whichever windows Codex currently publishes
+ * in the shared shell, with percents, labels, and bars following the
+ * same usage style as the status bar so the hover never contradicts
+ * the widget next to it. Color ramps stay keyed to remaining percent.
+ */
+
+/** Full-mode bar color, derived from the same remaining bands as the
+ * status-bar heatmap so hover and widget always agree. */
 function codexBarColor(remainingPct: number): string {
   const band = bandFromRemaining(remainingPct);
-  if (band === "red") return "#ef4444";
-  if (band === "yellow") return "#f59e0b";
-  return "#22c55e";
+  if (band === "red") return RED_CRITICAL;
+  if (band === "yellow") return AMBER_WARNING;
+  return CODEX_BRAND_GREEN;
 }
 
 /** Percent the row should display, honoring the user's usage style.
@@ -36,9 +44,6 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   );
 
   const planLabel = formatPlanLabel(usage.plan_type);
-  // Tooltip percents, labels, and embedded bars follow the same usage
-  // style as the status bar so the hover never contradicts the widget
-  // next to it. Color ramps stay keyed to remaining percent.
   const style = resolveUsageStyle("codex");
   const showUsed = style === "used";
   const pctLabel = showUsed ? "used" : "remaining";
@@ -57,30 +62,18 @@ export function buildTooltip(usage: CodexUsageResponse): vscode.MarkdownString {
   }
 
   if (getDisplayMode() === "minimal") {
-    // Minimal tooltip uses emoji bars so heatmap rules stay uniform
-    // with the status bar surface.
-    const md = new vscode.MarkdownString();
-    md.isTrusted = false;
-    // HTML needed for `&nbsp;` to render as non-breaking space (plain
-    // whitespace collapses in markdown). Theme icons needed so
-    // `$(openai)` renders the brand codicon.
-    md.supportHtml = true;
-    md.supportThemeIcons = true;
-    md.appendMarkdown(
-      `$(openai)&nbsp;&nbsp;**Codex usage limits** ${planLabel}\n\n`
-    );
-    for (const row of rows) {
-      md.appendMarkdown(
-        `**${row.title}** ${shownPct(row, showUsed)}% ${pctLabel}  \n`
-      );
-      md.appendMarkdown(
-        `${renderCodexBar(row.window.used_percent, 10, style)}  \n`
-      );
-      md.appendMarkdown(`\u{29D7} ${row.resetLine}\n\n`);
-    }
-    for (const note of notes) md.appendMarkdown(`${note}\n\n`);
-    md.appendMarkdown(`Updated ${new Date().toLocaleTimeString()}`);
-    return md;
+    return buildUsageTooltipMinimal({
+      heading: "Codex usage limits",
+      headingIcon: "$(openai)",
+      planLabel,
+      rows: rows.map((row) => ({
+        title: row.title,
+        valueLabel: `${shownPct(row, showUsed)}% ${pctLabel}`,
+        bar: renderCodexBar(row.window.used_percent, 10, style),
+        resetLine: row.resetLine,
+      })),
+      notes,
+    });
   }
 
   return buildUsageTooltipHtml({

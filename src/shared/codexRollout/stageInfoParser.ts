@@ -1,4 +1,4 @@
-import { extractCurrentTurn } from "./phaseParser";
+import { extractCurrentTurn } from "./rolloutTurnSlice";
 import {
   advanceStage,
   argumentsPreview,
@@ -162,7 +162,7 @@ export function parseStageInfo(tail: string): StageInfo {
     }
 
     if (entry.type === "response_item" && payloadType === "reasoning") {
-      // Reasoning alone does NOT advance to stage 3 anymore. Early
+      // Reasoning alone does NOT advance to stage 3. Early
       // reasoning belongs to stage 2 (the "reading" window - 7-23s
       // on real research turns). Stage 3 is reserved for active
       // tool use. Pure-reasoning turns with no tools fall back to

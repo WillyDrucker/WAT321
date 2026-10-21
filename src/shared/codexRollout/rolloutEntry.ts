@@ -4,7 +4,7 @@ import { BRIDGE_STAGE_ORDER, type BridgeStage } from "../../engine/bridgeTypes";
 /**
  * Internal helpers for Codex rollout JSONL parsing. Entry-shape
  * extraction, monotonic stage advancement, plan-argument parsing,
- * and small text conversions. Consumed by `phaseParser.ts` and
+ * and small text conversions. Consumed by `rolloutTurnSlice.ts` and
  * `stageInfoParser.ts`.
  *
  * All helpers are pure. Malformed JSON / missing fields fall through

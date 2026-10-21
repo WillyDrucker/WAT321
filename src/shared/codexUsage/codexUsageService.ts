@@ -1,14 +1,16 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
-
-import { WAT321_ROOT } from "../../engine/wat321Paths";
+import { clientStateDir, WAT321_ROOT } from "../../engine/wat321Paths";
 import { UsageServiceBase } from "../polling/usageServiceBase";
-import { clientStateDir } from "../../engine/wat321Paths";
+import { CODEX_AUTH_PATH, CODEX_HOME_DIR } from "../providers/codex/codexHome";
 import type { CodexUsageResponse } from "./codexUsageTypes";
 
-const AUTH_DIR = join(homedir(), ".codex");
-const AUTH_FILE = join(AUTH_DIR, "auth.json");
+/**
+ * Codex usage polling against the ChatGPT backend's rate-limit
+ * endpoint, authenticated with the OAuth token in `~/.codex/auth.json`.
+ * One window at a time writes the shared cache under `WAT321_ROOT`,
+ * see `UsageServiceBase`.
+ */
 
 interface CodexAuth {
   tokens?: {
@@ -20,7 +22,7 @@ interface CodexAuth {
 export class CodexUsageSharedService extends UsageServiceBase<CodexUsageResponse> {
   constructor() {
     super({
-      authDir: AUTH_DIR,
+      authDir: CODEX_HOME_DIR,
       cacheFile: join(WAT321_ROOT, "codex-usage.cache.json"),
       claimFile: join(WAT321_ROOT, "codex-usage.claim"),
       endpointUrl: "https://chatgpt.com/backend-api/wham/usage",
@@ -31,7 +33,7 @@ export class CodexUsageSharedService extends UsageServiceBase<CodexUsageResponse
 
   protected getAuth(): { token: string; headers: Record<string, string> } | null {
     try {
-      const auth: CodexAuth = JSON.parse(readFileSync(AUTH_FILE, "utf8"));
+      const auth: CodexAuth = JSON.parse(readFileSync(CODEX_AUTH_PATH, "utf8"));
       const token = auth?.tokens?.access_token;
       if (!token) return null;
       const headers: Record<string, string> = {

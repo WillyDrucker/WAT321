@@ -7,7 +7,7 @@ import {
   isUnlistedCodexModel,
 } from "../../providers/codex/models";
 import { formatTokens } from "../tokenFormatters";
-import type { ClaudeTurnInfo } from "./sessionTokenWidget";
+import type { ClaudeTurnInfo } from "./sessionTokenTypes";
 
 /**
  * The model line of the session token tooltip and the advisory lines
@@ -69,22 +69,16 @@ export function appendModelLines(md: vscode.MarkdownString, input: ModelLineInpu
   }
 }
 
-/** Effort label that goes after the model name, dot-separated between
- * the model and the context window.
- *
- * Both providers record the effort each turn ran at in the session
- * file itself, and that recorded level always wins: it describes THIS
- * session, where every other source describes a setting.
- *
- * Codex before its first turn: the bridge session's pinned effort, then
- * the model's own default from the catalog, so the user sees what
- * Codex will actually run.
- *
- * Claude with no recorded effort (a model without effort levels, an
- * older Claude Code): "Thinking" when the recent turns emitted
- * `thinking` blocks, since on/off is the only signal left.
- *
- * Returns null when there is nothing useful to display. */
+/** Effort label after the model name, dot-separated between the model
+ * and the context window. Both providers record the effort each turn
+ * ran at in the session file, and that recorded level always wins: it
+ * describes THIS session where every other source describes a setting.
+ * Codex before its first turn shows the bridge session's pinned
+ * effort, then the model's catalog default, so the user sees what
+ * Codex will actually run. Claude with no recorded effort (a model
+ * without levels, an older Claude Code) shows "Thinking" when recent
+ * turns emitted `thinking` blocks, the only signal left. Null when
+ * nothing useful can be displayed. */
 function resolveEffortLabel(
   provider: "Claude" | "Codex",
   modelId: string,

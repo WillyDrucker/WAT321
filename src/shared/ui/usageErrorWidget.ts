@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import type { ProviderKey } from "../../engine/contracts";
 import type { ServiceState as GenericServiceState } from "../../engine/serviceTypes";
 import { getWidgetPriority } from "../../engine/widgetCatalog";
-import { IDLE_DIM_COLOR } from "./idleColor";
+import { IDLE_DIM_COLOR } from "./hexColors";
 import { classifyUsageNonOk } from "./usageNonOkClassifier";
 
 /**

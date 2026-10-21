@@ -1,6 +1,6 @@
 import type { ServiceState } from "../../engine/serviceTypes";
 import type { TransitionReason, TransitionStatus } from "../../engine/usageTransitionLog";
-import type { Coordinator } from "../cacheCoordinator";
+import type { CacheCoordinator } from "../cacheCoordinator";
 import type { CountdownTicker } from "./countdownTicker";
 import { parseRetryAfterMs } from "./errorClassification";
 import { httpGetJson } from "./httpClient";
@@ -30,7 +30,7 @@ interface UsageAuth {
 
 interface FetchCycleDeps<TResponse> {
   endpointUrl: string;
-  coordinator: Coordinator<ServiceState<TResponse>>;
+  coordinator: CacheCoordinator<ServiceState<TResponse>>;
   countdown: CountdownTicker;
   errorState: UsageServiceErrorState;
   transitionLogger: TransitionLogger;

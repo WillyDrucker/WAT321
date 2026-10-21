@@ -15,7 +15,7 @@ import {
  * The big single-pass `parseStageInfo` state machine lives in the
  * sibling `stageInfoParser.ts`. Internal entry-shape helpers live
  * in `rolloutEntry.ts`. Display-string builders (label / plan /
- * tool line renderers) live in `phaseRender.ts`. Splitting parser
+ * tool line renderers) live in `stageDisplayRender.ts`. Splitting parser
  * core from rendering keeps the one-pass walk cohesive and lets
  * the tooltip layer evolve without touching parsing.
  *

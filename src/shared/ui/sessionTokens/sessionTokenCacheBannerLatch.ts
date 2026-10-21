@@ -1,42 +1,45 @@
-import {
-  CACHE_BANNER_FLASH_MS,
-  CACHE_BANNER_FRAME_MS,
-  CACHE_LOAD_BANNER_OFF,
-  CACHE_LOAD_BANNER_ON,
-  CACHE_MISS_BANNER_OFF,
-  CACHE_MISS_BANNER_ON,
-  CACHE_REBUILD_CREATION_MIN,
-  CACHE_REBUILD_RATIO_DENOM,
-} from "./sessionTokenHelpers";
 import type { SessionTokenRenderData } from "./sessionTokenTypes";
 
 /**
  * Cache-banner state machine for the session-token widget. Owns the
  * per-session watermarks (session id, usage signature, compact ts,
- * awaiting-first-load latch) and the flash-window timestamps. Pure-
- * input / pure-output: `observe(data)` is called once per `ok` render
- * with the latest render data and decides whether a banner should
- * fire. `bannerAt(now)` returns what to display right now (or null).
+ * awaiting-first-load latch) and the flash-window timestamps.
+ * `observe(data)` runs once per `ok` render and decides whether a
+ * banner fires, `bannerAt(now)` returns what to display right now.
  *
- * Read-only contract (load-bearing): no HTTP calls, no process
- * spawns, no file writes - only in-memory state mutations driving a
- * 2-second visual pulse. Thresholds in sessionTokenHelpers are tuned
- * against 25k+ sampled signatures - do not loosen without a fresh
- * false-fire audit.
- *
- * Claude path (cc/cr tokens available):
- *   1. Strict ratio (involuntary eviction): `cacheCreation >=
- *      CREATION_MIN` AND `cacheCreation >= cachedInput * RATIO_DENOM`.
- *      Fires red MISS.
- *   2. Compact-driven (deliberate rebuild): `awaitingFirstLoad` armed
- *      AND `cacheCreation >= CREATION_MIN`. Fires yellow LOAD. Armed
- *      only by brand-new attach (no prior usage) or by
- *      `newCompactObserved` mid-session.
- *
- * Codex path (no token-level cache breakdown): marker-only. A new
- * `compacted` / `context_compacted` rollout entry fires LOAD
- * immediately. No MISS detection - Codex doesn't surface evictions.
+ * Read-only contract: no HTTP, no process spawns, no file writes, only
+ * in-memory state driving a 2-second pulse. Claude fires red MISS on
+ * the strict creation ratio (involuntary eviction) and yellow LOAD on
+ * a compact-driven rebuild while `awaitingFirstLoad` is armed (by a
+ * brand-new attach or `newCompactObserved` mid-session). Codex has no
+ * token-level cache breakdown, so a `compacted` / `context_compacted`
+ * rollout entry fires LOAD and nothing detects MISS.
  */
+
+/** Cache-rebuild floors, tuned against 25k+ sampled signatures (do not
+ * loosen without a fresh false-fire audit). Strict ratio: creation >=
+ * MIN and creation >= cachedInput * RATIO_DENOM, so creation dominates
+ * reads 2:1 and a user-pasted blob does not false-fire. Compact-driven:
+ * awaitingFirstLoad and creation >= MIN, because a compact caches a
+ * fresh summary beside the surviving prompt and tools, so reads stay
+ * non-trivial and the ratio gate would miss it. Real rebuilds land at
+ * 5k or more. Exported so `cacheEventParser` classifies with the same
+ * floors and the two surfaces never disagree. */
+export const CACHE_REBUILD_CREATION_MIN = 5_000;
+export const CACHE_REBUILD_RATIO_DENOM = 2;
+
+/** Flash window. 2000ms total - the LOAD/MISS text persists the
+ * entire window while the bullets blink at 500ms cadence between a
+ * colored emoji (red MISS / yellow LOAD) and a black-circle off
+ * frame. Same emoji family for both frames keeps the cell width
+ * steady - mixing emoji with ASCII or codicons crosses font tables
+ * and shifts the text on every transition. */
+const CACHE_BANNER_FLASH_MS = 2000;
+const CACHE_BANNER_FRAME_MS = 500;
+const CACHE_LOAD_BANNER_ON = "🟡LOAD🟡";
+const CACHE_LOAD_BANNER_OFF = "⚫LOAD⚫";
+const CACHE_MISS_BANNER_ON = "🔴MISS🔴";
+const CACHE_MISS_BANNER_OFF = "⚫MISS⚫";
 
 export interface CacheBannerLatch {
   /** Apply the latest render data to the latch. Returns whether the

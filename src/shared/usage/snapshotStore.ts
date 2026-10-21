@@ -96,4 +96,3 @@ export function clearProviderSnapshot(provider: ProviderKey): void {
     // best-effort
   }
 }
-

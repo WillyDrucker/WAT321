@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { writeFileAtomic } from "../../../engine/fs/atomicWrite";
+import { CLAUDE_SETTINGS_PATH } from "./claudeHome";
 
 /**
  * Pre-allow / un-allow MCP tool names in Claude Code's user-level
@@ -34,7 +34,6 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
-const CLAUDE_SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
 
 /** Retired MCP tool names that may remain in `permissions.allow`.
  * The active install path (`preAllowMcpTools(UNIFIED_ALLOWED_TOOLS)`)

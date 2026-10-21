@@ -1,13 +1,13 @@
 import * as vscode from "vscode";
 import type { CodexEffortOverride } from "../../../engine/bridgeTypes";
 import { formatRelativeTime } from "../../../engine/durationFormat";
-import { renderStageDisplay } from "../../codex-rollout/phaseRender";
-import type { StageInfo } from "../../codex-rollout/turnStageTypes";
+import { renderStageDisplay } from "../../codexRollout/stageDisplayRender";
+import type { StageInfo } from "../../codexRollout/turnStageTypes";
 import type { LastEntryKind } from "../../turnState";
 import { formatPct, formatTokens, makeTokenBar } from "../tokenFormatters";
 import { wrapAndTruncateTitle } from "./sessionTitleWrap";
 import { appendModelLines } from "./sessionTokenModelLine";
-import type { ClaudeTurnInfo } from "./sessionTokenWidget";
+import type { ClaudeTurnInfo } from "./sessionTokenTypes";
 
 /**
  * Shared tooltip builder for the Claude and Codex session token

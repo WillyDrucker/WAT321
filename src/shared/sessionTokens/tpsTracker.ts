@@ -2,8 +2,8 @@
  * Smoothed tokens-per-second tracker shared by Claude and Codex
  * session-token services. Cumulative-count samples at transcript-mtime
  * instants in - stable rate reflecting only active write periods out.
- * Mtime time axis, minimum window age, idle-gap reset, and
- * baseline-anchor design all documented in `WAT321_MEMORY_EXTENDED.md`.
+ * The mtime time axis and each guard are documented where they apply
+ * below.
  */
 
 const TPS_MAX = 999;

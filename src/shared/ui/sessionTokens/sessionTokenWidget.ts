@@ -8,12 +8,7 @@ import {
   createCacheBannerLatch,
   type CacheBannerLatch,
 } from "./sessionTokenCacheBannerLatch";
-import {
-  COMPACT_PROGRESS_COLOR,
-  isOpenCodeDispatchActive,
-  TICK_MS,
-  tpsSuffix,
-} from "./sessionTokenHelpers";
+import { isOpenCodeDispatchActive } from "../../bridge/openCodeDispatchHeartbeat";
 import {
   effectiveActiveThresholdMs,
   isTurnFresh,
@@ -21,44 +16,30 @@ import {
 } from "./sessionTokenPrefix";
 import { buildSessionTokenTooltip } from "./sessionTokenTooltip";
 import type { SessionTokenWidgetDescriptor } from "./sessionTokenTypes";
+import { AMBER_WARNING } from "../hexColors";
 import { getSessionTokenColor } from "../textColors";
-import { formatPct, formatTokens } from "../tokenFormatters";
+import { formatPct, formatTokens, tpsSuffix } from "../tokenFormatters";
 import { TpsThrottle } from "../tpsThrottle";
 
-export type {
-  CacheEvent,
-  CacheEventKind,
-  ClaudeTurnInfo,
-  SessionTokenRenderData,
-  SessionTokenWidgetDescriptor,
-} from "./sessionTokenTypes";
-
 /**
- * Config-driven session-token widget. Provider-branded idle prefix +
- * DIY alternator "thinking" indicator while a turn is in progress.
+ * Config-driven session-token widget: provider-branded idle prefix plus
+ * an alternating "thinking" indicator while a turn is in progress.
+ * Active detection is three-layer: the classifier's `turnState` (only
+ * `user` and `assistant-pending` keep it active), then PID liveness so
+ * a live process keeps animating through silent thinking, then the
+ * mtime backstop `now - mtime < activeThresholdMs` for a CLI that
+ * crashed without a final marker.
  *
- * Active detection is three-layer:
- *   1. Classifier (`turnState`). `assistant-done` / `compact-end` /
- *      `interrupted` / `unknown` collapse to idle. Only `user` and
- *      `assistant-pending` keep the indicator active.
- *   2. PID liveness. When classifier says in-progress AND the
- *      session has a PID AND the process is alive, keep animating
- *      through silent thinking.
- *   3. Mtime backstop. PID dead / unavailable -> fall back to
- *      `now - mtime < activeThresholdMs`. Short window since the
- *      classifier catches end states - this only fires on CLI crash
- *      without a final marker ever landing.
- *
- * Ticker runs at TICK_MS, re-rendering from cached state + wall
- * clock. Frame index is wall-clock-derived so widgets stay in sync.
- * Ticker self-suspends when state leaves "ok" or no animation is
- * active, so idle widgets consume zero cycles.
- *
- * Cache-banner state and prefix selection are extracted into the
- * sibling `sessionTokenCacheBannerLatch` and `sessionTokenPrefix`
- * modules so this file owns only the VS Code status-bar lifecycle
- * and the render switch.
+ * The ticker runs at TICK_MS from cached state and the wall clock, with
+ * the frame index wall-clock-derived so widgets stay in sync, and
+ * self-suspends when state leaves "ok" or nothing animates, so idle
+ * widgets cost nothing. Cache-banner state lives in
+ * `sessionTokenCacheBannerLatch` and prefix selection in
+ * `sessionTokenPrefix`, so this file owns only the VS Code status-bar
+ * lifecycle and the render switch.
  */
+
+const TICK_MS = 250;
 
 export class SessionTokenWidget<TState extends { status: string }>
   implements vscode.Disposable
@@ -209,18 +190,18 @@ export class SessionTokenWidget<TState extends { status: string }>
         // with no observable pre-completion signal. The state machine
         // arms a brief flash on boundary detection so the user sees an
         // acknowledgment before the widget settles into the new post-
-        // compact token count. Bar saturated at 5/5 + 100% - live
-        // flashUntil check collapses the skin the instant the window
-        // passes instead of waiting for the next service poll.
+        // compact token count. Bar saturated + 100% in warning amber -
+        // live flashUntil check collapses the skin the instant the
+        // window passes instead of waiting for the next service poll.
         const now = Date.now();
         if (
           data.compactState?.state === "flashing-completion" &&
           data.compactState.flashUntil !== null &&
           now < data.compactState.flashUntil
         ) {
-          const filled = SQUARE_ORANGE_COMPACT.repeat(5);
+          const filled = SQUARE_ORANGE_COMPACT.repeat(data.compactState.barsFilled);
           this.item.text = `${d.idlePrefix} ${filled} ${data.compactState.percent}%`;
-          this.item.color = COMPACT_PROGRESS_COLOR;
+          this.item.color = AMBER_WARNING;
           this.item.tooltip = `${d.provider} compact complete`;
           this.item.show();
           return;

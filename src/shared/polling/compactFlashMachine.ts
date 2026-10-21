@@ -23,7 +23,7 @@ const DEFAULT_DURATION_MS = 120_000;
 /** Width of the compact flash bar in cells. Five matches the usage
  * widgets' compact-mode bar so the visual rhythm stays consistent.
  * Flash always renders all five filled. */
-export const COMPACT_BAR_CELL_COUNT = 5;
+const COMPACT_BAR_CELL_COUNT = 5;
 
 /** Normalized, provider-agnostic view of compact state derived from a
  * transcript / rollout tail. Provider parsers produce this - the shared

@@ -10,31 +10,25 @@ import {
   loadSnapshot,
   saveSnapshot,
 } from "../usage/snapshotStore";
-import { IDLE_DIM_COLOR } from "./idleColor";
+import { IDLE_DIM_COLOR } from "./hexColors";
 import { classifyUsageNonOk } from "./usageNonOkClassifier";
 
 /**
- * Config-driven usage widget. Bars are always visible. The ok branch
- * renders fresh data with the provider's text color - every non-ok branch
- * reuses the same bar layout (last-known cached data when available, else
- * a 0% scaffold) under the dim idle color. The one-word state label
- * ("Loading", "Refreshing", "Idle", "Offline", ...) lives on a separate
- * conditional error-status widget (`UsageErrorWidget`) sitting between
- * this 5h widget and the matching weekly widget - this widget itself
- * stays bars-only so the user always sees usage shape, never text where
- * a bar should be. The non-ok tooltip still leads with the cached ok
- * content (reset times etc.) and closes with the error detail so hover
- * disclosure remains identical.
+ * Config-driven usage widget. Bars are always visible: the ok branch
+ * renders fresh data in the provider's text color and every non-ok
+ * branch reuses the same bar layout (last-known cached data, else a 0%
+ * scaffold) in the dim idle color. The one-word state label lives on
+ * the separate `UsageErrorWidget` between this 5h widget and its weekly
+ * twin, so this widget never shows text where a bar should be. The
+ * non-ok tooltip leads with the cached ok content and closes with the
+ * error detail.
  *
- * The ONE exception to bars-always is `shouldHide`, which exists because
- * a provider can retire a rate-limit window outright. OpenAI removed the
- * Codex 5-hour cap and now publishes a single weekly window, and a widget
- * for a window that no longer exists cannot show usage shape - it can only
- * show a full green bar over nothing, which is worse than showing nothing.
- * The escape hatch is deliberately narrow: it fires only on data the
- * provider definitively returned, never on absence, and a widget with no
- * cached payload always renders rather than hiding. Uncertainty keeps the
- * bar on screen.
+ * The one exception is `shouldHide`: a provider can retire a rate-limit
+ * window outright (when OpenAI publishes a single weekly window and no
+ * 5-hour cap), and a widget for a window that does not exist can only
+ * draw a full green bar over nothing. It fires only on data the provider
+ * definitively returned, never on absence, and a widget with no cached
+ * payload always renders. Uncertainty keeps the bar on screen.
  */
 
 export interface UsageWidgetDescriptor<TData> {
@@ -284,4 +278,3 @@ export class UsageWidget<TData> implements vscode.Disposable {
     this.item.dispose();
   }
 }
-
