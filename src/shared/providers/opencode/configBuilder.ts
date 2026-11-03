@@ -39,7 +39,7 @@ const RESEARCH_AGENT_PROMPT =
   "- asks about prices, scores, standings, releases, versions, news, or events\n" +
   "- asks for an opinion or recommendation that depends on current state\n" +
   "- the user names a specific website (Cars.com, Steam, IMDb, Wikipedia, Reddit, GitHub, etc.)\n\n" +
-  "URL CONSTRUCTION HINTS (use these patterns when no exact URL is given; they are not exhaustive, infer similar shapes for other sites):\n" +
+  "URL CONSTRUCTION HINTS (use these patterns when no exact URL is given. They are not exhaustive, so infer similar shapes for other sites):\n" +
   "- Wikipedia: https://en.wikipedia.org/wiki/<Topic_With_Underscores>\n" +
   "- Cars.com search: https://www.cars.com/shopping/results/?makes[]=<make>&models[]=<make>-<model>&sort=list_price\n" +
   "- Steam store: https://store.steampowered.com/app/<id>/<slug>/  (use search if id unknown: https://store.steampowered.com/search/?term=<query>)\n" +

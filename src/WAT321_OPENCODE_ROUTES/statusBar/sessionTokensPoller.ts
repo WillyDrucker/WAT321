@@ -58,9 +58,9 @@ export interface BridgeSessionTokens {
    * tag (`Qwen3-8B-Q5_K_M.gguf` -> `Qwen3-8B`). Falls back to null
    * when the probe returns no usable name - the tooltip then omits the
    * specific model and uses the catalog alias instead. Remote
-   * (Zen routes): null - the catalog alias (Big Pickle, GPT 5 Nano,
-   * etc.) is the right display string for those, and the widget
-   * resolves it from the instance catalog directly. */
+   * (Zen routes): null - the catalog alias is the right display string
+   * for those, and the widget resolves it from the instance catalog
+   * directly. */
   modelDisplayName: string | null;
   /** Wall-clock when this snapshot was last refreshed. Lets callers
    * show a relative-time line and detect staleness. */

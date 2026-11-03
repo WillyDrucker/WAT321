@@ -1,3 +1,5 @@
+import { HttpError } from "./httpError";
+
 /**
  * Error classifiers shared by both usage services. Both Claude and
  * Codex observe the same `node:http` / network error shapes, so the
@@ -6,10 +8,8 @@
  * instead of being duplicated in each service.
  */
 
-import { HttpError } from "./httpError";
-
-/** Transient network-error strings we absorb silently once, surfacing
- * as "offline" only after ERROR_ABSORPTION_THRESHOLD consecutive hits.
+/** Transient network-error strings we absorb silently, surfacing as
+ * "offline" only after NETWORK_ERROR_ABSORPTION_THRESHOLD consecutive hits.
  * These cover stale keep-alive sockets after idle, brief DNS hiccups,
  * and middlebox RST windows. */
 const NETWORK_ERROR_PATTERNS = [

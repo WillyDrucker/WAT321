@@ -99,7 +99,7 @@ export function dispatchFireAndForget(target, args) {
     );
   } catch (err) {
     return errorResult(
-      `Fire-and-forget dispatch could not be queued: ${err?.message || String(err)}. The bridge inbox directory may be unwritable. No reply will land; reissue when the filesystem is healthy.`
+      `Fire-and-forget dispatch could not be queued: ${err?.message || String(err)}. The bridge inbox directory may be unwritable. No reply will land, so reissue when the filesystem is healthy.`
     );
   }
 
@@ -109,7 +109,7 @@ export function dispatchFireAndForget(target, args) {
       : prompt.replace(/\n/g, " ");
   return textResult(
     `Fire-and-forget dispatch to ${alias} (target=${target}) accepted. Dispatch id: ${id}. ` +
-      `The MCP tool returned immediately as intended - no wait attempted, no timeout. The extension-side dispatcher will run the call on its own schedule; the reply lands in the bridge inbox when complete and is retrievable with \`wat321_bridge()\`. If VS Code is closed before the dispatch completes, a synthetic "cancelled by shutdown" envelope will land in its place so the outcome is always visible.\n\n` +
+      `The MCP tool returned immediately as intended - no wait attempted, no timeout. The extension-side dispatcher will run the call on its own schedule, and the reply lands in the bridge inbox when complete and is retrievable with \`wat321_bridge()\`. If VS Code is closed before the dispatch completes, a synthetic "cancelled by shutdown" envelope will land in its place so the outcome is always visible.\n\n` +
       "What to do next:\n" +
       "1. Return control to the user right now. Do not say \"still working\", do not offer to poll, do not call this tool again for this prompt.\n" +
       "2. When the user asks for the reply, retrieve it with `wat321_bridge()`.\n" +

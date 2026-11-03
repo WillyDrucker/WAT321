@@ -8,7 +8,7 @@ import { peekResolvedCodexCli } from "../shared/providers/codex/cliResolver";
 import { peekResolvedOpenCodeCli } from "../shared/providers/opencode/cliResolver";
 import type { ResolvedCli } from "../shared/providers/cliResolver";
 import { EPIC_HANDSHAKE_DIR } from "../engine/wat321Paths";
-import type { BridgeThreadRecord } from "./codexTurn/threadRecord";
+import type { BridgeThreadRecord } from "./codexThread/threadRecord";
 
 /**
  * Health command surface for the Epic Handshake tier. Renders enabled

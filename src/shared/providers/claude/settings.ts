@@ -33,8 +33,7 @@ const COMPACT_MARGIN = 13_000;
 
 /**
  * Empirical delta between the percentage override's nominal target
- * and the actual compaction trigger in recent Claude Code releases.
- * Observed on 1M sessions: OVERRIDE=73 -> fires ~715k (nominal 730k,
+ * and the actual compaction trigger. Observed on 1M sessions: OVERRIDE=73 -> fires ~715k (nominal 730k,
  * ~15k short). Applied as an absolute token subtraction when computing
  * the displayed threshold from a user-supplied override. Not applied
  * to the default (no-override) formula - the SYSTEM_RESERVE_CAP +
@@ -67,8 +66,8 @@ function readSettingsEnv(key: string): string | null {
   }
 }
 
-/** True when Claude Code's `model` setting names a `[1m]` variant, such
- * as `sonnet[1m]` or `claude-opus-4-6[1m]`. `/model` stores the pick
+/** True when Claude Code's `model` setting names a `[1m]` variant, an
+ * alias or a full model id ending in `[1m]`. `/model` stores the pick
  * there, and the transcript never records the suffix. Lossy, false on
  * any read or parse failure. */
 export function modelSettingSelectsMillionVariant(): boolean {
@@ -92,10 +91,9 @@ function readAutoCompactOverrideRaw(): string | null {
 /** Raw `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` as an integer token count,
  * or null. When paired with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` this
  * declares the denominator the percentage applies to (the pair
- * branch wins in `readAutoCompactEffectiveTriggerTokens`). Without
- * the percentage pair, older Claude Code releases treated this as
- * an absolute trigger threshold. Current releases may ignore it
- * alone. The reader stays a thin env accessor either way. */
+ * branch wins in `readAutoCompactEffectiveTriggerTokens`). Alone,
+ * some Claude Code builds treat it as an absolute trigger and others
+ * ignore it. The reader stays a thin env accessor either way. */
 function readAutoCompactWindow(): number | null {
   const raw = readSettingsEnv("CLAUDE_CODE_AUTO_COMPACT_WINDOW");
   if (raw === null) return null;
@@ -115,21 +113,14 @@ function readMaxContextTokens(): number | null {
 }
 
 /** Real auto-compact fire point in absolute tokens, accounting for
- * the empirical drift between the nominal target and the actual
- * trigger. Resolution order: a WINDOW + PCT pair (current Claude Code
- * behavior, trigger = `(pct / 100) * window` minus the drift reserve),
- * then WINDOW alone as an absolute trigger (older Claude Code releases
- * honored it, current ones appear to ignore it), then PCT alone applied
- * to MAX_CONTEXT (defunct in recent releases, kept for older ones),
- * then the built-in default formula on the effective context window.
- *
- * Widget consumers use this as the unified denominator for bars, the
- * displayed percentage, the "N/M" numerator's right-hand side, and
- * the "Auto-Compact at ~X" tooltip line. The nominal ceiling
- * (`autoCompactPct * contextWindow`) is never surfaced: showing 73% /
- * 730k while compaction actually fires at 715k would confuse the
- * percentage / fire-point relationship, so every target the widget
- * shows is the actual hit point. */
+ * the drift between the nominal target and the actual trigger.
+ * Resolution order: a WINDOW + PCT pair (`(pct / 100) * window` minus
+ * the drift reserve), then WINDOW alone as an absolute trigger, then
+ * PCT alone applied to MAX_CONTEXT, then the built-in default formula
+ * on the effective context window. The two single-key branches serve
+ * Claude Code builds that honor those keys alone. The widget's bars,
+ * percent, "N/M", and "Auto-Compact at ~X" line all measure against
+ * this fire point, never the nominal `pct * window`, so they agree. */
 export function readAutoCompactEffectiveTriggerTokens(
   contextWindowSize: number
 ): number {

@@ -7,7 +7,7 @@ import {
   renderProvider,
   renderRuntimeProbes,
 } from "./healthReportSections";
-import { getAppUserModelID } from "./windowsToastProcess";
+import { getAppUserModelID } from "./notifications/windowsToastProcess";
 
 /**
  * [WAT-DEBUG] Diagnostic command exposed in the palette as

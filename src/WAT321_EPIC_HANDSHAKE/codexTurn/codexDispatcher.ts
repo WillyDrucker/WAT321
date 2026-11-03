@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { pruneSentArchives } from "../../engine/inbox/sentArchive";
 import { workspaceHash } from "../../engine/workspaceHash";
 import { releaseClaim, tryAcquireClaim } from "../../shared/claimFile";
 import { PathWatcher } from "../../shared/polling/pathWatcher";
@@ -35,9 +36,8 @@ import { writeSuppressCodexToast } from "./turnFlags";
  * turn run loop in `turnRunner.ts`.
  */
 
-/** Sent-folder purge cadence. Delivered envelopes older than 5 minutes
- * go, since no downstream consumer reads them (the conversation lives
- * in Claude's transcript). Keeps disk footprint bounded. */
+/** Cadence of `runPurge`: the mailbox sweeps in `mailbox.ts` and the
+ * sent-archive cap, so the mail folders stay bounded. */
 const PURGE_INTERVAL_MS = 5 * 60 * 1000;
 /** Per-envelope claim TTL. Two VS Code windows on the same workspace
  * each watch the same `inbox/codex/<wsHash>/` directory - without a
@@ -138,6 +138,7 @@ export class CodexDispatcher {
       sentClaude: this.sentClaude,
       logger: this.logger,
     });
+    pruneSentArchives(this.workspacePath);
   }
 
   private async drainInbox(): Promise<void> {

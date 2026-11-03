@@ -7,10 +7,11 @@ import type { Heartbeat } from "./heartbeatTypes";
 /**
  * Reader for the per-turn heartbeat files `heartbeatWriter.ts` and the
  * MCP runtime's `WAT321_MCP_SERVER/bin/turnHeartbeat.mjs` write under
- * the Epic Handshake root. The bridge stage coordinator drives the 5-stage display from
- * it and the Epic Handshake menu reads it for the in-flight row. Files
- * are per dispatch, so concurrent turns across workspaces each have
- * their own, and the reader filters on `workspaceHash`.
+ * the Epic Handshake root. The bridge stage coordinator drives the
+ * 5-stage display from it and the Epic Handshake menu reads it for the
+ * in-flight row. Files are per dispatch, so concurrent turns across
+ * workspaces each have their own, and the reader filters on
+ * `workspaceHash`.
  */
 
 /** A heartbeat older than this is a dead turn: every writer refreshes

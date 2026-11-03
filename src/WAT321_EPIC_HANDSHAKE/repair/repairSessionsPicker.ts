@@ -12,8 +12,8 @@ import {
   findRepairableSessions,
   type RepairCandidate,
 } from "./repairSessionsScan";
-import type { RecoverableSession } from "../codexTurn/sessionRecovery";
-import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
+import type { RecoverableSession } from "../codexThread/sessionRecovery";
+import { loadBridgeThreadRecord } from "../codexThread/threadRecord";
 
 /**
  * Repair Sessions sub-picker. Surfaces sessions whose stored

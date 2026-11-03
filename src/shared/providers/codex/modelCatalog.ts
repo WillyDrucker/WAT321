@@ -1,27 +1,20 @@
 /**
- * In-memory catalog of the models the Codex app-server WAT321 actually
- * dispatches to reports for itself, via the `model/list` RPC.
+ * In-memory catalog of the models the Codex app-server WAT321
+ * dispatches to reports for itself, via the `model/list` RPC. It exists
+ * because `~/.codex/models_cache.json` is one file every codex binary on
+ * the machine overwrites with its own catalog (last writer wins), so the
+ * file can describe a binary we never dispatch to. The backend decides
+ * per account what a binary may list, so `fetchedAt` lets a picker ask
+ * again.
  *
- * It exists because `~/.codex/models_cache.json` is one file that every
- * codex binary on the machine overwrites with its own version's
- * catalog (the ChatGPT VS Code extension beside the npm CLI is two
- * writers, last one wins), so the file can describe a binary we never
- * dispatch to. The app-server answers for the process that runs the
- * turn. The answer is also tied to a moment: the backend decides per
- * account what a binary may list and can switch a model on with no
- * upgrade, so `fetchedAt` lets a picker decide to ask again.
- *
- * Filled by `codexDispatcher.ensureClient()` right after `initialize`
- * on an app-server already being spawned. The catalog never spawns a
- * process or touches the idle timer, so no hover can trigger a cold
+ * Filled by `codexDispatcher.ensureClient()` right after `initialize` on
+ * an app-server already being spawned, so no hover can trigger a cold
  * start (the picker's one deliberate spawn is `codexCatalogSync.ts`).
- * The dispatcher clears it on force restart and on stop, and it
- * survives an idle shutdown because the same binary respawns.
- *
- * Empty until the first `initialize`. Callers MUST fail open while it
- * is empty, and once non-null it is authoritative and never unioned
- * with the cache file. `model/list` carries no `context_window`, so the
- * auto-compact ceiling stays file-sourced, see
+ * Cleared on force restart and stop, kept across an idle shutdown since
+ * the same binary respawns. Empty until the first `initialize`: callers
+ * MUST fail open while empty, and once non-null it is authoritative and
+ * never unioned with the cache file. `model/list` carries no
+ * `context_window`, so the compact limits stay file-sourced in
  * `WAT321_CODEX_SESSION_TOKENS/autoCompactLimit.ts`.
  */
 

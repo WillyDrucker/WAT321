@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { SessionSource } from "../engine/contracts";
 import { getProjectKey } from "../engine/fs/pathIdentity";
 import { CLAUDE_PROJECTS_DIR } from "../shared/providers/claude/claudeHome";
 import { SESSION_TOKEN_RESCAN_MS } from "../shared/polling/pollingTimings";
@@ -22,7 +23,7 @@ interface ActiveTranscript {
   transcriptPath: string;
   sessionId: string;
   cwdForLabel: string;
-  source: "live" | "lastKnown";
+  source: SessionSource;
   pid?: number;
 }
 

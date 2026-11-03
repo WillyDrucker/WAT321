@@ -39,9 +39,9 @@ export interface HeartbeatWriter {
   startedAt(): number;
   /** Schedule the heartbeat file for deletion after `delayMs`. The
    * status-bar walker needs the file to remain at `stage=complete`
-   * long enough to render each remaining stage's 3s min-hold (5
-   * stages * 3s = 15s worst case) - deleting on the same tick as
-   * turn end strands the walker at the last intermediate stage. */
+   * long enough to render each remaining stage's min-hold - deleting
+   * on the same tick as turn end strands the walker at the last
+   * intermediate stage. */
   scheduleCleanup(delayMs: number): void;
 }
 

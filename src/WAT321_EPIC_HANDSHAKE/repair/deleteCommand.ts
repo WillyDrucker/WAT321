@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
-import { listRecoverableSessions } from "../codexTurn/sessionRecovery";
+import { listRecoverableSessions } from "../codexThread/sessionRecovery";
 import {
   bridgeThreadDisplayName,
   bridgeThreadNamePattern,
-} from "../codexTurn/threadNaming";
-import { loadBridgeThreadRecordIfExists } from "../codexTurn/threadRecord";
+} from "../codexThread/threadNaming";
+import { loadBridgeThreadRecordIfExists } from "../codexThread/threadRecord";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
 import { buildDeleteAllDiagnostic } from "./deleteCommandDiagnostic";
 import {

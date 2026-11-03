@@ -3,7 +3,7 @@ import { rememberUnlistedPin } from "../../shared/providers/codex/unlistedModelP
 import { isKnownCodexModel, defaultCodexModelSlug } from "../../shared/providers/codex/models";
 import { showRepairOutcome } from "./repairOutcomeToast";
 import { applyRepairs, scanBridgeSessions } from "./repairSessionsScan";
-import type { RecoverableSession } from "../codexTurn/sessionRecovery";
+import type { RecoverableSession } from "../codexThread/sessionRecovery";
 
 /**
  * The path Repair Sessions takes when the catalog says every stored

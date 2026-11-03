@@ -9,12 +9,11 @@ import { adaptiveFlagPath, fireAndForgetFlagPath } from "../epicHandshakePaths";
  * Three-way wait mode for the Epic Handshake bridge, persisted as
  * per-workspace flag files so a sibling VS Code window keeps its own:
  *   - `standard`        no flag. The MCP tool blocks up to
- *                       `timeout_sec` (default 120s), dispatcher hard
- *                       cap 5 min.
+ *                       `timeout_sec`, under the dispatcher's hard cap.
  *   - `adaptive`        `adaptive.<wsHash>.flag`. The MCP tool blocks
- *                       while the dispatcher heartbeat is fresh, hard
- *                       cap 30 min on both sides so neither interrupts
- *                       the other early.
+ *                       while the dispatcher heartbeat is fresh, with
+ *                       one hard cap on both sides so neither
+ *                       interrupts the other early.
  *   - `fire-and-forget` `fire-and-forget.<wsHash>.flag`. The MCP tool
  *                       returns at once, the reply lands in the inbox,
  *                       the dispatcher runs with all timers disabled.

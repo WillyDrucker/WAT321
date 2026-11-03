@@ -4,6 +4,7 @@ import {
   type OpenCodeRoutesInstance,
 } from "../../shared/bridge/openCodeRoutesConfigSnapshot";
 import type { SessionTarget } from "../../shared/bridge/sessionAliases";
+import { DEFAULT_ZEN_ROUTE, LOCAL_INSTANCE_ID } from "../../shared/providers/opencode/catalog";
 
 /**
  * Data the OpenCode / Local-LLM "Manage Sessions" submenu reads: the
@@ -46,13 +47,13 @@ export const TARGET_CONFIGS: Record<SessionTarget, TargetConfig> = {
   opencode: {
     title: "Manage OpenCode",
     instanceKind: "remote",
-    fallbackInstanceId: "big-pickle",
+    fallbackInstanceId: DEFAULT_ZEN_ROUTE.id,
     emptyHint: "No OpenCode sessions yet. The next prompt creates one.",
   },
   local: {
     title: "Manage Local LLM",
     instanceKind: "local",
-    fallbackInstanceId: "local-llm",
+    fallbackInstanceId: LOCAL_INSTANCE_ID,
     emptyHint:
       "No Local LLM sessions yet. The next prompt creates one (requires Local Endpoint set in WAT321 settings).",
   },

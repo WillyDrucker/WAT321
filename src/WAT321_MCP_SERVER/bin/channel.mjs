@@ -1,29 +1,22 @@
 #!/usr/bin/env node
 /**
  * WAT321 unified MCP server entry, registered as `wat321` at project
- * scope wherever Epic Handshake is enabled. Three tools (`wat321_ask`
- * alias-driven dispatch, `wat321_session` lifecycle for opencode/local,
- * `wat321_bridge` inbox drain) plus read-only resources:
- * `bridge://instances`, `bridge://sessions/{target}`,
- * `bridge://inbox/{target}` (peek, not drain), `bridge://status`, and
- * `bridge://docs/*`.
+ * scope wherever Epic Handshake is enabled: three tools (`wat321_ask`
+ * dispatch, `wat321_session` lifecycle for opencode/local,
+ * `wat321_bridge` inbox drain) plus read-only `bridge://` resources.
  *
  * STAY LEAN: every tool registered here bills its description and
- * schema to every Claude session forever, so three tools is the cap.
- * A new capability prefers, in order, an existing tool's response
- * shape or action enum, a standalone script under `bin/`, a new
- * resource (read-only, separate token bucket), and only then a tool.
+ * schema to every Claude session forever, so three tools is the cap. A
+ * new capability prefers an existing tool's response shape or action
+ * enum, then a standalone script under `bin/`, then a resource (its own
+ * token bucket), and only then a tool.
  *
- * Registration is conditional: at startup the server reads the enabled
- * targets from the per-client `bridge/config.json` (written by the
- * extension on activate and on settings change) and strips disabled
- * targets from the tool and resource lists. MCP snapshots the tool list
- * at connection time, so a change needs a VS Code reload.
- *
- * Module map: `toolCatalog.mjs` declares the tools, `askRouter.mjs`
- * resolves aliases, `toolDispatch.mjs` routes a call into `codex/` or
- * `opencode/`, `bridgeDrain.mjs` combines the inboxes, `resources.mjs`
- * serves the read-only surface.
+ * At startup the server reads the enabled targets from the per-client
+ * `bridge/config.json` and strips disabled ones from both lists. MCP
+ * snapshots the tool list at connection, so a change needs a reload.
+ * `toolCatalog.mjs` declares the tools, `askRouter.mjs` resolves
+ * aliases, `toolDispatch.mjs` routes into `codex/` or `opencode/`,
+ * `bridgeDrain.mjs` combines the inboxes, `resources.mjs` serves reads.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";

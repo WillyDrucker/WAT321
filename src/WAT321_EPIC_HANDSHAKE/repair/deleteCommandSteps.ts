@@ -2,13 +2,13 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { basename } from "node:path";
 import { writeFileAtomic } from "../../engine/fs/atomicWrite";
 import { CODEX_SESSION_INDEX_PATH } from "../../shared/providers/codex/codexHome";
-import { findRolloutPath, walkRolloutFiles } from "../codexTurn/sessionRecovery";
-import { nextCollisionFreeCounter } from "../codexTurn/threadNaming";
+import { findRolloutPath, walkRolloutFiles } from "../codexThread/sessionRecovery";
+import { nextCollisionFreeCounter } from "../codexThread/threadNaming";
 import {
   loadBridgeThreadRecordIfExists,
   saveBridgeThreadRecord,
   type BridgeThreadRecord,
-} from "../codexTurn/threadRecord";
+} from "../codexThread/threadRecord";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
 
 /**

@@ -26,17 +26,16 @@ interface SessionTokenTooltipInput {
   provider: "Claude" | "Codex";
   sessionTitle: string;
   label: string;
-  /** Model slug (e.g. "claude-opus-4-6") for Claude, or model name
-   * for Codex. Displayed as a friendly name in the tooltip header. */
+  /** The model id the session file records, shown as a friendly name
+   * in the tooltip header. */
   modelId?: string;
   contextUsed: number;
-  /** Full context window size (e.g. 1,000,000 for 1M models). Shown
-   * alongside the model name so the user knows the total capacity. */
+  /** Full context window in tokens. Shown alongside the model name so
+   * the user knows the total capacity. */
   contextWindowSize?: number;
   ceiling: number;
   /** Tokens subtracted from both numerator and denominator before
-   * computing the percentage. Codex passes `CODEX_BASELINE_TOKENS`
-   * (12,000). Claude passes 0. */
+   * computing the percentage. Codex passes its baseline, Claude 0. */
   baselineTokens?: number;
   /** Present on a `lastKnown` session, absent on a live session.
    * When present, the tooltip adds a "Last active: X ago" line so
@@ -47,19 +46,17 @@ interface SessionTokenTooltipInput {
    * populated, the tooltip adds Plan / Tool / Token-split lines so
    * the user sees what Codex is currently doing. */
   stageInfo?: StageInfo;
-  /** Claude-only: tool_use name, tool call counter, thinking-block
-   * presence, and cache-hit split. Rendered under the Auto-Compact
-   * line when provider is Claude and turnState indicates in-flight. */
+  /** Claude-only: the latest turn's tool, thinking, and cache snapshot.
+   * Feeds the model line's thinking fallback and the cache-event
+   * readout. */
   claudeTurnInfo?: ClaudeTurnInfo;
   /** Current turn classification. Used to gate the stageInfo render:
    * the plan / tool / reasoning lines only make sense while the
    * session is actively mid-turn. */
   turnState?: LastEntryKind;
-  /** Claude-only: real compaction fire point. When supplied, the
-   * "Auto-Compact at ~X" line uses this value with a `~` prefix to
-   * signal approximate, matching the Codex pattern. Falls back to
-   * `ceiling` when absent (older callers, Codex path). */
-  autoCompactEffectiveTokens?: number;
+  /** Where auto-compact actually fires. The closing "Auto-Compact at
+   * ~X" line reads it with a `~` because the fire point is approximate. */
+  autoCompactEffectiveTokens: number;
   /** Effort the session's latest turn ran at, read from its own
    * transcript or rollout. Wins over every other effort source because
    * it is the one fact about THIS session rather than a setting. */
@@ -87,8 +84,7 @@ interface SessionTokenTooltipInput {
    * `"adaptive"` renders a different wait line ("Adaptive wait on
    * Codex (extends while making progress)") because adaptive has no
    * fixed deadline - showing a fixed seconds budget would mislead.
-   * Defaults to `"sync"` when omitted so older callers keep the
-   * existing "Waiting on Codex: Ns" line. */
+   * Defaults to `"sync"`, the "Waiting on Codex: Ns" line. */
   bridgeWaitMode?: "sync" | "adaptive";
   /** Multi-session disclosure. When the user has more than one
    * session open in this workspace (e.g. two Claude TUIs in the
@@ -186,9 +182,9 @@ export function buildSessionTokenTooltip(
   // (adaptive). Adaptive intentionally omits a numeric budget - its
   // useful "expected to finish" answer is "as long as the dispatcher
   // keeps refreshing its heartbeat sidecar". Adaptive does carry a
-  // 30-minute hard ceiling in the MCP server and dispatcher, but
-  // surfacing it as a countdown reads as the wrong signal: users
-  // expect adaptive to "just work".
+  // hard ceiling in the MCP server and dispatcher, but surfacing it as
+  // a countdown reads as the wrong signal: users expect adaptive to
+  // "just work".
   if (provider === "Claude" && typeof bridgeWaitTimeoutSec === "number") {
     if (bridgeWaitMode === "adaptive") {
       md.appendMarkdown(
@@ -239,22 +235,11 @@ export function buildSessionTokenTooltip(
   }
 
   // Auto-Compact lives at the bottom of every session-token tooltip.
-  // Claude's effective trigger may differ from the nominal ceiling
-  // when Claude Code's internal reserve stacks with the percentage
-  // override - `autoCompactEffectiveTokens` captures that drift. Codex
-  // computes the trigger from `(ceiling * 90) / 95` to mirror the
-  // upstream `context_window * 9 / 10` formulation against our 95%
-  // effective-window ceiling.
-  if (provider === "Claude") {
-    const triggerTokens = autoCompactEffectiveTokens ?? ceiling;
-    const prefix = autoCompactEffectiveTokens !== undefined ? "~" : "";
-    md.appendMarkdown(
-      `\n\n${CLAMP} Auto-Compact at ${prefix}${formatTokens(triggerTokens)}`
-    );
-  } else {
-    const compactTrigger = Math.floor((ceiling * 90) / 95);
-    md.appendMarkdown(`\n\n${CLAMP} Auto-Compact ~${formatTokens(compactTrigger)}`);
-  }
+  // Each provider resolves its own fire point, so the line reads the
+  // same for both.
+  md.appendMarkdown(
+    `\n\n${CLAMP} Auto-Compact at ~${formatTokens(autoCompactEffectiveTokens)}`
+  );
 
   return md;
 }

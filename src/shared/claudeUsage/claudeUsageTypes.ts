@@ -5,12 +5,9 @@ import type {
 export interface UsageResponse {
   five_hour: { utilization: number; resets_at: string } | null;
   seven_day: { utilization: number; resets_at: string } | null;
-  extra_usage: {
-    is_enabled: boolean;
-    monthly_limit: number;
-    used_credits: number;
-    utilization: number | null;
-  } | null;
+  /** Every limit on the account. A "session" group entry is the 5-hour
+   * limit. Unvalidated, so readers check it is a list before use. */
+  limits?: Array<{ group?: string } | null> | null;
 }
 
 /** Claude-specialized service state: ok payload is a Claude UsageResponse. */

@@ -20,7 +20,7 @@ import {
   showOpenCodeSessionsPicker,
 } from "../openCodeSessions/openCodeSessionsPicker";
 import { isBridgeBusy, setPaused } from "./statusBarState";
-import { clearBridgeErrorState } from "../codexTurn/threadRecord";
+import { clearBridgeErrorState } from "../codexThread/threadRecord";
 import { writeCancelFlag } from "../codexTurn/turnFlags";
 import {
   applyWaitMode,
@@ -136,7 +136,7 @@ export function createMenuDispatch(deps: MenuDispatchDeps): DispatchAction {
       case "cancel":
         if (!ctx.ws) {
           void vscode.window.showWarningMessage(
-            "Epic Handshake: no workspace open; cancel flag cannot be scoped."
+            "Epic Handshake: Cancel needs an open workspace folder."
           );
           return;
         }

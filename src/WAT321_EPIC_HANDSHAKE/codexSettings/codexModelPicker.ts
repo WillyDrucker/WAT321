@@ -31,7 +31,7 @@ import { isPaused, setPaused } from "../statusBar/statusBarState";
  * never this machine's `config.toml`.
  *
  * Two rows exist for the day a model goes live for this account: PIN A
- * MODEL BY SLUG takes a slug Codex has not sent yet (GPT-6 Astra shipped
+ * MODEL BY SLUG takes a slug Codex has not sent yet (a model can ship
  * hidden from every picker), and REFRESH MODELS asks the app-server
  * again on the spot.
  *
@@ -75,7 +75,7 @@ async function pinModelBySlug(): Promise<string | null> {
   const typed = await vscode.window.showInputBox({
     title: "Pin a Codex model by slug",
     prompt:
-      "Type the slug exactly as Codex names it, for example gpt-6-astra. For a model OpenAI has enabled for your account that Codex keeps out of its picker.",
+      "Type the slug exactly as Codex names it, lowercase and hyphenated. For a model OpenAI has enabled for your account that Codex keeps out of its picker.",
     placeHolder: "model slug",
     validateInput: (value) => {
       const trimmed = value.trim();
@@ -159,7 +159,7 @@ export async function pickModel(
       {
         rowKind: "pin",
         label: "⌨️ PIN A MODEL BY SLUG",
-        description: "Type a slug Codex has not listed yet, such as gpt-6-astra.",
+        description: "Type a slug Codex has not listed yet.",
         iconPath: new vscode.ThemeIcon("edit"),
       },
       {

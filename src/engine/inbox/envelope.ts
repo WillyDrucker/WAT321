@@ -23,7 +23,7 @@ import { writeFileAtomic } from "../fs/atomicWrite";
  */
 
 type EnvelopeKind = "outbound" | "inbound";
-type EnvelopePriority = "low" | "normal" | "high";
+export type EnvelopePriority = "low" | "normal" | "high";
 
 /** Codex-only: the conversational agent labels Epic Handshake uses.
  * Non-Codex tiers leave both unset. */
@@ -70,8 +70,8 @@ export interface Envelope {
    * reply to. Lets the MCP-side poller match replies. */
   replyToId?: string;
 
-  /** Outbound only: short preview of the prompt for status bar /
-   * audit purposes. Limited to ~200 chars. */
+  /** Outbound only: one-line preview of the prompt for status bar /
+   * audit purposes, truncated by the writer. */
   promptPreview?: string;
 
   /** Inbound only: true when the dispatch errored. Body carries the

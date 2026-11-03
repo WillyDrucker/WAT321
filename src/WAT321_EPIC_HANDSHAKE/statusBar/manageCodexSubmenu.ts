@@ -12,8 +12,8 @@ import {
 import { makeBackItem, makeCancelItem, makePauseResumeItem } from "../../shared/ui/menuRows";
 import { findRepairableSessions } from "../repair/repairSessionsScan";
 import { isBridgeBusy, isPaused } from "./statusBarState";
-import type { RecoverableSession } from "../codexTurn/sessionRecovery";
-import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
+import type { RecoverableSession } from "../codexThread/sessionRecovery";
+import { loadBridgeThreadRecord } from "../codexThread/threadRecord";
 
 /**
  * Manage Codex submenu. The CODEX SESSION row opens
@@ -21,8 +21,8 @@ import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
  * REPAIR SESSIONS row opens `showRepairSessionsPicker` (in
  * `repairSessionsPicker.ts`). Late-reply inbox sub-pickers live in
  * `lateReplyPickers.ts`. Each takes a `dispatch` callback so it can
- * route Pause/Resume/Cancel/Back through the same `handleAction`
- * surface as the main menu without a circular import back into
+ * route Pause/Resume/Cancel/Back through the same menu dispatch as
+ * the main menu without a circular import back into
  * `statusBarMenus.ts`.
  */
 

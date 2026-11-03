@@ -68,8 +68,8 @@ export function waitModeFlashFlagPath(wsHash: string): string {
  * on successful turn completion - the toast notifier consumes-and-
  * deletes it when Codex's transcript-driven `responseComplete` fires
  * within the freshness window. Decouples bridge-completion suppression
- * from the 3s `returning` flag latch so a slow Codex transcript write
- * (>3s after RPC completion) still gets suppressed. */
+ * from the short `returning` flag latch so a Codex transcript write
+ * that lands after the latch clears still gets suppressed. */
 export function suppressCodexToastFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `suppress-codex-toast.${wsHash}.flag`);
 }
@@ -142,8 +142,8 @@ export function pausedFlagPath(wsHash: string): string {
 
 /** Per-workspace adaptive sticky-mode sentinel. When present (and
  * fire-and-forget is absent), `channel.mjs` extends the MCP blocking
- * window while the heartbeat is fresh instead of using the 120s
- * standard cap. Persists across VS Code restarts. */
+ * window while the heartbeat is fresh instead of using the standard
+ * cap. Persists across VS Code restarts. */
 export function adaptiveFlagPath(wsHash: string): string {
   return join(EPIC_HANDSHAKE_DIR, `adaptive.${wsHash}.flag`);
 }

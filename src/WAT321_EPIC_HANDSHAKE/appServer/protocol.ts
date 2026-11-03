@@ -133,8 +133,8 @@ export interface TurnInterruptParams {
 /**
  * `model/list` reports the models the app-server on the other end of
  * this pipe can actually run. The bound fields have held steady on
- * every codex-cli release probed, the retirement pointers are optional
- * because older releases never send them.
+ * every codex-cli release probed, and the retirement pointers are
+ * optional because older releases never send them.
  *
  * WARNING: the field names are NOT the cache file's. The RPC is
  * camelCase and renames every field that matters (`slug` -> `id`,
@@ -143,17 +143,16 @@ export interface TurnInterruptParams {
  * `default_reasoning_level` -> `defaultReasoningEffort`,
  * `upgrade.retirement_at` ISO -> `upgradeInfo.retirementAt` epoch
  * seconds). `isDefault` exists only here, `context_window` only in the
- * file, so the default model comes from the RPC and the auto-compact
- * ceiling stays file-sourced.
+ * file, so the default model comes from the RPC and the compact limits
+ * stay file-sourced.
  *
  * The list is decided server-side per account AND per binary, so two
  * machines answer differently and one answer can change with no
  * upgrade: the catalog records when it was fetched and which binary
- * answered. Hidden models are omitted from the response (0.142.5
- * returns 3 where its file lists 4), so `hidden` has only been seen
- * false. `serviceTiers` drives the Speed row, its deprecated twin
- * `additionalSpeedTiers` is ignored. Also on the wire and unbound until
- * something consumes them: `defaultServiceTier`, `inputModalities`,
+ * answered. Hidden models come back only when `ModelListParams` asks
+ * for them, flagged `hidden: true`. `serviceTiers` drives the Speed
+ * row, its deprecated twin `additionalSpeedTiers` is ignored. Also on
+ * the wire and unbound until something consumes them: `defaultServiceTier`, `inputModalities`,
  * `supportsPersonality`, `multiAgentVersion`, `modelSpecialty`,
  * `availabilityNux`, `availableAccessPrograms`.
  */

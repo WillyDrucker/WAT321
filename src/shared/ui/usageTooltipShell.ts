@@ -26,7 +26,7 @@ interface UsageTooltipInput {
    * codicon CSS overrides inline styles on both the wrapper and the
    * codicon element itself in MarkdownString tooltips. */
   headingIcon?: string;
-  /** Right-aligned plan label, e.g. "Max (20x)" / "Pro". */
+  /** Right-aligned plan label, e.g. "Ultra" / "Plus". */
   planLabel: string;
   /** One or more rows separated by a divider. */
   rows: UsageTooltipRow[];

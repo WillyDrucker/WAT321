@@ -6,18 +6,10 @@ import {
 } from "../incidentStatusPoller";
 
 /**
- * Shared non-ok classifier. Pure mapping from every non-ok
- * `ServiceState` variant to a one-word label (status-bar friendly)
- * plus a longer tooltip detail. Used by both `usageWidget` and
- * `usageErrorWidget` so the two surfaces never drift in their
- * disclosure copy.
- *
- * Labels are one-word so the status-bar surface stays compact:
- * `Loading`, `Not Connected`, `Signed Out`, `Refreshing`, `Paused`,
- * `Idle`, `Offline`. The classifier itself does no I/O. The incident
- * refresh kick for the rate-limited path is the caller's
- * responsibility - the bar widget owns that kick so the error widget
- * does not double-fire it on every update.
+ * Shared non-ok classifier: maps every non-ok `ServiceState` to a short
+ * status-bar label plus a longer tooltip detail. Both `usageWidget` and
+ * `usageErrorWidget` read it, so the two surfaces never drift in their
+ * copy. Pure: the incident refresh kick belongs to the bar widget.
  */
 
 interface NonOkClassification {
@@ -58,7 +50,7 @@ export function classifyUsageNonOk<TData>(
           : "";
         return {
           label: "Idle",
-          detail: `Idle (cold-poll absorbed).${server} Usage data becomes available after ${providerName}'s next activity.`,
+          detail: `Idle.${server} Usage data becomes available after ${providerName}'s next activity.`,
         };
       }
       const elapsed = Date.now() - state.rateLimitedAt;
@@ -74,8 +66,6 @@ export function classifyUsageNonOk<TData>(
         ? ` API: ${state.serverMessage}.`
         : "";
       // Surface the cached status-page entry when an incident is live.
-      // The status-page refresh kick is fired by the bar widget's
-      // update path, not here, so this classifier stays pure.
       const status = getCachedStatus(providerKey);
       const incident =
         status && status.indicator !== "none"

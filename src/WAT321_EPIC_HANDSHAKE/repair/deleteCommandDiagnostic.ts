@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { samePath } from "../../engine/fs/pathIdentity";
 import { CODEX_SESSION_INDEX_PATH } from "../../shared/providers/codex/codexHome";
-import { findRolloutPath, readRolloutCwd } from "../codexTurn/sessionRecovery";
-import { ANY_WORKSPACE_THREAD_NAME } from "../codexTurn/threadNaming";
+import { findRolloutPath, readRolloutCwd } from "../codexThread/sessionRecovery";
+import { ANY_WORKSPACE_THREAD_NAME } from "../codexThread/threadNaming";
 
 /**
  * Per-entry diagnostic for the Delete-All "(0) matched" case. When

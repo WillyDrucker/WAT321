@@ -51,7 +51,8 @@ export function parseMostRecentCacheEvent(
     const ago = describeTurnsAgo(i);
 
     // Compact-driven rebuilds qualify on the creation floor alone -
-    // mirrors the banner's `meetsCompact` exception. Compact bundles
+    // mirrors the banner, which waives its ratio gate while
+    // `awaitingFirstLoad` is armed after a compact. Compact bundles
     // a fresh summary alongside surviving system prompt + tools, so
     // creation is meaningful but reads can be non-trivial - the
     // strict ratio gate would miss most compact LOADs and let the
@@ -95,13 +96,13 @@ export function parseMostRecentCacheEvent(
     // obvious causes and they're not the answer.
     return {
       kind: "MISS-unknown",
-      description: `MISS - prefix rebuilt (${ago}); ruled out TTL/large-payload/compact. Likely tool schema or system-prompt change.`,
+      description: `MISS - prefix rebuilt (${ago}). Not a TTL gap, large payload, or compact, so likely a tool schema or system-prompt change.`,
       ts: t.assistantTs,
     };
   }
 
   if (turns.length === 0) {
-    return { kind: "HIT-clean", description: "no recent activity", ts: null };
+    return { kind: "HIT-clean", description: "No recent activity", ts: null };
   }
   return { kind: "HIT-clean", description: "Clean", ts: null };
 }

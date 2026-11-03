@@ -14,6 +14,7 @@ import {
 } from "../../shared/bridge/openCodeRoutesConfigSnapshot";
 import { readActiveAlias } from "./openCodeDispatchAlias";
 import {
+  DISPATCH_TIMEOUT_MS,
   runSessionAttached,
   runZenOneShot,
 } from "./openCodeDispatchPaths";
@@ -39,7 +40,6 @@ import type { BridgeStage } from "../../engine/bridgeTypes";
  */
 
 const HEARTBEAT_INTERVAL_MS = 5_000;
-const WIDGET_HEARTBEAT_TIMEOUT_MS = 10 * 60_000;
 
 type HttpHandle = {
   controller: AbortController;
@@ -124,9 +124,8 @@ class OpenCodeDispatcher implements BackendDispatcher {
         instanceId: widgetInstanceId,
         dataRetention: widgetDataRetention,
         model: widgetModel,
-        // 10-min cap mirrors the dispatch path timeouts so the
-        // widget's "stale" gate matches the dispatcher ceiling.
-        timeoutMs: WIDGET_HEARTBEAT_TIMEOUT_MS,
+        // The dispatch ceiling, so the widget's stale gate matches it.
+        timeoutMs: DISPATCH_TIMEOUT_MS,
       });
     };
     const setStage = (s: BridgeStage): void => {
@@ -170,10 +169,10 @@ class OpenCodeDispatcher implements BackendDispatcher {
           dataRetention: widgetDataRetention,
           model: widgetModel,
         });
-        // Final `complete` push. Without it the walker would orphan-
-        // grace-drop the latch at `writing` (idx 3) after 3s and
-        // never reach `complete` (idx 4), skipping the stages 4/5 +
-        // left-arrow return ceremony.
+        // Final `complete` push. Without it the walker would drop the
+        // latch at `writing` once its orphan grace passed and never
+        // reach `complete`, skipping the stages 4/5 + left-arrow return
+        // ceremony.
         setStage("complete");
       }
       return result;

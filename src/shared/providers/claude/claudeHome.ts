@@ -8,7 +8,8 @@ import { join } from "node:path";
  */
 
 export const CLAUDE_HOME_DIR = join(homedir(), ".claude");
-/** OAuth token the usage service sends to the Anthropic usage endpoint. */
+/** OAuth block: the token the usage service sends to the Anthropic usage
+ * endpoint, and the plan tier the 5-hour bar reads before any payload. */
 export const CLAUDE_CREDENTIALS_PATH = join(CLAUDE_HOME_DIR, ".credentials.json");
 /** User settings: the `env` block with the auto-compact overrides and
  * the `permissions.allow` list the installer maintains. */

@@ -6,7 +6,7 @@ import { CLAUDE_PROJECTS_DIR } from "../shared/providers/claude/claudeHome";
 import { compareActivity, rankActivity } from "../shared/sessionTokens/activityRanking";
 import type { LastEntryKind } from "../shared/turnState";
 import { classifyClaudeTurn } from "./claudeTurnClassifier";
-import type { SessionEntry } from "./claudeSessionTokenTypes";
+import type { ClaudeSessionEntry } from "./claudeSessionTokenTypes";
 
 /**
  * Live-session discovery for Claude. `walkWorkspaceSessions` does the
@@ -21,20 +21,17 @@ import type { SessionEntry } from "./claudeSessionTokenTypes";
  * when the transcript could not be read, and `mtime` falls back to
  * `entry.startedAt` in the same case. */
 export interface SessionCandidate {
-  entry: SessionEntry;
+  entry: ClaudeSessionEntry;
   transcriptPath: string;
   mtime: number;
   turnState: LastEntryKind;
 }
 
 /** Walk `~/.claude/sessions/*.json` once and return every workspace-
- * matching session as a `SessionCandidate`. Bidirectional cwd match
- * closes a recurring widget-misses-the-live-session gap: when a user
- * launches `claude` from `c:\Dev\WAT321\subdir` but has VS Code open
- * at `c:\Dev\WAT321`, the unidirectional check "workspace is inside
- * session.cwd" fails and the live PID is never found. The reverse
- * check "session.cwd is inside workspace" recovers it. One tail read
- * per candidate, consumed by both rank and tally. */
+ * matching session as a `SessionCandidate`. The cwd match runs both
+ * ways, so a session launched from a subfolder of the open workspace
+ * still counts as this workspace's. One tail read per candidate,
+ * consumed by both rank and tally. */
 export function walkWorkspaceSessions(
   sessionsDir: string,
   workspacePath: string
@@ -52,7 +49,7 @@ export function walkWorkspaceSessions(
 
   for (const file of files) {
     try {
-      const entry: SessionEntry = JSON.parse(
+      const entry: ClaudeSessionEntry = JSON.parse(
         readFileSync(join(sessionsDir, file), "utf8")
       );
       if (!isSameWorkspaceTree(workspacePath, entry.cwd)) continue;
@@ -88,7 +85,7 @@ export function walkWorkspaceSessions(
  * over a terminal twin. */
 export function rankActiveSession(
   candidates: readonly SessionCandidate[]
-): SessionEntry | null {
+): ClaudeSessionEntry | null {
   if (candidates.length === 0) return null;
   const now = Date.now();
   const ranked = candidates.map((c) => ({

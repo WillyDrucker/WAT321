@@ -5,22 +5,9 @@ import {
 } from "./rolloutEntry";
 
 /**
- * Pure parsers for Codex rollout JSONL tails. No fs, no watchers,
- * no state. Callers supply a tail buffer they already have.
- *
- * Used by:
- *   - Codex session token widget (tooltip richness, active tool name)
- *   - Epic Handshake bridge dispatcher (adaptive stall detection)
- *
- * The big single-pass `parseStageInfo` state machine lives in the
- * sibling `stageInfoParser.ts`. Internal entry-shape helpers live
- * in `rolloutEntry.ts`. Display-string builders (label / plan /
- * tool line renderers) live in `stageDisplayRender.ts`. Splitting parser
- * core from rendering keeps the one-pass walk cohesive and lets
- * the tooltip layer evolve without touching parsing.
- *
- * Codex rollout event shapes were captured empirically from real
- * session runs.
+ * Turn scoping for Codex rollout tails. Pure over a tail the caller
+ * already read. Shared by the stage parser and the Epic Handshake reply
+ * recovery, so both see the same turn boundary.
  */
 
 /** Slice a rollout tail to the lines belonging to the most recent

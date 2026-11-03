@@ -3,7 +3,7 @@ import type { ProviderKey } from "./contracts";
 import { formatDuration } from "./durationFormat";
 import type { EngineContext } from "./engineContext";
 import { isPidAlive } from "./pidLiveness";
-import { getNotificationDiagnostics } from "./toastNotifier";
+import { getNotificationDiagnostics } from "./notifications/toastNotifier";
 import { readRecentTransitions } from "./usageTransitionLog";
 import { clientStateDir } from "./wat321Paths";
 

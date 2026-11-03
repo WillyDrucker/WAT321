@@ -3,14 +3,14 @@ import type { Envelope } from "./envelope";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
 import { classifyFailure } from "./failureClassifier";
 import { tryRolloutRecovery } from "./rolloutRecovery";
-import { findRolloutPath } from "./sessionRecovery";
+import { findRolloutPath } from "../codexThread/sessionRecovery";
 import {
   noteFailure,
   noteSuccess,
   rotateThreadRecord,
   spawnFreshThread,
-} from "./threadLifecycle";
-import { ensureReadyThread } from "./threadReadiness";
+} from "../codexThread/threadLifecycle";
+import { ensureReadyThread } from "../codexThread/threadReadiness";
 import {
   clearInFlightFlag,
   clearProcessingFlag,

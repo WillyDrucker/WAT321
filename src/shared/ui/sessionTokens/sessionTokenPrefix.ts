@@ -8,37 +8,25 @@ import type {
 
 /**
  * Pure prefix selection for the session-token widget: which codicon
- * drives the leading "thinking" cell on every render.
- *
- * Routing order:
- *   1. Claude waiting on OpenCode / Local LLM (heartbeat fresh, EH
- *      idle): 1Hz claude / blank blink, the same shape as a bridge wait.
- *   2. EH bridge in flight and not bypassed: pre-ceremony a 1Hz logo
- *      blink, during the ceremony Claude's native activeFrames or
- *      Codex's debug-disconnect / debug-connected alternation, after
- *      it Claude blinks claude / blank while Codex keeps alternating at
- *      stage dispatched and falls through to native from received on.
- *   3. Native: turnState in [user, assistant-pending] AND (pidAlive OR
- *      mtime fresh) cycles activeFrames, otherwise idlePrefix.
- *
- * Bypasses: Claude under fire-and-forget skips every bridge branch (the
- * MCP call returned at once), and Codex skips them when the active
- * dispatch targets OpenCode / Local LLM (its side is idle). Stage
+ * drives the leading "thinking" cell on every render. Routing order is
+ * a Claude wait on OpenCode / Local LLM, then the Epic Handshake bridge
+ * branches (ceremony and stage animation), then the native turn
+ * indicator. Claude under fire-and-forget skips the bridge branches,
+ * and so does Codex when a dispatch targets OpenCode / Local LLM. Stage
  * meanings live in `WAT321_EPIC_HANDSHAKE/bridgeStage/bridgeStageMap.ts`,
- * and both session-token widgets read the same snapshot as the bridge
- * widget, so all three observe the same stage at the same instant.
+ * and all three widgets read one snapshot, so they agree on the stage.
  */
 
-/** No-PID fallback window. mtime is doing both jobs (continuity AND
- * end-of-turn detection) so the default is widened from the
- * descriptor's tight live-PID safety net to ride through normal
+/** No-PID fallback window. The last write is doing both jobs
+ * (continuity AND end-of-turn detection) so the window is widened from
+ * the descriptor's tight live-PID safety net to ride through normal
  * between-tool deliberation. Classifier transitions still collapse
  * the widget the instant a real end state lands. */
 const NO_PID_FALLBACK_MS = 30_000;
 
-/** Activity-window length. Under live PID the descriptor's tight
- * default is just a safety net (PID-alive is the primary continuity
- * signal). With no PID:
+/** Activity-window length. Under a PID the descriptor's tight
+ * `activeThresholdMs` is just a safety net (PID-alive is the primary
+ * continuity signal). With no PID:
  *   - `silentTurnCeilingMs` (when the provider supplies one AND a turn
  *     is in progress) rides a long silent reasoning gap, trusting the
  *     classifier as the real end-of-turn signal. Codex needs this.
@@ -47,10 +35,10 @@ const NO_PID_FALLBACK_MS = 30_000;
  *     that must not trust the classifier far enough to widen). */
 export function effectiveActiveThresholdMs(
   pid: number | undefined,
-  defaultMs: number,
+  pidThresholdMs: number | undefined,
   silentTurnCeilingMs?: number
 ): number {
-  if (pid !== undefined) return defaultMs;
+  if (pid !== undefined && pidThresholdMs !== undefined) return pidThresholdMs;
   return silentTurnCeilingMs ?? NO_PID_FALLBACK_MS;
 }
 
@@ -69,7 +57,7 @@ export function isTurnFresh<TState extends { status: string }>(
   now: number
 ): boolean {
   return (
-    now - data.transcriptMtimeMs <
+    now - data.lastWriteMs <
     effectiveActiveThresholdMs(
       data.pid,
       descriptor.activeThresholdMs,
@@ -112,7 +100,7 @@ export function pickPrefix<TState extends { status: string }>(
 
   // Codex widget suppresses every bridge-driven animation when the
   // active dispatch targets OpenCode / Local LLM - the Codex side is
-  // doing nothing during a Big Pickle FF dispatch.
+  // idle for the whole of such a dispatch.
   const heartbeatTarget = snapshot.heartbeat?.target;
   const codexOffTarget =
     d.provider === "Codex" &&
@@ -162,10 +150,10 @@ export function pickPrefix<TState extends { status: string }>(
     data.turnState === "user" || data.turnState === "assistant-pending";
   if (!turnInProgress || d.activeFrames.length === 0) return d.idlePrefix;
 
-  // PID liveness keeps the indicator on through silent thinking
-  // (deep Opus reasoning, slow tool calls). Mtime backstop is the
-  // safety net when PID is unavailable or dead, and threshold widens to
-  // 30s on lastKnown fallback where mtime is doing both jobs.
+  // PID liveness keeps the indicator on through silent thinking and
+  // slow tool calls. The last-write backstop is the safety net when
+  // the PID is unavailable or dead, on the wider no-PID window where
+  // the last write is doing both jobs.
   const pidAlive = data.pid !== undefined && isPidAlive(data.pid);
   if (!pidAlive && !isTurnFresh(data, d, now)) return d.idlePrefix;
 

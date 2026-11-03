@@ -17,6 +17,8 @@ interface LastTokenCount {
   contextWindowSize: number;
 }
 
+/** Stand-in when a `token_count` event omits `model_context_window`:
+ * the usable window of the 272K-context models Codex shipped with. */
 const DEFAULT_CODEX_CONTEXT_WINDOW = 258_400;
 
 /** Scan the tail (up to the last 200 lines) for the most recent
@@ -75,10 +77,9 @@ export function parseLastTokenCount(tail: string): LastTokenCount | null {
 
 /** Read `session_meta.payload.cwd` from the first line of the rollout.
  * Used both to match rollouts to a workspace and to label the widget.
- * `readFirstLine` reads in chunks until a newline, so an oversized
- * session_meta first line (routinely 15-25KB on recent Codex CLI
- * rollouts - can grow further as Codex adds metadata) is always
- * captured intact. */
+ * `readFirstLine` reads in chunks until a newline, so the session_meta
+ * line, which runs to tens of kilobytes and grows as Codex adds
+ * metadata, is always captured intact. */
 export function parseCwd(rolloutPath: string): string | null {
   const firstLine = readFirstLine(rolloutPath);
   if (!firstLine) return null;
@@ -195,7 +196,6 @@ export function extractFirstUserMessage(headContent: string): string {
   }
   return "";
 }
-
 
 /** Walk the tail backwards for the most recent compact event. Codex
  * emits two paired entries on every compact (auto or `/compact`):

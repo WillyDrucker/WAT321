@@ -1,17 +1,18 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { clientStateDir } from "./wat321Paths";
+import type { ProviderKey, SessionSource } from "../contracts";
+import { clientStateDir } from "../wat321Paths";
 
 /**
  * [WAT-DEBUG] Append-only JSONL log of notification-path decisions at
- * `<clientStateDir>/notification-events.jsonl`. Bounded rolling
- * head-truncate at 1MB. Raw `writeFileSync` with `{ flag: "a" }` is
+ * `<clientStateDir>/notification-events.jsonl`, head-truncated past
+ * `EVENT_LOG_MAX_BYTES`. Raw `writeFileSync` with `{ flag: "a" }` is
  * intentional - the atomic-write helper would clobber the prior log
  * on every append.
  *
  * Every `logNotifEvent` callsite is part of the `[WAT-DEBUG]` surface
- * for missing-notification post-mortems. Surfaces feeding this log
- * today: session-switch (per provider), bridge-decision (fire / gate),
+ * for missing-notification post-mortems. Surfaces feeding this log:
+ * session-switch (per provider), bridge-decision (fire / gate),
  * dedup-decision, notifier-decision (toast outcome). `grep -rn
  * "logNotifEvent\\|\\[WAT-DEBUG\\]" src/` pulls the full
  * instrumentation set for review or wholesale removal.
@@ -46,7 +47,7 @@ interface BaseEvent {
 
 interface SessionSwitchEvent extends BaseEvent {
   kind: "session-switch";
-  provider: "claude" | "codex";
+  provider: ProviderKey;
   fromPath: string | null;
   toPath: string | null;
   /** UUIDs derived from `fromPath` / `toPath` so log readers can
@@ -61,12 +62,12 @@ interface SessionSwitchEvent extends BaseEvent {
    * service does not branch on this, but it lets the log reader
    * distinguish a live-process pick from a lastKnown fallback from a
    * Codex rollout scan without re-deriving from the path shape. */
-  source: "live" | "lastKnown" | "rollout-scan";
+  source: SessionSource | "rollout-scan";
 }
 
 interface BridgeDecisionEvent extends BaseEvent {
   kind: "bridge-decision";
-  provider: "claude" | "codex";
+  provider: ProviderKey;
   path: string | null;
   /** Per-session UUID derived from `path`. Same throw-away rationale
    * as `SessionSwitchEvent.fromSessionId`. */
@@ -83,7 +84,7 @@ interface BridgeDecisionEvent extends BaseEvent {
 
 interface DedupDecisionEvent extends BaseEvent {
   kind: "dedup-decision";
-  provider: "claude" | "codex";
+  provider: ProviderKey;
   sessionId: string;
   completionBucket: number;
   claimed: boolean;
@@ -91,7 +92,7 @@ interface DedupDecisionEvent extends BaseEvent {
 
 interface NotifierDecisionEvent extends BaseEvent {
   kind: "notifier-decision";
-  provider: "claude" | "codex";
+  provider: ProviderKey;
   /** Per-session UUID at the time of delivery. Empty string when
    * the toast carries no per-session context (rare - bridge fires
    * with a session id today, but the union allows future event

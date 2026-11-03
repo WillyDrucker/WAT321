@@ -27,8 +27,7 @@ import { TpsThrottle } from "../tpsThrottle";
  * Active detection is three-layer: the classifier's `turnState` (only
  * `user` and `assistant-pending` keep it active), then PID liveness so
  * a live process keeps animating through silent thinking, then the
- * mtime backstop `now - mtime < activeThresholdMs` for a CLI that
- * crashed without a final marker.
+ * last-write backstop for a CLI that crashed without a final marker.
  *
  * The ticker runs at TICK_MS from cached state and the wall clock, with
  * the frame index wall-clock-derived so widgets stay in sync, and
@@ -50,7 +49,7 @@ export class SessionTokenWidget<TState extends { status: string }>
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** Push subscription to bridge phase + stage transitions so the
    * first bridge dispatch after a cold launch animates immediately
-   * instead of waiting up to 15s for the next service poll. */
+   * instead of waiting for the next service poll. */
   private bridgeSub: { dispose(): void } | null = null;
   /** Display-refresh throttle for the visible TPS suffix. Per-widget -
    * the Claude widget's cadence does not drag the Codex widget. Reset
@@ -86,14 +85,14 @@ export class SessionTokenWidget<TState extends { status: string }>
     this.ensureTicker();
   }
 
-  /** True when an animation needs the 250ms sampling cadence:
+  /** True when an animation needs the `TICK_MS` sampling cadence:
    *   - bridge widget is mid-turn (any non-idle phase)
    *   - cache LOAD or MISS flash window is open
-   *   - transcript was active within the last `activeThresholdMs`
+   *   - the session file was written within its activity window
    *
    * When all are false the widget renders a static idle state - the
    * ticker self-suspends until the next external update() restarts
-   * it. Avoids the 4Hz tick during long idle stretches. */
+   * it, so long idle stretches cost no ticks. */
   private animationsActive(): boolean {
     const now = Date.now();
     if (this.bridgeStage.snapshot().phase !== "idle") return true;
@@ -110,7 +109,7 @@ export class SessionTokenWidget<TState extends { status: string }>
       // render falls through to the normal path even before the
       // service emits its next state.
       if (
-        data.compactState?.state === "flashing-completion" &&
+        data.compactState.state === "flashing-completion" &&
         data.compactState.flashUntil !== null &&
         now < data.compactState.flashUntil
       ) {
@@ -118,20 +117,19 @@ export class SessionTokenWidget<TState extends { status: string }>
       }
       const turnInProgress =
         data.turnState === "user" || data.turnState === "assistant-pending";
-      // PID + mtime backstop. Without it, a stale `assistant-pending`
-      // classification (auto-compact summary the parser misreads as
-      // mid-turn, partial entry from a Claude API error, cold launch
-      // with the prior session's tail unchanged) keeps the ticker
-      // ticking forever. A new prompt landing later still triggers
-      // update() so this is a self-healing suspension.
+      // PID + last-write backstop. Without it, a stale
+      // `assistant-pending` classification (a partial entry from an API
+      // error, a cold launch on the prior session's unchanged tail)
+      // keeps the ticker ticking forever. A new prompt landing later
+      // still triggers update() so this is a self-healing suspension.
       if (turnInProgress) {
         const pidAlive = data.pid !== undefined && isPidAlive(data.pid);
         if (pidAlive || isTurnFresh(data, this.descriptor, now)) return true;
       }
-      const mtimeFresh =
-        now - data.transcriptMtimeMs <
+      const writeFresh =
+        now - data.lastWriteMs <
         effectiveActiveThresholdMs(data.pid, this.descriptor.activeThresholdMs);
-      if (mtimeFresh) return true;
+      if (writeFresh) return true;
     }
     return false;
   }
@@ -195,7 +193,7 @@ export class SessionTokenWidget<TState extends { status: string }>
         // window passes instead of waiting for the next service poll.
         const now = Date.now();
         if (
-          data.compactState?.state === "flashing-completion" &&
+          data.compactState.state === "flashing-completion" &&
           data.compactState.flashUntil !== null &&
           now < data.compactState.flashUntil
         ) {
@@ -217,11 +215,11 @@ export class SessionTokenWidget<TState extends { status: string }>
         });
         const banner = this.cacheBannerLatch.bannerAt(now);
         if (banner !== null) {
-          // LOAD or MISS text persists for the full 2000ms window -
-          // only the bullet positions blink at 500ms cadence. Prefix
-          // stays visible so the brand icon and thinking indicator
-          // ride through the flash. Tooltip keeps real data so
-          // hovering during the flash still gives you session info.
+          // LOAD or MISS text persists for the whole flash window -
+          // only the bullet positions blink. Prefix stays visible so
+          // the brand icon and thinking indicator ride through the
+          // flash. Tooltip keeps real data so hovering during the
+          // flash still gives you session info.
           this.item.text = `${prefix} ${banner}`;
         } else if (mode === "minimal" || mode === "compact") {
           this.item.text = `${prefix} ${formatTokens(data.contextUsed)} ${formatPct(pctOfCeiling)}${tpsSuffix(this.tpsThrottle.next(data.tokensPerSecond), mode)}`;

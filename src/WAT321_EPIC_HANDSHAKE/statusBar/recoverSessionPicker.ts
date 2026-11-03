@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import { EPIC_HANDSHAKE_MENU_TEXT, type Action, type DispatchAction } from "./menuActions";
 import { makeBackItem, makeCancelItem, makePauseResumeItem } from "../../shared/ui/menuRows";
 import { isPaused } from "./statusBarState";
-import { type RecoverableSession, recoverBridgeThread } from "../codexTurn/sessionRecovery";
-import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
+import { type RecoverableSession, recoverBridgeThread } from "../codexThread/sessionRecovery";
+import { loadBridgeThreadRecord } from "../codexThread/threadRecord";
 
 /**
  * Switch-to-recoverable-session sub-picker. Opens from the CODEX
@@ -14,7 +14,7 @@ import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
  *
  * BACK from this picker walks back to the parent submenu, not the
  * main menu. The dispatch contract is shared with all EH pickers so
- * Pause/Resume/Cancel route through the same `handleAction` surface.
+ * Pause/Resume/Cancel route through the same menu dispatch.
  */
 
 export async function showRecoverSessionPicker(

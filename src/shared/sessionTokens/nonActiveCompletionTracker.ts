@@ -1,4 +1,5 @@
-import type { NonActiveCompletion } from "../../engine/sessionResponseBridge";
+import type { NonActiveCompletion } from "../../engine/notifications/sessionResponseBridge";
+import type { LastEntryKind } from "../turnState";
 
 /**
  * Tracks done-transitions on non-active workspace sessions so the
@@ -17,7 +18,6 @@ import type { NonActiveCompletion } from "../../engine/sessionResponseBridge";
  */
 
 interface TrackedState {
-  turnState: string;
   mtime: number;
   reportedAsDone: boolean;
 }
@@ -30,7 +30,7 @@ interface NonActiveCompletionTrackerConfig<C> {
    * inside the gate on the next one. */
   freshWindowMs: number;
   keyOf: (candidate: C) => string;
-  turnStateOf: (candidate: C) => string;
+  turnStateOf: (candidate: C) => LastEntryKind;
   mtimeOf: (candidate: C) => number;
   /** Build the completion payload for a freshly-done non-active
    * candidate. Called only at the moment of the done-transition. */
@@ -51,15 +51,14 @@ export class NonActiveCompletionTracker<C> {
     for (const candidate of candidates) {
       const key = this.config.keyOf(candidate);
       seen.add(key);
-      const turnState = this.config.turnStateOf(candidate);
       const mtime = this.config.mtimeOf(candidate);
-      const isDone = turnState === "assistant-done";
+      const isDone = this.config.turnStateOf(candidate) === "assistant-done";
       const prev = this.states.get(key);
 
       // Active session: track state for a future ranking flip, never
       // queue. First read of an unknown session: record without queuing.
       if (key === activeKey || prev === undefined) {
-        this.states.set(key, { turnState, mtime, reportedAsDone: isDone });
+        this.states.set(key, { mtime, reportedAsDone: isDone });
         continue;
       }
 
@@ -69,7 +68,6 @@ export class NonActiveCompletionTracker<C> {
         this.pending.push(this.config.buildCompletion(candidate, now));
       }
       this.states.set(key, {
-        turnState,
         mtime,
         reportedAsDone: isDone || (prev.reportedAsDone && mtime === prev.mtime),
       });

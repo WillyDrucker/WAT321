@@ -8,8 +8,8 @@ import { EPIC_HANDSHAKE_MENU_TEXT, makeInFlightLockedItem, type Item } from "./m
 import { makeCancelItem, makePauseResumeItem } from "../../shared/ui/menuRows";
 import { createMenuDispatch } from "./statusBarMenuActions";
 import { currentWorkspacePath, isPaused } from "./statusBarState";
-import { listRecoverableSessions } from "../codexTurn/sessionRecovery";
-import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
+import { listRecoverableSessions } from "../codexThread/sessionRecovery";
+import { loadBridgeThreadRecord } from "../codexThread/threadRecord";
 import { readNewestHeartbeat } from "../../engine/heartbeat/heartbeatReader";
 import {
   currentWaitMode,
@@ -22,9 +22,10 @@ import type { BridgeStage } from "../../engine/bridgeTypes";
  * Main QuickPick entry point for the Epic Handshake widget. The
  * status bar item registers a command that calls `showMainMenu` -
  * action handling lives in `statusBarMenuActions.ts` and is wired
- * here via `createMenuDispatch`. Sub-pickers (menuPickers.ts,
- * lateReplyPickers.ts, codexDefaultsPicker.ts) receive the same
- * dispatch closure so every action has exactly one switch.
+ * here via `createMenuDispatch`. Sub-pickers (`manageCodexSubmenu.ts`,
+ * `lateReplyPickers.ts`, `recoverSessionPicker.ts`,
+ * `codexDefaultsPicker.ts`) receive the same dispatch closure so every
+ * action has exactly one switch.
  *
  * Action types and the in-flight lock live in `menuActions.ts`, the shared rows in `shared/ui/menuRows.ts`.
  */

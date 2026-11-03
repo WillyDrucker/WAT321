@@ -5,7 +5,7 @@ import {
   deleteCurrentCodexSession,
 } from "./repair/deleteCommand";
 import { stageClipboardImageCommand } from "./stageClipboardImage";
-import { loadBridgeThreadRecord, resetBridgeThread } from "./codexTurn/threadRecord";
+import { loadBridgeThreadRecord, resetBridgeThread } from "./codexThread/threadRecord";
 import type { EpicHandshakeLogger } from "./epicHandshakeLogger";
 
 /**

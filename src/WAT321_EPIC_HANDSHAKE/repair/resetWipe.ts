@@ -11,7 +11,7 @@ import {
 import {
   loadBridgeThreadRecordIfExists,
   saveBridgeThreadRecord,
-} from "../codexTurn/threadRecord";
+} from "../codexThread/threadRecord";
 
 /**
  * Workspace-scoped wipe of every Epic Handshake artifact tied to one

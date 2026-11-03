@@ -13,9 +13,15 @@ import type * as vscode from "vscode";
  * registry and as the setting suffix in `wat321.enable{Key}`. */
 export type ProviderKey = "claude" | "codex";
 
-/** Known context window sizes mapped by model slug pattern.
- * Used by session token services to resolve the display
- * denominator from the model ID in the transcript/rollout. */
+/** How a session-token service found its session: `live` from a CLI
+ * process file, `lastKnown` from the newest transcript when no live
+ * process matched. */
+export type SessionSource = "live" | "lastKnown";
+
+/** Known context window sizes mapped by model id pattern. The Claude
+ * session token service resolves its display denominator from the
+ * model id in the transcript. Codex reads its window from the rollout
+ * and the models cache instead. */
 interface ModelContextWindow {
   match: (modelId: string) => boolean;
   contextWindowSize: number;
@@ -90,15 +96,6 @@ const MODEL_CONTEXT_WINDOWS: readonly ModelContextWindow[] = [
     contextWindowSize: 200_000,
     displayName: claudeDisplayName,
   },
-  {
-    match: (id) => id.startsWith("gpt-"),
-    contextWindowSize: 272_000,
-    // Codex slugs are the user-facing identifier in Codex CLI, so show
-    // them raw. A prettified name would mask config drift: an invalid
-    // slug in a session's `session_meta.model` reads as plausible until
-    // a turn fires and the API returns 404.
-    displayName: (id) => id,
-  },
 ];
 
 /** Resolve context window size for a model slug. Returns the
@@ -108,8 +105,10 @@ export function resolveContextWindow(modelId: string): number {
   return entry?.contextWindowSize ?? 200_000;
 }
 
-/** Format a model slug into a human-readable display name.
- * Falls back to the raw slug if no pattern matches. */
+/** Format a model id into a human-readable display name. An id no
+ * pattern matches shows raw, which is how Codex slugs show on purpose:
+ * they are the user-facing identifier in Codex CLI, and a prettified
+ * name would let an invalid slug read as plausible until a turn 404s. */
 export function formatModelDisplayName(modelId: string): string {
   const entry = MODEL_CONTEXT_WINDOWS.find((m) => m.match(modelId));
   return entry?.displayName(modelId) ?? modelId;
@@ -179,7 +178,7 @@ interface SessionTokenService<TState> extends Subscribable<TState> {
    * fallback. Health command surfaces this so cross-workspace
    * contamination (wrong tail + lastKnown source) is one glance away. */
   getActiveSessionDiagnostics(): {
-    source: "live" | "lastKnown" | null;
+    source: SessionSource | null;
     pid: number | null;
   };
   /** Compact-completion flash diagnostics. Both Claude and Codex

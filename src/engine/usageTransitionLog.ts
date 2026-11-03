@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { ProviderKey } from "./contracts";
 import { writeFileAtomic } from "./fs/atomicWrite";
 
 /**
@@ -42,7 +43,6 @@ export type TransitionReason =
   | "fetch-network-error"
   | "fetch-other-error"
   | "wake-from-park"
-  | "kickstart-skipped-idle"
   | "auth-missing"
   | "auth-dir-vanished"
   | "discovery-recovered"
@@ -51,7 +51,7 @@ export type TransitionReason =
 
 interface TransitionRecord {
   at: number;
-  provider: "claude" | "codex";
+  provider: ProviderKey;
   from: TransitionStatus;
   to: TransitionStatus;
   reason: TransitionReason;
@@ -60,21 +60,20 @@ interface TransitionRecord {
   consecutiveFailedKickstarts?: number;
   retryAfterMs?: number;
   serverMessage?: string;
-  /** Wall-clock ms since the activity probe (session-token mtime)
-   * last saw a transcript write, or null when the probe has no signal
-   * (no session resolved yet). The kickstart gate's idle/active
-   * decision is `idleForMs > KICKSTART_ACTIVITY_WINDOW_MS` (30s) - a
-   * value over that threshold at the moment of a 429 absorb or park
-   * is the smoking gun for "I was actively using Claude but the widget
-   * didn't kickstart because typing-in-input-box isn't a transcript
-   * write." */
+  /** Wall-clock ms since the activity probe last saw the session
+   * write, or null when the probe has no signal (no session resolved
+   * yet). The kickstart gate reads idle once this passes
+   * `KICKSTART_ACTIVITY_WINDOW_MS`, so a value over it at a 429 absorb
+   * or park is the smoking gun for "I was actively using it but the
+   * widget didn't kickstart, because typing in the input box isn't a
+   * transcript write." */
   idleForMs?: number | null;
   /** Current poll cadence in ms at the moment of the record. Normal is
-   * `POLL_INTERVAL_MS` (122_000) - rate-limited park raises this to
-   * `retryAfterMs` (up to `RATE_LIMIT_BACKOFF_MS`, 15 minutes).
-   * Sudden cadence drops point at unintentional fast-poll loops - long
-   * stretches at the rate-limit cadence point at "we haven't tried in
-   * a while" idle-feel even when the state is technically ok. */
+   * `POLL_INTERVAL_MS`, and a rate-limited park raises it to
+   * `retryAfterMs` (capped at `RATE_LIMIT_BACKOFF_MS`). Sudden cadence
+   * drops point at unintentional fast-poll loops, and long stretches at
+   * the rate-limit cadence point at "we haven't tried in a while"
+   * idle-feel even when the state is technically ok. */
   pollIntervalMs?: number;
   /** Age in ms of the cross-window cache entry the record adopted.
    * Only set on `cache-adopted` reasons. Helps distinguish "this

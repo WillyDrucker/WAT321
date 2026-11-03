@@ -102,7 +102,7 @@ export async function runAdaptiveWait(args, id, latePreamble) {
       lastHeartbeatAt === null ? ADAPTIVE_STALE_MS : Date.now() - lastHeartbeatAt;
     const msg = hitCeiling
       ? `Adaptive wait hit the ${Math.round(ceilingMs / 60_000)}-minute hard ceiling for dispatch ${id} while Codex was still emitting progress. The reply will land in the bridge inbox if it completes. Retrieve with \`wat321_bridge()\` once it arrives.`
-      : `Adaptive wait aborted for dispatch ${id} - no heartbeat from the bridge dispatcher for ${Math.round(stalledMs / 1000)}s (threshold ${Math.round(ADAPTIVE_STALE_MS / 1000)}s). Codex may have hung or the dispatcher may have died; check the WAT321 Bridge output channel for detail. If Codex finishes after this, the reply will land in the bridge inbox and is retrievable via \`wat321_bridge()\`.`;
+      : `Adaptive wait aborted for dispatch ${id} - no heartbeat from the bridge dispatcher for ${Math.round(stalledMs / 1000)}s (threshold ${Math.round(ADAPTIVE_STALE_MS / 1000)}s). Codex may have hung or the dispatcher may have died, so check the WAT321 Bridge output channel for detail. If Codex finishes after this, the reply will land in the bridge inbox and is retrievable via \`wat321_bridge()\`.`;
     return textResult(withPreamble(latePreamble, msg));
   } finally {
     clearWaitStatus();

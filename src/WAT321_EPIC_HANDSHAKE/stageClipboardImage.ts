@@ -8,10 +8,9 @@ import type { EpicHandshakeLogger } from "./epicHandshakeLogger";
 /**
  * Stage whatever image is on the OS clipboard into a file under
  * `~/.wat321/epic-handshake/attachments/clipboard/` so the user can
- * reference it in a Claude-to-Codex prompt via `file_paths` on the
- * MCP tool. The image bytes never enter Claude's token budget - they
- * go clipboard -> extension -> disk, and only the path string rides
- * the conversation.
+ * paste its path into a Claude-to-Codex prompt. The image bytes never
+ * enter Claude's token budget - they go clipboard -> extension -> disk,
+ * and only the path string rides the conversation.
  *
  * Platform matrix:
  *   - Windows: PowerShell + System.Windows.Forms.Clipboard.GetImage

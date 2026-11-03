@@ -1,4 +1,5 @@
 import { existsSync, statSync, unlinkSync } from "node:fs";
+import { RETURNING_FLAG_MS } from "../../engine/bridgeTypes";
 import { clearFlag, setFlag } from "../../engine/fs/flagFile";
 import {
   cancelFlagPath,
@@ -16,7 +17,7 @@ import { workspaceHash } from "../../engine/workspaceHash";
  * `in-flight.<wshash>.flag` from dispatch start until clear,
  * `processing.<wshash>.flag` from Codex's first streaming delta until
  * completion or failure, `returning.<wshash>.flag` written on success
- * and auto-cleared 3000ms later. The cancel sentinel and the
+ * and auto-cleared after `RETURNING_FLAG_MS`. The cancel sentinel and the
  * suppress-codex-toast sentinel live here too, documented at their
  * writers below.
  *
@@ -112,15 +113,13 @@ export function clearBridgeRuntimeFlags(workspacePath: string): void {
   clearFlag(suppressCodexToastFlagPath(hash));
 }
 
-/** Write the returning flag and schedule its cleanup 3000ms later.
- * The unref'd timer lets the dispatcher shut down without waiting.
- * 3s aligns with `STAGE_LATCH_MS["complete"]` and the walker's
- * stage 5 + post-walk hold, so the returning-flag fallback (used in
- * non-adaptive modes that bypass the walker) reads as the same
- * 3-second beat the rest of the bridge UI uses. */
+/** Write the returning flag and schedule its cleanup after
+ * `RETURNING_FLAG_MS`, the walker's stage-5 beat, so the fallback in
+ * non-adaptive modes that bypass the walker reads the same. The
+ * unref'd timer lets the dispatcher shut down without waiting. */
 export function writeReturningFlag(workspacePath: string): void {
   const path = returningFlagPath(workspaceHash(workspacePath));
   setFlag(path);
-  const t = setTimeout(() => clearFlag(path), 3_000);
+  const t = setTimeout(() => clearFlag(path), RETURNING_FLAG_MS);
   t.unref?.();
 }

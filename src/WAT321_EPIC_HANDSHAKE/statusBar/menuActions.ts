@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { DrainedReply } from "../../engine/inbox/inboxReader";
 import type { MenuRowText } from "../../shared/ui/menuRows";
-import type { RecoverableSession } from "../codexTurn/sessionRecovery";
+import type { RecoverableSession } from "../codexThread/sessionRecovery";
 
 /**
  * The action vocabulary and row shapes every Epic Handshake QuickPick
@@ -53,7 +53,7 @@ export type PickResult<TValue> =
   | { kind: "cancelled" }
   | { kind: "picked"; value: TValue };
 
-/** Context passed to `handleAction` so sub-menus and the main menu
+/** Context passed to the menu dispatch so sub-menus and the main menu
  * route through one dispatch surface without re-deriving state. */
 export interface ActionContext {
   ws: string | null;
@@ -63,8 +63,8 @@ export interface ActionContext {
 }
 
 /** Pickers call back into the main file's dispatch via this signature
- * to avoid a circular import. The main file passes its own
- * `handleAction` as the value. */
+ * to avoid a circular import. The main file passes the dispatch
+ * `createMenuDispatch` builds. */
 export type DispatchAction = (
   action: Action,
   ctx: ActionContext

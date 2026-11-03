@@ -15,8 +15,7 @@ import {
  * older binary reports fewer models from `model/list` and rejects the
  * newer ones outright. A ChatGPT extension left behind by an earlier
  * install can bundle a Codex several minor versions behind the user's
- * npm CLI (observed: bundled 0.140.0-alpha.2 against a PATH 0.144.1,
- * where only the latter knows the GPT-5.6 family), so preferring the
+ * npm CLI, one that does not know the newest models, so preferring the
  * bundled binary silently costs the user models they can run.
  */
 

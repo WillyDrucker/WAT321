@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { UsageServiceDiagnostics } from "../../engine/contracts";
+import type { ProviderKey, UsageServiceDiagnostics } from "../../engine/contracts";
 import type { ServiceState, StateListener } from "../../engine/serviceTypes";
 import type { TransitionReason, TransitionStatus } from "../../engine/usageTransitionLog";
 import { CacheCoordinator } from "../cacheCoordinator";
@@ -20,7 +20,7 @@ interface UsageServiceConfig {
   endpointUrl: string;
   /** Provider tag on every transition record so the health command
    * can attribute entries when Claude and Codex are both active. */
-  providerKey: "claude" | "codex";
+  providerKey: ProviderKey;
   /** Per-workspace JSONL transition log path. Each subclass passes
    * a path inside `clientStateDir()`. */
   transitionLogPath: string;
@@ -37,7 +37,7 @@ interface UsageServiceConfig {
  *   - usageServiceErrorState: fetch-error decision tree + counters
  *   - usageServiceFetchCycle: cache adoption, claim, fetch, validate
  *   - usageServicePollSchedule: every timer, including discovery and
- *     the recovery watchdog that forces a fetch on the 15-min gap
+ *     the recovery watchdog that forces a fetch after a long gap
  */
 export abstract class UsageServiceBase<TResponse> {
   private state: ServiceState<TResponse>;
@@ -103,9 +103,9 @@ export abstract class UsageServiceBase<TResponse> {
     });
   }
 
-  /** 60s callback during rate-limited state. Lets kickstart fire
-   * within a minute of activity returning instead of waiting out
-   * the full retryAfterMs (up to 901s) for the next refresh(). */
+  /** Countdown tick during a rate-limited park. Lets the kickstart fire
+   * soon after activity returns instead of waiting out the full
+   * retry-after for the next refresh(). */
   private onCountdownTick(): void {
     if (
       this.state.status === "rate-limited" &&

@@ -186,7 +186,7 @@ export async function handleAsk(args) {
       resolve(
         textResult(
           `Fire-and-forget safety cap reached at ${Math.round(FF_SAFETY_CAP_MS / 1000)}s. ` +
-            "The bridge held the dispatch longer than fire-and-forget's no-wait contract allows; this is unexpected. " +
+            "The bridge held the dispatch longer than fire-and-forget's no-wait contract allows, which is unexpected. " +
             "Codex's reply, if any, will still land in the bridge inbox - retrieve it with `wat321_bridge()`. " +
             "If this recurs, restart the bridge from the status bar widget."
         )

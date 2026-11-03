@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { logNotifEvent } from "../engine/notifEventLog";
+import { logNotifEvent } from "../engine/notifications/notifEventLog";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SESSION_TOKEN_RESCAN_MS } from "../shared/polling/pollingTimings";
 import type { NonActiveCompletionTracker } from "../shared/sessionTokens/nonActiveCompletionTracker";
@@ -39,8 +39,8 @@ export class ActiveRolloutTracker {
    * byte size. Seeded with kernel mtime on the first poll of a new
    * rollout (so a stale file is not falsely read as live), then
    * `Date.now()` on any later poll where size grew. Feeds
-   * `CodexResolvedSession.lastActivityObservedAt` - see that field for
-   * why byte-growth, not kernel mtime, drives the freshness gate. */
+   * `CodexResolvedSession.lastActiveAt` - see that field for why byte
+   * growth, not kernel mtime, marks Codex activity. */
   lastActivityObservedAt: number | null = null;
   /** Watches ~/.codex/sessions/ for new rollout files. Recursive on
    * Windows/macOS to catch date-sharded subdirs, with a fallback to

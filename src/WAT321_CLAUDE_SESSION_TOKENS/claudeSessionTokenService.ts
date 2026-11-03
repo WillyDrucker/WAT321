@@ -1,8 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { readTail } from "../engine/fs/fileReaders";
-import { logNotifEvent } from "../engine/notifEventLog";
-import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
+import { logNotifEvent } from "../engine/notifications/notifEventLog";
+import type { NonActiveCompletion } from "../engine/notifications/sessionResponseBridge";
 import { PathWatcher } from "../shared/polling/pathWatcher";
 import { SESSION_TOKEN_POLL_MS } from "../shared/polling/pollingTimings";
 import { SessionTokenServiceBase } from "../shared/polling/sessionTokenServiceBase";
@@ -15,8 +15,8 @@ import { readAutoCompactEffectiveTriggerTokens } from "../shared/providers/claud
 import { NonActiveCompletionTracker } from "../shared/sessionTokens/nonActiveCompletionTracker";
 import { TpsTracker } from "../shared/sessionTokens/tpsTracker";
 import { ActiveTranscriptResolver } from "./activeTranscriptResolver";
-import type { ResolvedSession, WidgetState } from "./claudeSessionTokenTypes";
-import { CompactStateMachine } from "./compactStateMachine";
+import { ClaudeCompactFlash } from "./claudeCompactFlash";
+import type { ClaudeResolvedSession, ClaudeTokenWidgetState } from "./claudeSessionTokenTypes";
 import { parseFirstUserMessage, parseLastUsage } from "./transcriptParsers";
 import {
   tallyWorkspaceSessions,
@@ -34,7 +34,7 @@ import { parseTurnInfo } from "./turnInfoParser";
  * transcript to follow is decided in `activeTranscriptResolver.ts`,
  * and its title is cached in `transcriptTitleCache.ts`. */
 
-export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetState> {
+export class ClaudeSessionTokenService extends SessionTokenServiceBase<ClaudeTokenWidgetState> {
   private readonly transcripts: ActiveTranscriptResolver;
   private readonly titles = new TranscriptTitleCache();
   private readonly windows = new SessionContextWindow();
@@ -45,15 +45,14 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
    * keep first-prompt cache-creation step functions from spiking the
    * counter to 999. */
   private readonly tpsTracker = new TpsTracker();
-  /** Compact-progress state machine. Owns the in-flight detection +
-   * rolling-duration estimate. Synced once per poll from the same tail
-   * the rest of the service reads, plus the classifier output for the
-   * activity-recovery exit path. */
-  private readonly compactStateMachine = new CompactStateMachine();
+  /** Drives the post-compact completion flash from the boundary entries
+   * in the tail, synced once per poll from the same tail the rest of
+   * the service reads. */
+  private readonly compactFlash = new ClaudeCompactFlash();
 
   /** Watches ~/.claude/sessions/ for new/removed CLI process files.
    * Triggers an immediate poll so new sessions are detected instantly
-   * instead of waiting for the 51s fallback scan. */
+   * instead of waiting for the resolver's fallback rescan. */
   private readonly sessionsWatcher = new PathWatcher(() => {
     this.transcripts.invalidate();
     this.triggerPoll();
@@ -97,18 +96,18 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     this.transcripts = new ActiveTranscriptResolver(workspacePath);
   }
 
-  /** Diagnostic snapshot for the health command. Forwards the state
-   * machine's internal view (current state, started-at, estimate, and
-   * rolling history) without exposing the machine instance itself. */
-  getCompactDiagnostics(): ReturnType<CompactStateMachine["getDiagnostics"]> {
-    return this.compactStateMachine.getDiagnostics();
+  /** Diagnostic snapshot for the health command. Forwards the flash
+   * machine's internal view (current state, estimate, and rolling
+   * history) without exposing the machine instance itself. */
+  getCompactDiagnostics(): ReturnType<ClaudeCompactFlash["getDiagnostics"]> {
+    return this.compactFlash.getDiagnostics();
   }
 
   reset(): void {
     this.transcripts.reset();
     this.titles.reset();
     this.windows.reset();
-    this.compactStateMachine.reset();
+    this.compactFlash.reset();
     this.sessionsWatcher.close();
     this.settingsWatcher.close();
     this.nonActiveTracker.reset();
@@ -121,7 +120,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     super.dispose();
   }
 
-  protected getIdleState(): WidgetState {
+  protected getIdleState(): ClaudeTokenWidgetState {
     return { status: "no-session" };
   }
 
@@ -130,7 +129,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
     return this.nonActiveTracker.drain();
   }
 
-  private emitOk(session: ResolvedSession): void {
+  private emitOk(session: ClaudeResolvedSession): void {
     this.setOkStateIfChanged(session, (s) => ({ status: "ok" as const, session: s }));
   }
 
@@ -239,7 +238,7 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
 
     const tokensPerSecond = this.tpsTracker.add(sessionId, mtime, contextUsed);
     const turnState = classifyClaudeTurn(tail);
-    const compactState = this.compactStateMachine.sync({
+    const compactState = this.compactFlash.sync({
       tail,
       sessionId,
       now,
@@ -260,7 +259,6 @@ export class ClaudeSessionTokenService extends SessionTokenServiceBase<WidgetSta
       effort: usage.effort,
       contextUsed,
       contextWindowSize,
-
       autoCompactEffectiveTokens:
         readAutoCompactEffectiveTriggerTokens(contextWindowSize),
       source,

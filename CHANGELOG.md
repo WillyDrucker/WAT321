@@ -5,6 +5,26 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.36] - 2026-11-03
+
+### Added
+
+- **Ultra accounts drop the 5-hour bar they no longer need.** Anthropic renamed Max 20x to Ultra and lifts its 5-hour limit once your account is verified. When your usage shows no 5-hour window, the Claude 5h bar steps aside and the weekly bar carries on, and the 5h bar comes back if the limit ever returns.
+- **Five more free OpenCode routes: Nemotron 3.5 Lightning, Beam, Flint 40B, MiMo V2.6 Flash, and Pulse Alpha.** The route list now matches what OpenCode offers for free today.
+
+### Changed
+
+- **Your Claude plan shows under Anthropic's current names, Ultra, Max, and Pro,** read from your Claude Code login instead of guessed from your extra-usage spending cap.
+- **GPT 5 Nano and MiniMax M3.1 Flash left the free OpenCode routes.** GPT 5 Nano is a paid model now and MiniMax M3.1 Flash is gone, so if you had either one selected, you move to Big Pickle the next time the extension starts.
+- **Old bridge replies stop piling up.** Each sent folder keeps its newest 30 replies and clears the rest, so a busy workspace no longer collects hundreds of files.
+
+### Fixed
+
+- **Codex usage wakes up while you work on Windows.** Windows reports the Codex session file's write time late, which could leave Codex usage paused mid-session and swallow a real completion toast. WAT321 now watches the file grow instead.
+- **One reply now shows one toast across all your VS Code windows.** Two windows could both toast the same reply when one saw it as its active session and the other as a background session, or when Windows reported the file's write time late.
+- **The Codex auto-compact point in the token hover follows each model's own window** instead of a fixed ratio, and the hover now ends with the same Auto-Compact line as Claude's.
+- **The Codex plan line shows the step it counts.** Before work started and after it finished, the line read step N of N beside the first step's text.
+
 ## [1.5.35] - 2026-10-21
 
 ### Added

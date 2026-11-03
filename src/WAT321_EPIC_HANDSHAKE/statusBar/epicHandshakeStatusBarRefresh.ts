@@ -11,7 +11,7 @@ import {
 } from "./epicHandshakeStatusBarSources";
 import type { InboxCoordinator } from "../../engine/inbox/inboxCoordinator";
 import { currentWorkspacePath, isBridgeBusy } from "./statusBarState";
-import { loadBridgeThreadRecordIfExists } from "../codexTurn/threadRecord";
+import { loadBridgeThreadRecordIfExists } from "../codexThread/threadRecord";
 import { adaptiveStageCycle } from "./stageGlyphs";
 import { isAdaptive } from "../codexTurn/waitMode";
 
@@ -111,7 +111,7 @@ export function refreshEpicHandshakeItem(
   const processing = wsHash ? existsSync(processingFlagPath(wsHash)) : false;
   const returning = snapshot.returning;
 
-  // Track sending-phase start so we can enforce a 3s floor. Sending
+  // Track sending-phase start so we can enforce the sending floor. Sending
   // means in-flight but processing has not begun yet. Reset on turn
   // end (returning or idle).
   const sendingActive = inFlight && !processing && !returning;
@@ -173,7 +173,7 @@ export function refreshEpicHandshakeItem(
     icon = "$(wat321-square-pause)";
   } else if (walkerActive && snapshot.latchedStage !== null) {
     // Walker drives the glyph from the engine-owned latched stage.
-    // When the walker reaches stage 5 and its 3s hold expires,
+    // When the walker reaches stage 5 and its hold expires,
     // snapshot.latchedStage flips to null and the branch goes
     // inactive - the widget falls into returning / idle branches
     // for the handoff animation.
@@ -217,11 +217,11 @@ export function refreshEpicHandshakeItem(
     // arrow-left briefly between walker-end and delivered-flash.
     icon = "$(wat321-square-check)";
   } else if (returning) {
-    // Post-turn latch: the dispatcher holds this flag for 3000ms
-    // so the return animation is visible if the walker did not
-    // already cover stage 5's arrow-left cycle. In adaptive mode
-    // the walker always reaches stage 5 with its own arrow-left
-    // cycle so this branch is mostly a fallback.
+    // Post-turn latch: the dispatcher holds this flag for
+    // `RETURNING_FLAG_MS` so the return animation is visible if the
+    // walker did not already cover stage 5's arrow-left cycle. In
+    // adaptive mode the walker always reaches stage 5 with its own
+    // arrow-left cycle so this branch is mostly a fallback.
     icon = oneHz ? "$(wat321-square-arrow-left)" : "$(wat321-square)";
   } else if (openCodeStartedAt !== null) {
     // OC/Local dispatch in flight (and no Codex turn active - the
@@ -238,7 +238,7 @@ export function refreshEpicHandshakeItem(
   } else if (isWaitModeFlashActive(now, wsHash)) {
     // User-initiated wait-mode toggle needs visible feedback, so
     // the flash preempts pendingCount / fail-count states. Held
-    // solid (no alternation) for the 2500ms window since the 1Hz
+    // solid (no alternation) for the flash window since the 1Hz
     // refresh cadence would land on the same parity at every
     // sample. Falls through to whichever state was preempted on
     // the next tick (the flag-file unlink happens lazily inside

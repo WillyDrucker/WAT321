@@ -26,7 +26,7 @@ WAT321 ships with **six read-only widgets** - three for Claude, three for Codex 
 
 ### Claude Usage
 
-Live progress bars showing your 5-hour session utilization and weekly limits.
+Live progress bars showing your 5-hour session utilization and weekly limits. When your plan has no 5-hour limit, the weekly bar shows on its own.
 
 <p>
 <img src="images/screenshots/CLAUDE_USAGE_TOOLTIP_HOVER.png" alt="Claude usage tooltip" width="190"><br>
@@ -136,7 +136,7 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - **Claude Usage / Codex Usage** poll each provider's stats endpoint on a safe interval (~2 minutes) with rate-limit protection.
 - **Session Tokens** read local CLI files only - no API calls, no network. Yellow `LOAD` flashes during deliberate cache rebuilds (`/compact` or reload). Red `MISS` is reserved for unexpected eviction.
 - Everything WAT321 writes is a disposable cache inside `~/.wat321/`. Settings changes take effect immediately with no reload.
-- **Epic Handshake** adds a widget between the Claude and Codex session token bars. With it on, Claude understands plain-language asks like *"ask Codex..."*, *"ask Big Pickle..."*, or *"ask the local LLM..."* - the bridge picks the right backend for you, sends the prompt over, and the reply lands right in your Claude conversation. Click the Epic Handshake widget anytime to open the dropdown menu. Manage sessions, models and effort as needed. The model and effort lists come straight from your installed Codex, so a new model like GPT-6 Astra shows up in the picker as soon as OpenAI enables it for your account.
+- **Epic Handshake** adds a widget between the Claude and Codex session token bars. With it on, Claude understands plain-language asks like *"ask Codex..."*, *"ask Big Pickle..."*, or *"ask the local LLM..."* - the bridge picks the right backend for you, sends the prompt over, and the reply lands right in your Claude conversation. Click the Epic Handshake widget anytime to open the dropdown menu. Manage sessions, models and effort as needed. The model and effort lists come straight from your installed Codex, so a new model shows up in the picker as soon as OpenAI enables it for your account.
 
 ## What It Doesn't Do
 
@@ -150,14 +150,14 @@ You can show or hide individual widgets by right-clicking the status bar or usin
 - Claude widgets need an active Claude account with CLI credentials (`~/.claude/.credentials.json`)
 - Codex widgets need Codex CLI credentials (`~/.codex/auth.json`)
 - Session token widgets need an active session in the respective CLI tool
-- Epic Handshake needs Claude Code plus at least one of: Codex CLI, an OpenCode Zen account (https://opencode.ai/), or a local OpenAI-compatible chat endpoint (llama.cpp `--jinja`, Ollama, vLLM, LM Studio)
+- Epic Handshake needs Claude Code plus at least one of: Codex CLI, an OpenCode account (https://opencode.ai/), or a local OpenAI-compatible chat endpoint (llama.cpp `--jinja`, Ollama, vLLM, LM Studio)
 
 ## Supported Plans
 
 | Provider | Plan | Status |
 |----------|------|--------|
-| Claude | Max (5x / 10x / 20x) | Supported - plan tier detected automatically |
-| Claude | Pro / Free | Supported - usage data works, plan label not shown |
+| Claude | Max / Ultra | Supported - plan detected automatically. The 5-hour bar hides on accounts without a 5-hour limit |
+| Claude | Pro / Free | Supported |
 | Claude | Team / Enterprise | Untested - see Known Issues |
 | Codex | Plus / Pro / Team | Supported |
 
@@ -175,8 +175,8 @@ Need a clean slate? Open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) an
 
 A few rough edges that are worth knowing about. None of them need any action on your part - they either self-heal or are waiting on upstream fixes.
 
-- **Claude Max plan tier label can lag.** Upgrades (for example Max 5x to Max 20x) may take a billing cycle to reflect. Actual limits are still correct.
-- **"Idle" means the usage endpoint throttled a cold poll.** Clears on Claude's next activity - no countdown, no wait. "Offline" with a countdown is a real rate limit and reconnects automatically.
+- **Claude plan label can lag.** It follows the plan Claude Code stores with its login, so an upgrade shows once that record updates. Actual limits are still correct.
+- **"Idle" means the usage endpoint throttled a cold poll.** Clears on Claude's next activity - no countdown, no wait. "Paused" with a countdown is a real rate limit and reconnects automatically.
 - **API-only Anthropic accounts stay hidden.** Claude widgets need CLI credentials at `~/.claude/.credentials.json`.
 - **Team and Enterprise Claude plans are untested.** Should work. Open an issue if something looks off.
 

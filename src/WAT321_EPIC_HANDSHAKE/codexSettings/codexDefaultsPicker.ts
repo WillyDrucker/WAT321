@@ -75,8 +75,8 @@ export function codexDefaultsSubline(): string {
   const sandbox = readCodexSandboxOverride(currentWsHash());
   const pin = readSessionPin(currentWorkspacePathOrSentinel());
   // Each segment uses native casing: sandbox words like "Read-Only" /
-  // "Full-Access", model display name preserves its capitalization
-  // (GPT-5.6 Sol), effort starts capital (Low). Keeps the subline
+  // "Full-Access", model display name preserves its own
+  // capitalization, effort starts capital (Low). Keeps the subline
   // scannable without a wall of lowercase that hides boundaries.
   const sandboxLabel = sandbox === "full-access" ? "Full-Access" : "Read-Only";
   const modelInfo = pin.model === null ? null : getCodexModelInfo(pin.model);

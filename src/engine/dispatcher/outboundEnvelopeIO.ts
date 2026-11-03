@@ -7,7 +7,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import type { BridgeTarget } from "../bridgeTypes";
+import { RETURNING_FLAG_MS, type BridgeTarget } from "../bridgeTypes";
 import { writeFileAtomic } from "../fs/atomicWrite";
 import { EPIC_HANDSHAKE_DIR } from "../wat321Paths";
 import { workspaceHash } from "../workspaceHash";
@@ -38,12 +38,11 @@ import { writeInbound } from "../inbox/inboxWriter";
 
 const STALE_OUTBOUND_MS = 5 * 60_000;
 
-/** Best-effort write of `~/.wat321/epic-handshake/returning.<wsHash>.flag`
- * with a self-clearing 3s timer. Mirrors Codex's turnRunner returning-
- * flag so a non-Codex dispatch's return ceremony hits the same 3-second
- * window the rest of the bridge UI is built around. The unref'd timer
- * lets the dispatcher shut down without waiting on cleanup. Atomic
- * tmp+rename so a status-bar reader cannot observe a torn write. */
+/** Best-effort write of `~/.wat321/epic-handshake/returning.<wsHash>.flag`,
+ * cleared after `RETURNING_FLAG_MS` so a non-Codex dispatch plays the
+ * same return ceremony as a Codex turn. The unref'd timer lets the
+ * dispatcher shut down without waiting on cleanup. Atomic tmp+rename
+ * so a status-bar reader cannot observe a torn write. */
 export function writeReturningFlag(workspacePath: string): void {
   try {
     const wsHash = workspaceHash(workspacePath);
@@ -58,7 +57,7 @@ export function writeReturningFlag(workspacePath: string): void {
       } catch {
         // best-effort
       }
-    }, 3_000);
+    }, RETURNING_FLAG_MS);
     t.unref?.();
   } catch {
     // missed flag write costs one animation frame
