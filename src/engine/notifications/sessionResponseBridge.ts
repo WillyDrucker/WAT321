@@ -1,13 +1,12 @@
 import { statSync } from "node:fs";
-import { basename } from "node:path";
 import type * as vscode from "vscode";
-import type { ProviderKey } from "./contracts";
-import type { EventHub } from "./eventHub";
+import type { ProviderKey } from "../contracts";
+import type { EventHub } from "../eventHub";
 import {
   logNotifEvent,
   type BridgeDecisionReason,
 } from "./notifEventLog";
-import { sessionIdFromPath } from "./transcriptSessionId";
+import { sessionIdFromPath } from "../transcriptSessionId";
 
 /**
  * Generic bridge that watches a session-token service for contextUsed
@@ -27,8 +26,9 @@ interface SessionResponseFields {
   contextUsed: number;
   label: string;
   sessionTitle: string;
-  /** Transcript file mtime in ms. Used to distinguish real in-
-   * progress turns from replays and session-switch artifacts. */
+  /** When the session file last grew, in ms (Claude's transcript
+   * mtime, Codex's observed byte growth). Used to distinguish real
+   * in-progress turns from replays and session-switch artifacts. */
   lastActiveAt: number;
 }
 
@@ -67,27 +67,37 @@ interface SessionResponseBridgeConfig {
   events: EventHub;
 }
 
-/** The completion's OWN timestamp, read off the transcript it was
- * written to. Every window that reads the same finished transcript
- * gets the same number, which is what makes the cross-window dedup tag
- * agree across windows.
- *
- * `Date.now()` cannot be used here, and this is the whole point of the
- * helper. Windows poll on independent cadences and observe the same
- * completion seconds apart, so two windows bucketing their own wall
- * clocks land on different tags, both claim, and the user gets two
- * toasts for one completion. The transcript has stopped growing by the
- * time the classifier reports done, so its mtime is stable to read.
- *
- * Falls back to the caller's clock when the stat fails, which degrades
- * to the old (leaky) behavior rather than dropping the notification. */
-function completionTimestamp(path: string | null, fallback: number): number {
+/** The completion's own timestamp, identical in every window, so the
+ * cross-window dedup tag agrees. The newest line `timestamp` wins over
+ * the mtime, which can flush late on Windows while Codex holds the
+ * file open. The caller's clock is the last resort and can leak. */
+function completionTimestamp(tail: string | null, path: string | null, fallback: number): number {
+  const fromTail = tail ? newestLineTimestamp(tail) : null;
+  if (fromTail !== null) return fromTail;
   if (path === null) return fallback;
   try {
     return statSync(path).mtimeMs;
   } catch {
     return fallback;
   }
+}
+
+/** Newest top-level `timestamp` in a JSONL tail, scanning back past
+ * lines that carry none and the torn first line. */
+function newestLineTimestamp(tail: string): number | null {
+  const lines = tail.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (line.length === 0) continue;
+    try {
+      const ts = (JSON.parse(line) as { timestamp?: unknown }).timestamp;
+      const ms = typeof ts === "string" ? Date.parse(ts) : NaN;
+      if (Number.isFinite(ms)) return ms;
+    } catch {
+      // torn line, keep scanning back
+    }
+  }
+  return null;
 }
 
 export function bridgeSessionResponse(
@@ -193,11 +203,8 @@ export function bridgeSessionResponse(
     }
     const willFire = reason.startsWith("fire-");
 
-    // Disk-tee every decision so a post-mortem can reconstruct
-    // exactly which gate caught the emission. The single most
-    // useful signal when "the notification did not fire" - tells
-    // you whether the chain even reached the toast notifier or got
-    // swallowed here.
+    // Disk-tee every decision so a post-mortem can see which gate
+    // caught the emission, the first question when a toast never fired.
     logNotifEvent({
       at: now,
       kind: "bridge-decision",
@@ -225,13 +232,10 @@ export function bridgeSessionResponse(
       ? cfg.parseAssistantText(tail)
       : "";
 
-    // Derive a stable per-session id from the transcript path's
-    // basename. Both providers shape it the same way: Claude is
-    // `<uuid>.jsonl`, Codex is `rollout-<uuid>.jsonl`. The full
-    // path would also work but is longer - basename is enough to
-    // scope the cross-window dedup tag without collisions across
-    // sessions.
-    const sessionId = path !== null ? basename(path) : "no-path";
+    // The same spelling the non-active path emits, so a completion one
+    // window toasts as its active session and another reaches through
+    // its non-active tracker claim the same cross-window dedup tag.
+    const sessionId = path !== null ? sessionIdFromPath(cfg.provider, path) : "no-path";
 
     cfg.events.emit("session.responseComplete", {
       provider: cfg.provider,
@@ -240,7 +244,7 @@ export function bridgeSessionResponse(
       sessionTitle: session.sessionTitle,
       responsePreview,
       sessionId,
-      completionMs: completionTimestamp(path, now),
+      completionMs: completionTimestamp(tail, path, now),
     });
   };
 
@@ -250,9 +254,9 @@ export function bridgeSessionResponse(
 
 function drainNonActiveCompletions(cfg: SessionResponseBridgeConfig): void {
   // Call through the object so `this` binds correctly. Destructuring
-  // `consumeNonActiveCompletions` into a variable loses `this`, which
-  // makes `this.pendingNonActiveCompletions` undefined inside the method
-  // and crashes provider activation before `setProviderActive` fires.
+  // `consumeNonActiveCompletions` into a variable loses `this`, so the
+  // service's tracker reads as undefined inside the method and provider
+  // activation crashes before `setProviderActive` fires.
   const completions = cfg.tokenService.consumeNonActiveCompletions?.() ?? [];
   if (completions.length === 0) return;
   for (const completion of completions) {
@@ -270,6 +274,7 @@ function drainNonActiveCompletions(cfg: SessionResponseBridgeConfig): void {
       // service stamps `completedAtMs` with its own `Date.now()`, so
       // it disagrees between windows for the same completion.
       completionMs: completionTimestamp(
+        tail,
         completion.transcriptPath,
         completion.completedAtMs
       ),

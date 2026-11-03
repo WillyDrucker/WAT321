@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import type { ProviderKey } from "./contracts";
 
 /** The per-session UUID a transcript or rollout path carries. Every
  * session-id consumer derives it here so the notification log, the
@@ -11,7 +12,7 @@ import { basename } from "node:path";
  *    so the UUID is everything after the sixth dash. A rollout name
  *    without the timestamp falls back to the whole basename. */
 export function sessionIdFromPath(
-  provider: "claude" | "codex",
+  provider: ProviderKey,
   path: string
 ): string {
   const file = basename(path, ".jsonl");

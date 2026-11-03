@@ -37,15 +37,13 @@ export interface AppEvents {
     label: string;
     sessionTitle: string;
     responsePreview: string;
-    /** Stable identifier for the session this completion came from.
-     * Used by the toast notifier's cross-window dedup to scope tag
-     * claims to the right session. Always present - the bridge knows
-     * the active transcript path and uses it (or its sessionId
-     * basename) as a stable per-session identifier. */
+    /** The session's UUID as `sessionIdFromPath` spells it, on every
+     * path that emits. The toast notifier's cross-window dedup scopes
+     * its tag claims by it. */
     sessionId: string;
-    /** Wall-clock ms when the bridge decided to fire. Buckets in the
-     * cross-window dedup tag so two windows firing for the same
-     * completion within 10s collapse to the same claim. */
+    /** The completion's own timestamp, read off the transcript, so
+     * every window that sees the same completion lands in the same
+     * cross-window dedup bucket. */
     completionMs: number;
   };
   "engine.reset": Record<string, never>;

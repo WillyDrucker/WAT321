@@ -1,39 +1,27 @@
 import * as vscode from "vscode";
 import { logNotifEvent } from "./notifEventLog";
 import { tryClaimNotification } from "./multiWindowDedup";
-import type { ProviderKey } from "./contracts";
-import type { AppEvents, EventHub } from "./eventHub";
+import type { ProviderKey } from "../contracts";
+import type { AppEvents, EventHub } from "../eventHub";
 import {
   showInAppNotification,
   showSystemNotification,
 } from "./notificationPlatforms";
-import { SETTING } from "./settingsKeys";
+import { SETTING } from "../settingsKeys";
 
 /**
- * Toast notification delivery.
+ * Toast notification delivery for `wat321.notifications.*`: a mode
+ * ("Off", "Auto", "System Notifications", "In-App") plus a per-provider
+ * filter. Mode dispatch is literal, Auto picks system when the editor
+ * is unfocused and in-app when focused, and an unknown mode fails
+ * closed. The per-platform paths live in `notificationPlatforms.ts`.
  *
- * Settings under `wat321.notifications.*`:
- *   mode   - "Off" | "Auto" | "System Notifications" | "In-App"
- *   claude - per-provider filter (default true)
- *   codex  - per-provider filter (default true)
- *
- * Mode dispatch is literal. "System Notifications" always uses the OS
- * path - "In-App" always uses the editor's notification bar. Auto picks
- * system when the editor is unfocused and in-app when focused. Unknown
- * mode values fail closed (suppressed) rather than silently selecting
- * a delivery path the user did not choose. The per-platform paths live
- * in `notificationPlatforms.ts`.
- *
- * No silent mode-switch fallback. If the chosen system path fails, the
- * failure is recorded in the diagnostic ring buffer (visible in the
- * health command) and the event is not delivered through a different
- * path. A user who picked "System Notifications" and sees no toast
- * should run the health command - causes include unregistered AUMID
- * on Windows, Focus Assist / Do Not Disturb, OS-level notification
- * permission disabled, or `notify-send` missing on Linux.
- *
- * Per-(provider, sessionId) 10s cooldown so distinct sessions can fire
- * concurrent toasts - the same session repeating within 10s collapses.
+ * No silent fallback: a failed system toast is recorded in the
+ * diagnostic ring buffer the health command shows, never re-sent
+ * another way. Causes include an unregistered AUMID on Windows, Focus
+ * Assist or Do Not Disturb, OS permission, or a missing `notify-send`
+ * on Linux. The cooldown is per session, so distinct sessions toast
+ * concurrently while one session repeating collapses.
  */
 
 /** Optional probe injected from bootstrap so the toast notifier can
@@ -54,9 +42,9 @@ function isEpicHandshakeBridgeActive(): boolean {
  * suppress-codex-toast sentinel on successful turn completion - this
  * consumer reads it once. Returning true means "the most recent Codex
  * activity was bridge-driven, suppress." Covers the gap where Codex's
- * transcript fires `responseComplete` after the bridge's 3s
- * `returning` latch has cleared (so `isEpicHandshakeBridgeActive` would
- * return false). */
+ * transcript fires `responseComplete` after the bridge's `returning`
+ * latch has cleared (so `isEpicHandshakeBridgeActive` would return
+ * false). */
 let recentCodexCompletionConsumer: (() => boolean) | null = null;
 
 export function setRecentCodexCompletionConsumer(
@@ -82,7 +70,7 @@ const DIAGNOSTIC_RING_SIZE = 20;
 
 const lastNotificationTime = new Map<string, number>();
 
-function cooldownKey(provider: string, sessionId: string): string {
+function cooldownKey(provider: ProviderKey, sessionId: string): string {
   return `${provider}::${sessionId}`;
 }
 
@@ -148,7 +136,7 @@ export function isNotificationsEnabled(): boolean {
   return getMode() !== "Off";
 }
 
-function isProviderEnabled(provider: string): boolean {
+function isProviderEnabled(provider: ProviderKey): boolean {
   const key = provider === "claude"
     ? SETTING.notificationsClaude
     : SETTING.notificationsCodex;
@@ -200,10 +188,10 @@ function handleResponseComplete(
   // result flows back and fires its own toast. The user only wanted
   // the Claude toast in that case - two toasts about the same event
   // is noise. Two suppression sources, in priority order:
-  //   1. Bridge currently active (in-flight or 3s returning latch).
+  //   1. Bridge currently active (in flight or in its returning latch).
   //   2. Recent bridge completion sentinel - one-shot, consume-on-read,
-  //      30s freshness window. Covers slow Codex transcript writes that
-  //      land after the returning latch has cleared.
+  //      with its own freshness window. Covers slow Codex transcript
+  //      writes that land after the returning latch has cleared.
   // Claude toasts are never suppressed, and Codex toasts fire normally
   // when the user is working in Codex independently of the bridge.
   if (

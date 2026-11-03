@@ -8,23 +8,12 @@ import {
 } from "./inboxReader";
 
 /**
- * Multi-target inbox coordinator. fs-watches every backend's inbound
- * dir simultaneously so a reply landing on any tier surfaces to the
- * status bar within ~50ms.
- *
- * Pattern:
- *   - One FSWatcher per inbound dir (Codex EH mailbox + each non-Codex
- *     per-client dir).
- *   - 5s polling tick as a missed-event backstop.
- *   - Single debounced `tick()` triggered by any watcher event (envelope
- *     tmp+rename produces 2-3 events - we coalesce).
- *   - Typed event emission via EventHub so subscribers (status bar,
- *     toast notifier, future widgets) react off events instead of
- *     polling.
- *
- * Lives in engine/ so adding a new backend just means populating the
- * dispatcher and inbox dirs - this coordinator picks them up via
- * `allInboundDirs()` without code changes.
+ * Multi-target inbox coordinator. One fs watcher per backend's inbound
+ * dir (the Codex mailbox and each non-Codex per-client dir) feeds a
+ * single debounced `tick()`, since one tmp+rename fires several events,
+ * with a polling tick as the missed-event backstop. Count changes go
+ * out as `inbox.countChanged`, so the status bar reacts without polling.
+ * A new backend needs only its dirs, which `allInboundDirs()` picks up.
  */
 
 const TICK_INTERVAL_MS = 5000;
@@ -33,7 +22,7 @@ const WATCH_DEBOUNCE_MS = 50;
 interface InboxSnapshot {
   workspacePath: string | null;
   /** Pending envelope count across all enabled targets' inbound dirs.
-   * Excludes envelopes younger than the late-reply threshold (3s)
+   * Excludes envelopes younger than the reader's late-reply threshold
    * so the count reflects "settled" replies the user can act on. */
   pendingCount: number;
   /** Wall-clock ms since the newest pending reply landed. Null when

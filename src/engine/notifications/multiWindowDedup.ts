@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { WAT321_ROOT } from "./wat321Paths";
+import { WAT321_ROOT } from "../wat321Paths";
 
 /**
  * Cross-window dedup for completion notifications. Each completion is
@@ -20,8 +20,8 @@ import { WAT321_ROOT } from "./wat321Paths";
  * transcript, so two windows on different workspaces can observe the
  * same completion. Partitioned by workspace hash they could never see
  * each other's claim, and the user would get two toasts for one
- * completion. `sessionId` is a transcript basename, globally unique on
- * its own, so nothing here needs workspace scoping.
+ * completion. `sessionId` is the session's UUID, globally unique on its
+ * own, so nothing here needs workspace scoping.
  *
  * Whichever window wins the race delivers, and the user sees exactly
  * one toast. Which window that is does not matter: the toast content is
@@ -33,8 +33,8 @@ import { WAT321_ROOT } from "./wat321Paths";
  * legitimately distinct turns on the same session never collide.
  *
  * Callers MUST pass a completion timestamp that is a property of the
- * completion itself (the transcript mtime), not the observing window's
- * wall clock. Windows poll on independent cadences and can observe the
+ * completion itself (read off the transcript), not the observing
+ * window's wall clock. Windows poll on independent cadences and can observe the
  * same completion many seconds apart - bucketing two such observations
  * straddles the boundary often enough that this gate would leak. */
 const DEDUP_BUCKET_MS = 10_000;
@@ -55,10 +55,9 @@ function ensureDir(): void {
   }
 }
 
-/** Sanitize a sessionId into a filesystem-safe tag fragment. The
- * Claude transcript path's UUID and Codex's rollout-* basename are
- * both safe by construction, but `replace` here makes the helper
- * robust to any future identifier shape. */
+/** Sanitize a sessionId into a filesystem-safe tag fragment. Session
+ * UUIDs are safe by construction, and `replace` keeps the helper safe
+ * for the "no-path" fallback or any other identifier shape. */
 function sanitize(s: string): string {
   return s.replace(/[^a-zA-Z0-9-]/g, "_");
 }

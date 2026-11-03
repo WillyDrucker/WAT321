@@ -42,6 +42,12 @@ export const BRIDGE_STAGE_ORDER: readonly BridgeStage[] = [
   "complete",
 ];
 
+/** How long the per-workspace returning flag stands before its writer
+ * clears it. The walker's stage-5 latch holds for the same beat, so
+ * the return arrow reads alike whether or not the walker drove the
+ * dispatch. The MCP runtime mirrors it in `turnHeartbeat.mjs`. */
+export const RETURNING_FLAG_MS = 3_000;
+
 /** Guard for stage values read back from disk (heartbeat files,
  * rollout tails). An unknown value from a newer or hand-edited
  * writer must not reach `indexOf` and poison downstream lookups. */
@@ -148,7 +154,7 @@ export interface BridgeStageReader {
   /** Subscribe to phase + stage transitions. Widgets that gate their
    * own animation ticker on bridge state need this push signal because
    * they only re-evaluate `animationsActive()` inside their `update()`
-   * path, which fires on the underlying service's poll cadence (15s).
+   * path, which fires on the underlying service's poll cadence.
    * Without a push, the very first bridge dispatch after a cold launch
    * lands between service polls and the widget never starts ticking
    * for the ceremony / stage walk. Returns a disposer. */
