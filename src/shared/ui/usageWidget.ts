@@ -23,12 +23,11 @@ import { classifyUsageNonOk } from "./usageNonOkClassifier";
  * non-ok tooltip leads with the cached ok content and closes with the
  * error detail.
  *
- * The one exception is `shouldHide`: a provider can retire a rate-limit
- * window outright (when OpenAI publishes a single weekly window and no
- * 5-hour cap), and a widget for a window that does not exist can only
- * draw a full green bar over nothing. It fires only on data the provider
- * definitively returned, never on absence, and a widget with no cached
- * payload always renders. Uncertainty keeps the bar on screen.
+ * The one exception is hiding: a provider can retire a rate-limit window
+ * outright (OpenAI's single weekly window, a Claude plan with no 5-hour
+ * limit), and a widget for a window that does not exist can only draw a
+ * bar over nothing. A payload in hand decides. With none cached, only a
+ * positive plan signal can hide a widget. Uncertainty keeps the bar.
  */
 
 export interface UsageWidgetDescriptor<TData> {
@@ -78,10 +77,14 @@ export interface UsageWidgetDescriptor<TData> {
   /** Optional. Return true to take this widget off the status bar for
    * this payload, because the provider no longer publishes the window it
    * renders. Called ONLY with a payload the provider actually returned,
-   * so it can never fire on missing or unreadable data. A widget with no
-   * cached payload is always shown. Omit it and the widget is never
-   * hidden, which is the default for every widget but Codex weekly. */
+   * so it can never fire on missing or unreadable data. With no cached
+   * payload, `shouldHideWithoutData` decides instead. */
   shouldHide?(data: TData): boolean;
+  /** Optional. Consulted only while no payload is in hand: first paint, or
+   * a non-ok state with nothing cached. Return true only on a positive
+   * signal outside the payload, such as the account's plan, that the
+   * window does not exist. Omit it and a widget with no payload renders. */
+  shouldHideWithoutData?(): boolean;
 }
 
 export class UsageWidget<TData> implements vscode.Disposable {
@@ -216,13 +219,14 @@ export class UsageWidget<TData> implements vscode.Disposable {
   private renderNonOk(detail: string): void {
     const d = this.descriptor;
     const data = this.lastOkData;
-    // Carry the last-known-good hide decision through the outage rather
-    // than re-deriving one. A window the provider had definitively retired
-    // has not come back just because the network dropped, and flickering
-    // the bar on for every transient error would be worse than leaving it
-    // off. With NO cached payload we always render, so an unknown state
-    // can never hide a widget.
-    if (data !== null && d.shouldHide?.(data) === true) {
+    // Carry the last-known-good hide decision through an outage. A retired
+    // window has not come back because the network dropped, and flickering
+    // the bar on for every transient error would be worse. With nothing
+    // cached, only a positive plan signal can hide it, never an unknown.
+    const hide = data !== null
+      ? d.shouldHide?.(data) === true
+      : d.shouldHideWithoutData?.() === true;
+    if (hide) {
       this.item.hide();
       return;
     }

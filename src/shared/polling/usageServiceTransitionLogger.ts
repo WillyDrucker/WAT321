@@ -1,3 +1,4 @@
+import type { ProviderKey } from "../../engine/contracts";
 import type { ServiceState } from "../../engine/serviceTypes";
 import type { KickstartGate } from "./kickstartGate";
 import {
@@ -28,7 +29,7 @@ export interface TransitionSnapshot {
 export class TransitionLogger {
   constructor(
     private readonly path: string,
-    private readonly providerKey: "claude" | "codex"
+    private readonly providerKey: ProviderKey
   ) {}
 
   /** Log a real state transition (from != to). Pulls cold-start /
@@ -64,7 +65,7 @@ export class TransitionLogger {
   }
 
   /** Log a same-status heartbeat where the state machine did not
-   * move (fetch-attempted, kickstart-skipped, recovery-ceiling-hit).
+   * move (fetch-attempted, recovery-ceiling-hit).
    * Captures polling activity in the log when state stays put. */
   recordHeartbeat(args: {
     status: TransitionStatus;

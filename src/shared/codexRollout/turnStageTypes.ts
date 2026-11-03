@@ -51,9 +51,9 @@ export interface StageDisplay {
   /** Human-readable short label. Context-aware at stage 3/5 - pulled
    * from the active tool name or reasoning presence. */
   label: string;
-  /** Optional tooltip line: text of the currently-`in_progress` plan
-   * step when Codex has emitted an `update_plan` call. Null when no
-   * plan is active. */
+  /** Optional tooltip line naming one plan step when Codex has emitted
+   * an `update_plan` call: the step in progress, else the next
+   * unfinished one, else the last. Null when no plan is active. */
   planLine: string | null;
   /** Optional tooltip line: active tool name + elapsed. Null when no
    * tool is in flight. */

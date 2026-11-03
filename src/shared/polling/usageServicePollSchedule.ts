@@ -39,7 +39,7 @@ export class UsagePollSchedule {
 
   /** First tick after `delayMs`, then every `POLL_INTERVAL_MS`. The
    * recovery watchdog is re-armed alongside so the discovery-recovered
-   * path (auth dir appeared post-startup) also gets the 15-min
+   * path (auth dir appeared post-startup) also gets the recovery
    * ceiling. Idempotent. */
   startPolling(delayMs: number, watchdog: RecoveryWatchdogDeps): void {
     this.discoveryPoller?.stop();

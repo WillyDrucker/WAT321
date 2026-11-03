@@ -5,7 +5,7 @@ import { openCodeRoutesStateDir } from "../../engine/wat321Paths";
 /**
  * The OpenCode Routes dispatch heartbeat, `heartbeat.json` in the
  * Routes state dir. Written for the duration of every OpenCode or
- * Local LLM call with a 5s keepalive by the Routes dispatcher
+ * Local LLM call, kept alive on a short beat by the Routes dispatcher
  * (`WAT321_OPENCODE_ROUTES/dispatch/openCodeDispatchHeartbeat.ts`) and
  * the MCP runtime (`WAT321_MCP_SERVER/bin/opencode/heartbeat.mjs`), and
  * unlinked on completion. The Routes widget renders it as the live

@@ -1,19 +1,14 @@
 import * as vscode from "vscode";
+import type { ProviderKey } from "../../engine/contracts";
 import { SETTING } from "../../engine/settingsKeys";
 
 /**
- * Resolves the `wat321.usageDisplay` setting into a per-provider
- * usage style. "used" counts up - bars fill left to right, 0% to
- * 100%, the percent is consumption. "remaining" counts down - bars
- * drain right to left, 100% to 0%, the percent is what's left.
- *
- * Auto keeps each provider on its native style - the one its own
- * status website shows and the only rendering WAT321 had before
- * this setting existed: Claude used, Codex remaining. Read fresh on
- * every call (same pattern as the heatmap gate). The instant
- * repaint on a settings change comes from `handleConfigChange` in
- * extension.ts rebroadcasting all provider states - without that
- * rebroadcast a flip would sit invisible until the next poll tick.
+ * Resolves `wat321.usageDisplay` into a per-provider usage style. "used"
+ * fills left to right as consumption grows, "remaining" drains as it
+ * shrinks. Auto keeps each provider's native style, the one its own usage
+ * page shows: Claude used, Codex remaining. Read fresh on every call, and
+ * a flip repaints at once because a settings change rebroadcasts every
+ * provider state instead of waiting for the next poll.
  */
 
 export type UsageStyle = "used" | "remaining";
@@ -21,7 +16,7 @@ export type UsageStyle = "used" | "remaining";
 const SHOW_USED = "Show Used";
 const SHOW_REMAINING = "Show Remaining";
 
-export function resolveUsageStyle(provider: "claude" | "codex"): UsageStyle {
+export function resolveUsageStyle(provider: ProviderKey): UsageStyle {
   const raw = vscode.workspace
     .getConfiguration("wat321")
     .get<string>(SETTING.usageDisplay, "Auto");

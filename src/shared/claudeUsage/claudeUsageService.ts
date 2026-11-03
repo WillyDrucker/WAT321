@@ -1,7 +1,7 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { clientStateDir, WAT321_ROOT } from "../../engine/wat321Paths";
-import { CLAUDE_CREDENTIALS_PATH, CLAUDE_HOME_DIR } from "../providers/claude/claudeHome";
+import { CLAUDE_HOME_DIR } from "../providers/claude/claudeHome";
+import { readClaudeOauth } from "../providers/claude/credentials";
 import { UsageServiceBase } from "../polling/usageServiceBase";
 import type { UsageResponse } from "./claudeUsageTypes";
 
@@ -25,20 +25,15 @@ export class ClaudeUsageSharedService extends UsageServiceBase<UsageResponse> {
   }
 
   protected getAuth(): { token: string; headers: Record<string, string> } | null {
-    try {
-      const creds = JSON.parse(readFileSync(CLAUDE_CREDENTIALS_PATH, "utf8"));
-      const token = creds?.claudeAiOauth?.accessToken;
-      if (!token) return null;
-      return {
-        token,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "anthropic-beta": "oauth-2025-04-20",
-        },
-      };
-    } catch {
-      return null;
-    }
+    const token = readClaudeOauth()?.accessToken;
+    if (typeof token !== "string" || token === "") return null;
+    return {
+      token,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "anthropic-beta": "oauth-2025-04-20",
+      },
+    };
   }
 
   protected validateResponse(data: unknown): data is UsageResponse {

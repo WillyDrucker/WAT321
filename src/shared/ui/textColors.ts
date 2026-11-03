@@ -18,24 +18,14 @@ import {
  */
 
 /** Resolve the text color for a session token widget at the given
- * percent of the auto-compact ceiling. Thresholds are parameterized
- * because Claude and Codex have different ceiling semantics:
- *
- *   - **Claude** ceiling is the literal compact trigger. Warn levels
- *     default to 90 / 95 - one or two turns of runway before the cap.
- *
- *   - **Codex** ceiling is the effective context window with a
- *     baseline-normalized display. Warn levels are shifted to 85 / 90
- *     so yellow lands ~11k tokens before compact.
- *
- * Heatmap off -> white at the white threshold only.
- * Heatmap on -> yellow-500 at the yellow threshold (plus white
- * between white and yellow).
- */
+ * percent of the auto-compact ceiling. Each widget passes its own warn
+ * thresholds, because a Claude ceiling is the literal compact trigger
+ * while a Codex ceiling is the effective context window. White from the
+ * white threshold, and yellow from the yellow one while the heatmap is on. */
 export function getSessionTokenColor(
   pctOfCeiling: number,
-  whitePct: number = 90,
-  yellowPct: number = 95
+  whitePct: number,
+  yellowPct: number
 ): string | undefined {
   if (isHeatmapEnabled() && pctOfCeiling >= yellowPct) return SESSION_TOKENS_YELLOW;
   if (pctOfCeiling >= whitePct) return SESSION_TOKENS_WHITE;

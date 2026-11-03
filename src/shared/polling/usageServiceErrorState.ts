@@ -31,9 +31,8 @@ import type { TransitionReason } from "../../engine/usageTransitionLog";
  * `setPollInterval` / cache write is the only seam the base file
  * needs to wire.
  *
- * On success, `recordSuccess()` clears all counters and resets the
- * kickstart escalation. The base class's refresh-ok path calls it
- * once instead of touching three private fields itself.
+ * On success the fetch cycle calls `recordSuccess()`, which clears every
+ * counter and the kickstart escalation in one place.
  */
 
 interface ErrorStateDeps {
@@ -80,13 +79,6 @@ export class UsageServiceErrorState {
     return this.consecutiveColdStartAbsorbs;
   }
 
-  /** Did the most recent fetch hit a 429? Used by the base class's
-   * refresh-ok branch to decide whether to reset the poll interval
-   * back to the default cadence. */
-  hadRateLimit(): boolean {
-    return this.consecutiveRateLimits > 0;
-  }
-
   /** Reset all counters + kickstart on a successful fetch. */
   recordSuccess(): void {
     this.deps.kickstart.clearStrikes();
@@ -110,12 +102,10 @@ export class UsageServiceErrorState {
 
     this.consecutiveErrors++;
     // Network-class errors (DNS failure, TCP reset, timeout) absorb
-    // a single attempt for the "still trying" spinner UX, then flip
-    // to the offline skin on the second hit at the shorter network-
-    // retry cadence so total spin time stays in the 30-40s range
-    // instead of stretching to 3 * POLL_INTERVAL_MS (~6 minutes).
-    // HTTP-class errors (5xx, transient blips) keep the original
-    // 3-attempt absorption because they often resolve next poll.
+    // fewer attempts at the shorter network-retry cadence, so the
+    // spinner turns into the offline skin within seconds rather than
+    // several poll intervals. HTTP-class errors (5xx, transient blips)
+    // absorb more because they often resolve on the next poll.
     const isNetworkLevelError = statusCode === null && isNetworkError(message);
     const threshold = isNetworkLevelError
       ? NETWORK_ERROR_ABSORPTION_THRESHOLD
@@ -196,10 +186,10 @@ export class UsageServiceErrorState {
     // polls on idle accounts - they recover as soon as the user
     // fires any prompt, so the server's retry-after is not a load-
     // bearing backoff signal in that case. Keep the cadence at
-    // POLL_INTERVAL_MS for cold-start parks so recovery lands
-    // within ~122s of activity returning, instead of stretching
-    // to retryAfterMs (~15min). Real (non-cold-start) 429s stretch
-    // because retry-after is the server's actual throttle ask.
+    // POLL_INTERVAL_MS for cold-start parks so recovery lands within
+    // one poll of activity returning, instead of stretching to the
+    // retry-after. Real (non-cold-start) 429s stretch because
+    // retry-after is the server's actual throttle ask.
     if (this.consecutiveRateLimits === 1 && !isColdStart) {
       this.deps.setPollInterval(retryAfterMs);
     }

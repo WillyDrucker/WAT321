@@ -2,14 +2,10 @@ import type { PlanState, StageDisplay, StageInfo, ToolCall } from "./turnStageTy
 import type { BridgeStage } from "../../engine/bridgeTypes";
 
 /**
- * Display-string builders for the canonical 5-stage bridge model.
- * Pure functions over `StageInfo` produced by `stageInfoParser`. No fs,
- * no state. Sits in its own file so the parser can stay a single
- * one-pass walk and the tooltip layer can swap renderers without
- * dragging the parser along.
- *
- * Consumers: session token widget tooltip, status bar tooltip in
- * adaptive mode.
+ * Display-string builders for the canonical 5-stage bridge model, pure
+ * over the `StageInfo` that `stageInfoParser` produces. Kept apart so
+ * the parser stays a single one-pass walk. The Codex session-token
+ * tooltip renders them.
  */
 
 export function renderStageDisplay(info: StageInfo): StageDisplay {
@@ -78,12 +74,19 @@ function labelForWorking(info: StageInfo): string {
 
 function renderPlanLine(plan: PlanState | null): string | null {
   if (!plan || plan.totalSteps === 0) return null;
-  const idx = plan.currentIndex >= 0 ? plan.currentIndex : plan.totalSteps;
-  const display = Math.min(idx + 1, plan.totalSteps);
-  const step = plan.steps[Math.max(0, Math.min(plan.currentIndex, plan.totalSteps - 1))];
-  const text = step?.step ?? "";
-  if (!text) return `Plan: step ${display} of ${plan.totalSteps}`;
-  return `Plan: step ${display} of ${plan.totalSteps} - ${truncate(text, 80)}`;
+  const index = planStepIndex(plan);
+  const head = `Plan: step ${index + 1} of ${plan.totalSteps}`;
+  const text = plan.steps[index]?.step ?? "";
+  return text ? `${head} - ${truncate(text, 80)}` : head;
+}
+
+/** The step the plan line names, so its number and its text always
+ * describe the same step: the one in progress, else the first
+ * unfinished one before work starts, else the last once all are done. */
+function planStepIndex(plan: PlanState): number {
+  if (plan.currentIndex >= 0) return plan.currentIndex;
+  const open = plan.steps.findIndex((s) => s.status !== "completed");
+  return open >= 0 ? open : plan.totalSteps - 1;
 }
 
 function renderToolLine(tool: ToolCall | null, elapsedMs: number): string | null {

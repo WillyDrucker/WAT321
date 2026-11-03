@@ -38,8 +38,8 @@ export function appendModelLines(md: vscode.MarkdownString, input: ModelLineInpu
   // Every `thread/resume` ships the stored slug to the API, so an
   // unknown slug guarantees a 404 on the next prompt. Prefixing a
   // warning badge lets the user spot config drift before dispatching.
-  // Claude model IDs aren't validated this way - Claude's slugs come
-  // from WAT321's own MODEL_CONTEXT_WINDOWS table, not a user cache.
+  // Claude model ids are not validated this way: Claude Code keeps no
+  // installed-model catalog to check them against.
   const codexModelInvalid = provider === "Codex" && !isKnownCodexModel(modelId);
   const prefix = codexModelInvalid ? "⚠ " : "";
   const effortLabel = resolveEffortLabel(provider, modelId, effort, codexEffort, claudeTurnInfo);

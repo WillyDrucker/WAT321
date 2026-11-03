@@ -1,14 +1,12 @@
 import type { StageInfo } from "../../codexRollout/turnStageTypes";
+import type { CompactFlashSnapshot } from "../../polling/compactFlashMachine";
 import type { LastEntryKind } from "../../turnState";
 
 /**
  * Type contracts shared by the session-token widget and its provider-
- * specific consumers (Claude / Codex parsers, OpenCode poller).
- *
- * Defined in `shared/ui` rather than per-tier so the generic widget
- * can reference these types without inverting the shared -> tool
- * dependency direction. Provider parser modules import + re-export
- * these names.
+ * specific producers (the Claude and Codex parsers and widgets). They
+ * live in `shared/ui` so the generic widget can reference them without
+ * inverting the shared -> tool dependency direction.
  */
 
 /** Cache-event classification surfaced in the Claude session-token
@@ -38,8 +36,8 @@ export interface ClaudeTurnInfo {
   activeToolName: string | null;
   /** Count of `tool_use` blocks since the most recent user message. */
   toolCallCount: number;
-  /** True if any of the last ~20 assistant entries carry a `thinking`
-   * content block. */
+  /** True if a recent assistant entry carries a `thinking` content
+   * block. The parser bounds how far back it looks. */
   hasThinkingRecent: boolean;
   /** Output tokens on the most recent assistant turn. */
   outputTokens: number;
@@ -82,16 +80,16 @@ export interface SessionTokenRenderData {
   contextWindowSize: number;
   ceiling: number;
   baselineTokens: number;
-  /** Most recent transcript / rollout file mtime in ms. Always present
-   * when state is "ok". Backstop for the active indicator when PID is
-   * unavailable / dead. */
-  transcriptMtimeMs: number;
+  /** When the session file last grew, in ms: the transcript mtime for
+   * Claude, the observed byte growth for Codex. Backstop for the active
+   * indicator when no live PID backs the session. */
+  lastWriteMs: number;
   /** Tail classification. Primary driver of the active indicator. */
   turnState: LastEntryKind;
   /** CLI process id for live sessions (Claude only). When present and
    * alive, keeps the active indicator on through silent thinking
-   * periods that would otherwise trip the mtime backstop. Undefined
-   * for lastKnown fallbacks and Codex. */
+   * periods that would otherwise trip the last-write backstop.
+   * Undefined for lastKnown fallbacks and Codex. */
   pid?: number;
   /** When present, tooltip adds "Last active: X ago". Populated only
    * for stale (lastKnown) sessions - live sessions leave it undefined
@@ -107,11 +105,10 @@ export interface SessionTokenRenderData {
    * presence, and cache-hit token split from the most recent turn.
    * Undefined for Codex sessions. */
   claudeTurnInfo?: ClaudeTurnInfo;
-  /** Claude-only: real compaction fire point in tokens. Distinct from
-   * `ceiling` because recent Claude Code releases stack a reserve on
-   * the override rather than replacing the default formula. Drives
-   * the "Auto-Compact at ~X" tooltip line. Undefined for Codex. */
-  autoCompactEffectiveTokens?: number;
+  /** Where auto-compact actually fires, in tokens. Drives the
+   * "Auto-Compact at ~X" tooltip line. Claude's equals `ceiling`,
+   * Codex's sits ahead of its usable-window ceiling. */
+  autoCompactEffectiveTokens: number;
   /** Provider-agnostic: timestamp (ms) of the most recent observed
    * compact event in the underlying transcript / rollout. Drives the
    * widget's compact-aware LOAD banner. Claude sources this from the
@@ -123,34 +120,19 @@ export interface SessionTokenRenderData {
    * rollout delta. Null when no recent positive sample is available
    * (idle, just started, transcript not advancing). Surfaced in the
    * tooltip as a "Streaming ~X tps" line. */
-  tokensPerSecond?: number | null;
-  /** Compact-completion flash snapshot (Claude + Codex). When
-   * `state: "flashing-completion"` the widget replaces the normal token
-   * text with a saturated orange 100% bar for the flash window. May be
-   * undefined during transitional states where the machine has not yet
-   * emitted. The structural shape is the shared
-   * `CompactFlashSnapshot` from `shared/polling/compactFlashMachine.ts`,
-   * threaded through each provider widget's `getRenderData`. */
-  compactState?: {
-    state: "idle" | "flashing-completion";
-    estimatedDurationMs: number;
-    percent: number;
-    barsFilled: number;
-    /** Wall-clock ms at which a `flashing-completion` window expires.
-     * The widget consults this on every ticker frame so the flash
-     * collapses back to normal token rendering the instant the window
-     * passes, instead of waiting for the next 15s service poll. Null
-     * outside the flash state. */
-    flashUntil: number | null;
-  };
+  tokensPerSecond: number | null;
+  /** Compact-completion flash snapshot. While `state` is
+   * `"flashing-completion"` and `flashUntil` has not passed, the widget
+   * replaces the token text with a saturated orange 100% bar, checked
+   * on every ticker frame rather than on the next service poll. */
+  compactState: CompactFlashSnapshot;
   /** Workspace session inventory snapshot. Total = open sessions in
    * this workspace for the provider - inProgress = subset with an
    * in-flight turn. Drives the multi-session tooltip disclosure -
    * surfaced as a tooltip line when total > 1 so the user can see
    * "this widget is watching one of N sessions" without a separate
-   * pill. Defaults to {total:1, inProgress:0} in the common single-
-   * session case. */
-  workspaceSessionInventory?: { total: number; inProgress: number };
+   * pill. */
+  workspaceSessionInventory: { total: number; inProgress: number };
 }
 
 export interface SessionTokenWidgetDescriptor<TState extends { status: string }> {
@@ -169,21 +151,22 @@ export interface SessionTokenWidgetDescriptor<TState extends { status: string }>
   activeFrames: readonly string[];
   /** Ms per active-frame advance. */
   activeStepMs: number;
-  /** Ms since last mtime bump before the widget returns to idle.
-   * Keeps the indicator self-healing. */
-  activeThresholdMs: number;
+  /** Ms after the last write before the widget returns to idle while a
+   * PID backs the session. A provider with no PID omits it, and the
+   * no-PID window in `sessionTokenPrefix` applies instead. */
+  activeThresholdMs?: number;
   /** In-flight-turn freshness window (ms) for a provider with no PID
    * handle. Codex exposes no process signal, so the indicator cannot
-   * lean on PID liveness through a silent stretch, and modern Codex
-   * reasons silently for tens of seconds with no rollout write, which
-   * the tight `activeThresholdMs` gate reads as idle mid-turn. The
-   * classifier owns end-of-turn detection (task_complete / turn_aborted
-   * / final_answer collapse the indicator instantly), so this only
-   * needs to outlast the longest silent gap and applies only while a
-   * turn is in progress. A stale `assistant-pending` tail with no
-   * end-state animates at most this long, then self-suspends. Omitted
-   * for Claude, whose no-PID path is a lastKnown fallback that stays on
-   * the tight window. */
+   * lean on PID liveness through a silent stretch, and Codex reasons
+   * silently for tens of seconds with no rollout write, which the
+   * no-PID window reads as idle mid-turn. The classifier owns
+   * end-of-turn detection (task_complete / turn_aborted / final_answer
+   * collapse the indicator instantly), so this only needs to outlast
+   * the longest silent gap and applies only while a turn is in
+   * progress. A stale `assistant-pending` tail with no end-state
+   * animates at most this long, then self-suspends. Omitted for Claude,
+   * whose no-PID path is a lastKnown fallback that stays on the no-PID
+   * window. */
   silentTurnCeilingMs?: number;
   /** Extract render data from an ok state. */
   getRenderData(state: TState & { status: "ok" }): SessionTokenRenderData;

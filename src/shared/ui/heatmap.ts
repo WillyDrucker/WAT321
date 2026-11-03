@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import { SETTING } from "../../engine/settingsKeys";
-import { makeBar as makeClaudeBarDefault } from "../claudeUsage/claudeUsageFormatters";
-import { makeBar as makeCodexBarDefault } from "../codexUsage/codexUsageFormatters";
+import { getRemainingPct } from "../codexUsage/codexUsageFormatters";
 import {
   buildClaudeHeatmapBar,
   buildClaudeRemainingHeatmapBar,
@@ -12,83 +11,52 @@ import { makeProgressBar } from "./progressBar";
 import type { UsageStyle } from "./usageDisplay";
 
 /**
- * Heatmap coloring for WAT321 usage progress bars. Two models,
- * picked by bar direction:
- *
- *   - **Ascending (rolling):** per-cell coloring - the backfill
- *     keeps the provider's base color and only cells past the
- *     thresholds turn yellow then red, so a warning reads as an
- *     accent, never a wall of color. Yellow demotes to base in the
- *     red phase. Claude gates at 70/85 used, Codex at 60/75 used
- *     (its native bands expressed on the used scale).
- *   - **Descending (band):** one color for the whole remaining
- *     fill - a draining fill is only a few cells by the time the
- *     gates hit, so per-cell positions degenerate. Codex gates at
- *     40/25 remaining, Claude at 30/15 remaining.
- *
- * The bars themselves live in `claudeHeatmapBar.ts` and
- * `codexHeatmapBar.ts`, the cells in `heatmapPalette.ts`. Gated on
- * `wat321.enableHeatmap` (default on). `renderClaudeBar` and
- * `renderCodexBar` are the dispatch points for all rendering surfaces.
+ * The dispatch point for every usage bar, on the status bar and in the
+ * tooltips. With the heatmap on, an ascending (used) bar colors cell by
+ * cell so a warning reads as an accent, and a descending (remaining) bar
+ * colors its whole fill by band, because a draining fill is only a few
+ * cells by the time a gate hits. Each provider's gates live in its own
+ * bar module. With the heatmap off, every bar is a plain provider fill.
  */
 
-/** Is the heatmap feature enabled in user settings? Gates every
- * heatmap-related coloring in WAT321: Claude's rolling bar, Codex's
- * band-based bar, the Claude and Codex minimal-view brand text
- * colors, and the emoji-style bars inside the minimal tooltips.
- * Read fresh on every call so toggling the setting takes effect
- * immediately without a reload. */
+/** Is `wat321.enableHeatmap` on? Gates every heatmap coloring, bars and
+ * text alike. Read fresh on every call so a toggle applies at once. */
 export function isHeatmapEnabled(): boolean {
   return vscode.workspace
     .getConfiguration("wat321")
     .get<boolean>(SETTING.enableHeatmap, true);
 }
 
-/** Render a Claude usage progress bar at the requested width,
- * respecting the `wat321.enableHeatmap` setting. Returns the rolling
- * per-cell heatmap bar when on, or the default solid-blue bar when
- * off. `style` follows `wat321.usageDisplay` - "used" (Claude's
- * native fill-up) is the default so existing call sites are
- * unchanged, "remaining" renders the draining variant. Shared by
- * status bar widgets and tooltip builders. */
+/** A Claude usage bar `width` cells wide in the given style, defaulting
+ * to Claude's native used style. */
 export function renderClaudeBar(
   usedPct: number,
   width: number = 10,
   style: UsageStyle = "used"
 ): string {
-  if (style === "remaining") {
-    if (isHeatmapEnabled()) {
-      return buildClaudeRemainingHeatmapBar(usedPct, width);
-    }
-    const remainingPct = 100 - Math.max(0, Math.min(100, usedPct));
-    return makeProgressBar(remainingPct, width, SQUARE_BLUE);
-  }
+  const remaining = style === "remaining";
   if (isHeatmapEnabled()) {
-    return buildClaudeHeatmapBar(usedPct, width);
+    return remaining
+      ? buildClaudeRemainingHeatmapBar(usedPct, width)
+      : buildClaudeHeatmapBar(usedPct, width);
   }
-  return makeClaudeBarDefault(usedPct, width);
+  const fillPct = remaining ? 100 - Math.max(0, Math.min(100, usedPct)) : usedPct;
+  return makeProgressBar(fillPct, width, SQUARE_BLUE);
 }
 
-/** Render a Codex usage progress bar at the requested width,
- * respecting the `wat321.enableHeatmap` setting. Returns the
- * band-based heatmap bar when on, or the default solid-green bar
- * when off. `style` follows `wat321.usageDisplay` - "remaining"
- * (Codex's native count-down) is the default so existing call sites
- * are unchanged, "used" renders the fill-up variant. Shared by
- * status bar widgets and tooltip builders. */
+/** A Codex usage bar `width` cells wide in the given style, defaulting
+ * to Codex's native remaining style, which reads through the same 1%
+ * floor as the widget percent. */
 export function renderCodexBar(
   usedPct: number,
   width: number = 10,
   style: UsageStyle = "remaining"
 ): string {
-  if (style === "used") {
-    if (isHeatmapEnabled()) {
-      return buildCodexUsedHeatmapBar(usedPct, width);
-    }
-    return makeProgressBar(Math.max(0, Math.min(100, usedPct)), width, SQUARE_GREEN);
-  }
+  const used = style === "used";
   if (isHeatmapEnabled()) {
-    return buildCodexHeatmapBar(usedPct, width);
+    return used
+      ? buildCodexUsedHeatmapBar(usedPct, width)
+      : buildCodexHeatmapBar(usedPct, width);
   }
-  return makeCodexBarDefault(usedPct, width);
+  return makeProgressBar(used ? usedPct : getRemainingPct(usedPct), width, SQUARE_GREEN);
 }

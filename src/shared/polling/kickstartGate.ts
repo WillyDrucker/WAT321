@@ -17,6 +17,11 @@ import {
  * The gate resets on any successful fetch or on a manual reset
  * (e.g. Reset WAT321 command).
  */
+
+/** Quick retries a kickstart wake gets before the round counts as failed
+ * and the escalation steps up. */
+const POST_WAKE_STRIKES = 3;
+
 export class KickstartGate {
   private consecutiveFailedKickstarts = 0;
   private postWakeStrikesRemaining = 0;
@@ -43,7 +48,7 @@ export class KickstartGate {
   /** Was the provider idle (no recent session activity) at `now`?
    * Used by the usage service to tag a fresh `rate-limited` park as
    * cold-start so the renderer can show a friendly "Idle" skin
-   * instead of the alarm-level "Offline" skin. */
+   * instead of the "Paused" throttle skin. */
   isIdleAt(now: number): boolean {
     const activityMs = this.getActivityMs?.() ?? null;
     if (activityMs === null) return true;
@@ -53,7 +58,7 @@ export class KickstartGate {
   /** Called when a kickstart wake begins. Arms the post-wake strike
    * counter so the service gets a few quick retries before escalating. */
   onWake(): void {
-    this.postWakeStrikesRemaining = 3;
+    this.postWakeStrikesRemaining = POST_WAKE_STRIKES;
   }
 
   /** Called on each 429 during post-wake strikes. Returns true if

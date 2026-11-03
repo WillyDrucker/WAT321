@@ -1,37 +1,29 @@
 import { RECOVERY_CEILING_MS, RECOVERY_TICK_MS } from "./pollingTimings";
-import type {
-  TransitionReason,
-  TransitionStatus,
-} from "../../engine/usageTransitionLog";
+import type { TransitionStatus } from "../../engine/usageTransitionLog";
 import type {
   TransitionLogger,
   TransitionSnapshot,
 } from "./usageServiceTransitionLogger";
 
 /**
- * Independent recovery watchdog for the polling service. Ticks at
- * `RECOVERY_TICK_MS` (60s) and checks the gap since the last real
- * HTTPS attempt. When the gap exceeds `RECOVERY_CEILING_MS` (15
- * min) and the service is in a non-ok / non-not-connected / no-auth
- * state, forces a fetch that bypasses cache adoption so a stuck
- * `token-expired` or a long `rate-limited` park always gets at
- * least one real attempt per quarter-hour. Replaces "user must
- * prompt to recover" with "the service heals itself on its own
- * clock."
+ * Independent recovery watchdog for the polling service. Every
+ * `RECOVERY_TICK_MS` it checks the gap since the last real HTTPS attempt,
+ * and past `RECOVERY_CEILING_MS` it forces a fetch that bypasses cache
+ * adoption, so a stuck `token-expired` or a long `rate-limited` park
+ * still gets a real attempt on the service's own clock.
  *
  * `ok` skips because there is nothing to recover from.
  * `not-connected` skips because the discovery poller owns recovery.
- * `no-auth` skips because the main poll loop revisits getAuth()
- * every POLL_INTERVAL_MS already - the watchdog would log
- * recovery-ceiling-hit every minute without making progress.
+ * `no-auth` skips because the main poll loop already revisits getAuth()
+ * every poll, and the watchdog would only log a ceiling hit each tick.
  */
 
 export interface RecoveryWatchdogDeps {
   /** Current service status. The watchdog skips the recovery path
    * for ok / not-connected / no-auth. */
   getCurrentStatus(): TransitionStatus;
-  /** Wall-clock ms of the last actual HTTPS attempt (updated by
-   * doFetch, NOT by cache adoption). */
+  /** Wall-clock ms of the last actual HTTPS attempt, set only when a
+   * request goes out and never by cache adoption. */
   getLastFetchAttemptMs(): number;
   /** Is the service currently disposed? Skip the tick if so. */
   isDisposed(): boolean;
@@ -71,7 +63,7 @@ export function startRecoveryWatchdog(
     if (sinceLastFetch < RECOVERY_CEILING_MS) return;
     deps.transitionLogger.recordHeartbeat({
       status,
-      reason: "recovery-ceiling-hit" as TransitionReason,
+      reason: "recovery-ceiling-hit",
       snapshot: deps.buildSnapshot(),
     });
     deps.forceRefresh();

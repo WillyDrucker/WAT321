@@ -15,28 +15,23 @@ import { hasUnlistedPin, listUnlistedPins } from "./unlistedModelPins";
 
 /**
  * Model facts for the Codex tier, resolved in a fixed order of
- * authority: the live catalog in `modelCatalog.ts` (filled from
- * `model/list` on the app-server the bridge dispatches to, hidden
- * models included), then the user's own typed pins in
- * `unlistedModelPins.ts` (explicit intent, the API gives the real
- * answer), then `~/.codex/models_cache.json` via `modelsCacheFile.ts`
- * for display only, until the app-server answers or when it never
- * will (no codex installed, or one too old to know `model/list`).
+ * authority: the live catalog in `modelCatalog.ts` (`model/list` on the
+ * app-server the bridge dispatches to, hidden models included), then
+ * the user's typed pins in `unlistedModelPins.ts`, then
+ * `~/.codex/models_cache.json` via `modelsCacheFile.ts` for display
+ * only, until the app-server answers or when it never will.
  *
  * The file is a DISPLAY hint, only the catalog and the pins GATE: a
  * file written by some other codex must never decide a session is
  * broken nor bless a slug the running app-server would 404 on. Gating
  * fails open with no catalog, or a window that has not asked yet would
- * block every `thread/resume`. The catalog also ages (the backend
- * decides per account what a binary may list), so
- * `codexCatalogRefresh.ts` re-asks when the answer is old.
+ * block every `thread/resume`. `codexCatalogRefresh.ts` re-asks when
+ * the answer is old.
  *
  * `~/.codex/config.toml` is read nowhere in WAT321: it is a machine-wide
  * TUI preference that made a fresh install behave differently on two
  * machines. Sessions pin their own model, see
  * `WAT321_EPIC_HANDSHAKE/codexSettings/codexSessionSettings.ts`.
- * `model/list` carries no `context_window`, so the auto-compact ceiling
- * stays file-sourced, see `WAT321_CODEX_SESSION_TOKENS/autoCompactLimit.ts`.
  */
 
 /** Every model slug the running Codex lists, hidden ones included.
@@ -141,8 +136,8 @@ export function getCodexModelInfo(slug: string): CodexModelInfo | null {
   return cacheFileModelInfo(slug);
 }
 
-/** The first speed tier beyond standard the model offers, which is Fast
- * on every model today. Null when it offers none or no source describes
+/** The first speed tier beyond standard the model offers, Fast where
+ * one exists. Null when it offers none or no source describes
  * the model, so the Speed row only appears where Fast can really run. */
 export function codexFastTier(slug: string | null): CodexServiceTier | null {
   if (slug === null) return null;

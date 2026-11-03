@@ -18,14 +18,12 @@ import type { BridgeStage } from "../../engine/bridgeTypes";
  * active tool, token breakdown). Scoped to the most recent turn via
  * `extractCurrentTurn` - long-lived rollouts contain many prior
  * turns and reading them unscoped would pollute every field and
- * latch stage permanently at `complete`.
- *
- * Cheap on every poll tick (15s in session tokens, 5s in the bridge
- * monitor) - one pass over the scoped tail.
+ * latch stage permanently at `complete`. One pass over the scoped
+ * tail, cheap enough for every session-token poll and monitor tick.
  */
 
 /** Post-tool reasoning threshold for promoting the turn to stage 4
- * (Finalizing). After Codex finishes its last function_call_output
+ * (writing). After Codex finishes its last function_call_output
  * it typically reasons for 10-30s before the final answer streams.
  * One function_call_output plus a run of reasoning entries with no
  * intervening new function_call is a reliable wrap-up signal. */
@@ -163,12 +161,12 @@ export function parseStageInfo(tail: string): StageInfo {
 
     if (entry.type === "response_item" && payloadType === "reasoning") {
       // Reasoning alone does NOT advance to stage 3. Early
-      // reasoning belongs to stage 2 (the "reading" window - 7-23s
-      // on real research turns). Stage 3 is reserved for active
-      // tool use. Pure-reasoning turns with no tools fall back to
-      // the walker which timestep-advances through 1-5. Post-tool
-      // reasoning still promotes to stage 4 (Finalizing) - the
-      // wrap-up window often accounts for 50%+ of synthesis turns.
+      // reasoning belongs to stage 2 (the "reading" window). Stage 3
+      // is reserved for active tool use. Pure-reasoning turns with no
+      // tools fall back to the bridge stage walker's timed advance
+      // through 1-5. Post-tool reasoning still promotes to stage 4
+      // (writing) - the wrap-up window is often half of a synthesis
+      // turn.
       if (functionCallOutputsSeen > 0) {
         reasoningSinceLastTool++;
         if (reasoningSinceLastTool >= POST_TOOL_REASONING_THRESHOLD) {

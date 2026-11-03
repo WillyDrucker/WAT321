@@ -1,9 +1,14 @@
 import * as vscode from "vscode";
+import type { DisplayMode } from "../../engine/displayMode";
 import { SETTING } from "../../engine/settingsKeys";
+import { SQUARE_YELLOW } from "./heatmapPalette";
 import { makeProgressBar } from "./progressBar";
 
-/** Yellow square emoji for session token bars. */
-const FILLED_YELLOW = "\uD83D\uDFE8";
+/**
+ * The text pieces of the session-token widgets: the compact token count,
+ * the percent, the yellow context bar, and the tokens-per-second suffix.
+ */
+
 const BAR_WIDTH = 10;
 
 /** Format token count as compact string: 1234 -> "1k", 150000 -> "150k", 1000000 -> "1M" */
@@ -26,7 +31,7 @@ export function formatPct(pct: number): string {
 
 /** Yellow/black block bar for session token context display */
 export function makeTokenBar(pct: number, width: number = BAR_WIDTH): string {
-  return makeProgressBar(pct, width, FILLED_YELLOW);
+  return makeProgressBar(pct, width, SQUARE_YELLOW);
 }
 
 /** Inline tokens-per-second suffix for widget text. Three digits at
@@ -37,7 +42,7 @@ export function makeTokenBar(pct: number, width: number = BAR_WIDTH): string {
  * reading so a fresh session never shows "0tps". */
 export function tpsSuffix(
   tps: number | null | undefined,
-  mode: "full" | "compact" | "minimal"
+  mode: DisplayMode
 ): string {
   if (mode === "minimal") return "";
   if (

@@ -1,7 +1,7 @@
 /**
  * Tiny 60-second ticker used by both usage services during rate-limit
- * backoff so the widget's countdown ("Retry in 14:03") keeps ticking
- * without a full poll cycle. The ticker stops itself automatically
+ * backoff so the tooltip's reconnect countdown keeps ticking between
+ * polls. The ticker stops itself automatically
  * when the service leaves the rate-limited state, so the caller only
  * needs to remember to `start()` on entry and `stop()` on dispose.
  */

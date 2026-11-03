@@ -1,3 +1,4 @@
+import type { SessionSource } from "../../engine/contracts";
 import type { StateListener } from "../../engine/serviceTypes";
 import { normalizePath } from "../../engine/fs/pathIdentity";
 import { PathWatcher } from "./pathWatcher";
@@ -106,7 +107,7 @@ export abstract class SessionTokenServiceBase<TState extends { status: string }>
    * their workspace has the smoking gun. Returns null fields when no
    * session is resolved or the underlying state shape is unexpected. */
   getActiveSessionDiagnostics(): {
-    source: "live" | "lastKnown" | null;
+    source: SessionSource | null;
     pid: number | null;
   } {
     if (this.state.status !== "ok") return { source: null, pid: null };
@@ -133,13 +134,11 @@ export abstract class SessionTokenServiceBase<TState extends { status: string }>
     this.transcriptWatcher.sync(this.cachedTranscriptPath);
   }
 
-  /** Most recent active-session mtime, or null. Consumed by the
-   * usage service as the activity signal that gates kickstart out
-   * of rate-limited park.
-   *
-   * Uses defensive property access because the base class is generic
-   * over TState. Both Claude and Codex subclasses have
-   * `session.lastActiveAt` when status is "ok". */
+  /** When the active session was last active, or null. Consumed by the
+   * usage service as the activity signal that gates kickstart out of
+   * rate-limited park. Defensive property access because the base is
+   * generic over TState, and both providers' ok sessions carry
+   * `lastActiveAt`. */
   getLastActivityMs(): number | null {
     if (this.state.status !== "ok") return null;
     const session = (this.state as Record<string, unknown>).session;

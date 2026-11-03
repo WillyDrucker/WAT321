@@ -1,9 +1,8 @@
-/** Black large square, shared empty cell for all progress bars. */
-const EMPTY_SQUARE = "\u2B1B";
+import { SQUARE_BLACK } from "./heatmapPalette";
 
-/** Build an emoji progress bar of `width` cells, filled proportional
- * to `pct`. The caller supplies the fill character (blue for Claude,
- * green for Codex, yellow for session tokens). */
+/** Build an emoji progress bar of `width` cells, filled proportional to
+ * `pct`. The caller supplies the fill cell from the palette, and the
+ * empty cells are the palette's black square. */
 export function makeProgressBar(
   pct: number,
   width: number,
@@ -12,5 +11,5 @@ export function makeProgressBar(
   const clamped = Math.max(0, Math.min(100, pct));
   const filled = Math.round((clamped / 100) * width);
   const empty = width - filled;
-  return filledChar.repeat(filled) + EMPTY_SQUARE.repeat(empty);
+  return filledChar.repeat(filled) + SQUARE_BLACK.repeat(empty);
 }

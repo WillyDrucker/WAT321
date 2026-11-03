@@ -40,8 +40,8 @@ function readFile(): SnapshotFile | null {
 /** Load the persisted last-known-good payload for a provider, or null
  * when nothing is on disk. Returns the payload plus its fetched-at
  * wall-clock so the widget can render "Last updated N ago" without
- * needing to refetch. Lossy on any read or schema error - the widget
- * falls through to its 0% scaffold when this returns null. */
+ * needing to refetch. Null on any read or schema error, which the widget
+ * treats as no payload in hand. */
 export function loadSnapshot<TData>(
   provider: ProviderKey
 ): { data: TData; fetchedAt: number } | null {
@@ -74,17 +74,10 @@ export function saveSnapshot(
   }
 }
 
-/** Clear a single provider's persisted snapshot. Called by the
- * widget on identity-changing service states (sign-out,
- * disconnect) so a subsequent VS Code restart cannot hydrate the
- * prior account's bars. token-expired is deliberately NOT in that
- * caller branch - the OAuth access token rotates inside the same
- * account, so the snapshot survives the refresh window and the
- * widget keeps showing cached bars under the dim skin until the
- * token recovers. Sibling provider's slot stays intact. Atomic
- * rewrite of the remaining slots. Best-effort: a failed clear means
- * the next restart shows one stale frame before the live service
- * overwrites it. */
+/** Clear one provider's persisted snapshot and leave the sibling's slot
+ * intact. The widget calls it on identity-changing states. Best-effort:
+ * a failed clear shows one stale frame on the next restart before the
+ * live service overwrites it. */
 export function clearProviderSnapshot(provider: ProviderKey): void {
   const current = readFile();
   if (!current) return;

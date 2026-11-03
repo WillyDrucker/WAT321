@@ -37,29 +37,37 @@ interface CatalogEntry {
    * key. The harness needs an explicit provider - auto-discovery only
    * fills in the model id for local entries. */
   harnessProviderID: "llama.cpp" | "zen";
-  /** Dispatchable without an API key when true. Free-tier Zen routes
-   * (Big Pickle, GPT-5 Nano, etc) hit opencode.ai's
-   * `/zen/v1/chat/completions` with no Authorization header and route
-   * to a rotating free-model pool with `cost: "0"`. Best-effort free
-   * use, not an SLA: SST controls quota per IP and can revoke at any
-   * time. When `apiKeyRef` is non-empty AND the user has set a key,
-   * the keyed request takes precedence (paid quota, no rate limits). */
+  /** A free route, dispatchable without an API key. OpenCode serves
+   * free models keyless only to its own client, so a direct keyless
+   * call from outside a session can hit the free-usage limit. A key,
+   * when set, takes precedence. */
   anonymousAccess?: boolean;
-  /** Model context window in tokens. Drives the session-tokens widget
-   * %-used + Auto-Compact threshold display. OpenCode does not
-   * disclose Zen route limits via its `/provider` catalog (it returns
-   * `limit.context: 0` for our user-added providers), so the Zen values
-   * here come from the models.dev registry OpenCode itself reads. Local
-   * LLM is resolved at runtime via llama-server's `/props.n_ctx` since
-   * the loaded model decides - the catalog value is a fallback only.
-   * Leave undefined when the route's underlying model is unknown - the
-   * widget then renders cumulative tokens without a percentage bar. */
+  /** Context window in tokens, for the session-tokens percentage and
+   * Auto-Compact line. Zen values are `limit.context` from the Zen
+   * model list, since `opencode serve` reports 0 for user-added
+   * providers. The local value only backs up llama-server's
+   * `/props.n_ctx`. Undefined renders tokens without a percentage. */
   contextWindow?: number;
 }
 
 const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
 
 export const LOCAL_INSTANCE_ID = "local-llm";
+
+/** The Zen route a remote dispatch or a new remote session falls back
+ * to when no remote instance is configured or active. */
+export const DEFAULT_ZEN_ROUTE: CatalogEntry = {
+  id: "big-pickle",
+  alias: "Big Pickle",
+  endpoint: ZEN_BASE_URL,
+  model: "big-pickle",
+  kind: "remote",
+  dataRetention: "retained",
+  apiKeyRef: ZEN_API_KEY_SECRET,
+  harnessProviderID: "zen",
+  anonymousAccess: true,
+  contextWindow: 200_000,
+};
 
 export const CATALOG: readonly CatalogEntry[] = [
   {
@@ -77,33 +85,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     // still render a percentage instead of going blank.
     contextWindow: 32_768,
   },
-  {
-    id: "big-pickle",
-    alias: "Big Pickle",
-    endpoint: ZEN_BASE_URL,
-    model: "big-pickle",
-    kind: "remote",
-    dataRetention: "retained",
-    apiKeyRef: ZEN_API_KEY_SECRET,
-    harnessProviderID: "zen",
-    anonymousAccess: true,
-    // Conservative lower-bound estimate. Big Pickle rotates between
-    // multiple frontier models with varying windows, so 200K is the
-    // safest assumption that covers common Claude / GPT routes.
-    contextWindow: 200_000,
-  },
-  {
-    id: "gpt-5-nano",
-    alias: "GPT 5 Nano",
-    endpoint: ZEN_BASE_URL,
-    model: "gpt-5-nano",
-    kind: "remote",
-    dataRetention: "retained",
-    apiKeyRef: ZEN_API_KEY_SECRET,
-    harnessProviderID: "zen",
-    anonymousAccess: true,
-    contextWindow: 400_000,
-  },
+  DEFAULT_ZEN_ROUTE,
   {
     id: "glm-5-3-flash-free",
     alias: "GLM 5.3 Flash",
@@ -141,30 +123,81 @@ export const CATALOG: readonly CatalogEntry[] = [
     contextWindow: 1_048_576,
   },
   {
-    id: "minimax-m3-1-flash-free",
-    alias: "MiniMax M3.1 Flash",
+    id: "nemotron-3-5-lightning-free",
+    alias: "Nemotron 3.5 Lightning",
     endpoint: ZEN_BASE_URL,
-    model: "minimax-m3.1-flash-free",
+    model: "nemotron-3.5-lightning-free",
     kind: "remote",
     dataRetention: "retained",
     apiKeyRef: ZEN_API_KEY_SECRET,
     harnessProviderID: "zen",
     anonymousAccess: true,
-    contextWindow: 1_000_000,
+    contextWindow: 262_144,
+  },
+  {
+    id: "beam-free",
+    alias: "Beam",
+    endpoint: ZEN_BASE_URL,
+    model: "beam-free",
+    kind: "remote",
+    dataRetention: "retained",
+    apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
+    anonymousAccess: true,
+    contextWindow: 1_048_576,
+  },
+  {
+    id: "flint-40b-free",
+    alias: "Flint 40B",
+    endpoint: ZEN_BASE_URL,
+    model: "flint-40b-free",
+    kind: "remote",
+    dataRetention: "retained",
+    apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
+    anonymousAccess: true,
+    contextWindow: 262_144,
+  },
+  {
+    id: "mimo-v2-6-flash-free",
+    alias: "MiMo V2.6 Flash",
+    endpoint: ZEN_BASE_URL,
+    model: "mimo-v2.6-flash-free",
+    kind: "remote",
+    dataRetention: "retained",
+    apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
+    anonymousAccess: true,
+    contextWindow: 200_000,
+  },
+  {
+    id: "pulse-alpha-free",
+    alias: "Pulse Alpha",
+    endpoint: ZEN_BASE_URL,
+    model: "pulse-alpha-free",
+    kind: "remote",
+    dataRetention: "retained",
+    apiKeyRef: ZEN_API_KEY_SECRET,
+    harnessProviderID: "zen",
+    anonymousAccess: true,
+    contextWindow: 1_048_576,
   },
 ] as const;
 
-/** Aliases of every Zen-routed instance, for the API key prompts. */
-/** Routes the catalog has retired, keyed to the route that took over
- * the slot. Saved preferences and session alias bindings migrate
- * through this table at activation. */
+/** Routes the catalog has retired, keyed to the live route that took
+ * over the slot, or the default route when the family has no free
+ * successor. Saved preferences and session alias bindings migrate
+ * through this table once at activation, so every value is a live id. */
 export const RETIRED_INSTANCE_IDS: Readonly<Record<string, string>> = {
   "ling-2-6-flash": "glm-5-3-flash-free",
   "hy3-preview-free": "deepseek-v4-1-flash-free",
   "nemotron-3-super-free": "nemotron-3-5-super-vl-free",
-  "minimax-m2-5-free": "minimax-m3-1-flash-free",
+  "minimax-m2-5-free": DEFAULT_ZEN_ROUTE.id,
+  "minimax-m3-1-flash-free": DEFAULT_ZEN_ROUTE.id,
+  "gpt-5-nano": DEFAULT_ZEN_ROUTE.id,
 };
 
+/** Aliases of every Zen-routed instance, for the API key prompts. */
 export const ZEN_INSTANCE_ALIASES: readonly string[] = CATALOG.filter(
   (entry) => entry.harnessProviderID === "zen"
 ).map((entry) => entry.alias);

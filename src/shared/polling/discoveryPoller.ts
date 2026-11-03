@@ -2,14 +2,10 @@ import { existsSync } from "node:fs";
 import { DISCOVERY_BACKOFF } from "./pollingTimings";
 
 /**
- * Polls for the existence of a provider CLI directory using the exponential
- * backoff defined in constants.ts. Used by services that are enabled but
- * whose CLI may not be installed yet. When the directory appears, calls
- * onFound() once and stops polling until re-started.
- *
- * Backoff: 60s for the first 5 minutes, 5 min up to 30 minutes, then 15
- * min indefinitely. This catches quick installs without hammering the
- * filesystem for users who will never install.
+ * Polls for a provider CLI directory on the `DISCOVERY_BACKOFF`
+ * schedule, for services that are enabled before their CLI is
+ * installed. The schedule catches a quick install without hammering the
+ * filesystem. When the directory appears, calls onFound() once and stops.
  */
 export class DiscoveryPoller {
   private timer: ReturnType<typeof setTimeout> | null = null;
