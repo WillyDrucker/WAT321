@@ -5,7 +5,11 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.37] - unreleased
+## [1.5.37] - 2026-11-03
+
+### Fixed
+
+- **The bridge no longer drops out of a Claude conversation when VS Code reloads.** Each time a window loaded, WAT321 briefly removed and re-added its bridge entry, and a conversation that reopened in that moment started without the bridge and stayed that way. The entry now updates in place and is left alone when it is already current, so nothing needs re-registering after you update.
 
 ## [1.5.36] - 2026-11-03
 
