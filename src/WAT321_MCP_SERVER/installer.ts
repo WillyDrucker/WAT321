@@ -18,6 +18,11 @@ import {
   extractUnifiedScripts,
   UNIFIED_MCP_NAME,
 } from "./installerScripts";
+import {
+  isUserEntryCurrent,
+  unifiedMcpEntry,
+  writeProjectEntry,
+} from "./installerMcpEntry";
 import { createOutputChannelLogger } from "../engine/outputChannelLogger";
 
 /**
@@ -28,15 +33,12 @@ import { createOutputChannelLogger } from "../engine/outputChannelLogger";
  *
  * Install: extract the bin scripts to `~/.wat321/bridge/bin/` with the
  * prod `node_modules/`, sweep dormant `wat321` entries from
- * `~/.claude.json` whose args[0] no longer exists, sweep any existing
- * entry by name so `claude mcp add` can re-register, register with the
- * wsId (and, with a folder open, the workspace path) injected via
- * `--env`, then pre-allow the tool surface in Claude's settings.
- * Project scope with a workspace folder, user scope with the sentinel
- * `default` wsId when VS Code is folderless so that window still gets
- * a working bridge. Uninstall reverses the registration and the
- * pre-allow list. Script extraction lives in `installerScripts`, the
- * `claude mcp` subprocess wrapper and the two sweeps in
+ * `~/.claude.json`, register the entry with the wsId (and, with a
+ * folder open, the workspace path) in its env, then pre-allow the tool
+ * surface in Claude's settings. Registration never removes a live entry
+ * first, see `installerMcpEntry`. Uninstall reverses the registration
+ * and the pre-allow list. Script extraction lives in `installerScripts`,
+ * the `claude mcp` subprocess wrapper and the two sweeps in
  * `installerClaudeCli`.
  */
 
@@ -51,7 +53,7 @@ const UNIFIED_ALLOWED_TOOLS = [
 
 /** Install the unified bridge: extract scripts, sweep legacy entries,
  * register the new MCP entry, pre-allow new tool names. */
-export async function installUnifiedBridge(
+async function installUnifiedBridge(
   context: vscode.ExtensionContext,
   logger: UnifiedLogger = silentLogger
 ): Promise<{ ok: boolean; error?: string; scriptPath?: string }> {
@@ -66,24 +68,33 @@ export async function installUnifiedBridge(
     return { ok: false, error: msg };
   }
 
-  // With a folder open the registration writes to
-  // `<workspace>/.claude/settings.json` at project scope - the CLI takes
-  // its target from the spawn cwd, so pass the folder explicitly. With
-  // no folder open the registration falls back to user scope
-  // (`~/.claude/settings.json`) with the sentinel `default` wsId, so a
-  // folderless VS Code window still gets a working bridge - state lands
-  // at `~/.wat321/clients/default/`. The next time the user opens a
-  // folder, project scope wins by Claude Code's normal precedence and
-  // the folder gets its own hashed wsId - the leftover user-scope entry
-  // gets swept on the next install.
+  // With a folder open the entry lives in `<workspace>/.mcp.json` at
+  // project scope. With no folder open it falls back to user scope in
+  // `~/.claude.json` with the sentinel `default` wsId, so a folderless
+  // window still gets a working bridge. Project scope wins once a folder
+  // opens, and the leftover user-scope entry is swept on that install.
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   const workspaceCwd = workspaceFolder?.uri.fsPath;
   const wsId = workspaceId();
   const scope: "project" | "user" = workspaceCwd ? "project" : "user";
+  const entry = unifiedMcpEntry(scriptPath, wsId, workspaceCwd);
 
   sweepStaleClaudeJsonEntries(logger);
-  await sweepPriorMcpEntries(logger, workspaceCwd);
+  if (workspaceCwd) {
+    const project = await writeProjectEntry(workspaceCwd, entry);
+    if (project !== "failed") {
+      logger.info(`${UNIFIED_MCP_NAME} entry in .mcp.json ${project} (wsId=${wsId})`);
+      // No cwd, so only a leftover user-scope entry is swept.
+      await sweepPriorMcpEntries(logger);
+      return finishInstall(scriptPath, logger);
+    }
+    logger.warn(".mcp.json is unreadable or locked, registering through the claude CLI");
+  } else if (isUserEntryCurrent(entry)) {
+    logger.info(`${UNIFIED_MCP_NAME} user-scope entry current (folderless wsId=${wsId})`);
+    return finishInstall(scriptPath, logger);
+  }
 
+  await sweepPriorMcpEntries(logger, workspaceCwd);
   const add = await runClaudeCli(
     [
       "mcp",
@@ -91,12 +102,10 @@ export async function installUnifiedBridge(
       "-s",
       scope,
       UNIFIED_MCP_NAME,
-      "--env",
-      `WAT321_WORKSPACE_ID=${wsId}`,
-      ...(workspaceCwd ? ["--env", `WAT321_WORKSPACE_PATH=${workspaceCwd}`] : []),
+      ...Object.entries(entry.env).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
       "--",
-      "node",
-      scriptPath,
+      entry.command,
+      ...entry.args,
     ],
     workspaceCwd
   );
@@ -105,16 +114,17 @@ export async function installUnifiedBridge(
     logger.error(msg);
     return { ok: false, error: msg };
   }
-  logger.info(
-    workspaceCwd
-      ? `claude mcp add ${UNIFIED_MCP_NAME} succeeded (project scope, wsId=${wsId})`
-      : `claude mcp add ${UNIFIED_MCP_NAME} succeeded (user scope, folderless wsId=${wsId})`
-  );
+  logger.info(`claude mcp add ${UNIFIED_MCP_NAME} succeeded (${scope} scope, wsId=${wsId})`);
+  return finishInstall(scriptPath, logger);
+}
+
+/** Pre-allow the tool surface, then heal allowlist entries for retired
+ * bridge tools, which the additive pre-allow never removes. */
+function finishInstall(
+  scriptPath: string,
+  logger: UnifiedLogger
+): { ok: boolean; scriptPath: string } {
   preAllowMcpTools(UNIFIED_ALLOWED_TOOLS, logger);
-  // Heal stale allowlist entries from retired bridge tools. The
-  // additive preAllow path does not touch entries that no longer
-  // ship, so without this sweep an upgrade from a release that
-  // seeded a now-retired tool leaves the entry stranded.
   healLegacyAllowlistEntries(logger);
   return { ok: true, scriptPath };
 }

@@ -67,10 +67,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Bridge config writer maintains the per-client
   // `~/.wat321/clients/<wsId>/bridge/config.json` so the unified MCP
-  // server can read enabled-target flags at startup. Cheap on activate,
-  // cheap on settings change.
-  registerBridgeConfigWriter(context);
+  // server can read enabled-target flags at startup. It dispatches the
+  // install command on activate, so the commands register first.
   registerUnifiedBridgeCommands(context);
+  registerBridgeConfigWriter(context);
   registerAutoCreateOpenCodeS1(context);
 
   // Epic Handshake tier activates first so its bridge-stage
@@ -121,18 +121,18 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // --- Command palette ---
-  // Reset hook awaits Epic Handshake cleanup (MCP uninstall from
-  // ~/.claude/settings.json + globalState key removal) before the
-  // disk wipe runs, so a prior MCP entry cannot survive as a zombie.
+  // Reset hook awaits Epic Handshake cleanup (MCP uninstall plus
+  // globalState key removal) before the disk wipe runs, so a prior MCP
+  // entry cannot survive as a zombie.
   registerClearSettingsCommand(context, async () => {
     ctx?.providers.resetAllKickstartEscalation();
     ctx?.providers.resetAllTokenServices();
     ctx?.events.emit("engine.reset", {});
     await epicHandshake.resetCleanup();
     if (openCodeRoutes) await openCodeRoutes.resetCleanup();
-    // Sweep the unified bridge's MCP entry + pre-allowed tool list
-    // (mcp__wat321__wat321_ask, etc.) from ~/.claude/settings.json so
-    // a fresh re-enable starts from a clean Claude config. EH's
+    // Sweep the unified bridge's MCP entry, plus the pre-allowed tool
+    // list (mcp__wat321__wat321_ask, etc.) in ~/.claude/settings.json,
+    // so a fresh re-enable starts from a clean Claude config. EH's
     // resetCleanup handles the registration removal at the CLI layer -
     // this second pass covers the pre-allowed tool surface that lives
     // in the user-scope settings file. Idempotent.

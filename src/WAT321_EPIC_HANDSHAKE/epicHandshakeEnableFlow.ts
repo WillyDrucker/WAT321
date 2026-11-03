@@ -120,9 +120,8 @@ async function runEnableFlow(deps: EnableFlowDeps): Promise<void> {
 
       progress.report({ message: "registering bridge channel..." });
       try {
-        // installUnifiedBridge sweeps stale entries from
-        // `~/.claude.json`'s projects tree and runs `claude mcp
-        // remove` before the fresh `claude mcp add`.
+        // Writes the `.mcp.json` entry in place, or registers through
+        // the claude CLI when no folder is open.
         await vscode.commands.executeCommand("wat321.bridge.installUnified");
       } catch (err) {
         await unflipAndWarn(
