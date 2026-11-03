@@ -18,9 +18,8 @@ import type { BridgeSessionTokens } from "./sessionTokensPoller";
 const FOLDER_ICON = "\u{1F4C1}";
 const CLAMP_ICON = "\u{1F5DC}\u{FE0F}";
 /** Provider header label that matches the Claude / Codex tooltip
- * vocabulary. Big Pickle and GPT 5 Nano both render "OpenCode session
- * token context" so users see one consistent header per service
- * regardless of which specific Zen route is active. */
+ * vocabulary. Every Zen route renders "OpenCode session token
+ * context", so the header stays the same whichever route is active. */
 function providerHeaderLabel(target: SessionTarget | null): string {
   if (target === "local") return "Local LLM";
   return "OpenCode";

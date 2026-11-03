@@ -1,4 +1,5 @@
 import type { DispatchResult } from "../../engine/dispatcher/dispatcherTypes";
+import { DEFAULT_ZEN_ROUTE } from "../../shared/providers/opencode/catalog";
 import { WAT321_RESEARCH_AGENT } from "../../shared/providers/opencode/configBuilder";
 import { readAliases, SESSION_ALIASES_PATH } from "../../shared/bridge/sessionAliases";
 import {
@@ -20,9 +21,9 @@ import type { BridgeStage } from "../../engine/bridgeTypes";
  * `working` -> `writing`) through the injected `setStage` so the
  * stage coordinator advances past `working` on every non-Codex
  * dispatch, and the parent dispatcher's `run()` pushes `complete`
- * after the path returns. Every POST has a 10-minute hard cap: long
- * enough for cold local models, short enough that a hung backend ends
- * in a structured timeout envelope instead of an indefinite wait.
+ * after the path returns. Every POST is capped by `DISPATCH_TIMEOUT_MS`,
+ * long enough for cold local models and short enough that a hung
+ * backend ends in a structured timeout envelope, not an indefinite wait.
  */
 
 const ANON_BASE_URL = "https://opencode.ai/zen/v1";
@@ -30,7 +31,7 @@ const ANON_BASE_URL = "https://opencode.ai/zen/v1";
  * that stays silent for 5 minutes (headers or body), so a turn that
  * sends nothing for that long surfaces as `fetch failed` before this
  * timer fires. Lifting that cap needs a per-request dispatcher. */
-const DISPATCH_TIMEOUT_MS = 10 * 60_000;
+export const DISPATCH_TIMEOUT_MS = 10 * 60_000;
 
 interface DispatchPathArgs {
   target: "opencode" | "local";
@@ -41,9 +42,9 @@ interface DispatchPathArgs {
 }
 
 /** Anonymous one-shot via opencode.ai/zen. Used when no session
- * alias is resolved - common path for "ask Big Pickle" without the
- * user having created a session. Model selection follows the
- * resolved instance's `model` field - falls back to `big-pickle`. */
+ * alias is resolved - the common path for asking a Zen route without
+ * the user having created a session. Model selection follows the
+ * resolved instance's `model` field, falling back to `DEFAULT_ZEN_ROUTE`. */
 export async function runZenOneShot(
   args: DispatchPathArgs
 ): Promise<DispatchResult> {
@@ -55,8 +56,8 @@ export async function runZenOneShot(
     };
   }
   const inst = findRoutesInstance(cfg, null, "remote");
-  const model = inst?.model || "big-pickle";
-  const alias = inst?.alias || "Big Pickle";
+  const model = inst?.model || DEFAULT_ZEN_ROUTE.model;
+  const alias = inst?.alias || DEFAULT_ZEN_ROUTE.alias;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DISPATCH_TIMEOUT_MS);
@@ -112,7 +113,7 @@ export async function runZenOneShot(
       return {
         body:
           `Dispatch to ${alias} exceeded the ${Math.round(DISPATCH_TIMEOUT_MS / 60_000)}-minute timeout. ` +
-          "The backend may still be processing; reissue the prompt if you still need the answer.",
+          "The backend may still be processing, so reissue the prompt if you still need the answer.",
         error: true,
         alias,
       };
@@ -219,7 +220,7 @@ export async function runSessionAttached(
       return {
         body:
           `Dispatch to ${alias} exceeded the ${Math.round(DISPATCH_TIMEOUT_MS / 60_000)}-minute timeout. ` +
-          "The backend may still be processing; reissue the prompt if you still need the answer. " +
+          "The backend may still be processing, so reissue the prompt if you still need the answer. " +
           "If this happens repeatedly the model is hung - restart the local server or check the model's health.",
         error: true,
         alias,

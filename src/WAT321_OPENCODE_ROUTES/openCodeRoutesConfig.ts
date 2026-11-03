@@ -108,11 +108,9 @@ export async function readConfigFromSettings(
   const instances: OpenCodeRouteInstance[] = filteredCatalog.map((entry) => {
     const endpoint = entry.kind === "local" ? localEndpoint : entry.endpoint;
     const apiKey = entry.apiKeyRef ? resolvedKeys[entry.apiKeyRef] ?? "" : "";
-    // Anonymous-access instances (free-tier Zen routes verified to
-    // accept no Authorization header) are never "missing" a key -
-    // missing key just means they fall through to the free path.
-    // Keyed call still wins when a key is present - this only affects
-    // the "needs API key" rejection in channel.mjs.
+    // A free route (`anonymousAccess`) is never "missing" a key, it
+    // takes the free path without one. This only drives the "needs API
+    // key" rejection in channel.mjs, and a present key still wins.
     const apiKeyMissing =
       entry.apiKeyRef.length > 0 &&
       apiKey.length === 0 &&
