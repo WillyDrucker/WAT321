@@ -4,7 +4,6 @@ import { writeFileAtomic } from "../engine/fs/atomicWrite";
 import { SETTING } from "../engine/settingsKeys";
 import { bridgeStateDir } from "../engine/wat321Paths";
 import { BRIDGE_CONFIG_PATH } from "../shared/bridge/bridgeConfig";
-import { installUnifiedBridge } from "./installer";
 
 /**
  * The unified bridge config: `channel.mjs` reads enabled-target flags
@@ -87,22 +86,17 @@ function writeBridgeConfig(): void {
   }
 }
 
-/** Re-run the unified install on every activate when Epic Handshake
- * is enabled. Idempotent: `claude mcp add` is a no-op when the entry
- * already exists with the same arguments. The activate-time call
- * ensures a user who upgrades the .vsix gets fresh script extracts
- * (channel.mjs and its codex/ and opencode/ handlers) without manually toggling
- * EH off and back on. EH-disabled state skips - the unified server
- * has nothing useful to expose without a dispatcher. */
-async function autoInstallIfEnabled(
-  context: vscode.ExtensionContext
-): Promise<void> {
+/** Re-run the unified install on every activate while Epic Handshake
+ * is enabled, so an upgraded .vsix lands fresh scripts and a current
+ * MCP entry without an EH toggle. A matching entry is left untouched.
+ * Runs through the install command so it logs to the Bridge output. */
+async function autoInstallIfEnabled(): Promise<void> {
   const ehEnabled = vscode.workspace
     .getConfiguration("wat321")
     .get<boolean>(SETTING.epicHandshakeEnabled, false);
   if (!ehEnabled) return;
   try {
-    await installUnifiedBridge(context);
+    await vscode.commands.executeCommand("wat321.bridge.installUnified");
   } catch {
     // best-effort - install failure surfaces in the bridge output channel
   }
@@ -116,7 +110,7 @@ export function registerBridgeConfigWriter(
   context: vscode.ExtensionContext
 ): vscode.Disposable {
   writeBridgeConfig();
-  void autoInstallIfEnabled(context);
+  void autoInstallIfEnabled();
   const subscription = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
       e.affectsConfiguration(`wat321.${SETTING.epicHandshakeEnabled}`) ||
