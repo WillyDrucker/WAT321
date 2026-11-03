@@ -63,7 +63,7 @@ export function buildTools(enabled) {
     tools.push({
       name: "wat321_session",
       description:
-        "Create, delete, or rename a named session for OpenCode or Local LLM. Aliases (S1, S2, ...) persist across VS Code windows so a `wat321_ask` with `session: 'S2'` reaches the same conversation context as before. Use this instead of calling the backend HTTP API directly; the bridge tracks the alias map and routes future dispatches to the right server-side session. To list existing sessions, read `bridge://sessions/{target}` (resource, not this tool).",
+        "Create, delete, or rename a named session for OpenCode or Local LLM. Aliases (S1, S2, ...) persist across VS Code windows so a `wat321_ask` with `session: 'S2'` reaches the same conversation context as before. Use this instead of calling the backend HTTP API directly, since the bridge tracks the alias map and routes future dispatches to the right server-side session. To list existing sessions, read `bridge://sessions/{target}` (resource, not this tool).",
       inputSchema: {
         type: "object",
         properties: {

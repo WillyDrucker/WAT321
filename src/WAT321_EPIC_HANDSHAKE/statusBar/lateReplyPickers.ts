@@ -13,7 +13,7 @@ import { currentWorkspacePath, isPaused } from "./statusBarState";
  * and lets the user copy or bulk-discard.
  *
  * Each picker takes a `dispatch` callback so Pause/Resume/Cancel/Back
- * route through the same `handleAction` surface as the main menu without
+ * route through the same menu dispatch as the main menu without
  * a circular import back into `statusBarMenus.ts`.
  */
 
@@ -25,7 +25,7 @@ export async function discardAllLateReplies(
     replies.length > 1 ? "replies" : "reply"
   }?`;
   const confirm = await vscode.window.showWarningMessage(
-    `${label} Replies move out of the inbox unread; files stay in sent/ until the 1-hour sweep.`,
+    `${label} They leave the inbox unread and move to the sent/ archive.`,
     "Discard",
     "Cancel"
   );

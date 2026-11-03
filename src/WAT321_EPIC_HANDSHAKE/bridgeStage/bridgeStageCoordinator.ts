@@ -54,10 +54,11 @@ export class BridgeStageCoordinator
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private lastNonIdleAt = Date.now();
   /** Envelope id of the most-recently-completed turn the walker
-   * finished. The heartbeat file lingers on disk for ~120s past turn
-   * end, so without this latch-suppression the next compute tick
-   * would start a fresh latch on the stale heartbeat and replay
-   * stages 1-5. Cleared when a new envelope id appears. */
+   * finished. A finished turn's heartbeat stays readable until its
+   * deferred cleanup or the reader's staleness window, so without this
+   * latch-suppression the next compute tick would start a fresh latch
+   * on the stale heartbeat and replay stages 1-5. Cleared when a new
+   * envelope id appears. */
   private lastCompletedEnvelopeId: string | null = null;
 
   constructor(private readonly events: EventHub) {}

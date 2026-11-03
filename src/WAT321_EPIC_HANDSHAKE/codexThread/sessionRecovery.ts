@@ -12,7 +12,7 @@ import {
   CODEX_SESSION_INDEX_PATH,
   CODEX_SESSIONS_DIR,
 } from "../../shared/providers/codex/codexHome";
-import { readRolloutLatestModel } from "./rolloutModel";
+import { readRolloutLatestModel } from "../codexTurn/rolloutModel";
 import { bridgeThreadNamePattern } from "./threadNaming";
 import {
   loadBridgeThreadRecord,

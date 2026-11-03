@@ -85,7 +85,7 @@ async function dispatchAsk(args, enabled) {
   // sync silently (functionally identical, no error needed).
   if (args?.adaptive === true && target !== "codex") {
     return errorResult(
-      `adaptive is only supported for target='codex'. The ${target} backend has no progress heartbeat for adaptive to extend against. Reissue the same prompt without the adaptive parameter and use timeout_sec if you need a longer fixed wait (this is not a dispatch failure; nothing was sent to ${target}).`
+      `adaptive is only supported for target='codex'. The ${target} backend has no progress heartbeat for adaptive to extend against. Reissue the same prompt without the adaptive parameter and use timeout_sec if you need a longer fixed wait (this is not a dispatch failure, and nothing was sent to ${target}).`
     );
   }
 

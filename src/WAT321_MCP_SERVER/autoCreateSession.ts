@@ -7,6 +7,7 @@ import {
   type OpenCodeRoutesInstance,
 } from "../shared/bridge/openCodeRoutesConfigSnapshot";
 import { readAliases, SESSION_ALIASES_PATH, writeAliases } from "../shared/bridge/sessionAliases";
+import { DEFAULT_ZEN_ROUTE } from "../shared/providers/opencode/catalog";
 
 /**
  * Auto-create the resumable S1 session for OpenCode when the user
@@ -28,9 +29,6 @@ import { readAliases, SESSION_ALIASES_PATH, writeAliases } from "../shared/bridg
 
 const RETRY_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 8_000;
-/** The remote instance S1 binds to when the active instance is not a
- * remote. Same fallback the Epic Handshake session pickers use. */
-const FALLBACK_REMOTE_INSTANCE_ID = "big-pickle";
 
 async function attemptCreate(cfg: OpenCodeRoutesConfigSnapshot, instance: OpenCodeRoutesInstance): Promise<string | null> {
   const url = cfg.openCodeServerUrl;
@@ -84,7 +82,7 @@ async function ensureOpenCodeS1(): Promise<void> {
   const cfg = await waitForOpencodeServe();
   if (cfg === null) return;
 
-  const instance = findRoutesInstance(cfg, null, "remote", FALLBACK_REMOTE_INSTANCE_ID);
+  const instance = findRoutesInstance(cfg, null, "remote", DEFAULT_ZEN_ROUTE.id);
   if (instance === null) return;
 
   const sessionId = await attemptCreate(cfg, instance);

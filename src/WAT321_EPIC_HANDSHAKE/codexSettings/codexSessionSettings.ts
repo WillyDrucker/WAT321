@@ -13,13 +13,13 @@ import {
   readLegacyCodexModelFlag,
 } from "./codexRuntimeOverrides";
 import { readRolloutEffectiveModel } from "../codexTurn/rolloutModel";
-import { findRolloutPath } from "../codexTurn/sessionRecovery";
+import { findRolloutPath } from "../codexThread/sessionRecovery";
 import {
   loadBridgeThreadRecord,
   loadBridgeThreadRecordIfExists,
   saveBridgeThreadRecord,
   type BridgeThreadRecord,
-} from "../codexTurn/threadRecord";
+} from "../codexThread/threadRecord";
 
 /**
  * The model and effort an Epic Handshake session runs, and how a

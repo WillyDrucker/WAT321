@@ -1,5 +1,6 @@
 import {
   BRIDGE_STAGE_ORDER,
+  RETURNING_FLAG_MS,
   type BridgeStage,
   type BridgeStageSnapshot,
   type BridgeTarget,
@@ -8,34 +9,29 @@ import {
 
 /**
  * Stage definitions, timing constants, and shared types for the Epic
- * Handshake bridge state machine. `bridgeStageCoordinator` owns
- * lifecycle and orchestration, `bridgeStageWalker` owns the per-tick
- * advance logic, this file owns what the stages mean.
+ * Handshake bridge. `bridgeStageCoordinator` owns lifecycle and
+ * `bridgeStageWalker` the per-tick advance. Each square-N cycle means:
  *
- * Stage map, the one home for what each square-N cycle means:
- *
- *   1 dispatched  square-one   / arrow-right  outbound: app-server
- *     spawning or thread/start + turn/start being dialed in (a cold
- *     first dispatch can take ~20s). Exit on turn-started or rollout
- *     task_started, forced at 30s.
+ *   1 dispatched  square-one   / arrow-right  app-server spawning or
+ *     thread/start + turn/start dialing in. Exit on turn-started or
+ *     rollout task_started.
  *   2 received    square-two   / arrow-right  prompt accepted, initial
- *     reasoning. Exit on the first function_call / web_search_call
- *     item, forced at 15s.
- *   3 working     square-three / blank        active tool use, most of
- *     the wall time on tool-heavy turns. Exit on agent_message
- *     final_answer or the post-tool reasoning threshold, forced at 30s.
- *   4 writing     square-four  / blank        final text being produced,
- *     arrow-left once `returning` is set. Exit on task_complete only,
- *     never forced: stage 5 means genuine completion.
- *   5 complete    square-five  / arrow-left   turn done, reply envelope
- *     written. Held 3s + COMPLETE_WALK_HOLD_MS so one full cycle is
- *     always visible, then the returning-arrow handoff.
+ *     reasoning. Exit on the first function_call / web_search_call.
+ *   3 working     square-three / blank        active tool use. Exit on
+ *     final_answer or the post-tool reasoning threshold.
+ *   4 writing     square-four  / blank        final text, arrow-left
+ *     once `returning` is set. Exit on task_complete only.
+ *   5 complete    square-five  / arrow-left   turn done, reply written,
+ *     held so one full cycle is always visible.
+ *
+ * Stages 1-3 force-advance at `STAGE_MAX_HOLD_MS`. Stages 4 and 5 never
+ * force, so stage 5 always means genuine completion.
  */
 
 /** Minimum display time per stage before the walker may advance to
  * the next stage. Sequential walker - never skips even when the
  * monitor's heartbeat jumps two stages in one poll window (Codex
- * emits final_answer and task_complete in the same 5s window, so
+ * emits final_answer and task_complete in the same window, so
  * stage 4 never gets a heartbeat write of its own). Stage 1 gets
  * the longest floor so two full 1Hz blink cycles are visible. */
 export const STAGE_LATCH_MS: Record<BridgeStage, number> = {
@@ -43,7 +39,7 @@ export const STAGE_LATCH_MS: Record<BridgeStage, number> = {
   received: 3000,
   working: 3000,
   writing: 3000,
-  complete: 3000,
+  complete: RETURNING_FLAG_MS,
 };
 
 /** Per-stage maximum display time before the walker force-advances
@@ -67,9 +63,9 @@ export const STAGE_MAX_HOLD_MS: Record<BridgeStage, number> = {
 /** Debug-disconnect / connected ceremony duration after
  * `turnStartedAt`. Drives the `phase: "ceremony"` window during
  * which session-token widgets render the debug ceremony glyphs.
- * Aligned with stage 1's min-hold so both widgets agree on when
- * the ceremony ends. */
-export const CEREMONY_MS = 4000;
+ * Stage 1's min-hold, so both widgets agree on when the ceremony
+ * ends. */
+export const CEREMONY_MS = STAGE_LATCH_MS.dispatched;
 
 /** Backstop polling interval. fs-watch on the Epic Handshake dir drives most ticks
  * instantly - the timer remains for time-based progressions
@@ -88,7 +84,6 @@ export const IDLE_SUSPEND_MS = 30_000;
  * laggy. */
 export const WATCH_DEBOUNCE_MS = 50;
 
-
 /** Stage 5 hold after the synthetic walker reaches `complete` but
  * before we release the envelope. Keeps stage 5 visible briefly
  * even after the dispatcher's heartbeat file has been removed. */
@@ -101,13 +96,10 @@ export const COMPLETE_WALK_HOLD_MS = 3000;
  * complete target are honored regardless of grace. */
 export const LATCH_ORPHAN_GRACE_MS = 3000;
 
-/** Compressed min-hold for intermediate stages (received, working,
- * writing) when Codex has already finished and the walker just needs
- * to catch up. Triggered when lastTargetStage reaches `complete`
- * while the walker is still walking. Stage 1 keeps its full floor
- * for the ceremony - stage 5 keeps its full hold + completion window.
- * 500ms lets stages 3 and 4 flash visibly on a sub-12s fast turn
- * instead of being skipped invisibly. */
+/** Compressed min-hold for stages 2-4 once the turn has reached its
+ * `complete` target and the walker is only catching up. Stage 1 keeps
+ * its full floor for the ceremony and stage 5 its full hold, so a fast
+ * turn still flashes stages 3 and 4 instead of skipping them. */
 export const FAST_WALK_INTERMEDIATE_MS = 500;
 
 export function stageIdx(s: BridgeStage): number {

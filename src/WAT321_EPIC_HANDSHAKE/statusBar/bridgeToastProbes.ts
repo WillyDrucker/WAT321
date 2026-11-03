@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import {
   setBridgeActiveProbe,
   setRecentCodexCompletionConsumer,
-} from "../../engine/toastNotifier";
+} from "../../engine/notifications/toastNotifier";
 import { workspaceHash } from "../../engine/workspaceHash";
 import {
   inFlightFlagPath,

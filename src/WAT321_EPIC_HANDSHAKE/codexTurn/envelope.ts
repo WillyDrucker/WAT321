@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { BridgeWaitMode } from "../../engine/bridgeTypes";
 import { writeFileAtomic } from "../../engine/fs/atomicWrite";
+import type { EnvelopeAgent, EnvelopePriority } from "../../engine/inbox/envelope";
 
 /**
  * The Epic Handshake agent dialect of the mailbox envelope: `source`
@@ -15,8 +16,6 @@ import { writeFileAtomic } from "../../engine/fs/atomicWrite";
  * Hand-rolled serializer keeps the module dependency-free.
  */
 
-export type EnvelopeAgent = "claude" | "codex";
-
 export interface Envelope {
   id: string;
   chainId: string;
@@ -24,7 +23,7 @@ export interface Envelope {
   source: EnvelopeAgent;
   target: EnvelopeAgent;
   sourceSessionFp: string;
-  priority: "low" | "normal" | "high";
+  priority: EnvelopePriority;
   intent: string;
   workspacePath: string;
   createdAt: string;
@@ -124,7 +123,7 @@ export function parseEnvelope(raw: string): Envelope | null {
     source: fields.source as EnvelopeAgent,
     target: fields.target as EnvelopeAgent,
     sourceSessionFp: fields.source_session_fp as string,
-    priority: (fields.priority as "low" | "normal" | "high") ?? "normal",
+    priority: (fields.priority as EnvelopePriority) ?? "normal",
     intent: fields.intent as string,
     workspacePath: fields.workspace_path as string,
     createdAt: fields.created_at as string,

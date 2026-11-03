@@ -2,6 +2,7 @@ import type { AppServerClient } from "../appServer/appServerClient";
 import type { Envelope } from "./envelope";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
 import type { TurnInterruptParams } from "../appServer/protocol";
+import { STAGE_LATCH_MS } from "../bridgeStage/bridgeStageMap";
 import {
   COMPLETED_TURN_RECOVERY_WINDOW,
   INTERRUPT_RECOVERY_WINDOW,
@@ -9,7 +10,7 @@ import {
   recoverOrRejectViaRolloutPolling,
   type RecoveryWindow,
 } from "./rolloutRecovery";
-import { findRolloutPath } from "./sessionRecovery";
+import { findRolloutPath } from "../codexThread/sessionRecovery";
 import { accumulateDelta, assembleTurnReply, type TurnCompleted } from "./turnCompletion";
 import { writeProcessingFlag, writeSuppressCodexToast } from "./turnFlags";
 import { createHeartbeatWriter } from "./turnHeartbeatWriter";
@@ -45,15 +46,18 @@ import type { BridgeWaitMode } from "../../engine/bridgeTypes";
  * calls or reasoning tokens bumping the rollout) does not trip the
  * 60-second default. */
 const ADAPTIVE_STALL_FLOOR_MS = 120_000;
-/** Adaptive's whole premise is "extend while making progress" - a
- * flat 5-minute hard cap from the monitor would interrupt the
+/** Adaptive's whole premise is "extend while making progress" - the
+ * monitor's standard hard cap would interrupt the
  * underlying Codex turn before the MCP-side adaptive ceiling gives
  * up. Match the MCP ceiling so the two sides agree. */
 const ADAPTIVE_HARD_CAP_MS = 30 * 60_000;
-/** Deferred heartbeat-file unlink. Lets the bridge status bar
- * walker render every remaining stage's 3s min-hold (5 * 3s = 15s
- * worst case) after `settle()` writes the final stage=complete. */
-const HEARTBEAT_CLEANUP_MS = 15_000;
+/** Deferred heartbeat-file unlink, the sum of every stage's min-hold,
+ * so the bridge status bar walker can render each remaining stage
+ * after `settle()` writes the final stage=complete. */
+const HEARTBEAT_CLEANUP_MS = Object.values(STAGE_LATCH_MS).reduce(
+  (sum, ms) => sum + ms,
+  0
+);
 
 interface TurnRunnerOptions {
   client: AppServerClient;

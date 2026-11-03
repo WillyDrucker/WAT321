@@ -32,7 +32,7 @@ export async function handleBridge(args) {
     (typeof action === "string" && action.trim() === "consume");
   if (!validAction) {
     return errorResult(
-      `wat321_bridge: unknown action '${String(action)}'. The tool drains the inbox - omit \`action\` entirely, or pass \`action: "consume"\` for back-compat. No action was taken; nothing was consumed.`
+      `wat321_bridge: unknown action '${String(action)}'. The tool drains the inbox - omit \`action\` entirely, or pass \`action: "consume"\` for back-compat. No action was taken and nothing was consumed.`
     );
   }
   return bridgeConsume(args);

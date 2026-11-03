@@ -18,9 +18,9 @@ import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
  * the freshness policy around it.
  *
  * An answer ages. The backend decides per account which models a
- * binary may list and can switch one on with no upgrade (GPT-6 Astra
- * arrived as a staged rollout), so `ensureCodexCatalog` re-asks once
- * the answer is old and `refreshCodexCatalog` re-asks on demand.
+ * binary may list and can switch one on with no upgrade, as a staged
+ * rollout does, so `ensureCodexCatalog` re-asks once the answer is
+ * old and `refreshCodexCatalog` re-asks on demand.
  *
  * `hydrateCodexCatalog` spawns nothing. It only reads a sidecar this
  * same binary wrote on a previous run, so a freshly opened window shows
@@ -78,7 +78,7 @@ export async function hydrateCodexCatalog(
  * sidecar this same binary wrote earlier when it is younger and fresh
  * (no process), then a short-lived app-server spawned only to answer
  * `model/list` (about two seconds warm, persisted, so a window pays it
- * at most once per ten minutes of picker use).
+ * at most once per `CATALOG_FRESH_FOR_MS` of picker use).
  *
  * Tier 3 is the only place WAT321 spawns codex outside a dispatch, and
  * on purpose: the caller is the model picker or the repair flow, so the

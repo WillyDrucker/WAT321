@@ -31,10 +31,10 @@ import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
  * binary entirely, since every codex on the machine overwrites that one
  * file with its own version's catalog.
  *
- * Hidden models are requested on purpose. Codex keeps some models out of
- * its own picker (GPT-6 Astra shipped that way), yet the app-server runs
- * them, so they must count as known or a session pinned to one would be
- * flagged for repair and refused at pre-flight.
+ * Hidden models are requested on purpose. Codex can keep a model out of
+ * its own picker while the app-server runs it, so hidden models must
+ * count as known or a session pinned to one would be flagged for
+ * repair and refused at pre-flight.
  */
 
 /** Bounded so an app-server that always returns a cursor cannot spin.

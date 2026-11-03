@@ -92,7 +92,7 @@ export function modelRowDescription(model: string | null): string {
   return note === null ? "Click to change model." : `${note}. Click to change model.`;
 }
 
-/** "Retiring, Codex recommends GPT-5.6-Terra" for a model OpenAI has
+/** "Retiring, Codex recommends <successor>" for a model OpenAI has
  * put a successor on, null otherwise. Reads "Retired" once the date
  * Codex published has passed, even though Codex may keep listing the
  * model for a while. The successor is named by display name when a

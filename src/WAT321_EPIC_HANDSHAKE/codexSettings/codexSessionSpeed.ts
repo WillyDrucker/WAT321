@@ -3,7 +3,7 @@ import {
   loadBridgeThreadRecord,
   loadBridgeThreadRecordIfExists,
   saveBridgeThreadRecord,
-} from "../codexTurn/threadRecord";
+} from "../codexThread/threadRecord";
 import { readSessionPin } from "./codexSessionSettings";
 
 /**

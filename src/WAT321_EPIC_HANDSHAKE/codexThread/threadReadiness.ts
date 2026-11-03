@@ -1,8 +1,8 @@
 import type { AppServerClient } from "../appServer/appServerClient";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
-import { classifyFailure } from "./failureClassifier";
+import { classifyFailure } from "../codexTurn/failureClassifier";
 import { isKnownCodexModel } from "../../shared/providers/codex/models";
-import { readRolloutModelSlug } from "./rolloutModel";
+import { readRolloutModelSlug } from "../codexTurn/rolloutModel";
 import { findRolloutPath } from "./sessionRecovery";
 import {
   noteFailure,
@@ -118,7 +118,7 @@ export async function ensureReadyThread(args: {
   const rolloutPath = findRolloutPath(threadId);
   const storedSlug = rolloutPath ? readRolloutModelSlug(rolloutPath) : null;
   if (storedSlug !== null && !isKnownCodexModel(storedSlug)) {
-    const msg = `Codex session S${record.sessionCounter} stores a model slug "${storedSlug}" that the installed Codex doesn't recognize. The Repair Sessions option in the bridge menu can rewrite the slug; Reset Codex Session rolls to a fresh thread.`;
+    const msg = `Codex session S${record.sessionCounter} stores a model slug "${storedSlug}" that the installed Codex doesn't recognize. The Repair Sessions option in the bridge menu can rewrite the slug, or Reset Codex Session rolls to a fresh thread.`;
     logger.warn(`[preflight] ${msg}`);
     noteFailure(record, msg);
     throw new Error(msg);

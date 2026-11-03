@@ -32,7 +32,7 @@ type TurnOutcome =
   | { kind: "recover"; logLabel: string; failure: Error };
 
 const EMPTY_REPLY_MESSAGE =
-  'empty reply from Codex (thread may be in a degraded state; will rotate after threshold or pick "Reset Codex Session" from the menu)';
+  'empty reply from Codex (the thread may be degraded. It rotates after repeated failures, or pick "Reset Codex Session" from the menu)';
 
 /** Fold one `item/agentMessage/delta` notification into the per-item
  * text map that backs the fallback when the completed turn carries no

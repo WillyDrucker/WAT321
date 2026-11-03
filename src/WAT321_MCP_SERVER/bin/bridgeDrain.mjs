@@ -83,8 +83,8 @@ function inFlightEmptyState() {
   const total = nonCodexInFlight.length + codexInFlight.length;
   const stuck = codexInFlight.some((e) => e.kind === "stuck");
   const tail = stuck
-    ? "A Codex heartbeat is stale (may be wedged). Restart Epic Handshake Bridge from the status bar if the next `wat321_bridge()` still reports stuck. Do not re-issue the same prompt; that would queue a duplicate."
-    : "Report this to the user as a wait, not a failure - the extension-side dispatcher is running. Call `wat321_bridge()` again when the user asks for the reply. Do not re-issue the same prompt; that would queue a duplicate dispatch.";
+    ? "A Codex heartbeat is stale (may be wedged). Restart Epic Handshake Bridge from the status bar if the next `wat321_bridge()` still reports stuck. Do not re-issue the same prompt, since that would queue a duplicate."
+    : "Report this to the user as a wait, not a failure - the extension-side dispatcher is running. Call `wat321_bridge()` again when the user asks for the reply. Do not re-issue the same prompt, since that would queue a duplicate dispatch.";
   return textResult(
     `No replies have landed yet. ${total} dispatch${total === 1 ? " is" : "es are"} still in flight:\n\n${allLines.join("\n")}\n\n${tail}`
   );

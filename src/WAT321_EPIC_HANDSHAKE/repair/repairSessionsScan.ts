@@ -1,9 +1,9 @@
 import { isKnownCodexModel } from "../../shared/providers/codex/models";
 import { writeSessionModel } from "../codexSettings/codexSessionSettings";
 import { readRolloutModelSlug, rewriteRolloutModelSlug } from "../codexTurn/rolloutModel";
-import { findRolloutPath, type RecoverableSession } from "../codexTurn/sessionRecovery";
-import { bridgeThreadDisplayName } from "../codexTurn/threadNaming";
-import { loadBridgeThreadRecord } from "../codexTurn/threadRecord";
+import { findRolloutPath, type RecoverableSession } from "../codexThread/sessionRecovery";
+import { bridgeThreadDisplayName } from "../codexThread/threadNaming";
+import { loadBridgeThreadRecord } from "../codexThread/threadRecord";
 
 /**
  * The disk side of Repair Sessions: which bridge sessions exist, what
