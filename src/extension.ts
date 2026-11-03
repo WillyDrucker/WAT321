@@ -10,7 +10,7 @@ import {
   dispose as disposeToastProcess,
   resetBootstrapCircuit,
   setHostAppName,
-} from "./engine/windowsToastProcess";
+} from "./engine/notifications/windowsToastProcess";
 import { registerClearSettingsCommand } from "./shared/resetSettings";
 import { workspaceId } from "./engine/wat321Paths";
 import { registerBridgeConfigWriter } from "./WAT321_MCP_SERVER";
@@ -93,7 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     void vscode.window.showWarningMessage(
-      `WAT321 OpenCode Routes failed to activate; usage widgets continue working. (${msg})`
+      `WAT321 OpenCode Routes failed to activate. Usage widgets keep working. (${msg})`
     );
   }
 
@@ -230,7 +230,7 @@ function activateProviderSafely(ctx: EngineContext, key: ProviderKey): void {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     void vscode.window.showWarningMessage(
-      `WAT321 ${key} activation failed; other widgets continue working. (${msg})`
+      `WAT321 ${key} activation failed. Other widgets keep working. (${msg})`
     );
   }
 }
