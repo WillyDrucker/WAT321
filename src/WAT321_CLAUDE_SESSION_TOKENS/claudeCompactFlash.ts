@@ -5,7 +5,7 @@ import {
 import { parseRecentCompactBoundaries } from "./turnInfoParser";
 
 /**
- * Claude-tier adapter over the shared `CompactFlashMachine`.
+ * Claude's adapter over the shared `CompactFlashMachine`.
  *
  * Architecture constraint. Claude Code buffers the `<command-name>/
  * compact</command-name>` user entry until the compact completes.
@@ -34,12 +34,11 @@ const AUTO_COMPACT_FLASH_MS = 1_500;
  * they're actively watching, so hold a little longer. */
 const MANUAL_COMPACT_FLASH_MS = 2_500;
 
-export class CompactStateMachine {
+export class ClaudeCompactFlash {
   private readonly core = new CompactFlashMachine();
 
   /** Parse the Claude tail into a normalized observation and fold it
-   * into the shared machine. Public signature matches what the
-   * service / widget call, so neither needs edits. */
+   * into the shared machine. */
   sync(args: { tail: string; sessionId: string; now: number }): CompactFlashSnapshot {
     const { tail, sessionId, now } = args;
     const recent = parseRecentCompactBoundaries(tail, HISTORICAL_WINDOW);

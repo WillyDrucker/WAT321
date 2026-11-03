@@ -1,10 +1,17 @@
 import { buildTooltip } from "../shared/claudeUsage/claudeUsageTooltip";
 import type { UsageResponse } from "../shared/claudeUsage/claudeUsageTypes";
+import { fiveHourRetiredByPayload, fiveHourRetiredByPlan } from "../shared/claudeUsage/claudeUsageWindows";
 import { renderClaudeBar } from "../shared/ui/heatmap";
 import { getClaudeTextColor } from "../shared/ui/textColors";
 import { resolveUsageStyle } from "../shared/ui/usageDisplay";
 import { UsageWidget, type UsageWidgetDescriptor } from "../shared/ui/usageWidget";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
+
+/**
+ * The leading Claude usage bar, for the 5-hour session window. It leaves
+ * the status bar when the account has no 5-hour limit, as on a verified
+ * Ultra plan, and the weekly bar carries on alone until the limit returns.
+ */
 
 const descriptor: UsageWidgetDescriptor<UsageResponse> = {
   id: "wat321.session",
@@ -12,6 +19,8 @@ const descriptor: UsageWidgetDescriptor<UsageResponse> = {
   slot: WIDGET_SLOT.claudeUsage5H,
   providerName: "Claude",
   providerKey: "claude",
+  shouldHide: fiveHourRetiredByPayload,
+  shouldHideWithoutData: fiveHourRetiredByPlan,
   getDisplayPct: (data) => {
     const usedPct = data.five_hour?.utilization ?? 0;
     if (resolveUsageStyle("claude") === "remaining") {

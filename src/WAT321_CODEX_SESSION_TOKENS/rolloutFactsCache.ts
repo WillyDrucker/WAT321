@@ -1,5 +1,5 @@
 import { readHead } from "../engine/fs/fileReaders";
-import { resolveAutoCompactTokens } from "./autoCompactLimit";
+import { resolveCompactLimits, type CodexCompactLimits } from "./autoCompactLimit";
 import {
   extractFirstUserMessage,
   parseCwd,
@@ -10,8 +10,8 @@ import { getSessionTitle } from "./rolloutDiscovery";
 
 /**
  * The slow-changing facts about the tracked rollout: session title,
- * cwd, model slug and effort, and the auto-compact ceiling that
- * depends on the model. Each is re-derived only when its key changes
+ * cwd, model slug and effort, and the compact limits that depend on
+ * the model. Each is re-derived only when its key changes
  * (session, path, or model), so a growth poll pays for the tail parse
  * and nothing else. `forget()` runs when the service switches rollouts.
  */
@@ -21,7 +21,7 @@ interface RolloutFacts {
   cwd: string | null;
   modelSlug: string | null;
   effort: string | null;
-  autoCompactTokens: number;
+  limits: CodexCompactLimits;
 }
 
 interface RolloutFactsInput {
@@ -39,8 +39,8 @@ export class RolloutFactsCache {
   private cwdPath = "";
   private modelSlug: string | null = null;
   private effort: string | null = null;
-  private autoCompactTokens: number | null = null;
-  private autoCompactModel = "";
+  private limits: CodexCompactLimits | null = null;
+  private limitsModel: string | null = null;
 
   /** A new rollout was selected: every fact re-derives on the next read. */
   forget(): void {
@@ -48,14 +48,14 @@ export class RolloutFactsCache {
     this.cwd = null;
     this.modelSlug = null;
     this.effort = null;
-    this.autoCompactTokens = null;
+    this.limits = null;
   }
 
   reset(): void {
     this.forget();
     this.titleSessionId = "";
     this.cwdPath = "";
-    this.autoCompactModel = "";
+    this.limitsModel = null;
   }
 
   read(input: RolloutFactsInput): RolloutFacts {
@@ -86,22 +86,11 @@ export class RolloutFactsCache {
         ? { model: this.modelSlug, effort: this.effort }
         : parseFirstTurnContext(input.rolloutPath));
     this.effort = turn?.effort ?? null;
-    const resolvedModel = turn?.model ?? null;
-    if (resolvedModel !== this.modelSlug) {
-      this.modelSlug = resolvedModel;
-      // Model changed - invalidate ceiling cache so it recomputes.
-      this.autoCompactTokens = null;
-    }
+    this.modelSlug = turn?.model ?? null;
 
-    if (
-      this.autoCompactTokens === null ||
-      this.autoCompactModel !== this.modelSlug
-    ) {
-      this.autoCompactTokens = resolveAutoCompactTokens(
-        input.contextWindowSize,
-        this.modelSlug
-      );
-      this.autoCompactModel = this.modelSlug ?? "";
+    if (this.limits === null || this.limitsModel !== this.modelSlug) {
+      this.limits = resolveCompactLimits(input.contextWindowSize, this.modelSlug);
+      this.limitsModel = this.modelSlug;
     }
 
     return {
@@ -109,7 +98,7 @@ export class RolloutFactsCache {
       cwd: this.cwd,
       modelSlug: this.modelSlug,
       effort: this.effort,
-      autoCompactTokens: this.autoCompactTokens,
+      limits: this.limits,
     };
   }
 }

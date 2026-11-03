@@ -6,6 +6,7 @@ import {
   rankActivity,
   type ActivityRank,
 } from "../shared/sessionTokens/activityRanking";
+import type { LastEntryKind } from "../shared/turnState";
 import { classifyCodexTurn } from "./codexTurnClassifier";
 import { parseCwd } from "./rolloutParsers";
 
@@ -42,7 +43,7 @@ export interface RolloutDiscoveryResult {
 export interface RolloutCandidate {
   path: string;
   mtime: number;
-  turnState: "user" | "assistant-pending" | "assistant-done" | "unknown";
+  turnState: LastEntryKind;
   cwd: string;
 }
 
@@ -53,7 +54,7 @@ export interface ScoredRollout {
   rank: ActivityRank;
   inProgress: boolean;
   fresh: boolean;
-  turnState: RolloutCandidate["turnState"];
+  turnState: LastEntryKind;
   cwd: string;
 }
 
@@ -83,19 +84,11 @@ export function scoreRollout(
   // Read the tail to classify activity. Bounded to the tail window so
   // this stays cheap even on multi-MB rollouts.
   const tail = readTail(fullPath);
-  const rawTurnState = tail ? classifyCodexTurn(tail) : "unknown";
-  // Narrow LastEntryKind to the three states the candidate carries -
-  // compact-end / interrupted collapse to unknown.
-  const turnState: RolloutCandidate["turnState"] =
-    rawTurnState === "user" ||
-    rawTurnState === "assistant-pending" ||
-    rawTurnState === "assistant-done"
-      ? rawTurnState
-      : "unknown";
+  const turnState = tail ? classifyCodexTurn(tail) : "unknown";
 
   return {
     path: fullPath,
-    rank: rankActivity(rawTurnState, mtime, now),
+    rank: rankActivity(turnState, mtime, now),
     inProgress: turnState === "assistant-pending" || turnState === "user",
     fresh: now - mtime <= INVENTORY_WINDOW_MS,
     turnState,

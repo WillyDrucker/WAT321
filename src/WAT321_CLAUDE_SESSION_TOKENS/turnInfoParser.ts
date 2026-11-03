@@ -11,24 +11,20 @@ import { parseMostRecentCacheEvent } from "./cacheEventParser";
  *     assistant turn's usage, tool-call counter, thinking-block
  *     presence, and the compact-summary watermark.
  *   - `parseRecentCompactBoundaries(tail, limit)` -> structured
- *     end-of-compact signals from `system/compact_boundary` entries
- *     (recent Claude Code releases). Drives the compact state
- *     machine's clean-exit transition.
+ *     end-of-compact signals from `system/compact_boundary` entries.
+ *     Drives the post-compact completion flash.
  */
 
-/** Structured signal Claude Code writes at the end of every compact,
- * verified against recent releases: `{ "type": "system", "subtype":
- * "compact_boundary", "content": "Conversation compacted",
+/** The structured signal Claude Code writes at the end of every
+ * compact: `{ "type": "system", "subtype": "compact_boundary",
  * "timestamp": "...", "compactMetadata": { "trigger": "manual" |
- * "auto", "preTokens": <int>, "durationMs": <int>, "postTokens":
- * <int>, ... } }` */
+ * "auto", "durationMs": <int>, ... } }`. Only the fields read here are
+ * shown. */
 interface CompactBoundary {
   /** ms since epoch parsed from the entry's `timestamp` field. */
   at: number;
   trigger: string;
-  preTokens: number;
   durationMs: number;
-  postTokens: number;
 }
 
 /** Walk the tail backwards and parse compact_boundary system
@@ -58,13 +54,10 @@ export function parseRecentCompactBoundaries(
     const meta = entry.compactMetadata as Record<string, unknown> | undefined;
     if (!meta) continue;
     const trigger = typeof meta.trigger === "string" ? meta.trigger : "auto";
-    const preTokens = typeof meta.preTokens === "number" ? meta.preTokens : 0;
     const durationMs =
       typeof meta.durationMs === "number" ? meta.durationMs : 0;
-    const postTokens =
-      typeof meta.postTokens === "number" ? meta.postTokens : 0;
     if (durationMs <= 0) continue;
-    out.unshift({ at, trigger, preTokens, durationMs, postTokens });
+    out.unshift({ at, trigger, durationMs });
   }
   return out;
 }

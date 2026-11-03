@@ -36,8 +36,8 @@ const COMPACT_MARKERS = [
   "<local-command-stdout>Compacted",
 ] as const;
 
-/** True if a decoded text block contains any of our auto-compact
- * terminal markers. Used inside the user-entry classifier path. */
+/** True if a decoded text block contains any compact terminal marker,
+ * auto or manual. Used inside the user-entry classifier path. */
 function isCompactMarker(text: string): boolean {
   for (const marker of COMPACT_MARKERS) {
     if (text.includes(marker)) return true;
@@ -64,7 +64,7 @@ export function classifyClaudeTurn(tail: string): LastEntryKind {
     }
 
     if (entry.type === "user") {
-      // Interrupt and auto-compact entries arrive structurally as
+      // Interrupt and compact entries arrive structurally as
       // user-typed entries but semantically end the prior turn. Each
       // gets its own kind so the widget can stop animating while the
       // toast notifier still distinguishes "model finished" from
@@ -127,7 +127,7 @@ export function classifyClaudeTurn(tail: string): LastEntryKind {
 /** Claude turn-completion gate for notifications. Only `assistant-done`
  * fires a toast. The classifier deliberately distinguishes:
  *   - `assistant-pending` (tool_use in flight) - mid-turn, suppress
- *   - `compact-end` (auto-compact summary marker) - engine rotated
+ *   - `compact-end` (compact summary marker) - engine rotated
  *     context behind the scenes, the user's task isn't done, suppress
  *   - `interrupted` (user hit Esc / Ctrl+C) - user aborted, suppress
  *   - `unknown` (system / summary / unparseable) - suppress

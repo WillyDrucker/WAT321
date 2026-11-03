@@ -14,30 +14,24 @@ export interface CodexResolvedSession {
   sessionId: string;
   label: string; // folder name from cwd
   sessionTitle: string; // thread_name or first user message
-  modelSlug: string; // e.g. "gpt-5.1-mini"
+  modelSlug: string; // the model slug the rollout records
   effort: string | null; // effort of the latest turn_context, null before the first turn
   contextUsed: number; // last_token_usage.total_tokens (matches Codex native hover)
   contextWindowSize: number; // effective model context window from token_count
-  autoCompactTokens: number; // effective context window ceiling (matches Codex native hover) - actual compact trigger is ~90/95 of this
-  lastActiveAt: number; // ms - rollout file mtime (display metadata only)
-  /** Extension-observed growth timestamp (ms). Set to wall-clock
-   * `Date.now()` on every poll where the rollout file's byte size
-   * grew - seeded with the kernel mtime when a new rollout is first
-   * picked up so a stale file does not falsely read as "just active".
-   *
-   * Drives the active-indicator freshness gate in place of the kernel
-   * mtime because the Codex TUI keeps its rollout file open for the
-   * lifetime of the session, and Windows NTFS lazily flushes mtime
-   * on an open handle - the file's size grows on every append, but
-   * `st.mtimeMs` can lag by tens of seconds. With the 30s freshness
-   * window driven directly off mtime, the comment-discussion cycle
-   * collapses to idle mid-turn even while Codex is actively writing.
-   * Sampling growth at the syscall layer makes the freshness gate
-   * independent of the kernel's mtime cadence. */
-  lastActivityObservedAt: number;
-  /** Last rollout event classification. Drives the active-state
-   * indicator. `user` and `assistant-pending` mean a response is in
-   * flight. `assistant-done` and `unknown` are idle. */
+  /** The usable window Codex's own hover shows, the widget's
+   * denominator. */
+  ceilingTokens: number;
+  /** Where auto-compact fires, ahead of the ceiling. Drives the
+   * "Auto-Compact at ~X" tooltip line. */
+  autoCompactEffectiveTokens: number;
+  /** When the rollout last grew, in ms: wall clock on each poll that
+   * sees its byte size grow, seeded with its mtime when the rollout is
+   * first picked up. Codex holds the file open for the whole session
+   * and Windows flushes mtime late on an open handle, so the raw mtime
+   * can trail a live turn by tens of seconds. */
+  lastActiveAt: number;
+  /** Last rollout event classification (see `LastEntryKind`), which
+   * drives the active-state indicator. */
   turnState: LastEntryKind;
   /** Stage + tool + plan snapshot parsed from the same tail read
    * that populated `turnState`. Drives the active-state tooltip
@@ -51,19 +45,14 @@ export interface CodexResolvedSession {
    * signaling a deliberate context rebuild. Null when no compact event
    * is in the scanned tail window. */
   lastCompactTimestamp: number | null;
-  /** Smoothed tokens-per-second from the most recent rollout delta.
-   * `TpsTracker` over cumulative `usage.tokens` (which Codex updates on
-   * every mid-turn `token_count` event) against rollout mtime as the
-   * time axis. Null when no recent positive sample is available (idle,
-   * no turn yet, file not advancing). Decays after 10s of no growth so
-   * a pause does not keep showing a stale reading. */
+  /** Tokens per second from `TpsTracker` over cumulative `usage.tokens`,
+   * timed by rollout mtime and cleared after an idle gap so a pause
+   * never shows a stale reading. Null until the first positive sample. */
   tokensPerSecond: number | null;
-  /** Compact-completion flash snapshot. When `state` is
-   * `"flashing-completion"` the widget replaces the token text with a
-   * saturated orange 100% bar for the flash window. Codex's `compacted`
-   * rollout entry is the post-completion boundary (no live progress is
-   * observable, same as Claude). Driven by the shared
-   * `CompactFlashMachine`. */
+  /** Compact-completion flash snapshot from the shared
+   * `CompactFlashMachine`. Codex's `compacted` rollout entry is the
+   * post-completion boundary, so no live progress is observable, the
+   * same as on Claude. Always present so the widget never null-checks. */
   compactState: CompactFlashSnapshot;
   /** Snapshot of how many Codex sessions in this workspace are
    * currently open and how many of those have an in-flight turn.

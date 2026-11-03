@@ -2,9 +2,9 @@ import type { BridgeStageReader } from "../engine/bridgeTypes";
 import { WIDGET_SLOT } from "../engine/widgetCatalog";
 import type { SessionTokenWidgetDescriptor } from "../shared/ui/sessionTokens/sessionTokenTypes";
 import { SessionTokenWidget } from "../shared/ui/sessionTokens/sessionTokenWidget";
-import type { WidgetState } from "./claudeSessionTokenTypes";
+import type { ClaudeTokenWidgetState } from "./claudeSessionTokenTypes";
 
-const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
+const descriptor: SessionTokenWidgetDescriptor<ClaudeTokenWidgetState> = {
   id: "wat321.sessionTokens",
   name: "Claude Session Tokens",
   slot: WIDGET_SLOT.claudeSessionTokens,
@@ -17,12 +17,11 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
   activeThresholdMs: 3_000,
   getRenderData: (state) => {
     const { session } = state;
-    // Bars, percent, and the "N/M" numerator all use the effective
-    // auto-compact trigger (nominal target minus the empirical reserve
-    // Claude Code applies to overrides). Keeps the displayed % from
-    // disagreeing with the actual fire point - if you set OVERRIDE=73
-    // on a 1M window the widget reports 715k as 100% rather than the
-    // nominal 730k. Source of truth lives in providers/claude/settings.ts.
+    // Bars, percent, and the "N/M" numerator all measure against the
+    // effective auto-compact trigger, the nominal target minus the
+    // reserve Claude Code applies to overrides, so the displayed percent
+    // agrees with the real fire point. The Claude settings provider owns
+    // the reserve math.
     return {
       sessionId: session.sessionId,
       sessionTitle: session.sessionTitle,
@@ -33,7 +32,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
       contextWindowSize: session.contextWindowSize,
       ceiling: session.autoCompactEffectiveTokens,
       baselineTokens: 0,
-      transcriptMtimeMs: session.lastActiveAt,
+      lastWriteMs: session.lastActiveAt,
       turnState: session.turnState,
       pid: session.pid,
       lastActiveAt:
@@ -48,7 +47,7 @@ const descriptor: SessionTokenWidgetDescriptor<WidgetState> = {
   },
 };
 
-export class ClaudeSessionTokensWidget extends SessionTokenWidget<WidgetState> {
+export class ClaudeSessionTokensWidget extends SessionTokenWidget<ClaudeTokenWidgetState> {
   constructor(bridgeStage: BridgeStageReader) {
     super(descriptor, bridgeStage);
   }

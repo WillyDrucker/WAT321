@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { readTail } from "../engine/fs/fileReaders";
 import { sessionIdFromPath } from "../engine/transcriptSessionId";
-import type { NonActiveCompletion } from "../engine/sessionResponseBridge";
+import type { NonActiveCompletion } from "../engine/notifications/sessionResponseBridge";
 import { parseStageInfo } from "../shared/codexRollout/stageInfoParser";
 import { CompactFlashMachine } from "../shared/polling/compactFlashMachine";
 import { SESSION_TOKEN_POLL_MS } from "../shared/polling/pollingTimings";
@@ -21,13 +21,12 @@ import { classifyCodexTurn } from "./codexTurnClassifier";
 /** The shared `SESSION_TOKEN_POLL_MS` cadence is a safety net for
  * session discovery and missed watcher events. Which rollout is
  * tracked, and whether it is still growing, lives in
- * `activeRolloutTracker.ts`. Title, cwd, model, and auto-compact facts
- * about the tracked rollout live in `rolloutFactsCache.ts`. */
+ * `activeRolloutTracker.ts`. Title, cwd, model, and compact limits
+ * for the tracked rollout live in `rolloutFactsCache.ts`. */
 
 /** Flash hold for a completed Codex compact. Codex's `compacted` marker
- * carries no trigger field (no manual/auto distinction) so a single
- * fixed hold is used - between Claude's auto (1.5s) and manual (2.5s)
- * since we can't tell which it was. */
+ * carries no trigger field, so one hold sits between Claude's auto and
+ * manual holds since there is no telling which it was. */
 const CODEX_COMPACT_FLASH_MS = 2_000;
 
 export class CodexSessionTokenService extends SessionTokenServiceBase<CodexTokenWidgetState> {
@@ -66,9 +65,9 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
    * reset, and minimum-age guards. */
   private readonly tpsTracker = new TpsTracker();
   /** Drives the post-compact completion flash. Codex's `compacted`
-   * rollout entry is the only observable signal (post-completion, same
-   * as Claude) - the shared machine arms a brief flash on each newly-
-   * observed boundary. */
+   * rollout entry is the only observable signal, written after the
+   * compact completes as on Claude, so the shared machine arms a brief
+   * flash on each newly observed boundary. */
   private readonly compactFlash = new CompactFlashMachine();
 
   constructor(workspacePath: string) {
@@ -192,8 +191,6 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
     });
 
     const turnState = classifyCodexTurn(tail);
-    const lastActivityObservedAt =
-      this.rollout.lastActivityObservedAt ?? rolloutMtime;
 
     this.emitOk({
       sessionId,
@@ -203,9 +200,9 @@ export class CodexSessionTokenService extends SessionTokenServiceBase<CodexToken
       effort: facts.effort,
       contextUsed: usage.tokens,
       contextWindowSize: usage.contextWindowSize,
-      autoCompactTokens: facts.autoCompactTokens,
-      lastActiveAt: rolloutMtime,
-      lastActivityObservedAt,
+      ceilingTokens: facts.limits.ceilingTokens,
+      autoCompactEffectiveTokens: facts.limits.autoCompactEffectiveTokens,
+      lastActiveAt: this.rollout.lastActivityObservedAt ?? rolloutMtime,
       turnState,
       stageInfo,
       lastCompactTimestamp: lastCompactAt,

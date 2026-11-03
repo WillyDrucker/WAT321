@@ -15,7 +15,6 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
   idlePrefix: "$(openai)",
   activeFrames: ["$(comment)", "$(comment-discussion-quote)"],
   activeStepMs: 1000,
-  activeThresholdMs: 30_000,  // Codex has no PID signal - mtime-only with generous window
   // Native Codex turns reason silently for tens of seconds with no
   // rollout write (96s observed after task_started). The classifier
   // collapses the indicator instantly on a real end-state, so an
@@ -33,15 +32,12 @@ const descriptor: SessionTokenWidgetDescriptor<CodexTokenWidgetState> = {
       effort: session.effort,
       contextUsed: session.contextUsed,
       contextWindowSize: session.contextWindowSize,
-      ceiling: session.autoCompactTokens,
+      ceiling: session.ceilingTokens,
       baselineTokens: CODEX_BASELINE_TOKENS,
-      // Freshness routes through the extension-observed growth
-      // timestamp, not kernel mtime - see
-      // CodexResolvedSession.lastActivityObservedAt for the Windows
-      // open-handle mtime-lag rationale.
-      transcriptMtimeMs: session.lastActivityObservedAt,
+      lastWriteMs: session.lastActiveAt,
       turnState: session.turnState,
       stageInfo: session.stageInfo,
+      autoCompactEffectiveTokens: session.autoCompactEffectiveTokens,
       lastCompactTimestamp: session.lastCompactTimestamp,
       tokensPerSecond: session.tokensPerSecond,
       compactState: session.compactState,

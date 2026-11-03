@@ -54,8 +54,7 @@ function entryEffort(entry: Record<string, unknown>): string | null {
 /** Walk backwards through the tail to find the most recent
  * `type: "assistant"` entry that carries `message.usage`. Post-
  * compact or long-tool-result turns can push the last usage-bearing
- * entry well beyond the first 100 lines of a 256KB tail, so this
- * scans every line in the window. */
+ * entry deep into the tail window, so this scans every line in it. */
 export function parseLastUsage(tail: string): LastUsage | null {
   const lines = tail.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
