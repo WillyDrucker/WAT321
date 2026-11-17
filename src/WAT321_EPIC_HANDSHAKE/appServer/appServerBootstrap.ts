@@ -30,6 +30,11 @@ export async function spawnInitializedAppServer(
     logger.info(
       `[client] codex binary resolved via ${resolved.source}: ${resolved.command}`
     );
+    // A broken install hides behind the fallback, and the binary that
+    // runs instead may list fewer models, so say so where it shows.
+    if (resolved.passedOver !== undefined) {
+      logger.warn(`[client] ${resolved.passedOver}, so the ${resolved.source} binary runs instead`);
+    }
   }
   client.spawn();
   const initStart = Date.now();
