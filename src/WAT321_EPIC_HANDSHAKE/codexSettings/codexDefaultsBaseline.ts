@@ -1,7 +1,7 @@
 import type { CodexEffortLevel } from "../../engine/bridgeTypes";
 import type { CodexModelInfo, CodexServiceTier } from "../../shared/providers/codex/modelCatalog";
 import {
-  codexFastTier,
+  codexServiceTiers,
   defaultCodexModelSlug,
   getCodexModelInfo,
   isUnlistedCodexModel,
@@ -117,33 +117,37 @@ export function effortRowLabel(effort: CodexEffortLevel | null): string {
   return `EFFORT: ${effective.toUpperCase()}${isDefault ? " *default*" : ""}`;
 }
 
-/** The Speed row's state: the faster tier the session's model offers and
- * whether the session runs it. Null when the model offers nothing beyond
- * standard, and the row stays hidden. */
+/** The Speed row's state: every tier beyond standard the session's model
+ * offers, and the one the session runs, null for standard. Null when the
+ * model offers nothing beyond standard, and the row stays hidden. */
 interface SpeedState {
-  fast: CodexServiceTier;
-  on: boolean;
+  tiers: readonly CodexServiceTier[];
+  active: CodexServiceTier | null;
 }
 
 export function sessionSpeedState(): SpeedState | null {
   const workspacePath = currentWorkspacePathOrSentinel();
-  const fast = codexFastTier(readSessionPin(workspacePath).model ?? baselineModel());
-  if (fast === null) return null;
-  return { fast, on: readSessionServiceTier(workspacePath) === fast.id };
+  const tiers = codexServiceTiers(readSessionPin(workspacePath).model ?? baselineModel());
+  if (tiers.length === 0) return null;
+  const running = readSessionServiceTier(workspacePath);
+  return { tiers, active: tiers.find((t) => t.id === running) ?? null };
 }
 
 /** Standard is Codex's own default on every model (`defaultServiceTier`
  * is null), so it carries the `*default*` tag. */
 export function speedRowLabel(state: SpeedState): string {
-  return state.on
-    ? `SPEED: ${state.fast.name.toUpperCase()}`
+  return state.active !== null
+    ? `SPEED: ${state.active.name.toUpperCase()}`
     : "SPEED: STANDARD *default*";
 }
 
+/** One tier toggles in place, several open the speed picker. */
 export function speedRowDescription(state: SpeedState): string {
-  if (state.on) return "Click to switch to STANDARD.";
-  const detail = state.fast.description.length > 0 ? `: ${state.fast.description}` : "";
-  return `Click to switch to ${state.fast.name.toUpperCase()}${detail}.`;
+  if (state.tiers.length > 1) return "Click to change speed.";
+  if (state.active !== null) return "Click to switch to STANDARD.";
+  const only = state.tiers[0];
+  const detail = only.description.length > 0 ? `: ${only.description}` : "";
+  return `Click to switch to ${only.name.toUpperCase()}${detail}.`;
 }
 
 export function sandboxIsDefault(state: CodexSandboxState): boolean {

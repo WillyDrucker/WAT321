@@ -1,5 +1,6 @@
 import type { AppServerClient } from "../appServer/appServerClient";
 import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
+import { freshenCodexCatalog } from "../codexSettings/codexCatalogRefresh";
 import { classifyFailure } from "../codexTurn/failureClassifier";
 import { isKnownCodexModel } from "../../shared/providers/codex/models";
 import { readRolloutModelSlug } from "../codexTurn/rolloutModel";
@@ -62,6 +63,18 @@ export async function ensureReadyThread(args: {
   const { client, workspacePath, logger } = args;
   let record = loadBridgeThreadRecord(workspacePath);
 
+  // A slug the last answer does not list gets one fresh ask per turn
+  // before it counts as unknown: the answer can predate a model OpenAI
+  // has just enabled for the account.
+  let askedAgain = false;
+  const isListed = async (slug: string): Promise<boolean> => {
+    if (isKnownCodexModel(slug)) return true;
+    if (askedAgain) return false;
+    askedAgain = true;
+    await freshenCodexCatalog(client, logger, { force: true });
+    return isKnownCodexModel(slug);
+  };
+
   // Auto-recovery: if the stored model slug is now recognized (a Codex
   // upgrade or a server-side rollout added it) and the last failure was
   // a model-unknown error, clear the failure state and preserve the
@@ -74,7 +87,7 @@ export async function ensureReadyThread(args: {
   ) {
     const rolloutPath = findRolloutPath(record.threadId);
     const storedSlug = rolloutPath ? readRolloutModelSlug(rolloutPath) : null;
-    if (storedSlug !== null && isKnownCodexModel(storedSlug)) {
+    if (storedSlug !== null && (await isListed(storedSlug))) {
       logger.info(
         `[auto-recover] session S${record.sessionCounter} stored model "${storedSlug}" is now recognized; clearing ${record.consecutiveFailures} prior failure(s) and resuming`
       );
@@ -117,7 +130,7 @@ export async function ensureReadyThread(args: {
   // answered, so an unreachable Codex never gates a legit dispatch.
   const rolloutPath = findRolloutPath(threadId);
   const storedSlug = rolloutPath ? readRolloutModelSlug(rolloutPath) : null;
-  if (storedSlug !== null && !isKnownCodexModel(storedSlug)) {
+  if (storedSlug !== null && !(await isListed(storedSlug))) {
     const msg = `Codex session S${record.sessionCounter} stores a model slug "${storedSlug}" that the installed Codex doesn't recognize. The Repair Sessions option in the bridge menu can rewrite the slug, or Reset Codex Session rolls to a fresh thread.`;
     logger.warn(`[preflight] ${msg}`);
     noteFailure(record, msg);

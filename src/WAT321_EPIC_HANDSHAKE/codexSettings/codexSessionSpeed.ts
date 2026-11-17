@@ -7,8 +7,8 @@ import {
 import { readSessionPin } from "./codexSessionSettings";
 
 /**
- * The session's speed tier: standard, or the faster tier its model
- * offers (Fast, id `priority`, "2x speed, increased usage").
+ * The session's speed tier: standard, or any faster tier its model
+ * offers (Fast is id `priority`, and a plan can add more).
  *
  * Session-scoped like model and effort and stored on the same
  * `BridgeThreadRecord`, so reset and delete return to standard while an

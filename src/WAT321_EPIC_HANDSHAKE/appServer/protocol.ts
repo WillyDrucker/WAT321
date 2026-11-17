@@ -170,8 +170,9 @@ interface ModelListReasoningEffort {
   description?: string;
 }
 
-/** A speed tier beyond standard. Observed: every model offers one, id
- * `priority`, named Fast, "2x speed, increased usage". */
+/** A speed tier beyond standard. Observed: every model offers Fast, id
+ * `priority`, its description varying by model. Plans that include
+ * Ultrafast add a second tier, so a model can list several. */
 interface ModelListServiceTier {
   id: string;
   name?: string;

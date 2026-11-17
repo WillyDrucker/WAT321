@@ -60,11 +60,12 @@ export class AppServerLifecycle {
     const client = await spawnInitializedAppServer(this.logger, "codexDispatcher", resolved);
     this.client = client;
     this.clientBinary = codexCliIdentity(resolved);
-    // Not awaited: the catalog is a display / validation convenience and
-    // must not sit in front of the first turn. Readers fall back to the
-    // cache file until it lands. Never touches the idle timer. Also
-    // persists the answer under this binary's identity so the next
-    // window starts truthful.
+    // Not awaited: a turn on a session with a pinned model does not need
+    // it, so it must not sit in front of that turn. A session about to be
+    // born on Codex's recommendation, or a turn about to refuse an
+    // unlisted slug, joins it through `freshenCodexCatalog`. Never touches
+    // the idle timer. Also persists the answer under this binary's
+    // identity so the next window starts truthful.
     void syncCodexCatalog(client, resolved, this.logger);
     return client;
   }

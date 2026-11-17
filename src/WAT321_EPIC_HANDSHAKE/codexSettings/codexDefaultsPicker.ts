@@ -29,6 +29,7 @@ import {
   writeSessionModel,
 } from "./codexSessionSettings";
 import { writeSessionServiceTier } from "./codexSessionSpeed";
+import { pickSpeed } from "./codexSpeedPicker";
 import { EPIC_HANDSHAKE_MENU_TEXT, type ActionContext, type DispatchAction } from "../statusBar/menuActions";
 import { makeBackItem, makeCancelItem, makePauseResumeItem } from "../../shared/ui/menuRows";
 import { epicHandshakeLogger } from "../epicHandshakeLogger";
@@ -38,8 +39,9 @@ import { isPaused, setPaused } from "../statusBar/statusBarState";
  * Combined "Codex Model Settings" picker - one entry point for the
  * four values the bridge passes on every `turn/start`: sandbox (a
  * direct toggle), model and effort (sub-pickers over what the running
- * app-server advertises), and speed (a toggle shown only when the
- * selected model offers a tier beyond standard).
+ * app-server advertises), and speed (shown only when the selected model
+ * offers a tier beyond standard, a toggle for one and a sub-picker for
+ * several).
  *
  * `*default*` marks rows matching CODEX's own recommendation, which
  * is `model/list`'s `isDefault` model, its `defaultReasoningEffort`,
@@ -88,7 +90,7 @@ export function codexDefaultsSubline(): string {
   // Speed shows only when it departs from standard, so the common case
   // keeps the three-part subline.
   const speed = sessionSpeedState();
-  const speedSegment = speed?.on === true ? ` · ${speed.fast.name}` : "";
+  const speedSegment = speed?.active ? ` · ${speed.active.name}` : "";
   return `${sandboxLabel} · ${modelMark}${modelLabel} · ${effortLabel}${speedSegment}`;
 }
 
@@ -216,7 +218,12 @@ export async function showCodexDefaultsPicker(
       continue;
     }
     if (pick.rowKind === "speed" && speed !== null) {
-      writeSessionServiceTier(workspacePath, speed.on ? null : speed.fast.id);
+      if (speed.tiers.length === 1) {
+        writeSessionServiceTier(workspacePath, speed.active !== null ? null : speed.tiers[0].id);
+        continue;
+      }
+      const result = await pickSpeed(speed.tiers, speed.active?.id ?? null);
+      if (result.kind === "picked") writeSessionServiceTier(workspacePath, result.value);
       continue;
     }
     if (pick.rowKind === "sandbox") {

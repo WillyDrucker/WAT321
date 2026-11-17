@@ -5,6 +5,18 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.38] - 2026-11-17
+
+### Added
+
+- **Ultrafast joins the Speed row when your plan includes it.** Codex Model Settings now offers every speed your Codex lists for the selected model. With one faster speed the row still switches between Standard and Fast in place, and with more it opens a picker showing Standard, Fast, and Ultrafast with Codex's description of each, since a faster speed uses up your limits faster.
+
+### Fixed
+
+- **New Codex sessions start on the model Codex recommends that day, now GPT-6.2 Sol.** A window opened before OpenAI promoted a new default could start a session on the old one, and a session keeps its model. WAT321 now checks Codex's current list before a session is born. GPT-6.2 Sol and GPT-6.2 Astra appear in the model picker with all six effort levels, from Low to Ultra, as soon as your Codex lists them.
+- **A model OpenAI just switched on for your account no longer gets turned away.** If your session runs a model that appeared after WAT321 last asked Codex, the next prompt asks Codex again before calling the model unknown, instead of refusing the turn and sending you to Repair.
+- **A broken Codex install no longer hides behind the ChatGPT extension's built-in Codex.** When the Codex CLI on your PATH is installed but fails to start, such as an npm install missing its Windows package, the Epic Handshake output now names the error, because the built-in Codex that runs instead may know fewer models.
+
 ## [1.5.37] - 2026-11-03
 
 ### Fixed

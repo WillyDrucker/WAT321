@@ -128,9 +128,15 @@ function forgetPinsNowListed(
   }
 }
 
+/** The sync running on each client, so a caller that needs the answer
+ * waits on the one a cold spawn already started instead of asking
+ * twice. */
+const inflight = new WeakMap<AppServerClient, Promise<void>>();
+
 /**
  * Ask an already-initialized app-server for its model list and publish
- * it to the shared catalog.
+ * it to the shared catalog. A call while one is running on the same
+ * client joins it.
  *
  * Never throws. Never spawns anything. Never touches the dispatcher's
  * idle timer, so the app-server's warm / cold lifetime is untouched.
@@ -140,7 +146,19 @@ function forgetPinsNowListed(
  * back to `models_cache.json`, failing open, so an unreachable RPC is
  * a no-op rather than a regression for users running an older Codex.
  */
-export async function syncCodexCatalog(
+export function syncCodexCatalog(
+  client: AppServerClient,
+  resolved: ResolvedCli | null,
+  logger: EpicHandshakeLogger
+): Promise<void> {
+  const running = inflight.get(client);
+  if (running !== undefined) return running;
+  const sync = askForModels(client, resolved, logger).finally(() => inflight.delete(client));
+  inflight.set(client, sync);
+  return sync;
+}
+
+async function askForModels(
   client: AppServerClient,
   resolved: ResolvedCli | null,
   logger: EpicHandshakeLogger

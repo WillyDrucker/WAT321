@@ -1,5 +1,6 @@
 import {
   forgetResolvedCodexCli,
+  peekResolvedCodexCli,
   resolveCodexCli,
 } from "../../shared/providers/codex/cliResolver";
 import {
@@ -20,7 +21,9 @@ import type { EpicHandshakeLogger } from "../epicHandshakeLogger";
  * An answer ages. The backend decides per account which models a
  * binary may list and can switch one on with no upgrade, as a staged
  * rollout does, so `ensureCodexCatalog` re-asks once the answer is
- * old and `refreshCodexCatalog` re-asks on demand.
+ * old, `refreshCodexCatalog` re-asks on demand, and
+ * `freshenCodexCatalog` re-asks the dispatcher's client before a turn
+ * decision reads the answer.
  *
  * `hydrateCodexCatalog` spawns nothing. It only reads a sidecar this
  * same binary wrote on a previous run, so a freshly opened window shows
@@ -133,4 +136,24 @@ export async function ensureCodexCatalog(
  * account and the user wants it now rather than within ten minutes. */
 export function refreshCodexCatalog(logger: EpicHandshakeLogger): Promise<void> {
   return ensureCodexCatalog(logger, { force: true });
+}
+
+/**
+ * Bring the catalog up to date on the dispatcher's own client before a
+ * decision that reads it: a session born on Codex's recommendation, or a
+ * turn about to be refused over a slug the last answer did not list. A
+ * cold spawn's sync is still running at that point, and a warm client
+ * can hold an answer from before OpenAI promoted or enabled a model.
+ *
+ * Joins the running sync, else asks again once the answer is older than
+ * `CATALOG_FRESH_FOR_MS`, or at any age with `force`. Spawns nothing and
+ * never throws, so a failure leaves the decision on the last answer.
+ */
+export async function freshenCodexCatalog(
+  client: AppServerClient,
+  logger: EpicHandshakeLogger,
+  opts: { force?: boolean } = {}
+): Promise<void> {
+  if (opts.force !== true && codexCatalogAgeMs() <= CATALOG_FRESH_FOR_MS) return;
+  await syncCodexCatalog(client, peekResolvedCodexCli() ?? null, logger);
 }
