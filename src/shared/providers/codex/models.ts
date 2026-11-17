@@ -136,12 +136,13 @@ export function getCodexModelInfo(slug: string): CodexModelInfo | null {
   return cacheFileModelInfo(slug);
 }
 
-/** The first speed tier beyond standard the model offers, Fast where
- * one exists. Null when it offers none or no source describes
- * the model, so the Speed row only appears where Fast can really run. */
-export function codexFastTier(slug: string | null): CodexServiceTier | null {
-  if (slug === null) return null;
-  return getCodexModelInfo(slug)?.serviceTiers[0] ?? null;
+/** Every speed tier beyond standard the model offers, in Codex's order.
+ * A plan can add tiers to a model, so this may hold more than one. Empty
+ * when it offers none or no source describes the model, so the Speed row
+ * only appears where a faster tier can really run. */
+export function codexServiceTiers(slug: string | null): readonly CodexServiceTier[] {
+  if (slug === null) return [];
+  return getCodexModelInfo(slug)?.serviceTiers ?? [];
 }
 
 /** True when the model offers this tier. False for a model no source
