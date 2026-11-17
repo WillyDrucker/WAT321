@@ -1,4 +1,5 @@
 import type { AppServerClient } from "../appServer/appServerClient";
+import { freshenCodexCatalog } from "../codexSettings/codexCatalogRefresh";
 import { codexRecommendedPin, type CodexSessionPin } from "../codexSettings/codexSessionSettings";
 import { serviceTierFor } from "../codexSettings/codexSessionSpeed";
 import type { ThreadStartParams } from "../appServer/protocol";
@@ -59,10 +60,16 @@ export async function spawnFreshThread(opts: {
   // answered yet. Effort is absent here on purpose: `thread/start`
   // accepts the key and ignores it (probed), so effort rides `turn/start`
   // alone and this would be a lie in the diff.
-  const pinned: CodexSessionPin =
-    typeof opts.record.model === "string" && opts.record.model.length > 0
-      ? { model: opts.record.model, effort: opts.record.effort ?? null }
-      : codexRecommendedPin();
+  //
+  // The recommendation is made current first, because the session keeps
+  // it for life: read off an older answer, a session started the day
+  // OpenAI promotes a model would be born on the one it replaced.
+  const storedModel = opts.record.model;
+  const hasPin = typeof storedModel === "string" && storedModel.length > 0;
+  if (!hasPin) await freshenCodexCatalog(opts.client, opts.logger);
+  const pinned: CodexSessionPin = hasPin
+    ? { model: storedModel, effort: opts.record.effort ?? null }
+    : codexRecommendedPin();
 
   // The speed tier is always named, standard included. Omitted, Codex
   // would take `config.toml`'s `service_tier`, and every turn re-sends
