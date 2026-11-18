@@ -5,6 +5,12 @@ All notable changes to WAT321 Willy's AI Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.39] - 2026-11-17
+
+### Fixed
+
+- **The bridge picks up the latest security fixes.** The server that connects your Claude session to Codex and the other models now runs current versions of the MCP SDK and the packages it brings along, which clears every published security advisory against them. The bridge works just as before, and there is nothing to do after you update.
+
 ## [1.5.38] - 2026-11-17
 
 ### Added
